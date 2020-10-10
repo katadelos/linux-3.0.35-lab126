@@ -1174,6 +1174,23 @@ static int fsl_ep_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 		return -EINVAL;
 
 	spin_lock_irqsave(&ep->udc->lock, flags);
+
+    /* Applied this patch for arcotg_udc instead of atmel_usba_udc
+     * https://patchwork.kernel.org/patch/5551751/
+     */
+
+   	list_for_each_entry(req, &ep->queue, queue) {
+		if (&req->req == _req)
+			break;
+	}
+
+	if (&req->req != _req) {
+		spin_unlock_irqrestore(&udc->lock, flags);
+		return -EINVAL;
+	}
+    
+    /* end patch */
+
 	stopped = ep->stopped;
 	udc = ep->udc;
 
