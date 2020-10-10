@@ -1,0 +1,49 @@
+From 7bf9d8610f75b085fa6ba500156da61cee333d23 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Mon, 21 Nov 2011 10:11:42 +0800
+Subject: [PATCH 0639/2463] ENGR00162663 ipuv3 fb: add vertical flip support
+
+support vertical flip for fb.
+just set it by:
+echo 1 > /sys/class/graphics/fb0/rotate
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |    7 +++++--
+ 1 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 4004ddf..e669590 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -241,7 +241,7 @@ static int _setup_disp_channel2(struct fb_info *fbi)
+ 					 bpp_to_pixfmt(fbi),
+ 					 fbi->var.xres, fbi->var.yres,
+ 					 fb_stride,
+-					 IPU_ROTATE_NONE,
++					 fbi->var.rotate,
+ 					 base,
+ 					 base,
+ 					 fbi->var.accel_flags &
+@@ -259,7 +259,7 @@ static int _setup_disp_channel2(struct fb_info *fbi)
+ 						 IPU_PIX_FMT_GENERIC,
+ 						 fbi->var.xres, fbi->var.yres,
+ 						 fbi->var.xres,
+-						 IPU_ROTATE_NONE,
++						 fbi->var.rotate,
+ 						 mxc_fbi->alpha_phy_addr1,
+ 						 mxc_fbi->alpha_phy_addr0,
+ 						 0,
+@@ -574,6 +574,9 @@ static int mxcfb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
+ 			var->yres = bg_yres - pos_y;
+ 	}
+ 
++	if (var->rotate > IPU_ROTATE_VERT_FLIP)
++		var->rotate = IPU_ROTATE_NONE;
++
+ 	if (var->xres_virtual < var->xres)
+ 		var->xres_virtual = var->xres;
+ 
+-- 
+1.7.7.4
+

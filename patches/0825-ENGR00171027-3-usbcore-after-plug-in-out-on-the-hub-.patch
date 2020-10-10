@@ -1,0 +1,63 @@
+From 8184b12436e539edce5a25b92b3ebfc41132fd8f Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Fri, 30 Dec 2011 14:34:38 +0800
+Subject: [PATCH 0825/2463] ENGR00171027-3 usbcore:after plug in/out on the
+ hub,host can't work
+
+This issue will happen only when suspend bit is set but phcd is not set
+The root cause of this issue is the IC defect.
+    - If the suspend bit is set without phcd bit set, host controller
+      can't resume normally
+    - The workaround is after set suspend bit, we need set the following
+      bit in USB PHY at once:
+      HW_USBPHY_PWD_RXPWDRX
+      HW_USBPHY_PWD_RXPWDDIFF
+      HW_USBPHY_PWD_RXPWD1PT1
+      HW_USBPHY_PWD_RXPWDENV
+      HW_USBPHY_PWD_TXPWDv2I
+      HW_USBPHY_PWD_TXPWDIBIAS
+      HW_USBPHY_PWD_TXPWDFS
+    - Furthermore, after resume, we must clear these bits during the K state
+    - IC has no plan to fix this issue
+    - This issue only happen on MX6Q/MX28
+
+core part
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ drivers/usb/host/ehci-hub.c |   12 ++++++++++++
+ 1 files changed, 12 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/host/ehci-hub.c b/drivers/usb/host/ehci-hub.c
+index f5d7fed..4f3688b 100644
+--- a/drivers/usb/host/ehci-hub.c
++++ b/drivers/usb/host/ehci-hub.c
+@@ -29,6 +29,10 @@
+ /*-------------------------------------------------------------------------*/
+ #include <linux/usb/otg.h>
+ 
++#ifdef CONFIG_ARCH_MX6
++#define MX6_USB_HOST_HACK
++#include <linux/fsl_devices.h>
++#endif
+ #define	PORT_WAKE_BITS	(PORT_WKOC_E|PORT_WKDISC_E|PORT_WKCONN_E)
+ 
+ #ifdef	CONFIG_PM
+@@ -1062,6 +1066,14 @@ static int ehci_hub_control (
+ 			temp &= ~PORT_WKCONN_E;
+ 			temp |= PORT_WKDISC_E | PORT_WKOC_E;
+ 			ehci_writel(ehci, temp | PORT_SUSPEND, status_reg);
++#ifdef MX6_USB_HOST_HACK
++			{
++				struct fsl_usb2_platform_data *pdata;
++				pdata = hcd->self.controller->platform_data;
++				if (pdata->platform_suspend)
++					pdata->platform_suspend(pdata);
++			}
++#endif
+ 			if (hostpc_reg) {
+ 				spin_unlock_irqrestore(&ehci->lock, flags);
+ 				msleep(5);/* 5ms for HCD enter low pwr mode */
+-- 
+1.7.7.4
+

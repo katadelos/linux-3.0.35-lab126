@@ -1,0 +1,32 @@
+From 742e94dd0065b7a3a8e9c1ce4a5887dc94f48c44 Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Mon, 1 Aug 2011 13:25:18 +0800
+Subject: [PATCH 0309/2463] ENGR00153856 [mx6q]platform data is not correctly
+ initialized
+
+wakeup_pdata is initialized after device register, thus the field can't be
+initialized correctively. change to the correct sequence.
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ arch/arm/mach-mx6/usb_h1.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_h1.c b/arch/arm/mach-mx6/usb_h1.c
+index 353b79f..b3b354f 100644
+--- a/arch/arm/mach-mx6/usb_h1.c
++++ b/arch/arm/mach-mx6/usb_h1.c
+@@ -252,8 +252,9 @@ static struct fsl_usb2_wakeup_platform_data usbh1_wakeup_config = {
+ void __init mx6_usb_h1_init(void)
+ {
+ 	static void __iomem *anatop_base_addr = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
+-	imx6q_add_fsl_ehci_hs(1, &usbh1_config);
+ 	usbh1_config.wakeup_pdata = &usbh1_wakeup_config;
++	imx6q_add_fsl_ehci_hs(1, &usbh1_config);
++
+ 	imx6q_add_fsl_usb2_hs_wakeup(1, &usbh1_wakeup_config);
+ 	/* Some phy and power's special controls for host1
+ 	 * 1. The external charger detector needs to be disabled
+-- 
+1.7.7.4
+

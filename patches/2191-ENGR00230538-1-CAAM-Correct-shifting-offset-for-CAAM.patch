@@ -1,0 +1,37 @@
+From ab4bd342f5a3bc2782a48a9862c874dbc0f79f79 Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Fri, 19 Oct 2012 13:18:37 -0700
+Subject: [PATCH 2191/2463] ENGR00230538-1: CAAM: Correct shifting offset for
+ CAAM IPG clock selection
+
+3 pairs of clock enable bits are required for CAAM clocking:
+(1) wrapper IPG clock
+(2) wrapper ACLK
+(3) secure memory clock
+
+IPG enable happened to be using an incorrect shift selection, which
+had the net effect of leaving secure memory unclocked. Added the correct
+shift selection in so that all 3 clock enable pairs are turned on.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 67c3d1f..bbddb94 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4244,7 +4244,7 @@ static struct clk caam_clk[] = {
+ 	 __INIT_CLK_DEBUG(caam_ipg_clk)
+ 	.id = 2,
+ 	.enable_reg = MXC_CCM_CCGR0,
+-	.enable_shift = MXC_CCM_CCGRx_CG4_OFFSET,
++	.enable_shift = MXC_CCM_CCGRx_CG6_OFFSET,
+ 	.enable = _clk_enable,
+ 	.disable = _clk_disable,
+ 	.parent = &mmdc_ch0_axi_clk[0],
+-- 
+1.7.7.4
+

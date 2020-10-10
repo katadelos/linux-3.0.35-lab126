@@ -1,0 +1,49 @@
+From 754fa25a2310995c10acc9cfe6b2db35b3536a23 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Mon, 8 Apr 2013 16:02:14 +0800
+Subject: [PATCH 2454/2463] ENGR00257130-5 mx6sl: Add config for USB ID as
+ system wakeup source
+
+Since USB ID pin may affect power savings, we add enable/disable
+USB ID pin as system wakeup source using Kconfig option, the user
+can determine it.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig              |    5 +++++
+ arch/arm/mach-mx6/board-mx6sl_common.h |    2 ++
+ 2 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 59d8ab3..dab97da 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -295,6 +295,11 @@ config USB_EHCI_ARC_H1
+ config USB_FSL_ARC_OTG
+ 	tristate "FSL USB OTG support"
+ 
++config USB_ID_WAKEUP_ENABLE
++	bool "Enable USB ID Pin As System Wakeup Source"
++	depends on SOC_IMX6SL
++	default n
++
+ config MX6_INTER_LDO_BYPASS
+ 	bool "Internal LDO in MX6Q/DL bypass"
+ 	depends on  REGULATOR_PFUZE100 && CPU_FREQ_IMX && ARCH_MX6
+diff --git a/arch/arm/mach-mx6/board-mx6sl_common.h b/arch/arm/mach-mx6/board-mx6sl_common.h
+index 2b2dd6b..897099f 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_common.h
++++ b/arch/arm/mach-mx6/board-mx6sl_common.h
+@@ -481,7 +481,9 @@ static iomux_v3_cfg_t suspend_enter_pads[] = {
+ 	MX6SL_PAD_SD3_DAT3__GPIO_5_17,
+ 
+ 	/* USBOTG ID pin */
++#ifndef CONFIG_USB_ID_WAKEUP_ENABLE
+ 	MX6SL_PAD_EPDC_PWRCOM__GPIO_2_11,
++#endif
+ 	MX6SL_PAD_HSIC_STROBE__GPIO_3_20,
+ 	MX6SL_PAD_HSIC_DAT__GPIO_3_19,
+ 
+-- 
+1.7.7.4
+

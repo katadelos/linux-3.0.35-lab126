@@ -1,0 +1,40 @@
+From c1a4a5d3ef7bd61d9512ba796813206e0ad9d386 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Fri, 4 May 2012 17:49:51 +0800
+Subject: [PATCH 1421/2463] ENGR00181697 HDMI: fix ahb bus error bug
+
+In ARIK, to prevent noise cause by false triggered burst, we reduce
+the incr type to 4. and the change may cause bus_error because a
+burst may unexpectly stop and thus an AHB bus error happens.
+
+Reset HDMI Audio FIFO state to prevent AHB bus error.
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ sound/soc/imx/imx-hdmi-dma.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/imx/imx-hdmi-dma.c b/sound/soc/imx/imx-hdmi-dma.c
+index ac7ac5d..d391267 100644
+--- a/sound/soc/imx/imx-hdmi-dma.c
++++ b/sound/soc/imx/imx-hdmi-dma.c
+@@ -24,6 +24,7 @@
+ #include <linux/module.h>
+ #include <linux/platform_device.h>
+ #include <linux/slab.h>
++#include <linux/delay.h>
+ 
+ #include <sound/core.h>
+ #include <sound/initval.h>
+@@ -883,6 +884,9 @@ static int hdmi_dma_trigger(struct snd_pcm_substream *substream, int cmd)
+ 		}
+ 		dumpregs();
+ 
++		hdmi_fifo_reset();
++		udelay(1);
++
+ 		hdmi_dma_priv->tx_active = true;
+ 		hdmi_dma_start();
+ 		hdmi_dma_irq_mask(0);
+-- 
+1.7.7.4
+

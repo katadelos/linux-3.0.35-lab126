@@ -1,0 +1,54 @@
+From cd50320907c44531469bddac86371f5428d00be6 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Fri, 30 Dec 2011 14:32:41 +0800
+Subject: [PATCH 0824/2463] ENGR00171027-2 [USB_HOST]after plug in/out on the
+ hub,host can't work
+
+This issue will happen only when suspend bit is set but phcd is not set
+The root cause of this issue is the IC defect.
+    - If the suspend bit is set without phcd bit set, host controller
+      can't resume normally
+    - The workaround is after set suspend bit, we need set the following
+      bit in USB PHY at once:
+      HW_USBPHY_PWD_RXPWDRX
+      HW_USBPHY_PWD_RXPWDDIFF
+      HW_USBPHY_PWD_RXPWD1PT1
+      HW_USBPHY_PWD_RXPWDENV
+      HW_USBPHY_PWD_TXPWDv2I
+      HW_USBPHY_PWD_TXPWDIBIAS
+      HW_USBPHY_PWD_TXPWDFS
+    - Furthermore, after resume, we must clear these bits during the K state
+    - IC has no plan to fix this issue
+    - This issue only happen on MX6Q/MX28
+
+driver part
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ drivers/usb/host/ehci-arc.c |   10 ++++++++++
+ 1 files changed, 10 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index bed3056..8db08ba 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -155,6 +155,16 @@ static irqreturn_t ehci_fsl_pre_irq(int irq, void *dev)
+ 		pdata->wakeup_event = 0;
+ 		fsl_usb_recover_hcd(pdev);
+ 		return IRQ_HANDLED;
++	} else {
++		u32 portsc = 0;
++		struct ehci_hcd *ehci = hcd_to_ehci(hcd);
++		portsc = ehci_readl(ehci, &ehci->regs->port_status[0]);
++		/* PORT_USB11 macro is used to judge line state K*/
++		if ((PORT_USB11(portsc)) && (portsc & PORT_SUSPEND)) {
++			pdata = hcd->self.controller->platform_data;
++			if (pdata->platform_resume)
++				pdata->platform_resume(pdata);
++		}
+ 	}
+ 	return IRQ_NONE;
+ }
+-- 
+1.7.7.4
+

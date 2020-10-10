@@ -1,0 +1,34 @@
+From 549da8b5d3b899e62d525b14d2a839746671eee2 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Mon, 9 Apr 2012 15:43:40 +0800
+Subject: [PATCH 1287/2463] ENGR00179178 [RTC]Enable both wakealarm and common
+ power wakeup
+
+For RTC driver, as not all RTCs support alarm and wakeup, so the
+framework only support alarm or wakeup, not both of them, as our
+rtc can support alarm and wakeup function, to simplify the unit
+test interface for power off and wakeup, we add both wakealarm and
+common power wakeup sysfs interface to our RTC driver.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ drivers/rtc/rtc-snvs.c |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/rtc/rtc-snvs.c b/drivers/rtc/rtc-snvs.c
+index 2051e86..41470e9 100644
+--- a/drivers/rtc/rtc-snvs.c
++++ b/drivers/rtc/rtc-snvs.c
+@@ -609,6 +609,9 @@ static int snvs_rtc_probe(struct platform_device *pdev)
+ 	tv.tv_nsec = 0;
+ 	tv.tv_sec = rtc_read_lp_counter(ioaddr + SNVS_LPSRTCMR);
+ 
++	/* Remove can_wakeup flag to add common power wakeup interface */
++	pdev->dev.power.can_wakeup = 0;
++
+ 	/* By default, devices should wakeup if they can */
+ 	/* So snvs is set as "should wakeup" as it can */
+ 	device_init_wakeup(&pdev->dev, 1);
+-- 
+1.7.7.4
+

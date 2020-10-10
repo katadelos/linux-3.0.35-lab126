@@ -1,0 +1,32 @@
+From ad56c8ebc569fc9cc79b5cda78dab15418efd1d8 Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Mon, 9 Apr 2012 14:36:07 -0500
+Subject: [PATCH 1327/2463] ENGR00179575 only set color depth if TV supports
+ deep color
+
+If TV's EDID indicates that deep color is not supported, then
+write color depth field of HDMI_VP_PR_CD register to zero.
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ drivers/video/mxc_hdmi.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index ad6d713..fc5df12 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -570,6 +570,10 @@ static void hdmi_video_packetize(struct mxc_hdmi *hdmi)
+ 	} else
+ 		return;
+ 
++	if (!hdmi->edid_cfg.vsd_dc_48bit && !hdmi->edid_cfg.vsd_dc_36bit &&
++		!hdmi->edid_cfg.vsd_dc_30bit && !hdmi->edid_cfg.vsd_dc_y444)
++		color_depth = 0;
++
+ 	/* set the packetizer registers */
+ 	val = ((color_depth << HDMI_VP_PR_CD_COLOR_DEPTH_OFFSET) &
+ 		HDMI_VP_PR_CD_COLOR_DEPTH_MASK) |
+-- 
+1.7.7.4
+

@@ -1,0 +1,40 @@
+From 1f927e7f3fcadb240d0850873eccb2ad098cef52 Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Wed, 3 Aug 2011 15:28:14 +0800
+Subject: [PATCH 0316/2463] ENGR00154217 [MX6Q/D]fix mmc suspend/resume issue.
+
+following log is the scenario.
+
+mmc0: host doesn't support card's voltages
+mmc0: error -110 during resume (card was removed?)
+
+can't clear ocr in power off, instead we need to set
+it to the highest bit of ocr_avail.
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ drivers/mmc/core/core.c |    8 +++++++-
+ 1 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
+index a08b71f..fb541cc 100644
+--- a/drivers/mmc/core/core.c
++++ b/drivers/mmc/core/core.c
+@@ -1075,7 +1075,13 @@ void mmc_power_off(struct mmc_host *host)
+ 
+ 	host->ios.clock = 0;
+ 	host->ios.vdd = 0;
+-	host->ocr = 0;
++
++	/*
++	 * Reset ocr mask to be the highest possible voltage supported for
++	 * this mmc host. This value will be used at next power up.
++	 */
++	host->ocr = 1 << (fls(host->ocr_avail) - 1);
++
+ 	if (!mmc_host_is_spi(host)) {
+ 		host->ios.bus_mode = MMC_BUSMODE_OPENDRAIN;
+ 		host->ios.chip_select = MMC_CS_DONTCARE;
+-- 
+1.7.7.4
+

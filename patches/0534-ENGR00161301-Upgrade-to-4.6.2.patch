@@ -1,0 +1,4328 @@
+From a55f09c997b62739770830238b4da861c2b2b36b Mon Sep 17 00:00:00 2001
+From: Richard Zhao <richard.zhao@freescale.com>
+Date: Thu, 3 Nov 2011 09:55:23 +0800
+Subject: [PATCH 0534/2463] ENGR00161301 Upgrade to 4.6.2
+
+Signed-off-by: Richard Zhao <richard.zhao@freescale.com>
+Acked-by: Lily Zhang
+---
+ drivers/mxc/gpu-viv/Kbuild                         |   13 +-
+ .../hal/kernel/gc_hal_kernel_hardware_command_vg.h |    7 +
+ .../GC350/hal/kernel/gc_hal_kernel_hardware_vg.c   |  764 +++++++++++++++++++-
+ .../GC350/hal/kernel/gc_hal_kernel_hardware_vg.h   |   17 +
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_context.c   |   16 +-
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c  |  722 ++++++++-----------
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h  |   20 +-
+ drivers/mxc/gpu-viv/config                         |    2 +-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c     |   25 +-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h     |    6 +-
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c |   54 +-
+ .../gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c  |  130 ++++-
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c   |    6 +-
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c   |  261 +++-----
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c  |    2 +
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h        |   55 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h   |   95 +++-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_cl.h     |   20 +
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h   |    2 +
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h |  140 ++--
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h  |    5 +
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h |   30 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h   |    1 +
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h    |   75 ++-
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h   |    5 +
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h    |    6 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h     |   38 +
+ .../hal/os/linux/kernel/gc_hal_kernel_device.c     |   38 +-
+ .../hal/os/linux/kernel/gc_hal_kernel_driver.c     |   29 +-
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |  152 +++-
+ 30 files changed, 1877 insertions(+), 859 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/Kbuild b/drivers/mxc/gpu-viv/Kbuild
+index 13fd9b4..fee9dfd 100644
+--- a/drivers/mxc/gpu-viv/Kbuild
++++ b/drivers/mxc/gpu-viv/Kbuild
+@@ -167,7 +167,7 @@ else
+ EXTRA_CFLAGS += -DNO_USER_DIRECT_ACCESS_FROM_KERNEL=0
+ endif
+ 
+-ifeq ($(ENABLE_CACHED_VIDEO_MEMORY), 1)
++ifeq ($(FORCE_ALL_VIDEO_MEMORY_CACHED), 1)
+ EXTRA_CFLAGS += -DgcdPAGED_MEMORY_CACHEABLE=1
+ else
+ EXTRA_CFLAGS += -DgcdPAGED_MEMORY_CACHEABLE=0
+@@ -191,12 +191,23 @@ else
+ EXTRA_CFLAGS += -DgcdCACHE_FUNCTION_UNIMPLEMENTED=0
+ endif
+ 
++ifeq ($(SUPPORT_SWAP_RECTANGLE), 1)
++EXTRA_CFLAGS += -DgcdSUPPORT_SWAP_RECTANGLE=1
++else
++EXTRA_CFLAGS += -DgcdSUPPORT_SWAP_RECTANGLE=0
++endif
++
+ ifeq ($(VIVANTE_ENABLE_VG), 1)
+ EXTRA_CFLAGS += -DgcdENABLE_VG=1
+ else
+ EXTRA_CFLAGS += -DgcdENABLE_VG=0
+ endif
+ 
++ifeq ($(CONFIG_SMP), y)
++EXTRA_CFLAGS += -DgcdSMP=1
++else
++EXTRA_CFLAGS += -DgcdSMP=0
++endif
+ 
+ 
+ EXTRA_CFLAGS += -I$(AQROOT)/hal/kernel/inc
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.h b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.h
+index a3738fe..37d8d58 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.h
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.h
+@@ -232,6 +232,13 @@ struct _gckVGCOMMAND
+ 
+     /* Current context ID. */
+     gctUINT64                   currentContext;
++
++    /* Command queue power semaphore. */
++    gctPOINTER                  powerSemaphore;
++    gctINT32                    powerStallInt;
++    gcsCMDBUFFER_PTR            powerStallBuffer;
++    gctSIGNAL                   powerStallSignal;
++
+ };
+ 
+ /******************************************************************************\
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+index b5cd035..2b5e9ec 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+@@ -23,11 +23,29 @@
+ 
+ #include "gc_hal.h"
+ #include "gc_hal_kernel.h"
++#include "gc_hal_kernel_hardware_command_vg.h"
+ 
+ #if gcdENABLE_VG
+ 
+ #define _GC_OBJ_ZONE    gcvZONE_HARDWARE
+ 
++typedef enum
++{
++    gcvPOWER_FLAG_INITIALIZE    = 1 << 0,
++    gcvPOWER_FLAG_STALL         = 1 << 1,
++    gcvPOWER_FLAG_STOP          = 1 << 2,
++    gcvPOWER_FLAG_START         = 1 << 3,
++    gcvPOWER_FLAG_RELEASE       = 1 << 4,
++    gcvPOWER_FLAG_DELAY         = 1 << 5,
++    gcvPOWER_FLAG_SAVE          = 1 << 6,
++    gcvPOWER_FLAG_ACQUIRE       = 1 << 7,
++    gcvPOWER_FLAG_POWER_OFF     = 1 << 8,
++    gcvPOWER_FLAG_CLOCK_OFF     = 1 << 9,
++    gcvPOWER_FLAG_CLOCK_ON      = 1 << 10,
++    gcvPOWER_FLAG_NOP           = 1 << 11,
++}
++gcePOWER_FLAGS;
++
+ /******************************************************************************\
+ ********************************* Support Code *********************************
+ \******************************************************************************/
+@@ -108,6 +126,59 @@ _IdentifyHardware(
+     return status;
+ }
+ 
++#if gcdPOWER_MANAGEMENT
++static gctTHREADFUNCRESULT gctTHREADFUNCTYPE
++_TimeIdleThread(
++    gctTHREADFUNCPARAMETER ThreadParameter
++    )
++{
++    gctUINT32           currentTime = 0;
++    gctBOOL             isAfter = gcvFALSE;
++    gceCHIPPOWERSTATE   state;
++
++    /* Cast the object. */
++    gckVGHARDWARE hardware = (gckVGHARDWARE) ThreadParameter;
++
++    gcmkVERIFY_OK(gckOS_AcquireSemaphore(
++        hardware->os,
++        hardware->idleSemaphore));
++
++    while(gcvTRUE)
++    {
++        if (hardware->killThread)
++        {
++            break;
++        }
++
++        gcmkVERIFY_OK(gckOS_AcquireSemaphore(
++            hardware->os,
++            hardware->idleSemaphore));
++
++        do
++        {
++            gcmkVERIFY_OK(gckOS_GetTicks(&currentTime));
++
++            gcmkVERIFY_OK(
++                gckOS_TicksAfter(currentTime, hardware->powerOffTime, &isAfter));
++
++            if (isAfter)
++            {
++                gcmkVERIFY_OK(gckVGHARDWARE_SetPowerManagementState(
++                    hardware, gcvPOWER_OFF_BROADCAST));
++            }
++
++            gcmkVERIFY_OK(gckOS_Delay(hardware->os, 200));
++
++            gcmkVERIFY_OK(gckVGHARDWARE_QueryPowerManagementState(
++                hardware, &state));
++
++        } while (state == gcvPOWER_IDLE);
++    }
++    return 0;
++}
++#endif
++
++
+ /******************************************************************************\
+ ****************************** gckVGHARDWARE API code *****************************
+ \******************************************************************************/
+@@ -135,7 +206,7 @@ gckVGHARDWARE_Construct(
+     OUT gckVGHARDWARE * Hardware
+     )
+ {
+-    gckVGHARDWARE hardware;
++    gckVGHARDWARE hardware = gcvNULL;
+     gceSTATUS status;
+     gceCHIPMODEL chipModel;
+     gctUINT32 chipRevision;
+@@ -173,6 +244,16 @@ gckVGHARDWARE_Construct(
+         hardware->chipMinorFeatures  = chipMinorFeatures;
+         hardware->chipMinorFeatures2 = chipMinorFeatures2;
+ 
++        hardware->powerMutex            = gcvNULL;
++        hardware->idleSemaphore         = gcvNULL;
++        hardware->chipPowerState        = gcvPOWER_ON;
++        hardware->chipPowerStateGlobal  = gcvPOWER_ON;
++        hardware->clockState            = gcvTRUE;
++        hardware->powerState            = gcvTRUE;
++        hardware->powerOffTimeout       = gcdPOWEROFF_TIMEOUT;
++        hardware->powerOffTime          = 0;
++        hardware->timeIdleThread        = gcvNULL;
++        hardware->killThread            = gcvFALSE;
+         /* Determine whether FE 2.0 is present. */
+         hardware->fe20 = ((((gctUINT32) (hardware->chipFeatures)) >> (0 ? 28:28) & ((gctUINT32) ((((1 ? 28:28) - (0 ? 28:28) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 28:28) - (0 ? 28:28) + 1)))))) == (0x1  & ((gctUINT32) ((((1 ? 28:28) - (0 ? 28:28) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 28:28) - (0 ? 28:28) + 1)))))));
+ 
+@@ -188,6 +269,17 @@ gckVGHARDWARE_Construct(
+         /* Set fast clear to auto. */
+         gcmkVERIFY_OK(gckVGHARDWARE_SetFastClear(hardware, -1));
+ 
++        gcmkERR_BREAK(gckOS_CreateMutex(Os, &hardware->powerMutex));
++
++        gcmkERR_BREAK(gckOS_CreateSemaphore(Os, &hardware->idleSemaphore));
++#if gcdPOWER_MANAGEMENT
++        gcmkERR_BREAK(gckOS_StartThread(
++            hardware->os,
++            _TimeIdleThread,
++            hardware,
++            &hardware->timeIdleThread
++            ));
++#endif
+         /* Return pointer to the gckVGHARDWARE object. */
+         *Hardware = hardware;
+ 
+@@ -197,6 +289,11 @@ gckVGHARDWARE_Construct(
+     }
+     while (gcvFALSE);
+ 
++    if (hardware != gcvNULL)
++    {
++        gcmkVERIFY_OK(gckOS_Free(Os, hardware));
++    }
++
+     gcmkFOOTER();
+     /* Return the status. */
+     return status;
+@@ -227,9 +324,25 @@ gckVGHARDWARE_Destroy(
+     /* Verify the arguments. */
+     gcmkVERIFY_OBJECT(Hardware, gcvOBJ_HARDWARE);
+ 
++#if gcdPOWER_MANAGEMENT
++    Hardware->killThread  = gcvTRUE;
++    gcmkVERIFY_OK(gckOS_StopThread(Hardware->os, Hardware->timeIdleThread));
++#endif
+     /* Mark the object as unknown. */
+     Hardware->object.type = gcvOBJ_UNKNOWN;
+ 
++    if (Hardware->powerMutex != gcvNULL)
++    {
++        gcmkVERIFY_OK(gckOS_DeleteMutex(
++            Hardware->os, Hardware->powerMutex));
++    }
++
++    if (Hardware->idleSemaphore != gcvNULL)
++    {
++        gcmkVERIFY_OK(gckOS_DestroySemaphore(
++            Hardware->os, Hardware->idleSemaphore));
++    }
++
+     /* Free the object. */
+     status = gckOS_Free(Hardware->os, Hardware);
+     gcmkFOOTER();
+@@ -1064,13 +1177,29 @@ gceSTATUS gckVGHARDWARE_FlushMMU(
+             | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 2:2) - (0 ? 2:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 2:2) - (0 ? 2:2) + 1))))))) << (0 ? 2:2))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 2:2) - (0 ? 2:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 2:2) - (0 ? 2:2) + 1))))))) << (0 ? 2:2)))
+             | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 3:3) - (0 ? 3:3) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 3:3) - (0 ? 3:3) + 1))))))) << (0 ? 3:3))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 3:3) - (0 ? 3:3) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 3:3) - (0 ? 3:3) + 1))))))) << (0 ? 3:3)))
+             | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 4:4) - (0 ? 4:4) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 4:4) - (0 ? 4:4) + 1))))))) << (0 ? 4:4))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 4:4) - (0 ? 4:4) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 4:4) - (0 ? 4:4) + 1))))))) << (0 ? 4:4)));
+-
++#if gcdPOWER_MANAGEMENT
++        /* Acquire the power management semaphore. */
++        gcmkERR_BREAK(gckOS_AcquireSemaphore(Hardware->os,
++                               Hardware->kernel->command->powerSemaphore));
++
++        status = gckVGCOMMAND_Execute(
++                            Hardware->kernel->command,
++                            commandBuffer
++                            );
++        /* Acquire the power management semaphore. */
++        gcmkVERIFY_OK(gckOS_ReleaseSemaphore(Hardware->os,
++                               Hardware->kernel->command->powerSemaphore));
++
++        gcmkERR_BREAK(status);
++#else
+         gcmkERR_BREAK(gckVGCOMMAND_Execute(
+             Hardware->kernel->command,
+             commandBuffer
+             ));
++#endif
+     }
+     while(gcvFALSE);
++
+     gcmkFOOTER();
+     /* Return the status. */
+     return status;
+@@ -1212,5 +1341,636 @@ gckVGHARDWARE_ReadInterrupt(
+     return status;
+ }
+ 
++#if gcdPOWER_MANAGEMENT
++static gceSTATUS _CommandStall(
++    gckVGHARDWARE Hardware)
++{
++    gceSTATUS status;
++    gckVGCOMMAND command;
++
++    gcmkHEADER_ARG("Hardware=0x%x", Hardware);
++    /* Verify the arguments. */
++    gcmkVERIFY_OBJECT(Hardware, gcvOBJ_HARDWARE);
++
++    do
++    {
++        gctUINT32_PTR buffer;
++        command = Hardware->kernel->command;
++
++        /* Allocate command buffer space. */
++        gcmkERR_BREAK(gckVGCOMMAND_Allocate(
++            command, 8, &command->powerStallBuffer,
++            (gctPOINTER *) &buffer
++            ));
++
++        gcmkERR_BREAK(gckVGCOMMAND_EventCommand(
++            command, buffer, gcvBLOCK_PIXEL,
++            command->powerStallInt, gcvNULL));
++
++        gcmkERR_BREAK(gckVGCOMMAND_Execute(
++            command,
++            command->powerStallBuffer
++            ));
++
++        /* Wait the signal. */
++        gcmkERR_BREAK(gckOS_WaitSignal(
++            command->os,
++            command->powerStallSignal,
++            gcvINFINITE));
++
++
++    }
++    while(gcvFALSE);
++
++    gcmkFOOTER();
++    /* Return the status. */
++    return status;
++}
++#endif
++
++/*******************************************************************************
++**
++**  gckHARDWARE_SetPowerManagementState
++**
++**  Set GPU to a specified power state.
++**
++**  INPUT:
++**
++**      gckHARDWARE Harwdare
++**          Pointer to an gckHARDWARE object.
++**
++**      gceCHIPPOWERSTATE State
++**          Power State.
++**
++*/
++gceSTATUS
++gckVGHARDWARE_SetPowerManagementState(
++    IN gckVGHARDWARE Hardware,
++    IN gceCHIPPOWERSTATE State
++    )
++{
++#if gcdPOWER_MANAGEMENT
++    gceSTATUS status;
++    gckVGCOMMAND command = gcvNULL;
++    gckOS os;
++    gctUINT flag, clock;
++
++    gctBOOL acquired        = gcvFALSE;
++    gctBOOL stall           = gcvTRUE;
++    gctBOOL commitMutex     = gcvFALSE;
++    gctBOOL mutexAcquired   = gcvFALSE;
++
++    gctBOOL broadcast = gcvFALSE;
++    gctUINT32 process, thread;
++    gctBOOL global = gcvFALSE;
++    gctUINT32   currentTime;
++
++
++#if gcdENABLE_PROFILING
++    gctUINT64 time, freq, mutexTime, onTime, stallTime, stopTime, delayTime,
++              initTime, offTime, startTime, totalTime;
++#endif
++
++    /* State transition flags. */
++    static const gctUINT flags[4][4] =
++    {
++        /* gcvPOWER_ON           */
++        {   /* ON                */ 0,
++            /* OFF               */ gcvPOWER_FLAG_ACQUIRE   |
++                                    gcvPOWER_FLAG_STALL     |
++                                    gcvPOWER_FLAG_STOP      |
++                                    gcvPOWER_FLAG_POWER_OFF |
++                                    gcvPOWER_FLAG_CLOCK_OFF,
++            /* IDLE              */ gcvPOWER_FLAG_NOP,
++            /* SUSPEND           */ gcvPOWER_FLAG_ACQUIRE   |
++                                    gcvPOWER_FLAG_STALL     |
++                                    gcvPOWER_FLAG_STOP      |
++                                    gcvPOWER_FLAG_CLOCK_OFF,
++        },
++
++        /* gcvPOWER_OFF          */
++        {   /* ON                */ gcvPOWER_FLAG_INITIALIZE |
++                                    gcvPOWER_FLAG_START      |
++                                    gcvPOWER_FLAG_RELEASE    |
++                                    gcvPOWER_FLAG_DELAY,
++            /* OFF               */ 0,
++            /* IDLE              */ gcvPOWER_FLAG_INITIALIZE |
++                                    gcvPOWER_FLAG_START      |
++                                    gcvPOWER_FLAG_RELEASE    |
++                                    gcvPOWER_FLAG_DELAY,
++            /* SUSPEND           */ gcvPOWER_FLAG_INITIALIZE |
++                                    gcvPOWER_FLAG_CLOCK_OFF,
++        },
++
++        /* gcvPOWER_IDLE         */
++        {   /* ON                */ gcvPOWER_FLAG_NOP,
++            /* OFF               */ gcvPOWER_FLAG_ACQUIRE   |
++                                    gcvPOWER_FLAG_STOP      |
++                                    gcvPOWER_FLAG_POWER_OFF |
++                                    gcvPOWER_FLAG_CLOCK_OFF,
++            /* IDLE              */ 0,
++            /* SUSPEND           */ gcvPOWER_FLAG_ACQUIRE   |
++                                    gcvPOWER_FLAG_STOP      |
++                                    gcvPOWER_FLAG_CLOCK_OFF,
++        },
++
++        /* gcvPOWER_SUSPEND      */
++        {   /* ON                */ gcvPOWER_FLAG_START     |
++                                    gcvPOWER_FLAG_RELEASE   |
++                                    gcvPOWER_FLAG_DELAY     |
++                                    gcvPOWER_FLAG_CLOCK_ON,
++            /* OFF               */ gcvPOWER_FLAG_SAVE      |
++                                    gcvPOWER_FLAG_POWER_OFF |
++                                    gcvPOWER_FLAG_CLOCK_OFF,
++            /* IDLE              */ gcvPOWER_FLAG_START     |
++                                    gcvPOWER_FLAG_DELAY     |
++                                    gcvPOWER_FLAG_RELEASE   |
++                                    gcvPOWER_FLAG_CLOCK_ON,
++            /* SUSPEND           */ 0,
++        },
++    };
++
++    /* Clocks. */
++    static const gctUINT clocks[4] =
++    {
++        /* gcvPOWER_ON */
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (64) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
++
++        /* gcvPOWER_OFF */
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
++
++        /* gcvPOWER_IDLE */
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
++
++        /* gcvPOWER_SUSPEND */
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
++    };
++
++    gcmkHEADER_ARG("Hardware=0x%x State=%d", Hardware, State);
++#if gcmIS_DEBUG(gcdDEBUG_TRACE)
++    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
++                   "Switching to power state %d",
++                   State);
++#endif
++
++    /* Verify the arguments. */
++    gcmkVERIFY_OBJECT(Hardware, gcvOBJ_HARDWARE);
++
++    /* Get the gckOS object pointer. */
++    os = Hardware->os;
++    gcmkVERIFY_OBJECT(os, gcvOBJ_OS);
++
++    /* Get the gckCOMMAND object pointer. */
++    gcmkVERIFY_OBJECT(Hardware->kernel, gcvOBJ_KERNEL);
++    command = Hardware->kernel->command;
++    gcmkVERIFY_OBJECT(command, gcvOBJ_COMMAND);
++
++    /* Start profiler. */
++    gcmkPROFILE_INIT(freq, time);
++
++    /* Convert the broadcast power state. */
++    switch (State)
++    {
++    case gcvPOWER_SUSPEND_ATPOWERON:
++        /* Convert to SUSPEND and don't wait for STALL. */
++        State = gcvPOWER_SUSPEND;
++        stall = gcvFALSE;
++        break;
++
++    case gcvPOWER_OFF_ATPOWERON:
++        /* Convert to OFF and don't wait for STALL. */
++        State = gcvPOWER_OFF;
++        stall = gcvFALSE;
++        break;
++
++    case gcvPOWER_IDLE_BROADCAST:
++        /* Convert to IDLE and note we are inside broadcast. */
++        State     = gcvPOWER_IDLE;
++        broadcast = gcvTRUE;
++        break;
++
++    case gcvPOWER_SUSPEND_BROADCAST:
++        /* Convert to SUSPEND and note we are inside broadcast. */
++        State     = gcvPOWER_SUSPEND;
++        broadcast = gcvTRUE;
++        break;
++
++    case gcvPOWER_OFF_BROADCAST:
++        /* Convert to OFF and note we are inside broadcast. */
++        State     = gcvPOWER_OFF;
++        broadcast = gcvTRUE;
++        break;
++
++    case gcvPOWER_OFF_RECOVERY:
++        /* Convert to OFF and note we are inside recovery. */
++        State     = gcvPOWER_OFF;
++        stall     = gcvFALSE;
++        broadcast = gcvTRUE;
++        break;
++
++    case gcvPOWER_ON_AUTO:
++        /* Convert to ON and note we are inside recovery. */
++        State = gcvPOWER_ON;
++        break;
++
++    case gcvPOWER_ON:
++    case gcvPOWER_IDLE:
++    case gcvPOWER_SUSPEND:
++    case gcvPOWER_OFF:
++        /* Mark as global power management. */
++        global = gcvTRUE;
++        break;
++
++    default:
++        break;
++    }
++
++    /* Get current process and thread IDs. */
++    gcmkONERROR(gckOS_GetProcessID(&process));
++    gcmkONERROR(gckOS_GetThreadID(&thread));
++
++    /* Acquire the power mutex. */
++    if (broadcast)
++    {
++        /* Try to acquire the power mutex. */
++        status = gckOS_AcquireMutex(os, Hardware->powerMutex, 0);
++
++        if (status == gcvSTATUS_TIMEOUT)
++        {
++            /* Check if we already own this mutex. */
++            if ((Hardware->powerProcess == process)
++            &&  (Hardware->powerThread  == thread)
++            )
++            {
++                /* Bail out on recursive power management. */
++                gcmkFOOTER_NO();
++                return gcvSTATUS_OK;
++            }
++            else if (State == gcvPOWER_IDLE)
++            {
++                /* gcvPOWER_IDLE_BROADCAST is from IST,
++                ** so waiting here will cause deadlock,
++                ** if lock holder call gckCOMMAND_Stall() */
++                gcmkONERROR(gcvSTATUS_INVALID_REQUEST);
++            }
++            else
++            {
++                /* Acquire the power mutex. */
++                gcmkONERROR(gckOS_AcquireMutex(os,
++                                               Hardware->powerMutex,
++                                               gcvINFINITE));
++            }
++        }
++    }
++    else
++    {
++        /* Acquire the power mutex. */
++        gcmkONERROR(gckOS_AcquireMutex(os, Hardware->powerMutex, gcvINFINITE));
++    }
++
++    /* Get time until mtuex acquired. */
++    gcmkPROFILE_QUERY(time, mutexTime);
++
++    Hardware->powerProcess = process;
++    Hardware->powerThread  = thread;
++    mutexAcquired          = gcvTRUE;
++
++    /* Grab control flags and clock. */
++    flag  = flags[Hardware->chipPowerState][State];
++    clock = clocks[State];
++
++    if (flag == 0)
++    {
++        /* Release the power mutex. */
++        gcmkONERROR(gckOS_ReleaseMutex(os, Hardware->powerMutex));
++
++        /* No need to do anything. */
++        gcmkFOOTER_NO();
++        return gcvSTATUS_OK;
++    }
++
++    /* internal power control */
++    if (!global)
++    {
++        if (Hardware->chipPowerStateGlobal == gcvPOWER_OFF)
++        {
++            /* Release the power mutex. */
++            gcmkONERROR(gckOS_ReleaseMutex(os, Hardware->powerMutex));
++
++            /* No need to do anything. */
++            gcmkFOOTER_NO();
++            return gcvSTATUS_OK;
++        }
++    }
++
++    if (flag & (gcvPOWER_FLAG_INITIALIZE | gcvPOWER_FLAG_CLOCK_ON))
++    {
++        /* Turn on the power. */
++        gcmkONERROR(gckOS_SetGPUPower(os, gcvTRUE, gcvTRUE));
++
++        /* Mark clock and power as enabled. */
++        Hardware->clockState = gcvTRUE;
++        Hardware->powerState = gcvTRUE;
++    }
++
++    /* Get time until powered on. */
++    gcmkPROFILE_QUERY(time, onTime);
++
++    if ((flag & gcvPOWER_FLAG_STALL) && stall)
++    {
++        /* Acquire the mutex. */
++        gcmkONERROR(gckOS_AcquireMutex(
++            command->os,
++            command->commitMutex,
++            gcvINFINITE
++            ));
++
++        commitMutex = gcvTRUE;
++
++        gcmkONERROR(_CommandStall(Hardware));
++    }
++
++    /* Get time until stalled. */
++    gcmkPROFILE_QUERY(time, stallTime);
++
++    if (flag & gcvPOWER_FLAG_ACQUIRE)
++    {
++        /* Acquire the power management semaphore. */
++        gcmkONERROR(gckOS_AcquireSemaphore(os, command->powerSemaphore));
++
++        acquired = gcvTRUE;
++    }
++
++    if (flag & gcvPOWER_FLAG_STOP)
++    {
++    }
++
++    /* Get time until stopped. */
++    gcmkPROFILE_QUERY(time, stopTime);
++
++    /* Only process this when hardware is enabled. */
++    if (Hardware->clockState && Hardware->powerState)
++    {
++    }
++
++    if (flag & gcvPOWER_FLAG_DELAY)
++    {
++        /* Wait for the specified amount of time to settle coming back from
++        ** power-off or suspend state. */
++        gcmkONERROR(gckOS_Delay(os, gcdPOWER_CONTROL_DELAY));
++    }
++
++    /* Get time until delayed. */
++    gcmkPROFILE_QUERY(time, delayTime);
++
++    if (flag & gcvPOWER_FLAG_INITIALIZE)
++    {
++        /* Force the command queue to reload the next context. */
++        command->currentContext = 0;
++    }
++
++    /* Get time until initialized. */
++    gcmkPROFILE_QUERY(time, initTime);
++
++    if (flag & (gcvPOWER_FLAG_POWER_OFF | gcvPOWER_FLAG_CLOCK_OFF))
++    {
++        /* Turn off the GPU power. */
++        gcmkONERROR(
++            gckOS_SetGPUPower(os,
++                              (flag & gcvPOWER_FLAG_CLOCK_OFF) ? gcvFALSE
++                                                               : gcvTRUE,
++                              (flag & gcvPOWER_FLAG_POWER_OFF) ? gcvFALSE
++                                                               : gcvTRUE));
++
++        /* Save current hardware power and clock states. */
++        Hardware->clockState = (flag & gcvPOWER_FLAG_CLOCK_OFF) ? gcvFALSE
++                                                                : gcvTRUE;
++        Hardware->powerState = (flag & gcvPOWER_FLAG_POWER_OFF) ? gcvFALSE
++                                                                : gcvTRUE;
++    }
++
++    /* Get time until off. */
++    gcmkPROFILE_QUERY(time, offTime);
++
++    if (flag & gcvPOWER_FLAG_START)
++    {
++    }
++
++    /* Get time until started. */
++    gcmkPROFILE_QUERY(time, startTime);
++
++    if (flag & gcvPOWER_FLAG_RELEASE)
++    {
++        /* Release the power management semaphore. */
++        gcmkONERROR(gckOS_ReleaseSemaphore(os, command->powerSemaphore));
++        acquired = gcvFALSE;
++    }
++
++    /* Save the new power state. */
++    Hardware->chipPowerState = State;
++
++    if (global)
++    {
++        /* Save the new power state. */
++        Hardware->chipPowerStateGlobal = State;
++    }
++
++    if (State == gcvPOWER_IDLE)
++    {
++        gcmkONERROR(gckOS_ReleaseSemaphore(os, Hardware->idleSemaphore));
++    }
++        /* Reset power off time */
++    gcmkONERROR(gckOS_GetTicks(&currentTime));
++    Hardware->powerOffTime = currentTime + Hardware->powerOffTimeout;
++
++    if (commitMutex)
++    {
++        /* Acquire the mutex. */
++        gcmkVERIFY_OK(gckOS_ReleaseMutex(
++            command->os,
++            command->commitMutex
++            ));
++    }
++
++    /* Release the power mutex. */
++    gcmkONERROR(gckOS_ReleaseMutex(os, Hardware->powerMutex));
++
++    /* Get total time. */
++    gcmkPROFILE_QUERY(time, totalTime);
++#if gcdENABLE_PROFILING
++    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
++                   "PROF(%llu): mutex:%llu on:%llu stall:%llu stop:%llu",
++                   freq, mutexTime, onTime, stallTime, stopTime);
++    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
++                   "  delay:%llu init:%llu off:%llu start:%llu total:%llu",
++                   delayTime, initTime, offTime, startTime, totalTime);
++#endif
++
++    /* Success. */
++    gcmkFOOTER_NO();
++    return gcvSTATUS_OK;
++
++OnError:
++
++    if (acquired)
++    {
++        /* Release semaphore. */
++        gcmkVERIFY_OK(gckOS_ReleaseSemaphore(Hardware->os,
++                                             command->powerSemaphore));
++    }
++
++    if (mutexAcquired)
++    {
++        gcmkVERIFY_OK(gckOS_ReleaseMutex(Hardware->os, Hardware->powerMutex));
++    }
++
++    if (commitMutex)
++    {
++        /* Acquire the mutex. */
++        gcmkVERIFY_OK(gckOS_ReleaseMutex(
++            command->os,
++            command->commitMutex
++            ));
++    }
++
++    /* Return the status. */
++    gcmkFOOTER();
++    return status;
++#else /* gcdPOWER_MANAGEMENT */
++    /* Do nothing */
++    return gcvSTATUS_OK;
++#endif
++}
++
++/*******************************************************************************
++**
++**  gckHARDWARE_QueryPowerManagementState
++**
++**  Get GPU power state.
++**
++**  INPUT:
++**
++**      gckHARDWARE Harwdare
++**          Pointer to an gckHARDWARE object.
++**
++**      gceCHIPPOWERSTATE* State
++**          Power State.
++**
++*/
++gceSTATUS
++gckVGHARDWARE_QueryPowerManagementState(
++    IN gckVGHARDWARE Hardware,
++    OUT gceCHIPPOWERSTATE* State
++    )
++{
++    gcmkHEADER_ARG("Hardware=0x%x", Hardware);
++
++    /* Verify the arguments. */
++    gcmkVERIFY_OBJECT(Hardware, gcvOBJ_HARDWARE);
++    gcmkVERIFY_ARGUMENT(State != gcvNULL);
++
++    /* Return the statue. */
++    *State = Hardware->chipPowerState;
++
++    /* Success. */
++    gcmkFOOTER_ARG("*State=%d", *State);
++    return gcvSTATUS_OK;
++}
++
++gceSTATUS
++gckVGHARDWARE_SetPowerOffTimeout(
++    IN gckVGHARDWARE  Hardware,
++    IN gctUINT32    Timeout
++    )
++{
++    gcmkHEADER_ARG("Hardware=0x%x Timeout=%d", Hardware, Timeout);
++
++    Hardware->powerOffTimeout = Timeout;
++
++    gcmkFOOTER_NO();
++    return gcvSTATUS_OK;
++}
++
++
++gceSTATUS
++gckVGHARDWARE_QueryPowerOffTimeout(
++    IN gckVGHARDWARE  Hardware,
++    OUT gctUINT32*  Timeout
++    )
++{
++    gcmkHEADER_ARG("Hardware=0x%x", Hardware);
++
++    *Timeout = Hardware->powerOffTimeout;
++
++    gcmkFOOTER_ARG("*Timeout=%d", *Timeout);
++    return gcvSTATUS_OK;
++}
++
++gceSTATUS
++gckVGHARDWARE_QueryIdle(
++    IN gckVGHARDWARE Hardware,
++    OUT gctBOOL_PTR IsIdle
++    )
++{
++    gceSTATUS status;
++    gctUINT32 idle;
++
++    gcmkHEADER_ARG("Hardware=0x%x", Hardware);
++
++    /* Verify the arguments. */
++    gcmkVERIFY_OBJECT(Hardware, gcvOBJ_HARDWARE);
++    gcmkVERIFY_ARGUMENT(IsIdle != gcvNULL);
++
++    /* We are idle when the power is not ON. */
++    if (Hardware->chipPowerState != gcvPOWER_ON)
++    {
++        *IsIdle = gcvTRUE;
++    }
++
++    else
++    {
++        /* Read idle register. */
++        gcmkONERROR(
++            gckOS_ReadRegisterEx(Hardware->os, gcvCORE_VG, 0x00004, &idle));
++
++        /* Pipe must be idle. */
++        if (((((((gctUINT32) (idle)) >> (0 ? 0:0)) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1)))))) ) != 1)
++        ||  ((((((gctUINT32) (idle)) >> (0 ? 8:8)) & ((gctUINT32) ((((1 ? 8:8) - (0 ? 8:8) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:8) - (0 ? 8:8) + 1)))))) ) != 1)
++        ||  ((((((gctUINT32) (idle)) >> (0 ? 9:9)) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1)))))) ) != 1)
++        ||  ((((((gctUINT32) (idle)) >> (0 ? 10:10)) & ((gctUINT32) ((((1 ? 10:10) - (0 ? 10:10) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 10:10) - (0 ? 10:10) + 1)))))) ) != 1)
++        ||  ((((((gctUINT32) (idle)) >> (0 ? 11:11)) & ((gctUINT32) ((((1 ? 11:11) - (0 ? 11:11) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 11:11) - (0 ? 11:11) + 1)))))) ) != 1)
++        )
++        {
++            /* Something is busy. */
++            *IsIdle = gcvFALSE;
++        }
++
++        else
++        {
++            *IsIdle = gcvTRUE;
++        }
++    }
++
++    /* Success. */
++    gcmkFOOTER_NO();
++    return gcvSTATUS_OK;
++
++OnError:
++    /* Return the status. */
++    gcmkFOOTER();
++    return status;
++}
+ #endif /* gcdENABLE_VG */
+ 
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
+index f7300bb..a4ec3eb 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
+@@ -53,6 +53,23 @@ struct _gckVGHARDWARE
+ 
+     /* Event mask. */
+     gctUINT32                   eventMask;
++
++    gctBOOL                     clockState;
++    gctBOOL                     powerState;
++    gctPOINTER                  powerMutex;
++    gctSEMAPHORE                idleSemaphore;
++    gctUINT32                   powerProcess;
++    gctUINT32                   powerThread;
++    gceCHIPPOWERSTATE           chipPowerState;
++    gceCHIPPOWERSTATE           chipPowerStateGlobal;
++    gctISRMANAGERFUNC           startIsr;
++    gctISRMANAGERFUNC           stopIsr;
++    gctPOINTER                  isrContext;
++    gctUINT32                   powerOffTime;
++    gctUINT32                   powerOffTimeout;
++    gctTHREAD                   timeIdleThread;
++    gctBOOL                     killThread;
++
+ };
+ 
+ #endif /* __gc_hal_kernel_hardware_h_ */
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
+index 2f0c982..dbf8680 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
+@@ -417,7 +417,7 @@ _InitializeContextBuffer(
+ 
+     /* Front End states. */
+ 	fe2vsCount = 12;
+-	if ((((((gctUINT32) (Context->hardware->chipMinorFeatures1)) >> (0 ? 23:23)) & ((gctUINT32) ((((1 ? 23:23) - (0 ? 23:23) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 23:23) - (0 ? 23:23) + 1)))))) ))
++	if ((((((gctUINT32) (Context->hardware->identity.chipMinorFeatures1)) >> (0 ? 23:23)) & ((gctUINT32) ((((1 ? 23:23) - (0 ? 23:23) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 23:23) - (0 ? 23:23) + 1)))))) ))
+ 	{
+ 		fe2vsCount = 16;
+ 	}
+@@ -515,7 +515,7 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x02740 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
+     index += _CLOSE_RANGE();
+ 
+-    if ((((((gctUINT32) (Context->hardware->chipMinorFeatures2)) >> (0 ? 11:11)) & ((gctUINT32) ((((1 ? 11:11) - (0 ? 11:11) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 11:11) - (0 ? 11:11) + 1)))))) ))
++    if ((((((gctUINT32) (Context->hardware->identity.chipMinorFeatures2)) >> (0 ? 11:11)) & ((gctUINT32) ((((1 ? 11:11) - (0 ? 11:11) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 11:11) - (0 ? 11:11) + 1)))))) ))
+     {
+         /* New texture block. */
+         index += _State(Context, index, 0x10000 >> 2, 0x00000000, 32, gcvFALSE, gcvFALSE);
+@@ -565,7 +565,7 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x0091C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _CLOSE_RANGE();
+ 
+-	if (Context->hardware->instructionCount >= 2048)
++	if (Context->hardware->identity.instructionCount >= 2048)
+ 	{
+ 		/* New Shader instruction memory. */
+ 		index += _State(Context, index, 0x0085C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+@@ -579,7 +579,7 @@ _InitializeContextBuffer(
+ 			index += _CLOSE_RANGE();
+ 		}
+ 	}
+-	else if (Context->hardware->instructionCount >= 1024)
++	else if (Context->hardware->identity.instructionCount >= 1024)
+ 	{
+ 		/* VX instruction memory. */
+ 		for (i = 0; i < 4096; i += 1024)
+@@ -617,16 +617,16 @@ _InitializeContextBuffer(
+     /* Composition states. */
+     index += _State(Context, index, 0x03008 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+ 
+-    if (Context->hardware->pixelPipes == 1)
++    if (Context->hardware->identity.pixelPipes == 1)
+     {
+         index += _State(Context, index, 0x01430 >> 2, 0x00000000, 1, gcvFALSE, gcvTRUE);
+         index += _State(Context, index, 0x01410 >> 2, 0x00000000, 1, gcvFALSE, gcvTRUE);
+     }
+     else
+     {
+-        index += _State(Context, index, ((0x01460 >> 2) + (0 << 3)), 0x00000000, Context->hardware->pixelPipes , gcvFALSE, gcvTRUE);
++        index += _State(Context, index, ((0x01460 >> 2) + (0 << 3)), 0x00000000, Context->hardware->identity.pixelPipes , gcvFALSE, gcvTRUE);
+ 
+-        index += _State(Context, index, ((0x01480 >> 2) + (0 << 3)), 0x00000000, Context->hardware->pixelPipes , gcvFALSE, gcvTRUE);
++        index += _State(Context, index, ((0x01480 >> 2) + (0 << 3)), 0x00000000, Context->hardware->identity.pixelPipes , gcvFALSE, gcvTRUE);
+     }
+ 
+     index += _State(Context, index, 0x01434 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+@@ -1401,7 +1401,7 @@ gckCONTEXT_Update(
+             gctUINT32_PTR nop;
+             gctUINT fe2vsCount = 12;
+ 
+-            if ((((((gctUINT32) (Context->hardware->chipMinorFeatures1)) >> (0 ? 23:23)) & ((gctUINT32) ((((1 ? 23:23) - (0 ? 23:23) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 23:23) - (0 ? 23:23) + 1)))))) ))
++            if ((((((gctUINT32) (Context->hardware->identity.chipMinorFeatures1)) >> (0 ? 23:23)) & ((gctUINT32) ((((1 ? 23:23) - (0 ? 23:23) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 23:23) - (0 ? 23:23) + 1)))))) ))
+             {
+                 fe2vsCount = 16;
+             }
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+index 8ca8dfe..fe6c1a9 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+@@ -39,189 +39,209 @@ static gceSTATUS
+ _IdentifyHardware(
+     IN gckOS Os,
+     IN gceCORE Core,
+-    OUT gceCHIPMODEL * ChipModel,
+-    OUT gctUINT32_PTR ChipRevision,
+-    OUT gctUINT32_PTR ChipFeatures,
+-    OUT gctUINT32_PTR ChipMinorFeatures0,
+-    OUT gctUINT32_PTR ChipMinorFeatures1,
+-    OUT gctUINT32_PTR ChipMinorFeatures2,
+-    OUT gctUINT32_PTR ChipMinorFeatures3
++    OUT gcsHAL_QUERY_CHIP_IDENTITY_PTR Identity
+     )
+ {
+     gceSTATUS status;
++
+     gctUINT32 chipIdentity;
+-    gctUINT32 chipDate = 0xCCDDCCDD;
+-    gctUINT32 chipTime = 0xCCDDCCDD;
++
++    gctUINT32 streamCount = 0;
++    gctUINT32 registerMax = 0;
++    gctUINT32 threadCount = 0;
++    gctUINT32 shaderCoreCount = 0;
++    gctUINT32 vertexCacheSize = 0;
++    gctUINT32 vertexOutputBufferSize = 0;
++    gctUINT32 pixelPipes = 0;
++    gctUINT32 instructionCount = 0;
++    gctUINT32 numConstants = 0;
++    gctUINT32 bufferSize = 0;
+ 
+     gcmkHEADER_ARG("Os=0x%x", Os);
+ 
++    /***************************************************************************
++    ** Get chip ID and revision.
++    */
++
+     /* Read chip identity register. */
+     gcmkONERROR(
+-        gckOS_ReadRegisterEx(Os, Core, 0x00018, &chipIdentity));
++        gckOS_ReadRegisterEx(Os, Core,
++                             0x00018,
++                             &chipIdentity));
+ 
+     /* Special case for older graphic cores. */
+     if (((((gctUINT32) (chipIdentity)) >> (0 ? 31:24) & ((gctUINT32) ((((1 ? 31:24) - (0 ? 31:24) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:24) - (0 ? 31:24) + 1)))))) == (0x01 & ((gctUINT32) ((((1 ? 31:24) - (0 ? 31:24) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:24) - (0 ? 31:24) + 1))))))))
+     {
+-        *ChipModel    = gcv500;
+-        *ChipRevision = (((((gctUINT32) (chipIdentity)) >> (0 ? 15:12)) & ((gctUINT32) ((((1 ? 15:12) - (0 ? 15:12) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:12) - (0 ? 15:12) + 1)))))) );
++        Identity->chipModel    = gcv500;
++        Identity->chipRevision = (((((gctUINT32) (chipIdentity)) >> (0 ? 15:12)) & ((gctUINT32) ((((1 ? 15:12) - (0 ? 15:12) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:12) - (0 ? 15:12) + 1)))))) );
+     }
+ 
+     else
+     {
+-        /* Read date and time registers. */
+-        gcmkONERROR(
+-            gckOS_ReadRegisterEx(Os, Core, 0x00028, &chipDate));
+-
+-        gcmkONERROR(
+-            gckOS_ReadRegisterEx(Os, Core, 0x0002C, &chipTime));
+-
+         /* Read chip identity register. */
+         gcmkONERROR(
+-            gckOS_ReadRegisterEx(Os,
+-                                 Core,
++            gckOS_ReadRegisterEx(Os, Core,
+                                  0x00020,
+-                                 (gctUINT32_PTR) ChipModel));
++                                 (gctUINT32_PTR) &Identity->chipModel));
+ 
+         /* !!!! HACK ALERT !!!! */
+         /* Because people change device IDs without letting software know
+         ** about it - here is the hack to make it all look the same.  Only
+         ** for GC400 family.  Next time - TELL ME!!! */
+-        if ((*ChipModel & 0xFF00) == 0x0400)
++        if ((Identity->chipModel & 0xFF00) == 0x0400)
+         {
+-            *ChipModel &= 0x0400;
++            Identity->chipModel = (gceCHIPMODEL) (Identity->chipModel & 0x0400);
+         }
+ 
+         /* Read CHIP_REV register. */
+         gcmkONERROR(
+-            gckOS_ReadRegisterEx(Os, Core, 0x00024, ChipRevision));
++            gckOS_ReadRegisterEx(Os, Core,
++                                 0x00024,
++                                 &Identity->chipRevision));
+ 
+-        if ((*ChipModel    == gcv300)
+-        &&  (*ChipRevision == 0x2201)
++        if ((Identity->chipModel    == gcv300)
++        &&  (Identity->chipRevision == 0x2201)
+         )
+         {
++            gctUINT32 chipDate;
++            gctUINT32 chipTime;
++
++            /* Read date and time registers. */
++            gcmkONERROR(
++                gckOS_ReadRegisterEx(Os, Core,
++                                     0x00028,
++                                     &chipDate));
++
++            gcmkONERROR(
++                gckOS_ReadRegisterEx(Os, Core,
++                                     0x0002C,
++                                     &chipTime));
++
+             if ((chipDate == 0x20080814) && (chipTime == 0x12051100))
+             {
+                 /* This IP has an ECO; put the correct revision in it. */
+-                *ChipRevision = 0x1051;
++                Identity->chipRevision = 0x1051;
+             }
+         }
+     }
+ 
++    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
++                   "Identity: chipModel=%X",
++                   Identity->chipModel);
++
++    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
++                   "Identity: chipRevision=%X",
++                   Identity->chipRevision);
++
++
++    /***************************************************************************
++    ** Get chip features.
++    */
++
+     /* Read chip feature register. */
+     gcmkONERROR(
+-        gckOS_ReadRegisterEx(Os, Core, 0x0001C, ChipFeatures));
++        gckOS_ReadRegisterEx(Os, Core,
++                             0x0001C,
++                             &Identity->chipFeatures));
+ 
+ #ifndef VIVANTE_NO_3D
+     /* Disable fast clear on GC700. */
+-    if (*ChipModel == gcv700)
++    if (Identity->chipModel == gcv700)
+     {
+-        *ChipFeatures = ((((gctUINT32) (*ChipFeatures)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0)));
++        Identity->chipFeatures
++            = ((((gctUINT32) (Identity->chipFeatures)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) (0x0 & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0)));
+     }
+ #endif
+ 
+-    if (((*ChipModel == gcv500) && (*ChipRevision < 2))
+-    ||  ((*ChipModel == gcv300) && (*ChipRevision < 0x2000))
++    if (((Identity->chipModel == gcv500) && (Identity->chipRevision < 2))
++    ||  ((Identity->chipModel == gcv300) && (Identity->chipRevision < 0x2000))
+     )
+     {
+         /* GC500 rev 1.x and GC300 rev < 2.0 doesn't have these registers. */
+-        *ChipMinorFeatures0 = 0;
+-        *ChipMinorFeatures1 = 0;
+-        *ChipMinorFeatures2 = 0;
+-        *ChipMinorFeatures3 = 0;
++        Identity->chipMinorFeatures  = 0;
++        Identity->chipMinorFeatures1 = 0;
++        Identity->chipMinorFeatures2 = 0;
++        Identity->chipMinorFeatures3 = 0;
+     }
+     else
+     {
+         /* Read chip minor feature register #0. */
+         gcmkONERROR(
+-            gckOS_ReadRegisterEx(Os,
+-                                 Core,
++            gckOS_ReadRegisterEx(Os, Core,
+                                  0x00034,
+-                                 ChipMinorFeatures0));
++                                 &Identity->chipMinorFeatures));
+ 
+-        if (((((gctUINT32) (*ChipMinorFeatures0)) >> (0 ? 21:21) & ((gctUINT32) ((((1 ? 21:21) - (0 ? 21:21) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 21:21) - (0 ? 21:21) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 21:21) - (0 ? 21:21) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 21:21) - (0 ? 21:21) + 1)))))))
++        if (((((gctUINT32) (Identity->chipMinorFeatures)) >> (0 ? 21:21) & ((gctUINT32) ((((1 ? 21:21) - (0 ? 21:21) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 21:21) - (0 ? 21:21) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 21:21) - (0 ? 21:21) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 21:21) - (0 ? 21:21) + 1)))))))
+         )
+         {
+             /* Read chip minor featuress register #1. */
+             gcmkONERROR(
+-                gckOS_ReadRegisterEx(Os,
+-                                     Core,
++                gckOS_ReadRegisterEx(Os, Core,
+                                      0x00074,
+-                                     ChipMinorFeatures1));
+-
+-            /* Disabling texture hAlignment until it's fully tested. */
+-            *ChipMinorFeatures1 = *ChipMinorFeatures1 & ~(1 << 20);
++                                     &Identity->chipMinorFeatures1));
+ 
+             /* Read chip minor featuress register #2. */
+             gcmkONERROR(
+-                gckOS_ReadRegisterEx(Os,
+-                                     Core,
++                gckOS_ReadRegisterEx(Os, Core,
+                                      0x00084,
+-                                     ChipMinorFeatures2));
++                                     &Identity->chipMinorFeatures2));
+ 
+-			/* Read chip minor featuress register #1. */
+-			gcmkONERROR(
+-				gckOS_ReadRegisterEx(Os,
+-                                     Core,
+-								     0x00088,
+-								     ChipMinorFeatures3));
++            /* Read chip minor featuress register #1. */
++            gcmkONERROR(
++                gckOS_ReadRegisterEx(Os, Core,
++                                     0x00088,
++                                     &Identity->chipMinorFeatures3));
+         }
+         else
+         {
+             /* Chip doesn't has minor features register #1 or 2 or 3. */
+-            *ChipMinorFeatures1 = 0;
+-            *ChipMinorFeatures2 = 0;
+-            *ChipMinorFeatures3 = 0;
++            Identity->chipMinorFeatures1 = 0;
++            Identity->chipMinorFeatures2 = 0;
++            Identity->chipMinorFeatures3 = 0;
+         }
+     }
+ 
+     /* Disable HIERARCHICAL_Z. */
+-    *ChipMinorFeatures0 = ((((gctUINT32) (*ChipMinorFeatures0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1))))))) << (0 ? 27:27))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1))))))) << (0 ? 27:27)));
++    Identity->chipMinorFeatures
++        = ((((gctUINT32) (Identity->chipMinorFeatures)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1))))))) << (0 ? 27:27))) | (((gctUINT32) (0x0 & ((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1))))))) << (0 ? 27:27)));
+ 
+-    /* Success. */
+-    gcmkFOOTER_ARG("*ChipModel=%x *ChipRevision=%x *ChipFeatures=0x%08x "
+-                   "*ChipMinorFeatures0=0x%08X *ChipMinorFeatures1=0x%08x "
+-                   "*ChipMinorFeatures2=0x%08x  *ChipMinorFeatures3=0x%08x",
+-                   *ChipModel, *ChipRevision, *ChipFeatures,
+-                   *ChipMinorFeatures0, *ChipMinorFeatures1,
+-                   *ChipMinorFeatures2, *ChipMinorFeatures3);
+-    return gcvSTATUS_OK;
++#if gcdSUPPORT_SWAP_RECTANGLE
++    Identity->chipMinorFeatures = Identity->chipMinorFeatures & (~(1 << 12));
++#endif
+ 
+-OnError:
+-    /* Return the status. */
+-    gcmkFOOTER();
+-    return status;
+-}
++    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
++                   "Identity: chipFeatures=0x%08X",
++                   Identity->chipFeatures);
+ 
+-static gceSTATUS
+-_GetChipSpecs(
+-    IN gckHARDWARE Hardware
+-    )
+-{
+-    gctUINT32 streamCount = 0;
+-    gctUINT32 registerMax = 0;
+-    gctUINT32 threadCount = 0;
+-    gctUINT32 shaderCoreCount = 0;
+-    gctUINT32 vertexCacheSize = 0;
+-    gctUINT32 vertexOutputBufferSize = 0;
+-    gctUINT32 pixelPipes = 0;
+-    gctUINT32 instructionCount = 0;
+-    gctUINT32 numConstants = 0;
+-    gctUINT32 bufferSize = 0;
+-    gceSTATUS status;
++    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
++                   "Identity: chipMinorFeatures=0x%08X",
++                   Identity->chipMinorFeatures);
+ 
+-    gcmkHEADER_ARG("Hardware=0x%x", Hardware);
++    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
++                   "Identity: chipMinorFeatures1=0x%08X",
++                   Identity->chipMinorFeatures1);
++
++    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
++                   "Identity: chipMinorFeatures2=0x%08X",
++                   Identity->chipMinorFeatures2);
++
++    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
++                   "Identity: chipMinorFeatures3=0x%08X",
++                   Identity->chipMinorFeatures3);
+ 
+-    if (((((gctUINT32) (Hardware->chipMinorFeatures0)) >> (0 ? 21:21) & ((gctUINT32) ((((1 ? 21:21) - (0 ? 21:21) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 21:21) - (0 ? 21:21) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 21:21) - (0 ? 21:21) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 21:21) - (0 ? 21:21) + 1))))))))
++    /***************************************************************************
++    ** Get chip specs.
++    */
++
++    if (((((gctUINT32) (Identity->chipMinorFeatures)) >> (0 ? 21:21) & ((gctUINT32) ((((1 ? 21:21) - (0 ? 21:21) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 21:21) - (0 ? 21:21) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 21:21) - (0 ? 21:21) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 21:21) - (0 ? 21:21) + 1))))))))
+     {
+         gctUINT32 specs, specs2;
+ 
+         /* Read gcChipSpecs register. */
+         gcmkONERROR(
+-            gckOS_ReadRegisterEx(Hardware->os, Hardware->core, 0x00048, &specs));
+-
+-        /* Handy macro to improve reading. */
+-#define gcmSPEC_FIELD(field) \
+-        (((((gctUINT32) (specs)) >> (0 ? GC_CHIP_SPECS_field)) & ((gctUINT32) ((((1 ? GC_CHIP_SPECS_field) - (0 ? GC_CHIP_SPECS_field) + 1) == 32) ? ~0 : (~(~0 << ((1 ? GC_CHIP_SPECS_field) - (0 ? GC_CHIP_SPECS_field) + 1)))))) )
++            gckOS_ReadRegisterEx(Os, Core,
++                                 0x00048,
++                                 &specs));
+ 
+         /* Extract the fields. */
+         streamCount            = (((((gctUINT32) (specs)) >> (0 ? 3:0)) & ((gctUINT32) ((((1 ? 3:0) - (0 ? 3:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 3:0) - (0 ? 3:0) + 1)))))) );
+@@ -234,119 +254,122 @@ _GetChipSpecs(
+ 
+         /* Read gcChipSpecs2 register. */
+         gcmkONERROR(
+-            gckOS_ReadRegisterEx(Hardware->os, Hardware->core, 0x00080, &specs2));
+-
+-        /* Handy macro to improve reading. */
+-#define gcmSPEC2_FIELD(field) \
+-        (((((gctUINT32) (specs2)) >> (0 ? GC_CHIP_SPECS2_field)) & ((gctUINT32) ((((1 ? GC_CHIP_SPECS2_field) - (0 ? GC_CHIP_SPECS2_field) + 1) == 32) ? ~0 : (~(~0 << ((1 ? GC_CHIP_SPECS2_field) - (0 ? GC_CHIP_SPECS2_field) + 1)))))) )
++            gckOS_ReadRegisterEx(Os, Core,
++                                 0x00080,
++                                 &specs2));
+ 
+-		instructionCount       = (((((gctUINT32) (specs2)) >> (0 ? 15:8)) & ((gctUINT32) ((((1 ? 15:8) - (0 ? 15:8) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:8) - (0 ? 15:8) + 1)))))) );
+-		numConstants           = (((((gctUINT32) (specs2)) >> (0 ? 31:16)) & ((gctUINT32) ((((1 ? 31:16) - (0 ? 31:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:16) - (0 ? 31:16) + 1)))))) );
+-		bufferSize             = (((((gctUINT32) (specs2)) >> (0 ? 7:0)) & ((gctUINT32) ((((1 ? 7:0) - (0 ? 7:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 7:0) - (0 ? 7:0) + 1)))))) );
++        instructionCount       = (((((gctUINT32) (specs2)) >> (0 ? 15:8)) & ((gctUINT32) ((((1 ? 15:8) - (0 ? 15:8) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:8) - (0 ? 15:8) + 1)))))) );
++        numConstants           = (((((gctUINT32) (specs2)) >> (0 ? 31:16)) & ((gctUINT32) ((((1 ? 31:16) - (0 ? 31:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:16) - (0 ? 31:16) + 1)))))) );
++        bufferSize             = (((((gctUINT32) (specs2)) >> (0 ? 7:0)) & ((gctUINT32) ((((1 ? 7:0) - (0 ? 7:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 7:0) - (0 ? 7:0) + 1)))))) );
+     }
+ 
+     /* Get the number of pixel pipes. */
+-    Hardware->pixelPipes = gcmMAX(pixelPipes, 1);
++    Identity->pixelPipes = gcmMAX(pixelPipes, 1);
+ 
+     /* Get the stream count. */
+-    Hardware->streamCount = (streamCount != 0)
++    Identity->streamCount = (streamCount != 0)
+                           ? streamCount
+-                          : (Hardware->chipModel >= gcv1000) ? 4 : 1;
++                          : (Identity->chipModel >= gcv1000) ? 4 : 1;
+ 
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+                    "Specs: streamCount=%u%s",
+-                   Hardware->streamCount,
++                   Identity->streamCount,
+                    (streamCount == 0) ? " (default)" : "");
+ 
+     /* Get the vertex output buffer size. */
+-    Hardware->vertexOutputBufferSize = (vertexOutputBufferSize != 0)
++    Identity->vertexOutputBufferSize = (vertexOutputBufferSize != 0)
+                                      ? 1 << vertexOutputBufferSize
+-                                     : (Hardware->chipModel == gcv400)
+-                                       ? (Hardware->chipRevision < 0x4000) ? 512
+-                                       : (Hardware->chipRevision < 0x4200) ? 256
++                                     : (Identity->chipModel == gcv400)
++                                       ? (Identity->chipRevision < 0x4000) ? 512
++                                       : (Identity->chipRevision < 0x4200) ? 256
+                                        : 128
+-                                     : (Hardware->chipModel == gcv530)
+-                                       ? (Hardware->chipRevision < 0x4200) ? 512
++                                     : (Identity->chipModel == gcv530)
++                                       ? (Identity->chipRevision < 0x4200) ? 512
+                                        : 128
+                                      : 512;
+ 
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+                    "Specs: vertexOutputBufferSize=%u%s",
+-                   Hardware->vertexOutputBufferSize,
++                   Identity->vertexOutputBufferSize,
+                    (vertexOutputBufferSize == 0) ? " (default)" : "");
+ 
+     /* Get the maximum number of threads. */
+-    Hardware->threadCount = (threadCount != 0)
++    Identity->threadCount = (threadCount != 0)
+                           ? 1 << threadCount
+-                          : (Hardware->chipModel == gcv400) ? 64
+-                          : (Hardware->chipModel == gcv500) ? 128
+-                          : (Hardware->chipModel == gcv530) ? 128
++                          : (Identity->chipModel == gcv400) ? 64
++                          : (Identity->chipModel == gcv500) ? 128
++                          : (Identity->chipModel == gcv530) ? 128
+                           : 256;
+ 
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+                    "Specs: threadCount=%u%s",
+-                   Hardware->threadCount,
++                   Identity->threadCount,
+                    (threadCount == 0) ? " (default)" : "");
+ 
+     /* Get the number of shader cores. */
+-    Hardware->shaderCoreCount = (shaderCoreCount != 0)
++    Identity->shaderCoreCount = (shaderCoreCount != 0)
+                               ? shaderCoreCount
+-                              : (Hardware->chipModel >= gcv1000) ? 2
++                              : (Identity->chipModel >= gcv1000) ? 2
+                               : 1;
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+                    "Specs: shaderCoreCount=%u%s",
+-                   Hardware->shaderCoreCount,
++                   Identity->shaderCoreCount,
+                    (shaderCoreCount == 0) ? " (default)" : "");
+ 
+     /* Get the vertex cache size. */
+-    Hardware->vertexCacheSize = (vertexCacheSize != 0)
++    Identity->vertexCacheSize = (vertexCacheSize != 0)
+                               ? vertexCacheSize
+                               : 8;
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+                    "Specs: vertexCacheSize=%u%s",
+-                   Hardware->vertexCacheSize,
++                   Identity->vertexCacheSize,
+                    (vertexCacheSize == 0) ? " (default)" : "");
+ 
+     /* Get the maximum number of temporary registers. */
+-    Hardware->registerMax = (registerMax != 0)
+-		/* Maximum of registerMax/4 registers are accessible to 1 shader */
++    Identity->registerMax = (registerMax != 0)
++        /* Maximum of registerMax/4 registers are accessible to 1 shader */
+                           ? 1 << registerMax
+-                          : (Hardware->chipModel == gcv400) ? 32
++                          : (Identity->chipModel == gcv400) ? 32
+                           : 64;
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+                    "Specs: registerMax=%u%s",
+-                   Hardware->registerMax,
++                   Identity->registerMax,
+                    (registerMax == 0) ? " (default)" : "");
+ 
+     /* Get the instruction count. */
+-	Hardware->instructionCount = (instructionCount == 0) ? 256
++    Identity->instructionCount = (instructionCount == 0) ? 256
+                                : (instructionCount == 1) ? 1024
+                                : (instructionCount == 2) ? 2048
+-							   : 256;
++                               : 256;
++
++    if (Identity->chipModel == gcv2000 && Identity->chipRevision == 0x5108)
++    {
++        Identity->instructionCount = 512;
++    }
+ 
+-	gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
++    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+                    "Specs: instructionCount=%u%s",
+-                   Hardware->instructionCount,
++                   Identity->instructionCount,
+                    (instructionCount == 0) ? " (default)" : "");
+ 
+     /* Get the number of constants. */
+-	Hardware->numConstants = numConstants;
++    Identity->numConstants = numConstants;
+ 
+-	gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
++    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+                    "Specs: numConstants=%u%s",
+-                   Hardware->numConstants,
++                   Identity->numConstants,
+                    (numConstants == 0) ? " (default)" : "");
+ 
+     /* Get the buffer size. */
+-	Hardware->bufferSize = bufferSize;
++    Identity->bufferSize = bufferSize;
+ 
+-	gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
++    gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+                    "Specs: bufferSize=%u%s",
+-                   Hardware->bufferSize,
++                   Identity->bufferSize,
+                    (bufferSize == 0) ? " (default)" : "");
+ 
+     /* Success. */
+-    gcmkFOOTER_NO();
++    gcmkFOOTER();
+     return gcvSTATUS_OK;
+ 
+ OnError:
+@@ -386,15 +409,8 @@ gckHARDWARE_Construct(
+     OUT gckHARDWARE * Hardware
+     )
+ {
+-    gckHARDWARE hardware = gcvNULL;
+     gceSTATUS status;
+-    gceCHIPMODEL chipModel = gcv300;
+-    gctUINT32 chipRevision = 0;
+-    gctUINT32 chipFeatures = 0;
+-    gctUINT32 chipMinorFeatures0 = 0;
+-    gctUINT32 chipMinorFeatures1 = 0;
+-    gctUINT32 chipMinorFeatures2 = 0;
+-    gctUINT32 chipMinorFeatures3 = 0;
++    gckHARDWARE hardware = gcvNULL;
+     gctUINT16 data = 0xff00;
+     gctPOINTER pointer = gcvNULL;
+ 
+@@ -416,32 +432,23 @@ gckHARDWARE_Construct(
+             "_ResetGPU failed: status=%d\n", status);
+     }
+ 
+-    /* Identify the hardware. */
+-    gcmkONERROR(_IdentifyHardware(Os,
+-                                  Core,
+-                                  &chipModel,
+-                                  &chipRevision,
+-                                  &chipFeatures,
+-                                  &chipMinorFeatures0,
+-                                  &chipMinorFeatures1,
+-                                  &chipMinorFeatures2,
+-                                  &chipMinorFeatures3));
+-
+     /* Allocate the gckHARDWARE object. */
+     gcmkONERROR(gckOS_Allocate(Os,
+                                gcmSIZEOF(struct _gckHARDWARE),
+                                &pointer));
+ 
+-    hardware = pointer;
++    hardware = (gckHARDWARE) pointer;
+ 
+     /* Initialize the gckHARDWARE object. */
+     hardware->object.type = gcvOBJ_HARDWARE;
+     hardware->os          = Os;
+-
+     hardware->core        = Core;
+ 
++    /* Identify the hardware. */
++    gcmkONERROR(_IdentifyHardware(Os, Core, &hardware->identity));
++
+     /* Determine the hardware type */
+-    switch (chipModel)
++    switch (hardware->identity.chipModel)
+     {
+     case gcv350:
+     case gcv355:
+@@ -456,33 +463,25 @@ gckHARDWARE_Construct(
+     default:
+         hardware->type = gcvHARDWARE_3D;
+ 
+-        if ((((((gctUINT32) (chipFeatures)) >> (0 ? 9:9)) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1)))))) ))
++        if ((((((gctUINT32) (hardware->identity.chipFeatures)) >> (0 ? 9:9)) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1)))))) ))
+         {
+-            hardware->type |= gcvHARDWARE_2D;
++            hardware->type = (gceHARDWARE_TYPE) (hardware->type | gcvHARDWARE_2D);
+         }
+     }
+ 
+-    /* Set chip identity. */
+-    hardware->chipModel          = chipModel;
+-    hardware->chipRevision       = chipRevision;
+-    hardware->chipFeatures       = chipFeatures;
+-    hardware->chipMinorFeatures0 = chipMinorFeatures0;
+-    hardware->chipMinorFeatures1 = chipMinorFeatures1;
+-    hardware->chipMinorFeatures2 = chipMinorFeatures2;
+-    hardware->chipMinorFeatures3 = chipMinorFeatures3;
+-    hardware->powerBaseAddress   = ((chipModel == gcv300)
+-                                   && (chipRevision < 0x2000)
+-                                   ) ? 0x100 : 0x00;
+-    hardware->powerMutex         = gcvNULL;
+-
+-    hardware->mmuVersion         =
+-                    (((((gctUINT32) (hardware->chipMinorFeatures1)) >> (0 ? 28:28)) & ((gctUINT32) ((((1 ? 28:28) - (0 ? 28:28) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 28:28) - (0 ? 28:28) + 1)))))) );
+-
+-    /* Get chip specs. */
+-    gcmkONERROR(_GetChipSpecs(hardware));
++    hardware->powerBaseAddress
++        = ((hardware->identity.chipModel   == gcv300)
++        && (hardware->identity.chipRevision < 0x2000))
++            ? 0x0100
++            : 0x0000;
++
++    hardware->powerMutex = gcvNULL;
++
++    hardware->mmuVersion
++        = (((((gctUINT32) (hardware->identity.chipMinorFeatures1)) >> (0 ? 28:28)) & ((gctUINT32) ((((1 ? 28:28) - (0 ? 28:28) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 28:28) - (0 ? 28:28) + 1)))))) );
+ 
+     /* Determine whether bug fixes #1 are present. */
+-    hardware->extraEventStates = ((((gctUINT32) (chipMinorFeatures1)) >> (0 ? 3:3) & ((gctUINT32) ((((1 ? 3:3) - (0 ? 3:3) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 3:3) - (0 ? 3:3) + 1)))))) == (0x0 & ((gctUINT32) ((((1 ? 3:3) - (0 ? 3:3) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 3:3) - (0 ? 3:3) + 1)))))));
++    hardware->extraEventStates = ((((gctUINT32) (hardware->identity.chipMinorFeatures1)) >> (0 ? 3:3) & ((gctUINT32) ((((1 ? 3:3) - (0 ? 3:3) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 3:3) - (0 ? 3:3) + 1)))))) == (0x0 & ((gctUINT32) ((((1 ? 3:3) - (0 ? 3:3) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 3:3) - (0 ? 3:3) + 1)))))));
+ 
+     /* Check if big endian */
+     hardware->bigEndian = (*(gctUINT8 *)&data == 0xff);
+@@ -492,7 +491,7 @@ gckHARDWARE_Construct(
+ 
+ #if !gcdENABLE_128B_MERGE && 1 && 1
+ 
+-    if (((((gctUINT32) (hardware->chipMinorFeatures2)) >> (0 ? 21:21) & ((gctUINT32) ((((1 ? 21:21) - (0 ? 21:21) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 21:21) - (0 ? 21:21) + 1)))))) == (0x1  & ((gctUINT32) ((((1 ? 21:21) - (0 ? 21:21) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 21:21) - (0 ? 21:21) + 1))))))))
++    if (((((gctUINT32) (hardware->identity.chipMinorFeatures2)) >> (0 ? 21:21) & ((gctUINT32) ((((1 ? 21:21) - (0 ? 21:21) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 21:21) - (0 ? 21:21) + 1)))))) == (0x1  & ((gctUINT32) ((((1 ? 21:21) - (0 ? 21:21) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 21:21) - (0 ? 21:21) + 1))))))))
+     {
+         /* 128B merge is turned on by default. Disable it. */
+         gcmkONERROR(gckOS_WriteRegisterEx(Os, Core, 0x00558, 0));
+@@ -513,6 +512,7 @@ gckHARDWARE_Construct(
+ #if gcdPOWEROFF_TIMEOUT
+     gcmkONERROR(gckOS_CreateMutex(Os, &hardware->powerOffSema));
+     gcmkONERROR(gckOS_AcquireMutex(Os, hardware->powerOffSema, gcvINFINITE));
++    hardware->powerOffTimeout = gcdPOWEROFF_TIMEOUT;
+ #endif
+ 
+     /* Return pointer to the gckHARDWARE object. */
+@@ -678,7 +678,7 @@ gckHARDWARE_InitializeHardware(
+                                      0x00024,
+                                      &chipRev));
+ 
+-    if (chipRev != Hardware->chipRevision)
++    if (chipRev != Hardware->identity.chipRevision)
+     {
+         /* Chip is not there! */
+         gcmkONERROR(gcvSTATUS_CONTEXT_LOSSED);
+@@ -745,8 +745,8 @@ gckHARDWARE_InitializeHardware(
+         /* Enable clock gating. */
+         data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0)));
+ 
+-        if ((Hardware->chipRevision == 0x4301)
+-        ||  (Hardware->chipRevision == 0x4302)
++        if ((Hardware->identity.chipRevision == 0x4301)
++        ||  (Hardware->identity.chipRevision == 0x4302)
+         )
+         {
+             /* Disable stall module level clock gating for 4.3.0.1 and 4.3.0.2
+@@ -763,9 +763,9 @@ gckHARDWARE_InitializeHardware(
+ #ifndef VIVANTE_NO_3D
+         /* Disable PE clock gating on revs < 5.0 when HZ is present without a
+         ** bug fix. */
+-        if ((Hardware->chipRevision < 0x5000)
+-        &&  ((((gctUINT32) (Hardware->chipMinorFeatures1)) >> (0 ? 9:9) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1)))))) == (0x0 & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1)))))))
+-        &&  ((((gctUINT32) (Hardware->chipMinorFeatures0)) >> (0 ? 27:27) & ((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1)))))))
++        if ((Hardware->identity.chipRevision < 0x5000)
++        &&  ((((gctUINT32) (Hardware->identity.chipMinorFeatures1)) >> (0 ? 9:9) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1)))))) == (0x0 & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1)))))))
++        &&  ((((gctUINT32) (Hardware->identity.chipMinorFeatures)) >> (0 ? 27:27) & ((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1)))))))
+         )
+         {
+             gcmkONERROR(
+@@ -932,224 +932,74 @@ gckHARDWARE_QueryMemory(
+ **
+ **  OUTPUT:
+ **
+-**      gceCHIPMODEL * ChipModel
+-**          If 'ChipModel' is not gcvNULL, the variable it points to will
+-**          receive the model of the chip.
+-**
+-**      gctUINT32 * ChipRevision
+-**          If 'ChipRevision' is not gcvNULL, the variable it points to will
+-**          receive the revision of the chip.
+-**
+-**      gctUINT32 * ChipFeatures
+-**          If 'ChipFeatures' is not gcvNULL, the variable it points to will
+-**          receive the feature set of the chip.
+-**
+-**      gctUINT32 * ChipMinorFeatures
+-**          If 'ChipMinorFeatures' is not gcvNULL, the variable it points to
+-**          will receive the minor feature set of the chip.
+-**
+-**      gctUINT32 * ChipMinorFeatures1
+-**          If 'ChipMinorFeatures1' is not gcvNULL, the variable it points to
+-**          will receive the minor feature set 1 of the chip.
+-**
+-**      gctUINT32 * ChipMinorFeatures2
+-**          If 'ChipMinorFeatures2' is not gcvNULL, the variable it points to
+-**          will receive the minor feature set 2 of the chip.
++**      gcsHAL_QUERY_CHIP_IDENTITY_PTR Identity
++**          Pointer to the identity structure.
+ **
+ */
+ gceSTATUS
+ gckHARDWARE_QueryChipIdentity(
+     IN gckHARDWARE Hardware,
+-    OUT gceCHIPMODEL * ChipModel,
+-    OUT gctUINT32 * ChipRevision,
+-    OUT gctUINT32* ChipFeatures,
+-    OUT gctUINT32* ChipMinorFeatures,
+-    OUT gctUINT32* ChipMinorFeatures1,
+-    OUT gctUINT32* ChipMinorFeatures2,
+-    OUT gctUINT32* ChipMinorFeatures3
++    OUT gcsHAL_QUERY_CHIP_IDENTITY_PTR Identity
+     )
+ {
++    gctUINT32 features;
++
+     gcmkHEADER_ARG("Hardware=0x%x", Hardware);
+ 
+     /* Verify the arguments. */
+     gcmkVERIFY_OBJECT(Hardware, gcvOBJ_HARDWARE);
++    gcmkVERIFY_ARGUMENT(Identity != gcvNULL);
+ 
+-    /* Return chip model. */
+-    if (ChipModel != gcvNULL)
+-    {
+-        *ChipModel = Hardware->chipModel;
+-    }
+-
+-    /* Return revision number. */
+-    if (ChipRevision != gcvNULL)
+-    {
+-        *ChipRevision = Hardware->chipRevision;
+-    }
++    /* Return chip model and revision. */
++    Identity->chipModel = Hardware->identity.chipModel;
++    Identity->chipRevision = Hardware->identity.chipRevision;
+ 
+     /* Return feature set. */
+-    if (ChipFeatures != gcvNULL)
+-    {
+-        gctUINT32 features = Hardware->chipFeatures;
+-
+-        if ((((((gctUINT32) (features)) >> (0 ? 0:0)) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1)))))) ))
+-        {
+-            /* Override fast clear by command line. */
+-            features = ((((gctUINT32) (features)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (Hardware->allowFastClear) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0)));
+-        }
+-
+-        if ((((((gctUINT32) (features)) >> (0 ? 5:5)) & ((gctUINT32) ((((1 ? 5:5) - (0 ? 5:5) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 5:5) - (0 ? 5:5) + 1)))))) ))
+-        {
+-            /* Override compression by command line. */
+-            features = ((((gctUINT32) (features)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 5:5) - (0 ? 5:5) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 5:5) - (0 ? 5:5) + 1))))))) << (0 ? 5:5))) | (((gctUINT32) ((gctUINT32) (Hardware->allowCompression) & ((gctUINT32) ((((1 ? 5:5) - (0 ? 5:5) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 5:5) - (0 ? 5:5) + 1))))))) << (0 ? 5:5)));
+-        }
+-
+-        /* Mark 2D pipe as available for GC500.0 through GC500.2 and GC300,
+-        ** since they did not have this bit. */
+-        if (((Hardware->chipModel == gcv500)
+-            && (Hardware->chipRevision <= 2)
+-            )
+-        ||  (Hardware->chipModel == gcv300)
+-        )
+-        {
+-            features = ((((gctUINT32) (features)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9)));
+-        }
+-
+-        *ChipFeatures = features;
+-    }
+-
+-    /* Return minor feature set. */
+-    if (ChipMinorFeatures != gcvNULL)
+-    {
+-        *ChipMinorFeatures = Hardware->chipMinorFeatures0;
+-    }
+-
+-    /* Return minor feature set 1. */
+-    if (ChipMinorFeatures1 != gcvNULL)
+-    {
+-        *ChipMinorFeatures1 = Hardware->chipMinorFeatures1;
+-    }
++    features = Hardware->identity.chipFeatures;
+ 
+-    /* Return minor feature set 2. */
+-    if (ChipMinorFeatures2 != gcvNULL)
++    if ((((((gctUINT32) (features)) >> (0 ? 0:0)) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1)))))) ))
+     {
+-        *ChipMinorFeatures2 = Hardware->chipMinorFeatures2;
++        /* Override fast clear by command line. */
++        features = ((((gctUINT32) (features)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (Hardware->allowFastClear) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0)));
+     }
+ 
+-    /* Return minor feature set 3. */
+-    if (ChipMinorFeatures3 != gcvNULL)
++    if ((((((gctUINT32) (features)) >> (0 ? 5:5)) & ((gctUINT32) ((((1 ? 5:5) - (0 ? 5:5) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 5:5) - (0 ? 5:5) + 1)))))) ))
+     {
+-        *ChipMinorFeatures3 = Hardware->chipMinorFeatures3;
++        /* Override compression by command line. */
++        features = ((((gctUINT32) (features)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 5:5) - (0 ? 5:5) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 5:5) - (0 ? 5:5) + 1))))))) << (0 ? 5:5))) | (((gctUINT32) ((gctUINT32) (Hardware->allowCompression) & ((gctUINT32) ((((1 ? 5:5) - (0 ? 5:5) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 5:5) - (0 ? 5:5) + 1))))))) << (0 ? 5:5)));
+     }
+ 
+-    /* Success. */
+-    gcmkFOOTER_ARG("*ChipModel=0x%x *ChipRevision=0x%x *ChipFeatures=0x%08x "
+-                   "*ChipMinorFeatures=0x%08x *ChipMinorFeatures1=0x%08x "
+-                   "*ChipMinorFeatures2=0x%08x  *ChipMinorFeatures3=0x%08x",
+-                   gcmOPT_VALUE(ChipModel),
+-				   gcmOPT_VALUE(ChipRevision),
+-                   gcmOPT_VALUE(ChipFeatures),
+-				   gcmOPT_VALUE(ChipMinorFeatures),
+-                   gcmOPT_VALUE(ChipMinorFeatures1),
+-                   gcmOPT_VALUE(ChipMinorFeatures2),
+-                   gcmOPT_VALUE(ChipMinorFeatures3));
+-
+-    return gcvSTATUS_OK;
+-}
+-
+-gceSTATUS
+-gckHARDWARE_QueryChipSpecs(
+-    IN gckHARDWARE Hardware,
+-    OUT gctUINT32_PTR StreamCount,
+-    OUT gctUINT32_PTR RegisterMax,
+-    OUT gctUINT32_PTR ThreadCount,
+-    OUT gctUINT32_PTR ShaderCoreCount,
+-    OUT gctUINT32_PTR VertexCacheSize,
+-    OUT gctUINT32_PTR VertexOutputBufferSize,
+-    OUT gctUINT32_PTR PixelPipes,
+-    OUT gctUINT32_PTR InstructionCount,
+-    OUT gctUINT32_PTR NumConstants,
+-    OUT gctUINT32_PTR BufferSize
++    /* Mark 2D pipe as available for GC500.0 through GC500.2 and GC300,
++    ** since they did not have this bit. */
++    if (((Hardware->identity.chipModel == gcv500) && (Hardware->identity.chipRevision <= 2))
++    ||   (Hardware->identity.chipModel == gcv300)
+     )
+-{
+-    gcmkHEADER_ARG("Hardware=0x%x", Hardware);
+-
+-    /* Verify the arguments. */
+-    gcmkVERIFY_OBJECT(Hardware, gcvOBJ_HARDWARE);
+-
+-    /* Return the number of streams. */
+-    if (StreamCount != gcvNULL)
+     {
+-        *StreamCount = Hardware->streamCount;
++        features = ((((gctUINT32) (features)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9)));
+     }
+ 
+-    /* Return the number of temporary registers. */
+-    if (RegisterMax != gcvNULL)
+-    {
+-        *RegisterMax = Hardware->registerMax;
+-    }
+-
+-    /* Return the maximum number of thrteads. */
+-    if (ThreadCount != gcvNULL)
+-    {
+-        *ThreadCount = Hardware->threadCount;
+-    }
+-
+-    /* Return the number of shader cores. */
+-    if (ShaderCoreCount != gcvNULL)
+-    {
+-        *ShaderCoreCount = Hardware->shaderCoreCount;
+-    }
+-
+-    /* Return the number of entries in the vertex cache. */
+-    if (VertexCacheSize != gcvNULL)
+-    {
+-        *VertexCacheSize = Hardware->vertexCacheSize;
+-    }
+-
+-    /* Return the number of entries in the vertex output buffer. */
+-    if (VertexOutputBufferSize != gcvNULL)
+-    {
+-        *VertexOutputBufferSize = Hardware->vertexOutputBufferSize;
+-    }
+-
+-    /* Return the number of pixel pipes. */
+-    if (PixelPipes != gcvNULL)
+-    {
+-        *PixelPipes = Hardware->pixelPipes;
+-    }
+-
+-    /* Return the number of instructions. */
+-    if (InstructionCount != gcvNULL)
+-    {
+-        *InstructionCount = Hardware->instructionCount;
+-    }
+-
+-    /* Return the number of constants. */
+-    if (NumConstants != gcvNULL)
+-    {
+-        *NumConstants = Hardware->numConstants;
+-    }
+-
+-    /* Return the buffer size. */
+-    if (BufferSize != gcvNULL)
+-    {
+-        *BufferSize = Hardware->bufferSize;
+-    }
+-
+-	/* Success. */
+-    gcmkFOOTER_ARG("*StreamCount=%u *RegisterMax=%u *ThreadCount=%u "
+-                   "*ShaderCoreCount=%u *VertexCacheSize=%u "
+-                   "*VertexOutputBufferSize=%u *PixelPipes=%u",
+-                   "*InstructionCount=%u *NumConstants=%u *BufferSize=%u",
+-                   gcmOPT_VALUE(StreamCount), gcmOPT_VALUE(RegisterMax),
+-                   gcmOPT_VALUE(ThreadCount), gcmOPT_VALUE(ShaderCoreCount),
+-                   gcmOPT_VALUE(VertexCacheSize),
+-                   gcmOPT_VALUE(VertexOutputBufferSize),
+-				   gcmOPT_VALUE(PixelPipes),
+-				   gcmOPT_VALUE(InstructionCount),
+-				   gcmOPT_VALUE(NumConstants),
+-				   gcmOPT_VALUE(BufferSize));
++    Identity->chipFeatures = features;
++
++    /* Return minor features. */
++    Identity->chipMinorFeatures  = Hardware->identity.chipMinorFeatures;
++    Identity->chipMinorFeatures1 = Hardware->identity.chipMinorFeatures1;
++    Identity->chipMinorFeatures2 = Hardware->identity.chipMinorFeatures2;
++    Identity->chipMinorFeatures3 = Hardware->identity.chipMinorFeatures3;
++
++    /* Return chip specs. */
++    Identity->streamCount            = Hardware->identity.streamCount;
++    Identity->registerMax            = Hardware->identity.registerMax;
++    Identity->threadCount            = Hardware->identity.threadCount;
++    Identity->shaderCoreCount        = Hardware->identity.shaderCoreCount;
++    Identity->vertexCacheSize        = Hardware->identity.vertexCacheSize;
++    Identity->vertexOutputBufferSize = Hardware->identity.vertexOutputBufferSize;
++    Identity->pixelPipes             = Hardware->identity.pixelPipes;
++    Identity->instructionCount       = Hardware->identity.instructionCount;
++    Identity->numConstants           = Hardware->identity.numConstants;
++    Identity->bufferSize             = Hardware->identity.bufferSize;
+ 
++    /* Success. */
++    gcmkFOOTER_NO();
+     return gcvSTATUS_OK;
+ }
+ 
+@@ -1630,7 +1480,7 @@ gckHARDWARE_WaitLink(
+             | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 25:16) - (0 ? 25:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 25:16) - (0 ? 25:16) + 1))))))) << (0 ? 25:16))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 25:16) - (0 ? 25:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 25:16) - (0 ? 25:16) + 1))))))) << (0 ? 25:16)));
+ 
+         logical[21]
+-            = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? AQ_FLUSH_L2_CACHE) - (0 ? AQ_FLUSH_L2_CACHE) + 1) == 32) ? ~0 : (~(~0 << ((1 ? AQ_FLUSH_L2_CACHE) - (0 ? AQ_FLUSH_L2_CACHE) + 1))))))) << (0 ? AQ_FLUSH_L2_CACHE))) | (((gctUINT32) (AQ_FLUSH_L2_CACHE_ENABLE & ((gctUINT32) ((((1 ? AQ_FLUSH_L2_CACHE) - (0 ? AQ_FLUSH_L2_CACHE) + 1) == 32) ? ~0 : (~(~0 << ((1 ? AQ_FLUSH_L2_CACHE) - (0 ? AQ_FLUSH_L2_CACHE) + 1))))))) << (0 ? AQ_FLUSH_L2_CACHE)));
++            = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 6:6) - (0 ? 6:6) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 6:6) - (0 ? 6:6) + 1))))))) << (0 ? 6:6))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 6:6) - (0 ? 6:6) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 6:6) - (0 ? 6:6) + 1))))))) << (0 ? 6:6)));
+ 
+         /* Append LINK(2, address). */
+         logical[22]
+@@ -2359,17 +2209,17 @@ gckHARDWARE_AlignToTile(
+         )
+         &&
+         /* Of course, hardware needs to support super tiles. */
+-        ((((gctUINT32) (Hardware->chipMinorFeatures0)) >> (0 ? 12:12) & ((gctUINT32) ((((1 ? 12:12) - (0 ? 12:12) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 12:12) - (0 ? 12:12) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 12:12) - (0 ? 12:12) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 12:12) - (0 ? 12:12) + 1)))))));
++        ((((gctUINT32) (Hardware->identity.chipMinorFeatures)) >> (0 ? 12:12) & ((gctUINT32) ((((1 ? 12:12) - (0 ? 12:12) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 12:12) - (0 ? 12:12) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 12:12) - (0 ? 12:12) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 12:12) - (0 ? 12:12) + 1)))))));
+ 
+     /* Textures can be better aligned. */
+-    hAlignmentAvailable = ((((gctUINT32) (Hardware->chipMinorFeatures1)) >> (0 ? 20:20) & ((gctUINT32) ((((1 ? 20:20) - (0 ? 20:20) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 20:20) - (0 ? 20:20) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 20:20) - (0 ? 20:20) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 20:20) - (0 ? 20:20) + 1)))))));
++    hAlignmentAvailable = ((((gctUINT32) (Hardware->identity.chipMinorFeatures1)) >> (0 ? 20:20) & ((gctUINT32) ((((1 ? 20:20) - (0 ? 20:20) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 20:20) - (0 ? 20:20) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 20:20) - (0 ? 20:20) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 20:20) - (0 ? 20:20) + 1)))))));
+ 
+     /* Compute alignment factors. */
+     xAlignment = superTiled ? 64
+                : ((Type == gcvSURF_TEXTURE) && !hAlignmentAvailable) ? 4
+                : 16;
+-    yAlignment = superTiled ? (64 * Hardware->pixelPipes)
+-               : (4 * Hardware->pixelPipes);
++    yAlignment = superTiled ? (64 * Hardware->identity.pixelPipes)
++               : (4 * Hardware->identity.pixelPipes);
+ 
+     if (Width != gcvNULL)
+     {
+@@ -2613,9 +2463,7 @@ gckHARDWARE_Interrupt(
+ 
+         if (data & 0x80000000)
+         {
+-            gcmkONERROR(gckOS_Broadcast(Hardware->os,
+-                                        Hardware,
+-                                        gcvBROADCAST_AXI_BUS_ERROR));
++            gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE, "AXI BUS ERROR");
+         }
+ 
+         if (data == 0)
+@@ -2794,7 +2642,7 @@ gckHARDWARE_QueryShaderCaps(
+     if (VertexUniforms != gcvNULL)
+     {
+ 		/* Return the vs shader const count. */
+-        if (Hardware->chipModel < gcv4000)
++        if (Hardware->identity.chipModel < gcv4000)
+         {
+             *VertexUniforms = 168;
+         }
+@@ -2807,7 +2655,7 @@ gckHARDWARE_QueryShaderCaps(
+     if (FragmentUniforms != gcvNULL)
+     {
+ 		/* Return the ps shader const count. */
+-        if (Hardware->chipModel < gcv4000)
++        if (Hardware->identity.chipModel < gcv4000)
+         {
+             *FragmentUniforms = 64;
+         }
+@@ -2820,7 +2668,7 @@ gckHARDWARE_QueryShaderCaps(
+     if (Varyings != gcvNULL)
+     {
+ 		/* Return the shader varyings count. */
+-        if (((((gctUINT32) (Hardware->chipMinorFeatures1)) >> (0 ? 23:23) & ((gctUINT32) ((((1 ? 23:23) - (0 ? 23:23) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 23:23) - (0 ? 23:23) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 23:23) - (0 ? 23:23) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 23:23) - (0 ? 23:23) + 1))))))))
++        if (((((gctUINT32) (Hardware->identity.chipMinorFeatures1)) >> (0 ? 23:23) & ((gctUINT32) ((((1 ? 23:23) - (0 ? 23:23) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 23:23) - (0 ? 23:23) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 23:23) - (0 ? 23:23) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 23:23) - (0 ? 23:23) + 1))))))))
+         {
+ 		    *Varyings = 12;
+         }
+@@ -3403,13 +3251,13 @@ gckHARDWARE_SetFastClear(
+                    Hardware, Enable, Compression);
+ 
+     /* Only process if fast clear is available. */
+-    if ((((((gctUINT32) (Hardware->chipFeatures)) >> (0 ? 0:0)) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1)))))) ))
++    if ((((((gctUINT32) (Hardware->identity.chipFeatures)) >> (0 ? 0:0)) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1)))))) ))
+     {
+         if (Enable == -1)
+         {
+             /* Determine automatic value for fast clear. */
+-            Enable = ((Hardware->chipModel    != gcv500)
+-                     || (Hardware->chipRevision >= 3)
++            Enable = ((Hardware->identity.chipModel    != gcv500)
++                     || (Hardware->identity.chipRevision >= 3)
+                      ) ? 1 : 0;
+         }
+ 
+@@ -3417,7 +3265,7 @@ gckHARDWARE_SetFastClear(
+         {
+             /* Determine automatic value for compression. */
+             Compression = Enable
+-                        & (((((gctUINT32) (Hardware->chipFeatures)) >> (0 ? 5:5)) & ((gctUINT32) ((((1 ? 5:5) - (0 ? 5:5) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 5:5) - (0 ? 5:5) + 1)))))) );
++                        & (((((gctUINT32) (Hardware->identity.chipFeatures)) >> (0 ? 5:5)) & ((gctUINT32) ((((1 ? 5:5) - (0 ? 5:5) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 5:5) - (0 ? 5:5) + 1)))))) );
+         }
+ 
+         /* Read AQMemoryDebug register. */
+@@ -4048,7 +3896,7 @@ gckHARDWARE_SetPowerManagementState(
+     /* Reset power off time */
+     gcmkONERROR(gckOS_GetTicks(&currentTime));
+ 
+-    Hardware->powerOffTime = currentTime + gcdPOWEROFF_TIMEOUT;
++    Hardware->powerOffTime = currentTime + Hardware->powerOffTimeout;
+ 
+     if (State == gcvPOWER_IDLE)
+     {
+@@ -4143,6 +3991,37 @@ gckHARDWARE_QueryPowerManagementState(
+     return gcvSTATUS_OK;
+ }
+ 
++#if gcdPOWEROFF_TIMEOUT
++gceSTATUS
++gckHARDWARE_SetPowerOffTimeout(
++    IN gckHARDWARE  Hardware,
++    IN gctUINT32    Timeout
++)
++{
++    gcmkHEADER_ARG("Hardware=0x%x Timeout=%d", Hardware, Timeout);
++
++    Hardware->powerOffTimeout = Timeout;
++
++    gcmkFOOTER_NO();
++    return gcvSTATUS_OK;
++}
++
++
++gceSTATUS
++gckHARDWARE_QueryPowerOffTimeout(
++    IN gckHARDWARE  Hardware,
++    OUT gctUINT32*  Timeout
++)
++{
++    gcmkHEADER_ARG("Hardware=0x%x", Hardware);
++
++    *Timeout = Hardware->powerOffTimeout;
++
++    gcmkFOOTER_ARG("*Timeout=%d", *Timeout);
++    return gcvSTATUS_OK;
++}
++#endif
++
+ gceSTATUS
+ gckHARDWARE_QueryIdle(
+     IN gckHARDWARE Hardware,
+@@ -4592,7 +4471,7 @@ gckHARDWARE_Reset(
+     command = Hardware->kernel->command;
+     gcmkVERIFY_OBJECT(command, gcvOBJ_COMMAND);
+ 
+-    if (Hardware->chipRevision < 0x4600)
++    if (Hardware->identity.chipRevision < 0x4600)
+     {
+         /* Not supported - we need the isolation bit. */
+         gcmkONERROR(gcvSTATUS_NOT_SUPPORTED);
+@@ -4652,7 +4531,7 @@ gckHARDWARE_GetBaseAddress(
+     gcmkVERIFY_ARGUMENT(BaseAddress != gcvNULL);
+ 
+     /* Test if we have a new Memory Controller. */
+-    if (((((gctUINT32) (Hardware->chipMinorFeatures0)) >> (0 ? 22:22) & ((gctUINT32) ((((1 ? 22:22) - (0 ? 22:22) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 22:22) - (0 ? 22:22) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 22:22) - (0 ? 22:22) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 22:22) - (0 ? 22:22) + 1))))))))
++    if (((((gctUINT32) (Hardware->identity.chipMinorFeatures)) >> (0 ? 22:22) & ((gctUINT32) ((((1 ? 22:22) - (0 ? 22:22) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 22:22) - (0 ? 22:22) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 22:22) - (0 ? 22:22) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 22:22) - (0 ? 22:22) + 1))))))))
+     {
+         /* No base address required. */
+         *BaseAddress = 0;
+@@ -4772,38 +4651,28 @@ gceSTATUS
+ gckHARDWARE_Compose(
+     IN gckHARDWARE Hardware,
+     IN gctUINT32 ProcessID,
+-    IN gctSIZE_T Size,
+     IN gctPHYS_ADDR Physical,
+     IN gctPOINTER Logical,
++    IN gctSIZE_T Offset,
++    IN gctSIZE_T Size,
+     IN gctUINT8 EventID
+     )
+ {
+ #ifndef VIVANTE_NO_3D
+     gceSTATUS status;
+-    gctUINT32_PTR sizeState;
+     gctUINT32_PTR triggerState;
+-    gctUINT32_PTR dummyState;
+-    gctSIZE_T size;
+ 
+-    gcmkHEADER_ARG("Hardware=0x%x Size=%d Physical=0x%x"
+-                   " Logical=0x%x EventID=%d",
+-                   Hardware, Size, Physical, Logical, EventID);
++    gcmkHEADER_ARG("Hardware=0x%x Physical=0x%x Logical=0x%x"
++                   " Offset=%d Size=%d EventID=%d",
++                   Hardware, Physical, Logical, Offset, Size, EventID);
+ 
+     /* Verify the arguments. */
+     gcmkVERIFY_OBJECT(Hardware, gcvOBJ_HARDWARE);
+-    gcmkVERIFY_ARGUMENT((Size & 7) == 0);
++    gcmkVERIFY_ARGUMENT(((Size + 8) & 63) == 0);
+     gcmkVERIFY_ARGUMENT(Logical != gcvNULL);
+ 
+-    /* Make total state buffer size 64B aligned. */
+-    size = gcmALIGN(Size + 16, 64) - 8;
+-
+-    /* Program the size of the state buffer. */
+-    sizeState = (gctUINT32_PTR) Logical;
+-    sizeState[0] = 0xFFFFFFFF;
+-    sizeState[1] = size >> 3;
+-
+     /* Program the trigger state. */
+-    triggerState = (gctUINT32_PTR) ((gctUINT8_PTR) Logical + Size);
++    triggerState = (gctUINT32_PTR) ((gctUINT8_PTR) Logical + Offset + Size);
+     triggerState[0] = 0x0C03;
+     triggerState[1]
+         = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:0) - (0 ? 1:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:0) - (0 ? 1:0) + 1))))))) << (0 ? 1:0))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 1:0) - (0 ? 1:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:0) - (0 ? 1:0) + 1))))))) << (0 ? 1:0)))
+@@ -4814,22 +4683,11 @@ gckHARDWARE_Compose(
+         | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 20:16) - (0 ? 20:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 20:16) - (0 ? 20:16) + 1))))))) << (0 ? 20:16))) | (((gctUINT32) ((gctUINT32) (EventID) & ((gctUINT32) ((((1 ? 20:16) - (0 ? 20:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 20:16) - (0 ? 20:16) + 1))))))) << (0 ? 20:16)))
+         ;
+ 
+-    /* Dummy state padding. */
+-    dummyState = triggerState + 2;
+-
+-    while (Size < size)
+-    {
+-        dummyState[0] = 0xFFFFFFFF;
+-        dummyState[1] = 0x00000000;
+-
+-        dummyState += 2;
+-        Size       += 8;
+-    }
+-
+ #if gcdNONPAGED_MEMORY_CACHEABLE
+     /* Flush the cache for the wait/link. */
+     gcmkONERROR(gckOS_CacheClean(
+-        Hardware->os, ProcessID, gcvNULL, Physical, Logical, size
++        Hardware->os, ProcessID, gcvNULL,
++        Physical, Logical, Offset + Size
+         ));
+ #endif
+ 
+@@ -4884,7 +4742,7 @@ gckHARDWARE_IsFeatureAvailable(
+     switch (Feature)
+     {
+     case gcvFEATURE_END_EVENT:
+-        /*available = gcmVERIFYFIELDVALUE(Hardware->chipMinorFeatures2,
++        /*available = gcmVERIFYFIELDVALUE(Hardware->identity.chipMinorFeatures2,
+             GC_MINOR_FEATURES2, END_EVENT, AVAILABLE
+             );*/
+         available = gcvFALSE;
+@@ -5163,7 +5021,7 @@ gckHARDWARE_GetFrameInfo(
+                                      &clock));
+ 
+     /* Walk through all avaiable pixel pipes. */
+-    for (i = 0; i < Hardware->pixelPipes; ++i)
++    for (i = 0; i < Hardware->identity.pixelPipes; ++i)
+     {
+         /* Select proper pipe. */
+         gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os,
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h
+index 1f6beec..37f6825 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h
+@@ -48,29 +48,12 @@ struct _gckHARDWARE
+     gceCORE                     core;
+ 
+     /* Chip characteristics. */
+-    gceCHIPMODEL                chipModel;
+-    gctUINT32                   chipRevision;
+-    gctUINT32                   chipFeatures;
+-    gctUINT32                   chipMinorFeatures0;
+-    gctUINT32                   chipMinorFeatures1;
+-    gctUINT32                   chipMinorFeatures2;
+-    gctUINT32                   chipMinorFeatures3;
++    gcsHAL_QUERY_CHIP_IDENTITY  identity;
+     gctBOOL                     allowFastClear;
+     gctBOOL                     allowCompression;
+     gctUINT32                   powerBaseAddress;
+     gctBOOL                     extraEventStates;
+ 
+-    gctUINT32                   pixelPipes;
+-    gctUINT32                   streamCount;
+-    gctUINT32                   registerMax;
+-    gctUINT32                   threadCount;
+-    gctUINT32                   shaderCoreCount;
+-    gctUINT32                   vertexCacheSize;
+-    gctUINT32                   vertexOutputBufferSize;
+-    gctUINT32                   instructionCount;
+-    gctUINT32                   numConstants;
+-    gctUINT32                   bufferSize;
+-
+     /* Big endian */
+     gctBOOL                     bigEndian;
+ 
+@@ -96,6 +79,7 @@ struct _gckHARDWARE
+ #if gcdPOWEROFF_TIMEOUT
+     gctUINT32                   powerOffTime;
+     gctPOINTER                  powerOffSema;
++    gctUINT32                   powerOffTimeout;
+ #endif
+ };
+ 
+diff --git a/drivers/mxc/gpu-viv/config b/drivers/mxc/gpu-viv/config
+index e406fad..043a91b 100644
+--- a/drivers/mxc/gpu-viv/config
++++ b/drivers/mxc/gpu-viv/config
+@@ -23,7 +23,7 @@ ARCH_TYPE                         ?= arm
+ SDK_DIR                           ?= $(AQROOT)/build/sdk
+ USE_3D_VG	= 1
+ USE_POWER_MANAGEMENT              ?= 1
+-ENABLE_CACHED_VIDEO_MEMORY        ?= 0
++FORCE_ALL_VIDEO_MEMORY_CACHED     ?= 0
+ NONPAGED_MEMORY_CACHEABLE         ?= 0
+ NONPAGED_MEMORY_BUFFERABLE        ?= 1
+ CACHE_FUNCTION_UNIMPLEMENTED      ?= 0
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
+index 967266a..8af6292 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
+@@ -83,6 +83,7 @@ gctCONST_STRING _DispatchText[] =
+     gcmDEFINE2TEXT(gcvHAL_TIMESTAMP),
+     gcmDEFINE2TEXT(gcvHAL_DATABASE),
+     gcmDEFINE2TEXT(gcvHAL_VERSION),
++    gcmDEFINE2TEXT(gcvHAL_CHIP_INFO),
+     gcmDEFINE2TEXT(gcvHAL_ATTACH),
+     gcmDEFINE2TEXT(gcvHAL_DETACH)
+ };
+@@ -711,28 +712,7 @@ gckKERNEL_Dispatch(
+         gcmkONERROR(
+             gckHARDWARE_QueryChipIdentity(
+                 Kernel->hardware,
+-                &Interface->u.QueryChipIdentity.chipModel,
+-                &Interface->u.QueryChipIdentity.chipRevision,
+-                &Interface->u.QueryChipIdentity.chipFeatures,
+-                &Interface->u.QueryChipIdentity.chipMinorFeatures,
+-                &Interface->u.QueryChipIdentity.chipMinorFeatures1,
+-                &Interface->u.QueryChipIdentity.chipMinorFeatures2,
+-                &Interface->u.QueryChipIdentity.chipMinorFeatures3));
+-
+-        /* Query chip specifications. */
+-        gcmkONERROR(
+-            gckHARDWARE_QueryChipSpecs(
+-                Kernel->hardware,
+-                &Interface->u.QueryChipIdentity.streamCount,
+-                &Interface->u.QueryChipIdentity.registerMax,
+-                &Interface->u.QueryChipIdentity.threadCount,
+-                &Interface->u.QueryChipIdentity.shaderCoreCount,
+-                &Interface->u.QueryChipIdentity.vertexCacheSize,
+-                &Interface->u.QueryChipIdentity.vertexOutputBufferSize,
+-                &Interface->u.QueryChipIdentity.pixelPipes,
+-                &Interface->u.QueryChipIdentity.instructionCount,
+-                &Interface->u.QueryChipIdentity.numConstants,
+-                &Interface->u.QueryChipIdentity.bufferSize));
++                &Interface->u.QueryChipIdentity));
+         break;
+ 
+     case gcvHAL_MAP_MEMORY:
+@@ -991,7 +971,6 @@ gckKERNEL_Dispatch(
+                                          FromUser,
+                                          Interface->u.LockVideoMemory.address,
+                                          &Interface->u.LockVideoMemory.memory));
+-			gckOS_ZeroMemory(Interface->u.LockVideoMemory.memory, node->VidMem.bytes);
+ #endif
+         }
+         else
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
+index bd701b7..8dac7a6 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
+@@ -469,12 +469,16 @@ struct _gckEVENT
+     gctPOINTER                  eventQueueMutex;
+ 
+     /* Array of event queues. */
+-    gcsEVENT_QUEUE              queues[31];
++    gcsEVENT_QUEUE              queues[30];
+     gctUINT8                    lastID;
+     gctPOINTER                  freeAtom;
+ 
+     /* Pending events. */
++#if gcdSMP
++    gctPOINTER                  pending;
++#else
+     volatile gctUINT            pending;
++#endif
+ 
+     /* List of free event structures and its mutex. */
+     gcsEVENT_PTR                freeEventList;
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
+index d49742f..a9489ea 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
+@@ -978,70 +978,49 @@ gckCOMMAND_Commit(
+     IN gctUINT32 ProcessID
+     )
+ {
+-#if gcdNULL_DRIVER
+-    /* Context switch required? */
+-    if ((Context != gcvNULL) && (Command->currContext != Context))
+-    {
+-        /* Yes, merge in the deltas. */
+-        gckCONTEXT_Update(Context, ProcessID, StateDelta);
+-
+-		/* Update the current context. */
+-		Command->currContext = Context;
+-	}
+-
+-    /* Do nothing with infinite hardware. */
+-    return gcvSTATUS_OK;
+-#else
+     gceSTATUS status;
++    gctBOOL commitEntered = gcvFALSE;
++    gctBOOL contextAcquired = gcvFALSE;
+     gckHARDWARE hardware;
+-    gcsCONTEXT_PTR contextBuffer;
+-
+     gctBOOL needCopy = gcvFALSE;
++    gcsQUEUE_PTR eventRecord = gcvNULL;
++    gcsQUEUE _eventRecord;
++    gcsQUEUE_PTR nextEventRecord;
++    gctBOOL commandBufferMapped = gcvFALSE;
++    gcoCMDBUF commandBufferObject = gcvNULL;
+ 
++#if !gcdNULL_DRIVER
++    gcsCONTEXT_PTR contextBuffer;
+     struct _gcoCMDBUF _commandBufferObject;
+-    gcoCMDBUF commandBufferObject = gcvNULL;
+-    gctBOOL commandBufferMapped = gcvFALSE;
+     gctPHYS_ADDR commandBufferPhysical;
+     gctUINT8_PTR commandBufferLogical;
+     gctUINT8_PTR commandBufferLink;
+     gctUINT commandBufferSize;
+-
+-    gctBOOL commitEntered = gcvFALSE;
+-    gctBOOL contextAcquired = gcvFALSE;
+-
+     gctSIZE_T nopBytes;
+     gctSIZE_T pipeBytes;
+     gctSIZE_T linkBytes;
+     gctSIZE_T bytes;
+     gctUINT32 offset;
+-
+     gctPHYS_ADDR entryPhysical;
+     gctPOINTER entryLogical;
+     gctSIZE_T entryBytes;
+-
+     gctPHYS_ADDR exitPhysical;
+     gctPOINTER exitLogical;
+     gctSIZE_T exitBytes;
+-
+     gctPHYS_ADDR waitLinkPhysical;
+     gctPOINTER waitLinkLogical;
+     gctSIZE_T waitLinkBytes;
+-
+     gctPHYS_ADDR waitPhysical;
+     gctPOINTER waitLogical;
+     gctUINT32 waitOffset;
+     gctSIZE_T waitSize;
+ 
+-    gcsQUEUE _eventRecord;
+-    gcsQUEUE_PTR eventRecord = gcvNULL;
+-    gcsQUEUE_PTR nextEventRecord;
+-
+ #if gcdDUMP_COMMAND
+     gctPOINTER contextDumpLogical = gcvNULL;
+     gctSIZE_T contextDumpBytes = 0;
+-
+     gctPOINTER bufferDumpLogical = gcvNULL;
+     gctSIZE_T bufferDumpBytes = 0;
++# endif
+ #endif
+ 
+     gctPOINTER pointer = gcvNULL;
+@@ -1070,6 +1049,17 @@ gckCOMMAND_Commit(
+     /* Check wehther we need to copy the structures or not. */
+     gcmkONERROR(gckOS_QueryNeedCopy(Command->os, ProcessID, &needCopy));
+ 
++#if gcdNULL_DRIVER
++    /* Context switch required? */
++    if ((Context != gcvNULL) && (Command->currContext != Context))
++    {
++        /* Yes, merge in the deltas. */
++        gckCONTEXT_Update(Context, ProcessID, StateDelta);
++
++		/* Update the current context. */
++		Command->currContext = Context;
++	}
++#else
+     if (needCopy)
+     {
+         commandBufferObject = &_commandBufferObject;
+@@ -1860,6 +1850,7 @@ gckCOMMAND_Commit(
+ #if gcdDUMP_COMMAND && !gcdSIMPLE_COMMAND_DUMP
+     gcmkPRINT("@[kernel.commit]");
+ #endif
++#endif /* gcdNULL_DRIVER */
+ 
+     /* Release the context switching mutex. */
+     gcmkONERROR(gckOS_ReleaseMutex(Command->os, Command->mutexContext));
+@@ -1972,7 +1963,6 @@ OnError:
+     /* Return status. */
+     gcmkFOOTER();
+     return status;
+-#endif
+ }
+ 
+ /*******************************************************************************
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c
+index 68b2d60..d9398ff 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c
+@@ -1113,6 +1113,23 @@ _EventHandler_BusError(
+     return gcvSTATUS_OK;
+ }
+ 
++#if gcdPOWER_MANAGEMENT
++/******************************************************************************\
++****************************** Power Stall Handler *******************************
++\******************************************************************************/
++
++static gceSTATUS
++_EventHandler_PowerStall(
++    IN gckVGKERNEL Kernel
++    )
++{
++    /* Signal. */
++    return gckOS_Signal(
++        Kernel->os,
++        Kernel->command->powerStallSignal,
++        gcvTRUE);
++}
++#endif
+ 
+ /******************************************************************************\
+ ******************************** Task Routines *********************************
+@@ -1378,10 +1395,18 @@ _TaskSignal(
+         /* Cast the task pointer. */
+         gcsTASK_SIGNAL_PTR task = (gcsTASK_SIGNAL_PTR) TaskHeader->task;
+ 
++
+         /* Map the signal into kernel space. */
++#ifdef __QNXNTO__
++        gcmkERR_BREAK(gckOS_UserSignal(
++            Command->os, task->signal, task->rcvid, task->coid
++            ));
++#else
+         gcmkERR_BREAK(gckOS_UserSignal(
+             Command->os, task->signal, task->process
+             ));
++#endif /* __QNXNTO__ */
++
+         /* Update the reference counter. */
+         TaskHeader->container->referenceCount -= 1;
+ 
+@@ -1734,6 +1759,7 @@ gcmDECLARE_INTERRUPT_HANDLER(COMMAND, 0)
+     /* Verify the arguments. */
+     gcmkVERIFY_OBJECT(Kernel, gcvOBJ_KERNEL);
+ 
++
+     do
+     {
+         gckVGCOMMAND command;
+@@ -1857,6 +1883,15 @@ gcmDECLARE_INTERRUPT_HANDLER(COMMAND, 0)
+                             );
+                     }
+                 }
++#if gcdPOWER_MANAGEMENT
++                else
++                {
++
++                    status = gckVGHARDWARE_SetPowerManagementState(
++                                Kernel->command->hardware, gcvPOWER_IDLE_BROADCAST
++                                );
++                }
++#endif
+ 
+                 /* Break out of the loop. */
+                 break;
+@@ -1871,6 +1906,7 @@ gcmDECLARE_INTERRUPT_HANDLER(COMMAND, 0)
+     }
+     while (gcvFALSE);
+ 
++
+     gcmkFOOTER();
+     /* Return status. */
+     return status;
+@@ -2590,10 +2626,10 @@ _UnlockCurrentQueue(
+ }
+ 
+ 
++
+ /******************************************************************************\
+ ****************************** gckVGCOMMAND API Code *****************************
+ \******************************************************************************/
+-
+ gceSTATUS
+ gckVGCOMMAND_Construct(
+     IN gckVGKERNEL Kernel,
+@@ -2641,6 +2677,10 @@ gckVGCOMMAND_Construct(
+         command->taskMutex   = gcvNULL;
+         command->commitMutex = gcvNULL;
+ 
++        command->powerStallBuffer   = gcvNULL;
++        command->powerStallSignal   = gcvNULL;
++        command->powerSemaphore     = gcvNULL;
++
+         /* Reset context states. */
+         command->contextCounter = 0;
+         command->currentContext = 0;
+@@ -2666,6 +2706,12 @@ gckVGCOMMAND_Construct(
+         gcmkERR_BREAK(gckOS_CreateMutex(Kernel->os, &command->taskMutex));
+         gcmkERR_BREAK(gckOS_CreateMutex(Kernel->os, &command->commitMutex));
+ 
++        /* Create the power management semaphore. */
++        gcmkERR_BREAK(gckOS_CreateSemaphore(Kernel->os,
++            &command->powerSemaphore));
++
++        gcmkERR_BREAK(gckOS_CreateSignal(Kernel->os,
++            gcvFALSE, &command->powerStallSignal));
+ 
+         /***********************************************************************
+         ** Command queue initialization.
+@@ -2720,6 +2766,15 @@ gckVGCOMMAND_Construct(
+             _EventHandler_BusError
+             ));
+ 
++#if gcdPOWER_MANAGEMENT
++        command->powerStallInt = 30;
++        /* Enable the interrupt. */
++        gcmkERR_BREAK(gckVGINTERRUPT_Enable(
++            Kernel->interrupt,
++            &command->powerStallInt,
++            _EventHandler_PowerStall
++            ));
++#endif
+ 
+         /***********************************************************************
+         ** Task management initialization.
+@@ -2870,6 +2925,20 @@ gckVGCOMMAND_Construct(
+                 ));
+         }
+ 
++        if (command->powerSemaphore != gcvNULL)
++        {
++            gcmkVERIFY_OK(gckOS_DestroySemaphore(
++                Kernel->os, command->powerSemaphore));
++        }
++
++        if (command->powerStallSignal != gcvNULL)
++        {
++            /* Create the power management semaphore. */
++            gcmkVERIFY_OK(gckOS_DestroySignal(
++                Kernel->os,
++                command->powerStallSignal));
++        }
++
+         /* Free the gckVGCOMMAND structure. */
+         gcmkCHECK_STATUS(gckOS_Free(
+             Kernel->os, command
+@@ -2999,6 +3068,21 @@ gckVGCOMMAND_Destroy(
+             Command->queueMutex = gcvNULL;
+         }
+ 
++        if (Command->powerSemaphore != gcvNULL)
++        {
++            /* Destroy the power management semaphore. */
++            gcmkERR_BREAK(gckOS_DestroySemaphore(
++                Command->os, Command->powerSemaphore));
++        }
++
++        if (Command->powerStallSignal != gcvNULL)
++        {
++            /* Create the power management semaphore. */
++            gcmkERR_BREAK(gckOS_DestroySignal(
++                Command->os,
++                Command->powerStallSignal));
++        }
++
+         if (Command->queue != gcvNULL)
+         {
+             /* Delete the command queue. */
+@@ -3091,7 +3175,7 @@ gckVGCOMMAND_Allocate(
+         gcmkERR_BREAK(_AllocateCommandBuffer(Command, Size, CommandBuffer));
+ 
+         /* Determine the data pointer. */
+-        * Data = (gctUINT8_PTR) CommandBuffer + (* CommandBuffer)->bufferOffset;
++        * Data = (gctUINT8_PTR) (*CommandBuffer) + (* CommandBuffer)->bufferOffset;
+     }
+     while (gcvFALSE);
+ 
+@@ -3246,6 +3330,35 @@ gckVGCOMMAND_Commit(
+             gcvINFINITE
+             ));
+ 
++#if gcdPOWER_MANAGEMENT
++        status = gckVGHARDWARE_SetPowerManagementState(
++            Command->hardware, gcvPOWER_ON_AUTO);
++
++        if (gcmIS_ERROR(status))
++        {
++            /* Acquire the mutex. */
++            gcmkVERIFY_OK(gckOS_ReleaseMutex(
++                Command->os,
++                Command->commitMutex
++                ));
++
++            break;
++        }
++            /* Acquire the power semaphore. */
++        status = gckOS_AcquireSemaphore(
++            Command->os, Command->powerSemaphore);
++
++        if (gcmIS_ERROR(status))
++        {
++            /* Acquire the mutex. */
++            gcmkVERIFY_OK(gckOS_ReleaseMutex(
++                Command->os,
++                Command->commitMutex
++                ));
++
++            break;
++        }
++#endif
+         do
+         {
+             /* Assign a context ID if not yet assigned. */
+@@ -3273,9 +3386,17 @@ gckVGCOMMAND_Commit(
+                 Queue      += 1;
+ 
+                 /* Set the signal to avoid user waiting. */
++#ifdef __QNXNTO__
++                gcmkERR_BREAK(gckOS_UserSignal(
++                    Command->os, Context->signal, Context->rcvid, Context->coid
++                    ));
++#else
+                 gcmkERR_BREAK(gckOS_UserSignal(
+                     Command->os, Context->signal, Context->process
+                     ));
++
++#endif /* __QNXNTO__ */
++
+             }
+             else
+             {
+@@ -3453,6 +3574,7 @@ gckVGCOMMAND_Commit(
+                     ));
+             }
+ 
++
+             /* Unmap the user command buffer. */
+             gcmkERR_BREAK(gckOS_UnmapUserPointer(
+                 Command->os,
+@@ -3463,6 +3585,10 @@ gckVGCOMMAND_Commit(
+         }
+         while (gcvFALSE);
+ 
++#if gcdPOWER_MANAGEMENT
++        gcmkVERIFY_OK(gckOS_ReleaseSemaphore(
++            Command->os, Command->powerSemaphore));
++#endif
+         /* Release the mutex. */
+         gcmkCHECK_STATUS(gckOS_ReleaseMutex(
+             Command->os,
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c
+index 0836e0d..1eba4ea 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c
+@@ -30,7 +30,11 @@
+ 
+ static gceSTATUS _lastError  = gcvSTATUS_OK;
+ static gctUINT32 _debugLevel = gcvLEVEL_ERROR;
+-static gctUINT32 _debugZones = gcvZONE_ALL;
++/*
++_debugZones config value
++Please Reference define in gc_hal_base.h
++*/
++static gctUINT32 _debugZones = gcvZONE_NONE;
+ 
+ /******************************************************************************\
+ ********************************* Debug Switches *******************************
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
+index e9050f1..6c9a65b 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
+@@ -1,7 +1,6 @@
+ /****************************************************************************
+ *
+ *    Copyright (C) 2005 - 2011 by Vivante Corp.
+-*    Copyright (C) 2011 Freescale Semiconductor, Inc. 
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -30,10 +29,6 @@
+ #include "gc_hal_kernel_qnx.h"
+ #endif
+ 
+-#ifdef LINUX
+-#include <asm/atomic.h>
+-#endif
+-
+ #define _GC_OBJ_ZONE                    gcvZONE_EVENT
+ 
+ #define gcdEVENT_ALLOCATION_COUNT       (4096 / gcmSIZEOF(gcsHAL_INTERFACE))
+@@ -206,6 +201,48 @@ OnError:
+ #endif
+ 
+ static gceSTATUS
++_TryToIdleGPU(
++    IN gckEVENT Event
++)
++{
++#ifndef __QNXNTO__
++    gceSTATUS status;
++    gctBOOL empty = gcvFALSE, idle = gcvFALSE;
++
++    gcmkHEADER_ARG("Event=0x%x", Event);
++
++    /* Verify the arguments. */
++    gcmkVERIFY_OBJECT(Event, gcvOBJ_EVENT);
++
++    /* Check whether the event queue is empty. */
++    gcmkONERROR(gckEVENT_IsEmpty(Event, &empty));
++
++    if (empty)
++    {
++        /* Query whether the hardware is idle. */
++        gcmkONERROR(gckHARDWARE_QueryIdle(Event->kernel->hardware, &idle));
++
++        if (idle)
++        {
++            /* Inform the system of idle GPU. */
++            gcmkONERROR(gckOS_Broadcast(Event->os,
++                                        Event->kernel->hardware,
++                                        gcvBROADCAST_GPU_IDLE));
++        }
++    }
++
++    gcmkFOOTER_NO();
++    return gcvSTATUS_OK;
++
++OnError:
++    gcmkFOOTER();
++    return status;
++#else
++    return gcvSTATUS_OK;
++#endif
++}
++
++static gceSTATUS
+ __RemoveRecordFromProcessDB(
+     IN gckEVENT Event,
+     IN gcsEVENT_PTR Record
+@@ -260,62 +297,6 @@ __RemoveRecordFromProcessDB(
+     return gcvSTATUS_OK;
+ }
+ 
+-static gceSTATUS
+-_IsEmpty(
+-    IN gckEVENT Event,
+-    OUT gctBOOL_PTR IsEmpty
+-    )
+-{
+-    gceSTATUS status;
+-    gctSIZE_T i;
+-
+-    gcmkHEADER_ARG("Event=0x%x", Event);
+-
+-    /* Verify the arguments. */
+-    gcmkVERIFY_OBJECT(Event, gcvOBJ_EVENT);
+-    gcmkVERIFY_ARGUMENT(IsEmpty != gcvNULL);
+-
+-    /* Assume the event queue is empty. */
+-    *IsEmpty = gcvTRUE;
+-
+-    /* Walk the event queue. */
+-    for (i = 0; i < gcmCOUNTOF(Event->queues); ++i)
+-    {
+-        /* Check whether this event is in use. */
+-        if (Event->queues[i].head != gcvNULL)
+-        {
+-            /* The event is in use, hence the queue is not empty. */
+-            *IsEmpty = gcvFALSE;
+-            break;
+-        }
+-    }
+-
+-    /* Try acquiring the mutex. */
+-    status = gckOS_AcquireMutex(Event->os, Event->eventQueueMutex, 0);
+-    if (status == gcvSTATUS_TIMEOUT)
+-    {
+-        /* Timeout - queue is no longer empty. */
+-        *IsEmpty = gcvFALSE;
+-    }
+-    else
+-    {
+-        /* Bail out on error. */
+-        gcmkONERROR(status);
+-
+-        /* Release the mutex. */
+-        gcmkVERIFY_OK(gckOS_ReleaseMutex(Event->os, Event->eventQueueMutex));
+-    }
+-
+-    /* Success. */
+-    gcmkFOOTER_ARG("*IsEmpty=%d", gcmOPT_VALUE(IsEmpty));
+-    return gcvSTATUS_OK;
+-
+-OnError:
+-    /* Return the status. */
+-    gcmkFOOTER();
+-    return status;
+-}
+-
+ /******************************************************************************\
+ ******************************* gckEVENT API Code *******************************
+ \******************************************************************************/
+@@ -404,6 +385,10 @@ gckEVENT_Construct(
+                               eventObj->freeAtom,
+                               gcmCOUNTOF(eventObj->queues)));
+ 
++#if gcdSMP
++    gcmkONERROR(gckOS_AtomConstruct(os, &eventObj->pending));
++#endif
++
+     /* Return pointer to the gckEVENT object. */
+     *Event = eventObj;
+ 
+@@ -443,6 +428,12 @@ OnError:
+             gcmkVERIFY_OK(gckOS_AtomDestroy(os, eventObj->freeAtom));
+         }
+ 
++#if gcdSMP
++        if (eventObj->pending != gcvNULL)
++        {
++            gcmkVERIFY_OK(gckOS_AtomDestroy(os, eventObj->pending));
++        }
++#endif
+         gcmkVERIFY_OK(gcmkOS_SAFE_FREE(os, eventObj));
+     }
+ 
+@@ -537,6 +528,9 @@ gckEVENT_Destroy(
+     /* Delete the atom. */
+     gcmkVERIFY_OK(gckOS_AtomDestroy(Event->os, Event->freeAtom));
+ 
++#if gcdSMP
++    gcmkVERIFY_OK(gckOS_AtomDestroy(Event->os, Event->pending));
++#endif
+     /* Mark the gckEVENT object as unknown. */
+     Event->object.type = gcvOBJ_UNKNOWN;
+ 
+@@ -582,7 +576,6 @@ gckEVENT_GetEvent(
+     gctINT i, id;
+     gceSTATUS status;
+     gctBOOL acquired = gcvFALSE;
+-    gctBOOL suspended = gcvFALSE;
+     gctINT32 free;
+ 
+ #if gcdGPU_TIMEOUT
+@@ -675,18 +668,9 @@ gckEVENT_GetEvent(
+ 
+         if (timer == gcdGPU_TIMEOUT)
+         {
+-            /* Suspend interrupts. */
+-            gcmkONERROR(gckOS_SuspendInterrupt(Event->os));
+-            suspended = gcvTRUE;
+-
+             /* Try to call any outstanding events. */
+             gcmkONERROR(gckHARDWARE_Interrupt(Event->kernel->hardware,
+                                               gcvTRUE));
+-
+-            /* Resume interrupts. */
+-            gcmkONERROR(gckOS_ResumeInterrupt(Event->os));
+-            suspended = gcvFALSE;
+-
+         }
+         else if (timer > gcdGPU_TIMEOUT)
+         {
+@@ -714,12 +698,6 @@ OnError:
+         /* Release the queue mutex. */
+         gcmkVERIFY_OK(gckOS_ReleaseMutex(Event->os, Event->eventQueueMutex));
+     }
+-    
+-    if (suspended)
+-    {
+-        /* Resume interrupts. */
+-        gcmkVERIFY_OK(gckOS_ResumeInterrupt(Event->os));
+-    }
+ 
+     /* Return the status. */
+     gcmkFOOTER();
+@@ -914,7 +892,7 @@ gckEVENT_AddList(
+         queue->head   = gcvNULL;
+         queue->next   = gcvNULL;
+ 
+-        /* Attach it to the list of alloicated queues. */
++        /* Attach it to the list of allocated queues. */
+         if (Event->queueTail == gcvNULL)
+         {
+             Event->queueHead =
+@@ -1309,29 +1287,24 @@ gckEVENT_Submit(
+     gctUINT8 id = 0xFF;
+     gcsEVENT_QUEUE_PTR queue;
+     gctBOOL acquired = gcvFALSE;
+-
++    gckCOMMAND command = gcvNULL;
++    gctBOOL commitEntered = gcvFALSE;
+ #if !gcdNULL_DRIVER
+     gctSIZE_T bytes;
+     gctPOINTER buffer;
+-    gckCOMMAND command = gcvNULL;
+-    gctBOOL commitEntered = gcvFALSE;
+ #endif
+ 
+     gcmkHEADER_ARG("Event=0x%x Wait=%d", Event, Wait);
+ 
+-#if !gcdNULL_DRIVER
+     /* Get gckCOMMAND object. */
+     command = Event->kernel->command;
+-#endif
+ 
+     /* Are there event queues? */
+     if (Event->queueHead != gcvNULL)
+     {
+-#if !gcdNULL_DRIVER
+         /* Acquire the command queue. */
+         gcmkONERROR(gckCOMMAND_EnterCommit(command, FromPower));
+         commitEntered = gcvTRUE;
+-#endif
+ 
+         /* Process all queues. */
+         while (Event->queueHead != gcvNULL)
+@@ -1404,10 +1377,12 @@ gckEVENT_Submit(
+ #endif
+         }
+ 
+-#if !gcdNULL_DRIVER
+         /* Release the command queue. */
+         gcmkONERROR(gckCOMMAND_ExitCommit(command, FromPower));
+         commitEntered = gcvFALSE;
++
++#if !gcdNULL_DRIVER
++        gcmkVERIFY_OK(_TryToIdleGPU(Event));
+ #endif
+     }
+ 
+@@ -1416,13 +1391,11 @@ gckEVENT_Submit(
+     return gcvSTATUS_OK;
+ 
+ OnError:
+-#if !gcdNULL_DRIVER
+     if (commitEntered)
+     {
+         /* Release the command queue mutex. */
+         gcmkVERIFY_OK(gckCOMMAND_ExitCommit(command, FromPower));
+     }
+-#endif
+ 
+     if (acquired)
+     {
+@@ -1660,7 +1633,7 @@ gckEVENT_Compose(
+     /* Start composition. */
+     gcmkONERROR(gckHARDWARE_Compose(
+         Event->kernel->hardware, processID,
+-        Info->size, Info->physical, Info->logical, id
++        Info->physical, Info->logical, Info->offset, Info->size, id
+         ));
+ 
+     /* Success. */
+@@ -1704,21 +1677,13 @@ gckEVENT_Interrupt(
+     gcmkVERIFY_OBJECT(Event, gcvOBJ_EVENT);
+ 
+     /* Combine current interrupt status with pending flags. */
+-#ifdef __QNXNTO__
++#if gcdSMP
++    gckOS_AtomSetMask(Event->pending, Data);
++#elif defined(__QNXNTO__)
+     atomic_set(&Event->pending, Data);
+ #else
+-#ifdef LINUX
+-    {
+-        gctUINT32 oldVal,newVal;
+-        do{
+-            oldVal = Event->pending;
+-            newVal = oldVal| Data;
+-        }while(atomic_cmpxchg((atomic_t *)&Event->pending,oldVal,newVal)!=oldVal);    
+-    }
+-#else
+     Event->pending |= Data;
+ #endif
+-#endif
+ 
+     /* Success. */
+     gcmkFOOTER_NO();
+@@ -1756,10 +1721,9 @@ gckEVENT_Notify(
+ #endif
+     gctUINT pending;
+     gctBOOL suspended = gcvFALSE;
+-#ifndef __QNXNTO__
+-    gctBOOL empty = gcvFALSE, idle = gcvFALSE;
++#if gcmIS_DEBUG(gcdDEBUG_TRACE)
++    gctINT eventNumber = 0;
+ #endif
+-    gcmDEBUG_ONLY(gctINT eventNumber = 0;)
+     gctINT32 free;
+ #if gcdSECURE_USER
+     gcskSECURE_CACHE_PTR cache;
+@@ -1794,7 +1758,11 @@ gckEVENT_Notify(
+         suspended = gcvTRUE;
+ 
+         /* Get current interrupts. */
++#if gcdSMP
++        gckOS_AtomGet(Event->os, Event->pending, &pending);
++#else
+         pending = Event->pending;
++#endif
+ 
+         /* Resume interrupts. */
+         gcmkONERROR(gckOS_ResumeInterruptEx(Event->os, Event->kernel->core));
+@@ -1845,7 +1813,9 @@ gckEVENT_Notify(
+                 {
+                     queue = &Event->queues[i];
+                     mask  = 1 << i;
+-                    gcmDEBUG_ONLY(eventNumber = i);
++#if gcmIS_DEBUG(gcdDEBUG_TRACE)
++                    eventNumber = i;
++#endif
+                 }
+             }
+         }
+@@ -1864,21 +1834,13 @@ gckEVENT_Notify(
+             suspended = gcvTRUE;
+ 
+             /* Mark pending interrupts as handled. */
+-#ifdef __QNXNTO__
+-            atomic_clr(&Event->pending, pending);
+-#else
+-#ifdef LINUX
+-            {
+-                gctUINT32 oldVal,newVal;
+-                do{
+-                    oldVal = Event->pending;
+-                    newVal = oldVal & (~pending);
+-                }while(atomic_cmpxchg((atomic_t *)&Event->pending,oldVal,newVal)!=oldVal);    
+-            }
++#if gcdSMP
++            gckOS_AtomClearMask(Event->pending, pending);
++#elif defined(__QNXNTO__)
++            atomic_set(&Event->pending, pending);
+ #else
+             Event->pending &= ~pending;
+ #endif
+-#endif
+ 
+             /* Resume interrupts. */
+             gcmkONERROR(gckOS_ResumeInterruptEx(Event->os, Event->kernel->core));
+@@ -1921,9 +1883,10 @@ gckEVENT_Notify(
+         }
+ 
+         /* Walk all events for this interrupt. */
+-        while (1)
++        for (;;)
+         {
+-            gcsEVENT_PTR record,record_next;
++            gcsEVENT_PTR record;
++            gcsEVENT_PTR recordNext = gcvNULL;
+ #ifndef __QNXNTO__
+             gctPOINTER logical;
+ #endif
+@@ -1939,11 +1902,11 @@ gckEVENT_Notify(
+ 
+             /* Grab the event head. */
+             record = queue->head;
+-            record_next = gcvNULL;
++
+             if (record != gcvNULL)
+             {
+-                record_next = record->next;
+-                queue->head = record_next;
++                queue->head = record->next;
++                recordNext = record->next;
+             }
+ 
+             /* Release the mutex queue. */
+@@ -2272,11 +2235,10 @@ gckEVENT_Notify(
+                 gcmkVERIFY_OK(gckEVENT_FreeRecord(Event, record));
+             }
+ 
+-            //Can't use queue->head to check, as the value may be updated while it equals to NULL.
+-            //So use the shadow value to check.
+-            if(record_next == gcvNULL)
++            if (recordNext == gcvNULL)
++            {
+                 break;
+-
++            }
+         }
+ 
+         /* Increase the number of free events. */
+@@ -2290,15 +2252,9 @@ gckEVENT_Notify(
+         suspended = gcvTRUE;
+ 
+         /* Mark pending interrupt as handled. */
+-#ifdef LINUX
+-        {
+-            gctUINT32 oldVal,newVal;
+-            do{
+-                oldVal = Event->pending;
+-                newVal = oldVal & (~mask);
+-            }while(atomic_cmpxchg((atomic_t *)&Event->pending,oldVal,newVal)!=oldVal);    
+-        }
+-#elif defined __QNXNTO__
++#if gcdSMP
++        gckOS_AtomClearMask(Event->pending, mask);
++#elif defined(__QNXNTO__)
+         atomic_clr(&Event->pending, mask);
+ #else
+         Event->pending &= ~mask;
+@@ -2309,25 +2265,10 @@ gckEVENT_Notify(
+         suspended = gcvFALSE;
+     }
+ 
+-#ifndef __QNXNTO__
+-
+-    /* Check whether the event queue is empty. */
+-    gcmkONERROR(gckEVENT_IsEmpty(Event, &empty));
+-
+-    if (empty && (IDs == 0))
++    if (IDs == 0)
+     {
+-        /* Query whether the hardware is idle. */
+-        gcmkONERROR(gckHARDWARE_QueryIdle(Event->kernel->hardware, &idle));
+-
+-        if (idle)
+-        {
+-            /* Inform the system of idle GPU. */
+-            gcmkONERROR(gckOS_Broadcast(Event->os,
+-                                        Event->kernel->hardware,
+-                                        gcvBROADCAST_GPU_IDLE));
+-        }
++        gcmkONERROR(_TryToIdleGPU(Event));
+     }
+-#endif
+ 
+     /* Success. */
+     gcmkFOOTER_NO();
+@@ -2379,7 +2320,6 @@ gckEVENT_FreeProcess(
+     gcsEVENT_PTR record, next;
+     gceSTATUS status;
+     gcsEVENT_PTR deleteHead, deleteTail;
+-    gctBOOL empty, idle;
+ 
+     gcmkHEADER_ARG("Event=0x%x ProcessID=%d", Event, ProcessID);
+ 
+@@ -2454,22 +2394,7 @@ gckEVENT_FreeProcess(
+         }
+     }
+ 
+-    /*Check whether the event queue is empty.*/
+-    gcmkONERROR(_IsEmpty(Event, &empty));
+-
+-    if (empty)
+-    {
+-        /* Query whether the hardware is idle. */
+-        gcmkONERROR(gckHARDWARE_QueryIdle(Event->kernel->hardware, &idle));
+-
+-        if (idle)
+-        {
+-            /* Inform the system of idle GPU. */
+-            gcmkONERROR(gckOS_Broadcast(Event->os,
+-                                        Event->kernel->hardware,
+-                                        gcvBROADCAST_GPU_IDLE));
+-        }
+-    }
++    gcmkONERROR(_TryToIdleGPU(Event));
+ 
+     /* Success. */
+     gcmkFOOTER_NO();
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c
+index 828295a..dd3c662 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c
+@@ -656,6 +656,7 @@ gceSTATUS gckVGKERNEL_Dispatch(
+ #endif
+         break;
+     case gcvHAL_USER_SIGNAL:
++#if !USE_NEW_LINUX_SIGNAL
+         /* Dispatch depends on the user signal subcommands. */
+         switch(Interface->u.UserSignal.command)
+         {
+@@ -705,6 +706,7 @@ gceSTATUS gckVGKERNEL_Dispatch(
+             /* Invalid user signal command. */
+             gcmkERR_BREAK(gcvSTATUS_INVALID_ARGUMENT);
+         }
++#endif
+         break;
+ 
+     case gcvHAL_COMMIT:
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
+index 505b69c..bc20a43 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
+@@ -544,6 +544,20 @@ gckOS_AtomicExchangePtr(
+     OUT gctPOINTER * OldValue
+     );
+ 
++#if gcdSMP
++gceSTATUS
++gckOS_AtomSetMask(
++    IN gctPOINTER Atom,
++    IN gctUINT32 Mask
++    );
++
++gceSTATUS
++gckOS_AtomClearMask(
++    IN gctPOINTER Atom,
++    IN gctUINT32 Mask
++    );
++#endif
++
+ /*******************************************************************************
+ **
+ **  gckOS_AtomConstruct
+@@ -1784,29 +1798,7 @@ gckHARDWARE_QueryMemory(
+ gceSTATUS
+ gckHARDWARE_QueryChipIdentity(
+     IN gckHARDWARE Hardware,
+-    OUT gceCHIPMODEL* ChipModel,
+-    OUT gctUINT32* ChipRevision,
+-    OUT gctUINT32* ChipFeatures,
+-    OUT gctUINT32* ChipMinorFeatures,
+-    OUT gctUINT32* ChipMinorFeatures1,
+-    OUT gctUINT32* ChipMinorFeatures2,
+-    OUT gctUINT32* ChipMinorFeatures3
+-    );
+-
+-/* Query the specifications sof the hardware. */
+-gceSTATUS
+-gckHARDWARE_QueryChipSpecs(
+-    IN gckHARDWARE Hardware,
+-    OUT gctUINT32_PTR StreamCount,
+-    OUT gctUINT32_PTR RegisterMax,
+-    OUT gctUINT32_PTR ThreadCount,
+-    OUT gctUINT32_PTR ShaderCoreCount,
+-    OUT gctUINT32_PTR VertexCacheSize,
+-    OUT gctUINT32_PTR VertexOutputBufferSize,
+-    OUT gctUINT32_PTR PixelPipes,
+-    OUT gctUINT32_PTR InstructionCount,
+-    OUT gctUINT32_PTR NumConstants,
+-    OUT gctUINT32_PTR BufferSize
++    OUT gcsHAL_QUERY_CHIP_IDENTITY_PTR Identity
+     );
+ 
+ /* Query the shader support. */
+@@ -1946,6 +1938,20 @@ gckHARDWARE_QueryPowerManagementState(
+     OUT gceCHIPPOWERSTATE* State
+     );
+ 
++#if gcdPOWEROFF_TIMEOUT
++gceSTATUS
++gckHARDWARE_SetPowerOffTimeout(
++    IN gckHARDWARE  Hardware,
++    IN gctUINT32    Timeout
++);
++
++gceSTATUS
++gckHARDWARE_QueryPowerOffTimeout(
++    IN gckHARDWARE  Hardware,
++    OUT gctUINT32*  Timeout
++);
++#endif
++
+ /* Profile 2D Engine. */
+ gceSTATUS
+ gckHARDWARE_ProfileEngine2D(
+@@ -1978,9 +1984,10 @@ gceSTATUS
+ gckHARDWARE_Compose(
+     IN gckHARDWARE Hardware,
+     IN gctUINT32 ProcessID,
+-    IN gctSIZE_T Size,
+     IN gctPHYS_ADDR Physical,
+     IN gctPOINTER Logical,
++    IN gctSIZE_T Offset,
++    IN gctSIZE_T Size,
+     IN gctUINT8 EventID
+     );
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
+index 1c1c1ad..c1711fa 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
+@@ -243,6 +243,68 @@ typedef struct _gcsHAL_LIMITS
+ #endif
+ 
+ /******************************************************************************\
++*********** Generic Memory Allocation Optimization Using Containers ************
++\******************************************************************************/
++
++/* Generic container definition. */
++typedef struct _gcsCONTAINER_LINK * gcsCONTAINER_LINK_PTR;
++typedef struct _gcsCONTAINER_LINK
++{
++    /* Points to the next container. */
++    gcsCONTAINER_LINK_PTR           next;
++}
++gcsCONTAINER_LINK;
++
++typedef struct _gcsCONTAINER_RECORD * gcsCONTAINER_RECORD_PTR;
++typedef struct _gcsCONTAINER_RECORD
++{
++    gcsCONTAINER_RECORD_PTR         prev;
++    gcsCONTAINER_RECORD_PTR         next;
++}
++gcsCONTAINER_RECORD;
++
++typedef struct _gcsCONTAINER * gcsCONTAINER_PTR;
++typedef struct _gcsCONTAINER
++{
++    gctUINT                         containerSize;
++    gctUINT                         recordSize;
++    gctUINT                         recordCount;
++    gcsCONTAINER_LINK_PTR           containers;
++    gcsCONTAINER_RECORD             freeList;
++    gcsCONTAINER_RECORD             allocList;
++}
++gcsCONTAINER;
++
++gceSTATUS
++gcsCONTAINER_Construct(
++    IN gcsCONTAINER_PTR Container,
++    gctUINT RecordsPerContainer,
++    gctUINT RecordSize
++    );
++
++gceSTATUS
++gcsCONTAINER_Destroy(
++    IN gcsCONTAINER_PTR Container
++    );
++
++gceSTATUS
++gcsCONTAINER_AllocateRecord(
++    IN gcsCONTAINER_PTR Container,
++    OUT gctPOINTER * Record
++    );
++
++gceSTATUS
++gcsCONTAINER_FreeRecord(
++    IN gcsCONTAINER_PTR Container,
++    IN gctPOINTER Record
++    );
++
++gceSTATUS
++gcsCONTAINER_FreeAll(
++    IN gcsCONTAINER_PTR Container
++    );
++
++/******************************************************************************\
+ ********************************* gcoHAL Object *********************************
+ \******************************************************************************/
+ 
+@@ -1764,6 +1826,12 @@ gcoSURF_QueryOrientation(
+     OUT gceORIENTATION * Orientation
+     );
+ 
++gceSTATUS
++gcoSURF_SetOffset(
++    IN gcoSURF Surface,
++    IN gctUINT Offset
++    );
++
+ /******************************************************************************\
+ ********************************* gcoDUMP Object ********************************
+ \******************************************************************************/
+@@ -2160,22 +2228,28 @@ gcoOS_DebugTrace(
+ #define gcvZONE_PARAMETERS      (1 << 21)
+ 
+ /* API definitions. */
+-#define gcvZONE_API_HAL         (0 << 28)
+-#define gcvZONE_API_EGL         (1 << 28)
+-#define gcvZONE_API_ES11        (2 << 28)
+-#define gcvZONE_API_ES20        (3 << 28)
+-#define gcvZONE_API_VG11        (4 << 28)
+-#define gcvZONE_API_GL          (5 << 28)
+-#define gcvZONE_API_DFB         (6 << 28)
+-#define gcvZONE_API_GDI         (7 << 28)
+-#define gcvZONE_API_D3D         (8 << 28)
++#define gcvZONE_API_HAL         (1 << 28)
++#define gcvZONE_API_EGL         (2 << 28)
++#define gcvZONE_API_ES11        (3 << 28)
++#define gcvZONE_API_ES20        (4 << 28)
++#define gcvZONE_API_VG11        (5 << 28)
++#define gcvZONE_API_GL          (6 << 28)
++#define gcvZONE_API_DFB         (7 << 28)
++#define gcvZONE_API_GDI         (8 << 28)
++#define gcvZONE_API_D3D         (9 << 28)
++
+ 
+ #define gcmZONE_GET_API(zone)   ((zone) >> 28)
++/*Set gcdZONE_MASE like 0x0 | gcvZONE_API_EGL
++will enable print EGL module debug info*/
+ #define gcdZONE_MASK            0x0FFFFFFF
+ 
+ /* Handy zones. */
+ #define gcvZONE_NONE            0
+-#define gcvZONE_ALL             gcdZONE_MASK
++#define gcvZONE_ALL             0x0FFFFFFF
++
++/*Dump API depth set 1 for API, 2 for API and API behavior*/
++#define gcvDUMP_API_DEPTH       1
+ 
+ /*******************************************************************************
+ **
+@@ -2326,6 +2400,7 @@ gcoOS_DebugTraceZone(
+ 
+ #define gcdHEADER_LEVEL             gcvLEVEL_VERBOSE
+ 
++
+ #if gcdENABLE_PROFILING
+ void
+ gcoOS_ProfileDB(
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_cl.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_cl.h
+index 5acc46d..86982c2 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_cl.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_cl.h
+@@ -245,6 +245,26 @@ gcoCL_CreateTexture(
+ 
+ /*******************************************************************************
+ **
++**  gcoCL_DestroyTexture
++**
++**  Destroy an gcoTEXTURE object.
++**
++**  INPUT:
++**
++**      gcoTEXTURE Texture
++**          Pointer to an gcoTEXTURE object.
++**
++**  OUTPUT:
++**
++**      Nothing.
++*/
++gceSTATUS
++gcoCL_DestroyTexture(
++    IN gcoTEXTURE Texture
++    );
++
++/*******************************************************************************
++**
+ **  gcoCL_QueryDeviceInfo
+ **
+ **  Query the OpenCL capabilities of the device.
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h
+index 9db51b5..aaf50c4 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h
+@@ -420,6 +420,8 @@ typedef enum _gceUNIFORM_FLAGS
+ 	gcvUNIFORM_GLOBAL_OFFSET		= 0x200,
+ 	gcvUNIFORM_WORK_DIM			= 0x400,
+ 	gcvUNIFORM_KERNEL_ARG_CONSTANT		= 0x800,
++ 	gcvUNIFORM_KERNEL_ARG_LOCAL_MEM_SIZE	= 0x1000,
++	gcvUNIFORM_KERNEL_ARG_PRIVATE		= 0x2000,
+ }
+ gceUNIFORM_FLAGS;
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h
+index 9574eb0..a16a60d 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h
+@@ -144,11 +144,9 @@ typedef enum _gceHAL_COMMAND_CODES
+     /* Frame database. */
+     gcvHAL_GET_FRAME_INFO,
+ 
+-#if gcdENABLE_SHARED_INFO
+     /* Shared info for each process */
+     gcvHAL_GET_SHARED_INFO,
+     gcvHAL_SET_SHARED_INFO,
+-#endif
+     gcvHAL_QUERY_COMMAND_BUFFER
+ }
+ gceHAL_COMMAND_CODES;
+@@ -167,30 +165,91 @@ typedef struct _gcsKERNEL_SETTINGS
+ }
+ gcsKERNEL_SETTINGS;
+ 
++
++/* gcvHAL_QUERY_CHIP_IDENTITY */
++typedef struct _gcsHAL_QUERY_CHIP_IDENTITY * gcsHAL_QUERY_CHIP_IDENTITY_PTR;
++typedef struct _gcsHAL_QUERY_CHIP_IDENTITY
++{
++
++    /* Chip model. */
++    gceCHIPMODEL                chipModel;
++
++    /* Revision value.*/
++    gctUINT32                   chipRevision;
++
++    /* Supported feature fields. */
++    gctUINT32                   chipFeatures;
++
++    /* Supported minor feature fields. */
++    gctUINT32                   chipMinorFeatures;
++
++    /* Supported minor feature 1 fields. */
++    gctUINT32                   chipMinorFeatures1;
++
++    /* Supported minor feature 2 fields. */
++    gctUINT32                   chipMinorFeatures2;
++
++    /* Supported minor feature 3 fields. */
++    gctUINT32                   chipMinorFeatures3;
++
++    /* Number of streams supported. */
++    gctUINT32                   streamCount;
++
++    /* Total number of temporary registers per thread. */
++    gctUINT32                   registerMax;
++
++    /* Maximum number of threads. */
++    gctUINT32                   threadCount;
++
++    /* Number of shader cores. */
++    gctUINT32                   shaderCoreCount;
++
++    /* Size of the vertex cache. */
++    gctUINT32                   vertexCacheSize;
++
++    /* Number of entries in the vertex output buffer. */
++    gctUINT32                   vertexOutputBufferSize;
++
++    /* Number of pixel pipes. */
++    gctUINT32                   pixelPipes;
++
++    /* Number of instructions. */
++	gctUINT32                   instructionCount;
++
++    /* Number of constants. */
++	gctUINT32                   numConstants;
++
++	/* Buffer size */
++	gctUINT32                   bufferSize;
++
++}
++gcsHAL_QUERY_CHIP_IDENTITY;
++
+ /* gcvHAL_COMPOSE. */
+ typedef struct _gcsHAL_COMPOSE * gcsHAL_COMPOSE_PTR;
+ typedef struct _gcsHAL_COMPOSE
+ {
+     /* Composition state buffer. */
+-    IN gctSIZE_T                size;
+-    IN gctPHYS_ADDR             physical;
+-    IN gctPOINTER               logical;
++    gctPHYS_ADDR                physical;
++    gctPOINTER                  logical;
++    gctSIZE_T                   offset;
++    gctSIZE_T                   size;
+ 
+     /* Composition end signal. */
+-    IN gctHANDLE                process;
+-    IN gctSIGNAL                signal;
++    gctHANDLE                   process;
++    gctSIGNAL                   signal;
+ 
+     /* User signals. */
+-    IN gctHANDLE                userProcess;
+-    IN gctSIGNAL                userSignal1;
+-    IN gctSIGNAL                userSignal2;
++    gctHANDLE                   userProcess;
++    gctSIGNAL                   userSignal1;
++    gctSIGNAL                   userSignal2;
+ 
+ #if defined(__QNXNTO__)
+     /* Client pulse side-channel connection ID. */
+-    IN gctINT32                 coid;
++    gctINT32                    coid;
+ 
+     /* Set by server. */
+-    IN gctINT32                 rcvid;
++    gctINT32                    rcvid;
+ #endif
+ }
+ gcsHAL_COMPOSE;
+@@ -247,62 +306,7 @@ typedef struct _gcsHAL_INTERFACE
+         QueryVideoMemory;
+ 
+         /* gcvHAL_QUERY_CHIP_IDENTITY */
+-        struct _gcsHAL_QUERY_CHIP_IDENTITY
+-        {
+-
+-            /* Chip model. */
+-            OUT gceCHIPMODEL            chipModel;
+-
+-            /* Revision value.*/
+-            OUT gctUINT32               chipRevision;
+-
+-            /* Supported feature fields. */
+-            OUT gctUINT32               chipFeatures;
+-
+-            /* Supported minor feature fields. */
+-            OUT gctUINT32               chipMinorFeatures;
+-
+-            /* Supported minor feature 1 fields. */
+-            OUT gctUINT32               chipMinorFeatures1;
+-
+-            /* Supported minor feature 2 fields. */
+-            OUT gctUINT32               chipMinorFeatures2;
+-
+-            /* Supported minor feature 3 fields. */
+-            OUT gctUINT32               chipMinorFeatures3;
+-
+-            /* Number of streams supported. */
+-            OUT gctUINT32               streamCount;
+-
+-            /* Total number of temporary registers per thread. */
+-            OUT gctUINT32               registerMax;
+-
+-            /* Maximum number of threads. */
+-            OUT gctUINT32               threadCount;
+-
+-            /* Number of shader cores. */
+-            OUT gctUINT32               shaderCoreCount;
+-
+-            /* Size of the vertex cache. */
+-            OUT gctUINT32               vertexCacheSize;
+-
+-            /* Number of entries in the vertex output buffer. */
+-            OUT gctUINT32               vertexOutputBufferSize;
+-
+-            /* Number of pixel pipes. */
+-            OUT gctUINT32               pixelPipes;
+-
+-            /* Number of instructions. */
+-			OUT gctUINT32               instructionCount;
+-
+-            /* Number of constants. */
+-			OUT gctUINT32               numConstants;
+-
+-			/* Buffer size */
+-			OUT gctUINT32               bufferSize;
+-
+-        }
+-        QueryChipIdentity;
++        gcsHAL_QUERY_CHIP_IDENTITY      QueryChipIdentity;
+ 
+         /* gcvHAL_MAP_MEMORY */
+         struct _gcsHAL_MAP_MEMORY
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h
+index aa7fac5..934c3df 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h
+@@ -180,6 +180,11 @@ typedef struct _gcsTASK_SIGNAL
+ 
+     /* Signal handle to signal. */
+     IN gctSIGNAL                signal;
++
++#if defined(__QNXNTO__)
++    IN gctINT32                 coid;
++    IN gctINT32                 rcvid;
++#endif
+ }
+ gcsTASK_SIGNAL;
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
+index 8389723..5ae49e0 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
+@@ -324,19 +324,34 @@ gcoSURF_Resolve(
+     IN gcoSURF DestSurface
+     );
+ 
+-/* Export the render target */
++/* Export the render target. */
+ gceSTATUS
+ gcoSURF_ExportRenderTarget(
+     IN gcoSURF SrcSurface
+ );
+ 
+-/* Import the render target */
++/* Export render target by given key. */
++gceSTATUS
++gcoSURF_ExportRenderTargetByKey(
++    IN gcoSURF Key,
++    IN gcoSURF SrcSurface
++);
++
++/* Import the render target. */
+ gceSTATUS
+ gcoSURF_ImportRenderTarget(
+     IN gctUINT32 Pid,
+     IN gcoSURF SrcSurface
+ );
+ 
++/* Import the render target by given key. */
++gceSTATUS
++gcoSURF_ImportRenderTargetByKey(
++    IN gctUINT32 Pid,
++    IN gcoSURF Key,
++    IN gcoSURF SrcSurface
++);
++
+ /* Save the Resolve info to kernel. */
+ gceSTATUS
+ gcoSURF_PrepareRemoteResolveRect(
+@@ -350,7 +365,8 @@ gcoSURF_PrepareRemoteResolveRect(
+ gceSTATUS
+ gcoSURF_RemoteResolveRect(
+     IN gcoSURF SrcSurface,
+-    IN gcoSURF DestSurface
++    IN gcoSURF DestSurface,
++    IN gctBOOL *resolveDiscarded
+     );
+ 
+ /*
+@@ -1759,13 +1775,15 @@ typedef struct _gcsCOMPOSITION
+     /* Layer to be composed. */
+     gcoSURF                         layer;
+ 
+-    /* Rotation angle. */
+-    gceSURF_ROTATION                rotation;
+-
+     /* Source and target coordinates. */
+     gcsRECT                         srcRect;
+     gcsRECT                         trgRect;
+ 
++    /* Target rectangle */
++    gcsPOINT                        v0;
++    gcsPOINT                        v1;
++    gcsPOINT                        v2;
++
+     /* Blending parameters. */
+     gctBOOL                         enableBlending;
+     gctBOOL                         premultiplied;
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h
+index d867ecd..9ade98f 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h
+@@ -127,6 +127,7 @@ typedef enum _gceFEATURE
+     gcvFEATURE_TEXTURE_ANISOTROPIC_FILTERING,
+     gcvFEATURE_TEXTURE_FLOAT_HALF_FLOAT,
+ 	gcvFEATURE_2D_ROTATION_STALL_FIX,
++    gcvFEATURE_2D_MULTI_SOURCE_BLT_EX,
+ }
+ gceFEATURE;
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+index c33f8bd..fdfc07b 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+@@ -471,7 +471,14 @@
+    gcdPAGED_MEMORY_CACHEABLE
+ 
+         When non-zero, paged memory will be cacheable.
+- */
++
++        Normally, driver will detemines whether a video memory
++        is cacheable or not. When cacheable is not neccessary,
++        it will be writecombine.
++
++        This option is only for those SOC which can't enable
++        writecombine without enabling cacheable.
++*/
+ 
+ #ifndef gcdPAGED_MEMORY_CACHEABLE
+ #   define gcdPAGED_MEMORY_CACHEABLE            0
+@@ -481,7 +488,7 @@
+    gcdNONPAGED_MEMORY_CACHEABLE
+ 
+         When non-zero, non paged memory will be cacheable.
+- */
++*/
+ 
+ #ifndef gcdNONPAGED_MEMORY_CACHEABLE
+ #   define gcdNONPAGED_MEMORY_CACHEABLE         0
+@@ -493,7 +500,7 @@
+         When non-zero, non paged memory will be bufferable.
+         gcdNONPAGED_MEMORY_BUFFERABLE and gcdNONPAGED_MEMORY_CACHEABLE
+         can't be set 1 at same time
+- */
++*/
+ 
+ #ifndef gcdNONPAGED_MEMORY_BUFFERABLE
+ #   define gcdNONPAGED_MEMORY_BUFFERABLE        1
+@@ -540,8 +547,9 @@
+ /*
+     gcdPOWEROFF_TIMEOUT
+ 
+-        When non-zero, GPU will power off automatically after idle
+-        state lasting for gcdPOWEROFF_TIMEOUT milliseconds.
++        When non-zero, GPU will power off automatically from
++        idle state, and gcdPOWEROFF_TIMEOUT is also the default
++        timeout value.
+  */
+ 
+ #ifndef gcdPOWEROFF_TIMEOUT
+@@ -571,4 +579,61 @@
+ #   define gcdENABLE_RECOVERY                   0
+ #endif
+ 
++/*
++    gcdRENDER_THREADS
++
++        Number of render threads. Make it zero, and there will be no render
++        threads.
++*/
++#ifndef gcdRENDER_THREADS
++#   define gcdRENDER_THREADS                    0
++#endif
++
++/*
++    gcdSMP
++
++        This define enables SMP support.
++
++        Currently, it only works on Linux/Android,
++        Kbuild will config it according to whether
++        CONFIG_SMP is set.
++
++*/
++#ifndef gcdSMP
++#   define gcdSMP                               0
++#endif
++
++/*
++    gcdSUPPORT_SWAP_RECTANGLE
++
++        Support swap with a specific rectangle.
++
++        Set the rectangle with eglSetSwapRectangleANDROID api.
++*/
++#ifndef gcdSUPPORT_SWAP_RECTANGLE
++#   define gcdSUPPORT_SWAP_RECTANGLE            0
++#endif
++
++/*
++    gcdDEFER_RESOLVES
++
++        Support deferred resolves for 3D apps.
++*/
++#ifndef gcdDEFER_RESOLVES
++#   define gcdDEFER_RESOLVES                    0
++#endif
++
++/*
++    gcdSYNC_CPU_APP_WITH_COMPOSITOR
++
++        Synchronize access to a linear buffer between CPU app and compositor (i.e. GPU - 2D, 3D or CE).
++*/
++#ifndef gcdSYNC_CPU_APP_WITH_COMPOSITOR
++#   define gcdSYNC_CPU_APP_WITH_COMPOSITOR      0
++#endif
++
++#ifndef gcdUSE_TRIANGLE_STRIP_PATCH
++#   define gcdUSE_TRIANGLE_STRIP_PATCH			1
++#endif
++
+ #endif /* __gc_hal_options_h_ */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h
+index bcfb2d4..93fb482 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h
+@@ -435,6 +435,11 @@ extern "C" {
+ #define	VG11_TRANSFORMPATH			(VG11_SHEAR						+ 1)
+ #define	VG11_TRANSLATE				(VG11_TRANSFORMPATH				+ 1)
+ #define	VG11_WRITEPIXELS			(VG11_TRANSLATE					+ 1)
++#define VG11_CALLS                  (VG11_WRITEPIXELS               + 1)
++#define VG11_DRAWCALLS              (VG11_CALLS                     + 1)
++#define VG11_STATECHANGECALLS       (VG11_DRAWCALLS                 + 1)
++#define VG11_FILLCOUNT              (VG11_STATECHANGECALLS          + 1)
++#define VG11_STROKECOUNT            (VG11_FILLCOUNT                 + 1)
+ /* End of Driver API ID Definitions. */
+ 
+ /* HAL & MISC IDs. */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
+index a9a974e..6605f4f 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
+@@ -26,11 +26,11 @@
+ 
+ #define gcvVERSION_MAJOR        4
+ 
+-#define gcvVERSION_MINOR        5
++#define gcvVERSION_MINOR        6
+ 
+-#define gcvVERSION_PATCH        0
++#define gcvVERSION_PATCH        2
+ 
+-#define gcvVERSION_BUILD        1190
++#define gcvVERSION_BUILD        1251
+ 
+ #define gcvVERSION_DATE      __DATE__
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h
+index 55cc74c..b61964d 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h
+@@ -47,6 +47,10 @@ extern "C" {
+     typedef gctUINT             gctTHREADFUNCRESULT;
+     typedef gctPOINTER          gctTHREADFUNCPARAMETER;
+ #   define  gctTHREADFUNCTYPE   __stdcall
++#elif defined(__QNXNTO__)
++    typedef void *              gctTHREADFUNCRESULT;
++    typedef gctPOINTER          gctTHREADFUNCPARAMETER;
++#   define  gctTHREADFUNCTYPE
+ #endif
+ 
+ typedef gctTHREADFUNCRESULT (gctTHREADFUNCTYPE * gctTHREADFUNC) (
+@@ -517,7 +521,36 @@ gckVGHARDWARE_ReadInterrupt(
+     OUT gctUINT32_PTR IDs
+     );
+ 
++/* Power management. */
++gceSTATUS
++gckVGHARDWARE_SetPowerManagementState(
++    IN gckVGHARDWARE Hardware,
++    IN gceCHIPPOWERSTATE State
++    );
++
++gceSTATUS
++gckVGHARDWARE_QueryPowerManagementState(
++    IN gckVGHARDWARE Hardware,
++    OUT gceCHIPPOWERSTATE* State
++    );
++
++gceSTATUS
++gckVGHARDWARE_SetPowerOffTimeout(
++    IN gckVGHARDWARE  Hardware,
++    IN gctUINT32    Timeout
++    );
++
++gceSTATUS
++gckVGHARDWARE_QueryPowerOffTimeout(
++    IN gckVGHARDWARE  Hardware,
++    OUT gctUINT32*  Timeout
++    );
+ 
++gceSTATUS
++gckVGHARDWARE_QueryIdle(
++    IN gckVGHARDWARE Hardware,
++    OUT gctBOOL_PTR IsIdle
++    );
+ /******************************************************************************\
+ *************************** Command Buffer Structures **************************
+ \******************************************************************************/
+@@ -623,6 +656,11 @@ typedef struct _gcsVGCONTEXT
+     /* Completion signal. */
+     gctHANDLE                   process;
+     gctSIGNAL                   signal;
++
++#if defined(__QNXNTO__)
++    gctINT32                    coid;
++    gctINT32                    rcvid;
++#endif
+ }
+ gcsVGCONTEXT;
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+index fb4ccc5..7c0c5be 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+@@ -34,6 +34,8 @@
+     static struct dove_gpio_irq_handler gc500_handle;
+ #endif
+ 
++#define gcmIS_CORE_PRESENT(Device, Core) (Device->irqLines[Core] > 0)
++
+ /******************************************************************************\
+ *************************** Memory Allocation Wrappers *************************
+ \******************************************************************************/
+@@ -777,18 +779,21 @@ gckGALDEVICE_Construct(
+                 device->requestedContiguousBase  = ContiguousBase;
+                 device->requestedContiguousSize  = ContiguousSize;
+ 
+-                device->contiguousBase
++                if (gcmIS_CORE_PRESENT(device, gcvCORE_VG))
++                {
++                    device->contiguousBase
+ #if gcdPAGED_MEMORY_CACHEABLE
+-                    = (gctPOINTER) ioremap_cached(ContiguousBase, ContiguousSize);
++                        = (gctPOINTER) ioremap_cached(ContiguousBase, ContiguousSize);
+ #else
+-                    = (gctPOINTER) ioremap_nocache(ContiguousBase, ContiguousSize);
++                        = (gctPOINTER) ioremap_nocache(ContiguousBase, ContiguousSize);
+ #endif
+-                if (device->contiguousBase == gcvNULL)
+-                {
+-                    device->contiguousVidMem = gcvNULL;
+-                    device->contiguousSize = 0;
++                    if (device->contiguousBase == gcvNULL)
++                    {
++                        device->contiguousVidMem = gcvNULL;
++                        device->contiguousSize = 0;
+ 
+-                    gcmkONERROR(gcvSTATUS_OUT_OF_RESOURCES);
++                        gcmkONERROR(gcvSTATUS_OUT_OF_RESOURCES);
++                    }
+                 }
+ 
+                 device->contiguousPhysical = (gctPHYS_ADDR) ContiguousBase;
+@@ -900,13 +905,13 @@ gckGALDEVICE_Destroy(
+                         ));
+                 }
+ 
+-				if (Device->requestedContiguousBase != 0)
+-				{
+-					release_mem_region(Device->requestedContiguousBase, Device->requestedContiguousSize);
+-				}
+-
+                 Device->contiguousBase     = gcvNULL;
+                 Device->contiguousPhysical = gcvNULL;
++            }
++
++            if (Device->requestedContiguousBase != 0)
++            {
++                release_mem_region(Device->requestedContiguousBase, Device->requestedContiguousSize);
+                 Device->requestedContiguousBase = 0;
+                 Device->requestedContiguousSize = 0;
+             }
+@@ -1563,6 +1568,13 @@ gckGALDEVICE_Stop(
+     {
+         /* Setup the ISR routine. */
+         gcmkONERROR(gckGALDEVICE_Release_ISR_VG(Device));
++
++#if gcdENABLE_VG
++        /* Switch to OFF power state. */
++        gcmkONERROR(gckVGHARDWARE_SetPowerManagementState(
++            Device->kernels[gcvCORE_VG]->vg->hardware, gcvPOWER_OFF
++            ));
++#endif
+     }
+ 
+     /* Stop the kernel thread. */
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+index a826b24..e7cc92f 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+@@ -1022,16 +1022,21 @@ static int __devinit gpu_suspend(struct platform_device *dev, pm_message_t state
+         if (device->kernels[i] != gcvNULL)
+         {
+ #if gcdENABLE_VG
+-            if (i != gcvCORE_VG)
++            if (i == gcvCORE_VG)
++            {
++                status = gckVGHARDWARE_SetPowerManagementState(device->kernels[i]->vg->hardware, gcvPOWER_OFF);
++            }
++            else
+ #endif
+             {
+                 status = gckHARDWARE_SetPowerManagementState(device->kernels[i]->hardware, gcvPOWER_OFF);
++            }
+ 
+-                if (gcmIS_ERROR(status))
+-                {
+-                    return -1;
+-                }
++            if (gcmIS_ERROR(status))
++            {
++                return -1;
+             }
++
+         }
+     }
+ 
+@@ -1051,15 +1056,19 @@ static int __devinit gpu_resume(struct platform_device *dev)
+         if (device->kernels[i] != gcvNULL)
+         {
+ #if gcdENABLE_VG
+-            if (i != gcvCORE_VG)
++            if (i == gcvCORE_VG)
++            {
++                status = gckVGHARDWARE_SetPowerManagementState(device->kernels[i]->vg->hardware, gcvPOWER_ON);
++            }
++            else
+ #endif
+             {
+                 status = gckHARDWARE_SetPowerManagementState(device->kernels[i]->hardware, gcvPOWER_ON);
++            }
+ 
+-                if (gcmIS_ERROR(status))
+-                {
+-                    return -1;
+-                }
++            if (gcmIS_ERROR(status))
++            {
++                return -1;
+             }
+         }
+     }
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index 9794938..ba4f032 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -66,6 +66,10 @@ const char * _PLATFORM = "\n\0$PLATFORM$Linux$\n";
+ #define MEMORY_MAP_UNLOCK(os) \
+     gcmkVERIFY_OK(gckOS_ReleaseMutex((os), (os)->memoryMapLock))
+ 
++/* Protection bit when mapping memroy to user sapce */
++#define gcmkPAGED_MEMROY_PROT(x) pgprot_noncached(x)
++#define gcmkNONPAGED_MEMROY_PROT(x) pgprot_writecombine(x)
++
+ #define gcdINFINITE_TIMEOUT     (60 * 1000)
+ #define gcdDETECT_TIMEOUT       0
+ #define gcdDETECT_DMA_ADDRESS   1
+@@ -443,7 +447,7 @@ _DumpGPUState(
+         gcmkONERROR(_DumpDebugRegisters(Os, &_dbgRegs[i]));
+     }
+ 
+-    if (kernel->hardware->chipFeatures & (1 << 4))
++    if (kernel->hardware->identity.chipFeatures & (1 << 4))
+     {
+         gctUINT32 read0, read1, write;
+ 
+@@ -1212,7 +1216,7 @@ gckOS_MapMemory(
+         }
+ #else
+ #if !gcdPAGED_MEMORY_CACHEABLE
+-        mdlMap->vma->vm_page_prot = pgprot_noncached(mdlMap->vma->vm_page_prot);
++        mdlMap->vma->vm_page_prot = gcmkPAGED_MEMROY_PROT(mdlMap->vma->vm_page_prot);
+         mdlMap->vma->vm_flags |= VM_IO | VM_DONTCOPY | VM_DONTEXPAND | VM_RESERVED;
+ #   endif
+         mdlMap->vma->vm_pgoff = 0;
+@@ -1610,7 +1614,7 @@ gckOS_AllocateNonPagedMemory(
+             gcmkONERROR(gcvSTATUS_OUT_OF_RESOURCES);
+         }
+ #else
+-        mdlMap->vma->vm_page_prot = pgprot_noncached(mdlMap->vma->vm_page_prot);
++        mdlMap->vma->vm_page_prot = gcmkNONPAGED_MEMROY_PROT(mdlMap->vma->vm_page_prot);
+         mdlMap->vma->vm_flags |= VM_IO | VM_DONTCOPY | VM_DONTEXPAND | VM_RESERVED;
+         mdlMap->vma->vm_pgoff = 0;
+ 
+@@ -2819,6 +2823,84 @@ gckOS_AtomicExchangePtr(
+     return gcvSTATUS_OK;
+ }
+ 
++#if gcdSMP
++/*******************************************************************************
++**
++**  gckOS_AtomicSetMask
++**
++**  Atomically set mask to Atom
++**
++**  INPUT:
++**      IN OUT gctPOINTER Atom
++**          Pointer to the atom to set.
++**
++**      IN gctUINT32 Mask
++**          Mask to set.
++**
++**  OUTPUT:
++**
++**      Nothing.
++*/
++gceSTATUS
++gckOS_AtomSetMask(
++    IN gctPOINTER Atom,
++    IN gctUINT32 Mask
++    )
++{
++    gctUINT32 oval, nval;
++
++    gcmkHEADER_ARG("Atom=0x%0x", Atom);
++    gcmkVERIFY_ARGUMENT(Atom != gcvNULL);
++
++    do
++    {
++        oval = atomic_read((atomic_t *) Atom);
++        nval = oval | Mask;
++    } while (atomic_cmpxchg((atomic_t *) Atom, oval, nval) != oval);
++
++    gcmkFOOTER_NO();
++    return gcvSTATUS_OK;
++}
++
++/*******************************************************************************
++**
++**  gckOS_AtomClearMask
++**
++**  Atomically clear mask from Atom
++**
++**  INPUT:
++**      IN OUT gctPOINTER Atom
++**          Pointer to the atom to clear.
++**
++**      IN gctUINT32 Mask
++**          Mask to clear.
++**
++**  OUTPUT:
++**
++**      Nothing.
++*/
++gceSTATUS
++gckOS_AtomClearMask(
++    IN gctPOINTER Atom,
++    IN gctUINT32 Mask
++    )
++{
++    gctUINT32 oval, nval;
++
++    gcmkHEADER_ARG("Atom=0x%0x", Atom);
++    gcmkVERIFY_ARGUMENT(Atom != gcvNULL);
++
++    do
++    {
++        oval = atomic_read((atomic_t *) Atom);
++        nval = oval & ~Mask;
++    } while (atomic_cmpxchg((atomic_t *) Atom, oval, nval) != oval);
++
++    gcmkFOOTER_NO();
++    return gcvSTATUS_OK;
++}
++#endif
++
+ /*******************************************************************************
+ **
+ **  gckOS_AtomConstruct
+@@ -3397,7 +3479,15 @@ gckOS_AllocatePagedMemoryEx(
+         }
+ 
+         SetPageReserved(page);
+-        flush_dcache_page(page);
++
++        if (page_to_phys(page))
++        {
++            gcmkVERIFY_OK(
++                gckOS_CacheFlush(Os, _GetProcessID(), gcvNULL,
++                                (gctPOINTER)page_to_phys(page),
++                                 addr + i * PAGE_SIZE,
++                                 PAGE_SIZE));
++        }
+     }
+ 
+     /* Return physical address. */
+@@ -3677,7 +3767,7 @@ gckOS_LockPages(
+         if (Cacheable == gcvFALSE)
+         {
+             /* Make this mapping non-cached. */
+-            mdlMap->vma->vm_page_prot = pgprot_noncached(mdlMap->vma->vm_page_prot);
++            mdlMap->vma->vm_page_prot = gcmkPAGED_MEMROY_PROT(mdlMap->vma->vm_page_prot);
+         }
+ #endif
+         addr = mdl->addr;
+@@ -5352,6 +5442,32 @@ gckOS_ZeroMemory(
+ ********************************* Cache Control ********************************
+ *******************************************************************************/
+ 
++#if !gcdCACHE_FUNCTION_UNIMPLEMENTED && defined(CONFIG_OUTER_CACHE)
++static inline gceSTATUS
++outer_func(
++    gceCACHEOPERATION Type,
++    unsigned long Start,
++    unsigned long End
++    )
++{
++    switch (Type)
++    {
++        case gcvCACHE_CLEAN:
++            outer_clean_range(Start, End);
++            break;
++        case gcvCACHE_INVALIDATE:
++            outer_inv_range(Start, End);
++            break;
++        case gcvCACHE_FLUSH:
++            outer_flush_range(Start, End);
++            break;
++        default:
++            return gcvSTATUS_INVALID_ARGUMENT;
++            break;
++    }
++    return gcvSTATUS_OK;
++}
++
+ /*******************************************************************************
+ **  _HandleOuterCache
+ **
+@@ -5380,32 +5496,6 @@ gckOS_ZeroMemory(
+ **      gceOUTERCACHE_OPERATION Type
+ **          Operation need to be execute.
+ */
+-#if !gcdCACHE_FUNCTION_UNIMPLEMENTED && defined(CONFIG_OUTER_CACHE)
+-static inline gceSTATUS
+-outer_func(
+-    gceCACHEOPERATION Type,
+-    unsigned long Start,
+-    unsigned long End
+-    )
+-{
+-    switch (Type)
+-    {
+-        case gcvCACHE_CLEAN:
+-            outer_clean_range(Start, End);
+-            break;
+-        case gcvCACHE_INVALIDATE:
+-            outer_inv_range(Start, End);
+-            break;
+-        case gcvCACHE_FLUSH:
+-            outer_flush_range(Start, End);
+-            break;
+-        default:
+-            return gcvSTATUS_INVALID_ARGUMENT;
+-            break;
+-    }
+-    return gcvSTATUS_OK;
+-}
+-
+ static gceSTATUS
+ _HandleOuterCache(
+     IN gckOS Os,
+-- 
+1.7.7.4
+

@@ -1,0 +1,44 @@
+From d324cc15df1f1aebf6f2401218e02e4b86578098 Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Wed, 15 Aug 2012 11:10:06 +0800
+Subject: [PATCH 1901/2463] ENGR00220176 sabrelite ov5642: Fix ov5642 probe
+ fail
+
+Add ov5642 power down function in the board initial file
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |   10 ++++++++++
+ 1 files changed, 10 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index 6f14aea..3abb282 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -575,6 +575,15 @@ static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
+ 	},
+ };
+ 
++static void mx6q_csi0_cam_powerdown(int powerdown)
++{
++	if (powerdown)
++		gpio_set_value(MX6Q_SABRELITE_CSI0_PWN, 1);
++	else
++		gpio_set_value(MX6Q_SABRELITE_CSI0_PWN, 0);
++
++	msleep(2);
++}
+ 
+ static void mx6q_csi0_io_init(void)
+ {
+@@ -615,6 +624,7 @@ static struct fsl_mxc_camera_platform_data camera_data = {
+ 	.mclk_source = 0,
+ 	.csi = 0,
+ 	.io_init = mx6q_csi0_io_init,
++	.pwdn = mx6q_csi0_cam_powerdown,
+ };
+ 
+ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+-- 
+1.7.7.4
+

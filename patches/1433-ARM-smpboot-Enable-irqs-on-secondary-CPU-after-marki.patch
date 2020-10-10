@@ -1,0 +1,109 @@
+From 51ea51fb50b4be6e2cc54e54bc0f4ad4171344b3 Mon Sep 17 00:00:00 2001
+From: Thomas Gleixner <tglx@linutronix.de>
+Date: Fri, 14 Oct 2011 17:22:43 -0700
+Subject: [PATCH 1433/2463] ARM: smpboot: Enable irqs on secondary CPU after
+ marking it online/active
+
+Patch is the last version from tglx on Oct 7.
+
+Discussion is at: http://comments.gmane.org/gmane.linux.ports.arm.kernel/131919
+
+The original commit message for the first patch version:
+
+Frank Rowand reported:
+
+ I have a consistent (every boot) hang on boot with the RT patches.
+ With a few hacks to get console output, I get:
+
+  rcu_preempt_state detected stalls on CPUs/tasks
+
+ I have also replicated the problem on the ARM RealView (in tree) and
+ without the RT patches.
+
+ The problem ended up being caused by the allowed cpus mask being set
+ to all possible cpus for the ksoftirqd on the secondary processors.
+ So the RCU softirq was never executing on the secondary cpu.
+
+ The problem was that ksoftirqd was woken on the secondary processors before
+ the secondary processors were online. This led to allowed cpus being set
+ to all cpus.
+
+   wake_up_process()
+      try_to_wake_up()
+         select_task_rq()
+            if (... || !cpu_online(cpu))
+               select_fallback_rq(task_cpu(p), p)
+                  ...
+                  /* No more Mr. Nice Guy. */
+                  dest_cpu = cpuset_cpus_allowed_fallback(p)
+                     do_set_cpus_allowed(p, cpu_possible_mask)
+                        #  Thus ksoftirqd can now run on any cpu...
+</report>
+
+The reason is that the ARM SMP boot code for the secondary CPUs enables
+interrupts before the newly brought up CPU is marked online and
+active.
+
+That causes a wakeup of ksoftirqd or a wakeup of any other kernel
+thread which is affine to the brought up CPU break that threads
+affinity and therefor being scheduled on already online CPUs.
+
+This problem has been observed on x86 before and the only solution is
+to mark the CPU online and wait for the CPU active bit before the
+point where interrupts are enabled.
+
+Change-Id: If948ef52d434191579e1ca95d18d0c50e91a03b9
+Signed-off-by: Dima Zavin <dima@android.com>
+---
+ arch/arm/kernel/smp.c |   23 +++++++++++++----------
+ 1 files changed, 13 insertions(+), 10 deletions(-)
+
+diff --git a/arch/arm/kernel/smp.c b/arch/arm/kernel/smp.c
+index fea97f6..28a5b13 100644
+--- a/arch/arm/kernel/smp.c
++++ b/arch/arm/kernel/smp.c
+@@ -301,17 +301,7 @@ asmlinkage void __cpuinit secondary_start_kernel(void)
+ 	 */
+ 	platform_secondary_init(cpu);
+ 
+-	/*
+-	 * Enable local interrupts.
+-	 */
+ 	notify_cpu_starting(cpu);
+-	local_irq_enable();
+-	local_fiq_enable();
+-
+-	/*
+-	 * Setup the percpu timer for this CPU.
+-	 */
+-	percpu_timer_setup();
+ 
+ 	calibrate_delay();
+ 
+@@ -323,10 +313,23 @@ asmlinkage void __cpuinit secondary_start_kernel(void)
+ 	 * before we continue.
+ 	 */
+ 	set_cpu_online(cpu, true);
++
++	/*
++	 * Setup the percpu timer for this CPU.
++	 */
++	percpu_timer_setup();
++
+ 	while (!cpu_active(cpu))
+ 		cpu_relax();
+ 
+ 	/*
++	 * cpu_active bit is set, so it's safe to enable interrupts
++	 * now.
++	 */
++	local_irq_enable();
++	local_fiq_enable();
++
++	/*
+ 	 * OK, it's off to the idle thread for us
+ 	 */
+ 	cpu_idle();
+-- 
+1.7.7.4
+

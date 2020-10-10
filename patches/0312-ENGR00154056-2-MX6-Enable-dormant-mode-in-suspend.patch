@@ -1,0 +1,716 @@
+From 2830baec62492050b35a1c150a611bb1adc510eb Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 2 Aug 2011 17:24:15 +0800
+Subject: [PATCH 0312/2463] ENGR00154056-2 [MX6]Enable dormant mode in suspend
+
+1. Enable dormant mode in suspend, which means arm
+core will be powered off when enter wfi, the latest
+command for stop mode and dormant mode are as below:
+
+echo standby > /sys/power/state
+	-> stop mode with arm core power on
+echo mem > /sys/power/state
+	-> stop mode with arm core power off
+
+2. Remove all iram related code in suspend.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/localtimer.c       |    2 +
+ arch/arm/mach-mx6/mx6q_suspend.S     |  359 +++++++++++++++++++++++++++++++++-
+ arch/arm/mach-mx6/pm.c               |  124 ++++++++----
+ arch/arm/mach-mx6/system.c           |   25 ++-
+ arch/arm/plat-mxc/include/mach/mxc.h |    1 +
+ 5 files changed, 454 insertions(+), 57 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/localtimer.c b/arch/arm/mach-mx6/localtimer.c
+index 541dcad..d72fa93 100644
+--- a/arch/arm/mach-mx6/localtimer.c
++++ b/arch/arm/mach-mx6/localtimer.c
+@@ -30,6 +30,8 @@
+  */
+ void __cpuinit local_timer_setup(struct clock_event_device *evt)
+ {
++#ifdef CONFIG_LOCAL_TIMERS
+ 	evt->irq = IRQ_LOCALTIMER;
+ 	twd_timer_setup(evt);
++#endif
+ }
+diff --git a/arch/arm/mach-mx6/mx6q_suspend.S b/arch/arm/mach-mx6/mx6q_suspend.S
+index d39ff7c..38db8a0 100644
+--- a/arch/arm/mach-mx6/mx6q_suspend.S
++++ b/arch/arm/mach-mx6/mx6q_suspend.S
+@@ -17,23 +17,364 @@
+  */
+ 
+ #include <linux/linkage.h>
++#include <mach/hardware.h>
++#include <asm/memory.h>
++#include "src-reg.h"
+ 
+ #define ARM_CTRL_DCACHE     1 << 2
+ #define ARM_CTRL_ICACHE     1 << 12
+ #define ARM_AUXCR_L2EN      1 << 1
++#define TTRBIT_MASK 		0xffffc000
++#define TABLE_INDEX_MASK 	0xfff00000
++#define TABLE_ENTRY 		0x00000c02
++#define CACHE_DISABLE_MASK 	0xffffe7fb
++
++/*************************************************************
++mx6q_suspend:
++
++Suspend the processor (eg, wait for interrupt).
++Set the DDR into Self Refresh
++IRQs are already disabled.
++
++The following code contain both standby and
++dormant mode for MX6, decided by the parameter
++passed in r0:
++see define in include/linux/suspend.h
++1 -> cpu enter stop mode;
++3 -> cpu enter dormant mode.
++*************************************************************/
+ 
+-/*
+- *  mx6q_suspend
+- *
+- *  Suspend the processor (eg, wait for interrupt).
+- *  Set the DDR into Self Refresh
+- *  IRQs are already disabled.
+- */
+ ENTRY(mx6q_suspend)
+-	stmfd   sp!, {r0-r4}     @ Save registers
++	stmfd   sp!, {r0-r8}     @ Save registers
++/*************************************************************
++suspend mode entry
++*************************************************************/
++
++	cmp r0, #0x1
++	bne dormant		/* dormant mode */
++
+ 	dsb
+ 	wfi
+-	ldmfd   sp!, {r0-r4}
++
++	nop
++	nop
++	nop
++	nop
++
++/***********************************************************
++never run to here
++************************************************************/
++	b out	/* exit standby */
++
++/************************************************************
++dormant entry, data save in stack, save sp in the src_gpr2
++************************************************************/
++dormant:
++	ldr r1, =SRC_BASE_ADDR
++	add r1, r1, #PERIPBASE_VIRT
++	str sp, [r1, #SRC_GPR2_OFFSET]	/* save sp in src_gpr2 */
++/**********************************************************
++saved register and context as below:
++	sp
++	spsr
++	lr
++	CPACR
++	TTBR0
++	TTBR1
++	TTBCR
++	DACR
++	PRRR
++	NMRR
++	ACTLR
++	Context ID
++	User r/w thread ID
++	Secure or NS VBAR
++	CPSR
++	SCTLR
++************************************************************/
++	/*
++	 * Save only needed CPU CP15 registers. VFP, breakpoint,
++	 * performance monitor registers are not saved. Generic
++	 * code suppose to take care of those.
++	 */
++	mrs	r5, spsr			@ Store spsr
++	mov	r6, lr				@ Store lr
++	stmfd	sp!, {r5-r6}
++
++	/* c1 and c2 registers */
++	mrc	p15, 0, r4, c1, c0, 2		@ CPACR
++	mrc	p15, 0, r5, c2, c0, 0		@ TTBR0
++	mrc	p15, 0, r6, c2, c0, 1		@ TTBR1
++	mrc	p15, 0, r7, c2, c0, 2		@ TTBCR
++	stmfd	sp!, {r4-r7}
++
++	/* c3 and c10 registers */
++	mrc	p15, 0, r4, c3, c0, 0		@ DACR
++	mrc	p15, 0, r5, c10, c2, 0		@ PRRR
++	mrc	p15, 0, r6, c10, c2, 1		@ NMRR
++	mrc	p15, 0, r7, c1, c0, 1		@ ACTLR
++	stmfd	sp!,{r4-r7}
++
++	/* c12, c13 and CPSR registers */
++	mrc	p15, 0, r4, c13, c0, 1		@ Context ID
++	mrc	p15, 0, r5, c13, c0, 2		@ User r/w thread ID
++	mrc	p15, 0, r6, c12, c0, 0		@ Secure or NS VBAR
++	mrs	r7, cpsr					@ Store CPSR
++	stmfd	sp!, {r4-r7}
++
++	/* c1 control register */
++	mrc	p15, 0, r4, c1, c0, 0		@ SCTLR
++	stmfd	sp!, {r4}
++
++	/*
++	 * Flush all data from the L1 data cache before disabling
++	 * SCTLR.C bit.
++	 */
++	push {r0-r12}
++	bl v7_flush_dcache_all
++	pop {r0-r12}
++
++	/*
++	 * Clear the SCTLR.C bit to prevent further data cache
++	 * allocation. Clearing SCTLR.C would make all the data accesses
++	 * strongly ordered and would not hit the cache.
++	 */
++	mrc	p15, 0, r0, c1, c0, 0
++	bic	r0, r0, #(1 << 2)		@ Disable the C bit
++	mcr	p15, 0, r0, c1, c0, 0
++	isb
++
++	/*
++	 * Invalidate L1 data cache. Even though only invalidate is
++	 * necessary exported flush API is used here. Doing clean
++	 * on already clean cache would be almost NOP.
++	 */
++	push {r0-r12}
++	bl v7_flush_dcache_all
++	pop {r0-r12}
++
++	/*
++	 * Execute an ISB instruction to ensure that all of the
++	 * CP15 register changes have been committed.
++	 */
++	isb
++
++	/*
++	 * Execute a barrier instruction to ensure that all cache,
++	 * TLB and branch predictor maintenance operations issued
++	 * by any CPU in the cluster have completed.
++	 */
++	dsb
++	dmb
++
++
++/****************************************************************
++save resume pointer into SRC_GPR1
++****************************************************************/
++	ldr r0, =resume
++	ldr r1, =va2pa_offset
++	sub r0, r0, r1
++	ldr r1, =SRC_BASE_ADDR
++	add r1, r1, #PERIPBASE_VIRT
++	str r0, [r1, #SRC_GPR1_OFFSET]
++/****************************************************************
++execute a wfi instruction to let SOC go into stop mode.
++****************************************************************/
++	wfi
++
++	nop
++	nop
++	nop
++	nop
++
++/****************************************************************
++never go here.
++****************************************************************/
++
++
++
++
++
++
++
++/****************************************************************
++when SOC exit stop mode, arm core restart from here, currently
++are running with MMU off.
++****************************************************************/
++resume:
++	mov r1, #0
++	ldr r0, =SRC_BASE_ADDR
++	str r1, [r0, #SRC_GPR1_OFFSET] /* clear SRC_GPR1 */
++	ldr sp, [r0, #SRC_GPR2_OFFSET]
++	ldr r1, =va2pa_offset
++	sub sp, sp, r1
++	/* Restore cp15 registers */
++	ldmea	sp!, {r5-r6}
++	msr	spsr_cxsf, r5		@ Restore spsr
++	mov	lr, r6				@ Restore lr
++
++	/* c1 and c2 registers */
++	ldmea	sp!, {r4-r7}
++	mcr	p15, 0, r4, c1, c0, 2		@ CPACR
++	mcr	p15, 0, r5, c2, c0, 0		@ TTBR0
++	mcr	p15, 0, r6, c2, c0, 1		@ TTBR1
++	mcr	p15, 0, r7, c2, c0, 2		@ TTBCR
++
++	/* c3 and c10 registers */
++	ldmea	sp!,{r4-r7}
++	mcr	p15, 0, r4, c3, c0, 0		@ DACR
++	mcr	p15, 0, r5, c10, c2, 0		@ PRRR
++	mcr	p15, 0, r6, c10, c2, 1		@ NMRR
++	mcr	p15, 0, r7, c1, c0, 1		@ ACTLR
++
++	/* c12, c13 and CPSR registers */
++	ldmea	sp!,{r4-r7}
++	mcr	p15, 0, r4, c13, c0, 1		@ Context ID
++	mcr	p15, 0, r5, c13, c0, 2		@ User r/w thread ID
++	mrc	p15, 0, r6, c12, c0, 0		@ Secure or NS VBAR
++	msr	cpsr, r7			@ store cpsr
++
++	/*
++	 * Enabling MMU here. Page entry needs to be altered
++	 * to create temporary 1:1 map and then resore the entry
++	 * ones MMU is enabled
++	 */
++	mrc	p15, 0, r7, c2, c0, 2		@ Read TTBRControl
++	and	r7, #0x7			@ Extract N (0:2) to decide
++	cmp	r7, #0x0			@ TTBR0/TTBR1
++	beq	use_ttbr0
++ttbr_error:
++	b	ttbr_error			@ Only N = 0 supported
++use_ttbr0:
++	mrc	p15, 0, r2, c2, c0, 0		@ Read TTBR0
++	ldr	r5, =TTRBIT_MASK
++	and	r2, r5
++	mov	r4, pc
++	ldr	r5, =TABLE_INDEX_MASK
++	and	r4, r5				@ r4 = 31 to 20 bits of pc
++	ldr	r1, =TABLE_ENTRY
++	add	r1, r1, r4			@ r1 has value of table entry
++	lsr	r4, #18				@ Address of table entry
++	add	r2, r4				@ r2 - location to be modified
++
++	/* Storing previous entry of location being modified */
++	ldr	r4, [r2]
++	mov r9, r4
++	str	r1, [r2]
++
++	/*
++	 * Storing address of entry being modified
++	 * It will be restored after enabling MMU
++	 */
++	mov r10, r2
++
++	mov	r1, #0
++	mcr	p15, 0, r1, c7, c5, 4		@ Flush prefetch buffer
++	mcr	p15, 0, r1, c7, c5, 6		@ Invalidate BTB
++	mcr	p15, 0, r1, c8, c5, 0		@ Invalidate ITLB
++	mcr	p15, 0, r1, c8, c6, 0		@ Invalidate DTLB
++
++	/*
++	 * Restore control register  but don't enable Data caches here.
++	 * Caches will be enabled after restoring MMU table entry.
++	 */
++	ldmea	sp!, {r4}
++	mov r11, r4
++	ldr	r2, =CACHE_DISABLE_MASK
++	and	r4, r4, r2
++	mcr	p15, 0, r4, c1, c0, 0
++	isb
++	dsb
++	ldr	r1, =mmu_on_label
++	bx	r1
++mmu_on_label:
++	/* Set up the per-CPU stacks */
++	ldr r1, =va2pa_offset
++	add sp, sp, r1
++	mov r5, lr
++	bl	cpu_init
++
++	/*
++	 * Restore the MMU table entry that was modified for
++	 * enabling MMU.
++	 */
++	mov r0, r9
++	mov r10, r0
++
++	mov	r0, #0
++	mcr	p15, 0, r0, c7, c1, 6		@ flush TLB and issue barriers
++	mcr	p15, 0, r0, c7, c5, 4		@ Flush prefetch buffer
++	mcr	p15, 0, r0, c7, c5, 6		@ Invalidate BTB
++	mcr	p15, 0, r0, c8, c5, 0		@ Invalidate ITLB
++	mcr	p15, 0, r0, c8, c6, 0		@ Invalidate DTLB
++	dsb
++	isb
++
++/******************************************************************
++invalidate l1 dcache, r0-r4, r6, r7 used
++******************************************************************/
++	mov     r0, #0
++	mcr     p15, 2, r0, c0, c0, 0
++	mrc     p15, 1, r0, c0, c0, 0
++
++	ldr     r1, =0x7fff
++	and     r2, r1, r0, lsr #13
++
++	ldr     r1, =0x3ff
++
++	and     r3, r1, r0, lsr #3  @ NumWays - 1
++	add     r2, r2, #1          @ NumSets
++
++	and     r0, r0, #0x7
++	add     r0, r0, #4          @ SetShift
++
++	clz     r1, r3              @ WayShift
++	add     r4, r3, #1          @ NumWays
++1:
++	sub     r2, r2, #1          @ NumSets--
++	mov     r3, r4              @ Temp = NumWays
++2:
++	subs    r3, r3, #1          @ Temp--
++	mov     r7, r3, lsl r1
++	mov     r6, r2, lsl r0
++	orr     r7, r7, r6          @ Reg = (Temp<<WayShift)|(NumSets<<SetShift)
++	mcr     p15, 0, r7, c7, c6, 2
++	bgt     2b
++	cmp     r2, #0
++	bgt     1b
++	dsb
++	isb
++
++/************************************************************
++restore control register to enable cache
++************************************************************/
++	mov r0, r11
++	mcr     p15, 0, r0, c1, c0, 0	@ with caches enabled.
++	isb
++
++/************************************************************
++clear src register we used
++************************************************************/
++	ldr r8, =SRC_BASE_ADDR
++	add r8, r8, #PERIPBASE_VIRT
++	ldr sp, [r8, #SRC_GPR2_OFFSET]
++
++/***********************************************************
++return back to mx6_suspend_enter for dormant
++***********************************************************/
++	mov lr, r5
++	ldmfd   sp!, {r0-r8}
++	mov pc, lr
++
++
++/************************************************
++return back to mx6_suspend_enter for suspend
++*************************************************/
++out:
++	ldmfd   sp!, {r0-r8}
++	mov pc, lr
++
++	.equ	va2pa_offset, (PAGE_OFFSET - MX6_PHYS_OFFSET)
+ 	.type   mx6q_do_suspend, #object
+ ENTRY(mx6q_do_suspend)
+ 	.word   mx6q_suspend
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index 0d30bdf..4c53bb4 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -29,22 +29,30 @@
+ #include <asm/mach/map.h>
+ #include <mach/hardware.h>
+ #include <mach/imx-pm.h>
+-#ifdef CONFIG_ARCH_MX61
++#include <asm/hardware/cache-l2x0.h>
++#include <asm/hardware/gic.h>
++#ifdef CONFIG_ARCH_MX6Q
+ #include <mach/iomux-mx6q.h>
+ #endif
+ #include "crm_regs.h"
+-
+-#define SCU_CTRL_OFFSET		0x00
+-#define GPC_IMR1_OFFSET		0x08
+-#define GPC_IMR2_OFFSET		0x0c
+-#define GPC_IMR3_OFFSET		0x10
+-#define GPC_IMR4_OFFSET		0x14
++#include "src-reg.h"
++
++#define SCU_CTRL_OFFSET				0x00
++#define GPC_IMR1_OFFSET				0x08
++#define GPC_IMR2_OFFSET				0x0c
++#define GPC_IMR3_OFFSET				0x10
++#define GPC_IMR4_OFFSET				0x14
++#define GPC_PGC_CPU_PDN_OFFSET		0x2a0
+ #define GPC_PGC_CPU_PUPSCR_OFFSET	0x2a4
+ #define GPC_PGC_CPU_PDNSCR_OFFSET	0x2a8
+-#define UART_UCR3_OFFSET		0x88
+-#define UART_USR1_OFFSET		0x94
+-#define UART_UCR3_AWAKEN		(1 << 4)
+-#define UART_USR1_AWAKE			(1 << 4)
++#define UART_UCR3_OFFSET			0x88
++#define UART_USR1_OFFSET			0x94
++#define UART_UCR3_AWAKEN			(1 << 4)
++#define UART_USR1_AWAKE				(1 << 4)
++#define LOCAL_TWD_LOAD_OFFSET		0x0
++#define LOCAL_TWD_COUNT_OFFSET		0x4
++#define LOCAL_TWD_CONTROL_OFFSET	0x8
++#define LOCAL_TWD_INT_OFFSET		0xc
+ static struct clk *cpu_clk;
+ static struct pm_platform_data *pm_data;
+ 
+@@ -52,20 +60,23 @@ static struct pm_platform_data *pm_data;
+ static int org_freq;
+ extern int set_cpu_freq(int wp);
+ #endif
+-
+-extern void mx6q_suspend(u32 m4if_addr);
++extern void mx6q_suspend(suspend_state_t state);
+ static struct device *pm_dev;
+ struct clk *gpc_dvfs_clk;
+-void *suspend_iram_base;
+-void (*suspend_in_iram)(void *sdclk_iomux_addr) = NULL;
+-void __iomem *suspend_param1;
+ 
+ static void __iomem *scu_base;
+ static void __iomem *gpc_base;
++static void __iomem *src_base;
++static void __iomem *local_twd_base;
++static void __iomem *pl310_base;
++static void __iomem *gic_dist_base;
++static void __iomem *gic_cpu_base;
++
+ static u32 ccm_clpcr, scu_ctrl;
+-static u32 gpc_imr[4], gpc_cpu_pup, gpc_cpu_pdn;
++static u32 gpc_imr[4], gpc_cpu_pup, gpc_cpu_pdn, gpc_cpu;
++static u32 local_timer[4];
+ 
+-static void mx6_suspend_store()
++static void mx6_suspend_store(void)
+ {
+ 	/* save some settings before suspend */
+ 	ccm_clpcr = __raw_readl(MXC_CCM_CLPCR);
+@@ -76,9 +87,16 @@ static void mx6_suspend_store()
+ 	gpc_imr[3] = __raw_readl(gpc_base + GPC_IMR4_OFFSET);
+ 	gpc_cpu_pup = __raw_readl(gpc_base + GPC_PGC_CPU_PUPSCR_OFFSET);
+ 	gpc_cpu_pdn = __raw_readl(gpc_base + GPC_PGC_CPU_PDNSCR_OFFSET);
++	gpc_cpu = __raw_readl(gpc_base + GPC_PGC_CPU_PDN_OFFSET);
++#ifdef CONFIG_LOCAL_TIMERS
++	local_timer[0] = __raw_readl(local_twd_base + LOCAL_TWD_LOAD_OFFSET);
++	local_timer[1] = __raw_readl(local_twd_base + LOCAL_TWD_COUNT_OFFSET);
++	local_timer[2] = __raw_readl(local_twd_base + LOCAL_TWD_CONTROL_OFFSET);
++	local_timer[3] = __raw_readl(local_twd_base + LOCAL_TWD_INT_OFFSET);
++#endif
+ }
+ 
+-static void mx6_suspend_restore()
++static void mx6_suspend_restore(void)
+ {
+ 	/* restore settings after suspend */
+ 	__raw_writel(ccm_clpcr, MXC_CCM_CLPCR);
+@@ -89,6 +107,13 @@ static void mx6_suspend_restore()
+ 	__raw_writel(gpc_imr[3], gpc_base + GPC_IMR4_OFFSET);
+ 	__raw_writel(gpc_cpu_pup, gpc_base + GPC_PGC_CPU_PUPSCR_OFFSET);
+ 	__raw_writel(gpc_cpu_pdn, gpc_base + GPC_PGC_CPU_PDNSCR_OFFSET);
++	__raw_writel(gpc_cpu, gpc_base + GPC_PGC_CPU_PDN_OFFSET);
++#ifdef CONFIG_LOCAL_TIMERS
++	__raw_writel(local_timer[0], local_twd_base + LOCAL_TWD_LOAD_OFFSET);
++	__raw_writel(local_timer[1], local_twd_base + LOCAL_TWD_COUNT_OFFSET);
++	__raw_writel(local_timer[2], local_twd_base + LOCAL_TWD_CONTROL_OFFSET);
++	__raw_writel(local_timer[3], local_twd_base + LOCAL_TWD_INT_OFFSET);
++#endif
+ }
+ static int mx6_suspend_enter(suspend_state_t state)
+ {
+@@ -96,16 +121,16 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 
+ 	switch (state) {
+ 	case PM_SUSPEND_MEM:
+-		mxc_cpu_lp_set(STOP_POWER_OFF);
++		mxc_cpu_lp_set(ARM_POWER_OFF);
+ 		break;
+ 	case PM_SUSPEND_STANDBY:
+-		mxc_cpu_lp_set(WAIT_UNCLOCKED_POWER_OFF);
++		mxc_cpu_lp_set(STOP_POWER_OFF);
+ 		break;
+ 	default:
+ 		return -EINVAL;
+ 	}
+ 
+-	if (state == PM_SUSPEND_MEM) {
++	if (state == PM_SUSPEND_MEM || state == PM_SUSPEND_STANDBY) {
+ 		if (pm_data && pm_data->suspend_enter)
+ 			pm_data->suspend_enter();
+ 
+@@ -113,14 +138,42 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 		flush_cache_all();
+ 		outer_cache.flush_all();
+ 
+-		suspend_in_iram(suspend_param1);
++		/* for dormant mode, we need to disable l2 cache */
++		if (state == PM_SUSPEND_MEM)
++			outer_cache.disable();
++
++		/* mx6q mmdc can enter self-refresh when ARM enter wfi
++		 * , so no need to run the code in the iram */
++		mx6q_suspend(state);
++
++		if (state == PM_SUSPEND_MEM) {
++			/* need to re-init gic */
++			gic_init(0, 29, gic_dist_base, gic_cpu_base);
++
++#ifdef CONFIG_LOCAL_TIMERS
++			gic_enable_ppi(IRQ_LOCALTIMER);
++#endif
++			/* if we use gpt as system timer, we need to
++			 * enable gpt timer here, and even LOCAL_TIMERS
++			 * defined, but if we only boot up a core, then
++			 * kernel will still use GPT as timer */
++			__raw_writel(1 << (MXC_INT_GPT % 32),
++					gic_dist_base + GIC_DIST_ENABLE_SET +
++					(MXC_INT_GPT / 32) * 4);
++
++			flush_cache_all();
++			/* init l2 cache, pl310 */
++			l2x0_init(pl310_base, 0x0, ~0x00000000);
++		}
+ 
+ 		mx6_suspend_restore();
++
+ 		if (pm_data && pm_data->suspend_exit)
+ 			pm_data->suspend_exit();
+ 	} else {
+ 			cpu_do_idle();
+ 	}
++
+ 	return 0;
+ }
+ 
+@@ -191,10 +244,13 @@ static struct platform_driver mx6_pm_driver = {
+ 
+ static int __init pm_init(void)
+ {
+-	unsigned long iram_paddr, cpaddr;
+-
+ 	scu_base = IO_ADDRESS(SCU_BASE_ADDR);
+ 	gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
++	src_base = IO_ADDRESS(SRC_BASE_ADDR);
++	pl310_base = IO_ADDRESS(L2_BASE_ADDR);
++	gic_dist_base = IO_ADDRESS(IC_DISTRIBUTOR_BASE_ADDR);
++	gic_cpu_base = IO_ADDRESS(IC_INTERFACES_BASE_ADDR);
++	local_twd_base = IO_ADDRESS(LOCAL_TWD_ADDR);
+ 
+ 	pr_info("Static Power Management for Freescale i.MX6\n");
+ 
+@@ -204,23 +260,6 @@ static int __init pm_init(void)
+ 	}
+ 
+ 	suspend_set_ops(&mx6_suspend_ops);
+-	/* Move suspend routine into iRAM */
+-	cpaddr = (unsigned long)iram_alloc(SZ_4K, &iram_paddr);
+-	/* Need to remap the area here since we want the memory region
+-		 to be executable. */
+-	suspend_iram_base = __arm_ioremap(iram_paddr, SZ_4K,
+-					  MT_HIGH_VECTORS);
+-	pr_info("cpaddr = %x suspend_iram_base=%x\n",
+-		(unsigned int)cpaddr, (unsigned int)suspend_iram_base);
+-
+-	/*
+-	 * Need to run the suspend code from IRAM as the DDR needs
+-	 * to be put into self refresh mode manually.
+-	 */
+-	memcpy((void *)cpaddr, mx6q_suspend, SZ_4K);
+-
+-	suspend_in_iram = (void *)suspend_iram_base;
+-
+ 	cpu_clk = clk_get(NULL, "cpu_clk");
+ 	if (IS_ERR(cpu_clk)) {
+ 		printk(KERN_DEBUG "%s: failed to get cpu_clk\n", __func__);
+@@ -231,7 +270,6 @@ static int __init pm_init(void)
+ 	return 0;
+ }
+ 
+-
+ static void __exit pm_cleanup(void)
+ {
+ 	/* Unregister the device structure */
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index eb22241..0737207 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -33,6 +33,9 @@
+ #define SCU_CPU_STATUS		0x08
+ #define SCU_INVALIDATE		0x0c
+ #define SCU_FPGA_REVISION	0x10
++#define GPC_PGC_CPU_PDN_OFFSET	0x2a0
++#define GPC_PGC_CPU_PUPSCR_OFFSET	0x2a4
++#define GPC_PGC_CPU_PDNSCR_OFFSET	0x2a8
+ 
+ extern unsigned int gpc_wake_irq[4];
+ 
+@@ -65,19 +68,28 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 		break;
+ 	case WAIT_UNCLOCKED_POWER_OFF:
+ 	case STOP_POWER_OFF:
++	case ARM_POWER_OFF:
+ 		if (mode == WAIT_UNCLOCKED_POWER_OFF) {
+ 			ccm_clpcr |= 0x1 << MXC_CCM_CLPCR_LPM_OFFSET;
+ 			ccm_clpcr &= ~MXC_CCM_CLPCR_VSTBY;
+ 			ccm_clpcr &= ~MXC_CCM_CLPCR_SBYOS;
+ 			stop_mode = 0;
+-		} else {
++		} else if (mode == STOP_POWER_OFF) {
+ 			ccm_clpcr |= 0x2 << MXC_CCM_CLPCR_LPM_OFFSET;
+ 			ccm_clpcr |= 0x3 << MXC_CCM_CLPCR_STBY_COUNT_OFFSET;
+ 			ccm_clpcr |= MXC_CCM_CLPCR_VSTBY;
+ 			ccm_clpcr |= MXC_CCM_CLPCR_SBYOS;
+ 			ccm_clpcr |= MXC_CCM_CLPCR_BYP_MMDC_CH1_LPM_HS;
+ 			stop_mode = 1;
++		} else {
++			ccm_clpcr |= 0x2 << MXC_CCM_CLPCR_LPM_OFFSET;
++			ccm_clpcr |= 0x3 << MXC_CCM_CLPCR_STBY_COUNT_OFFSET;
++			ccm_clpcr |= MXC_CCM_CLPCR_VSTBY;
++			ccm_clpcr |= MXC_CCM_CLPCR_SBYOS;
++			ccm_clpcr |= MXC_CCM_CLPCR_BYP_MMDC_CH1_LPM_HS;
++			stop_mode = 2;
+ 		}
++
+ 		/* scu standby enable, scu clk will be
+ 		 * off after all cpu enter WFI */
+ 		scu_cr |= 0x20;
+@@ -90,12 +102,15 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 		return;
+ 	}
+ 
+-	if (stop_mode == 1) {
+-
++	if (stop_mode > 0) {
+ 		gpc_set_wakeup(gpc_wake_irq);
+ 		/* Power down and power up sequence */
+-		__raw_writel(0xFFFFFFFF, gpc_base + 0x2a4);
+-		__raw_writel(0xFFFFFFFF, gpc_base + 0x2a8);
++		__raw_writel(0xFFFFFFFF, gpc_base + GPC_PGC_CPU_PUPSCR_OFFSET);
++		__raw_writel(0xFFFFFFFF, gpc_base + GPC_PGC_CPU_PDNSCR_OFFSET);
++
++		/* dormant mode, need to power off the arm core */
++		if (stop_mode == 2)
++			__raw_writel(0x1, gpc_base + GPC_PGC_CPU_PDN_OFFSET);
+ 	}
+ 
+ 	__raw_writel(scu_cr, scu_base + SCU_CTRL);
+diff --git a/arch/arm/plat-mxc/include/mach/mxc.h b/arch/arm/plat-mxc/include/mach/mxc.h
+index 21d0ba2..46e8498 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc.h
++++ b/arch/arm/plat-mxc/include/mach/mxc.h
+@@ -233,6 +233,7 @@ enum mxc_cpu_pwr_mode {
+ 	WAIT_UNCLOCKED_POWER_OFF,	/* WAIT + SRPG */
+ 	STOP_POWER_ON,		/* just STOP */
+ 	STOP_POWER_OFF,		/* STOP + SRPG */
++	ARM_POWER_OFF,		/* STOP + SRPG + ARM power off */
+ };
+ 
+ int tzic_enable_wake(int is_idle);
+-- 
+1.7.7.4
+

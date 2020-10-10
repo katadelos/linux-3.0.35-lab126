@@ -1,0 +1,547 @@
+From 243302c429aa9c8f4961feb16b1c8197ae602f7b Mon Sep 17 00:00:00 2001
+From: Wu Guoxing <b39297@freescale.com>
+Date: Mon, 21 May 2012 09:24:29 +0800
+Subject: [PATCH 1503/2463] ENGR00209062-2: mx6dq and mx6dl dual camera
+ support
+
+dual camera support for mx6q and mx6dl:
+1. let mipi and parallel camera working on different csi
+2. the two camera can work independently and synchronously
+3. the two camera will be registered and different video
+   device(/dev/video0, /dev/video1)
+4. when both camera are working, the can not use the same
+   ipu channel, that is, when camera one using PRP_ENC_MEM
+   or PRP_VF_MEM channel, the other one can only use CSI_MEM
+
+   this is the driver part.
+
+Signed-off-by: Wu Guoxing <b39297@freescale.com>
+---
+ drivers/media/video/mxc/capture/ipu_prp_enc.c      |    5 +-
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |  102 +++++++++++---------
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.h |    8 ++
+ drivers/media/video/mxc/capture/ov3640.c           |    3 +-
+ drivers/media/video/mxc/capture/ov5640.c           |    3 +-
+ drivers/media/video/mxc/capture/ov5640_mipi.c      |   13 +++-
+ drivers/media/video/mxc/capture/ov5642.c           |    3 +-
+ drivers/media/video/mxc/capture/ov8820_mipi.c      |    6 +-
+ include/linux/fsl_devices.h                        |    9 ++
+ 9 files changed, 99 insertions(+), 53 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_enc.c b/drivers/media/video/mxc/capture/ipu_prp_enc.c
+index 6710cba..02515b3 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_enc.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_enc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -170,7 +170,8 @@ static int prp_enc_setup(cam_data *cam)
+ 		return err;
+ 	}
+ 
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_ENC, cam->csi, true, true);
++	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_ENC,
++				cam->mclk_source, true, true);
+ 
+ 	grotation = cam->rotation;
+ 	if (cam->rotation >= IPU_ROTATE_90_RIGHT) {
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index 5822689..d80b842 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -37,15 +37,14 @@
+ #include <media/v4l2-chip-ident.h>
+ #include <media/v4l2-ioctl.h>
+ #include <media/v4l2-int-device.h>
++#include <linux/fsl_devices.h>
+ #include "mxc_v4l2_capture.h"
+ #include "ipu_prp_sw.h"
+ 
+ #define init_MUTEX(sem)         sema_init(sem, 1)
+ #define MXC_SENSOR_NUM 2
+-static int sensor_index;
+ 
+-static int video_nr = -1, local_buf_num;
+-static cam_data *g_cam;
++static int video_nr = -1;
+ 
+ /*! This data is used for the output to the display. */
+ #define MXC_V4L2_CAPTURE_NUM_OUTPUTS	3
+@@ -405,7 +404,7 @@ static int mxc_streamon(cam_data *cam)
+ 	}
+ 
+ 	cam->ping_pong_csi = 0;
+-	local_buf_num = 0;
++	cam->local_buf_num = 0;
+ 	if (cam->enc_update_eba) {
+ 		frame =
+ 		    list_entry(cam->ready_q.next, struct mxc_v4l_frame, queue);
+@@ -1210,7 +1209,7 @@ static int mxc_v4l2_s_ctrl(cam_data *cam, struct v4l2_control *c)
+ 	case V4L2_CID_MXC_SWITCH_CAM:
+ 		if (cam->sensor != cam->all_sensors[c->value]) {
+ 			/* power down other cameraes before enable new one */
+-			for (i = 0; i < sensor_index; i++) {
++			for (i = 0; i < cam->sensor_index; i++) {
+ 				if (i != c->value) {
+ 					vidioc_int_dev_exit(cam->all_sensors[i]);
+ 					vidioc_int_s_power(cam->all_sensors[i], 0);
+@@ -1665,7 +1664,7 @@ static int mxc_v4l_open(struct file *file)
+ 					cam_fmt.fmt.pix.pixelformat,
+ 					csi_param);
+ 
+-		ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
++		ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->mclk_source,
+ 				       true, true);
+ 		vidioc_int_s_power(cam->sensor, 1);
+ 		msleep(1);
+@@ -2494,7 +2493,7 @@ static void camera_callback(u32 mask, void *dev)
+ 					struct mxc_v4l_frame,
+ 					queue);
+ 
+-		if (done_frame->ipu_buf_num != local_buf_num)
++		if (done_frame->ipu_buf_num != cam->local_buf_num)
+ 			goto next;
+ 
+ 		/*
+@@ -2531,7 +2530,7 @@ next:
+ 				list_del(cam->ready_q.next);
+ 				list_add_tail(&ready_frame->queue,
+ 					      &cam->working_q);
+-				ready_frame->ipu_buf_num = local_buf_num;
++				ready_frame->ipu_buf_num = cam->local_buf_num;
+ 			}
+ 	} else {
+ 		if (cam->enc_update_eba)
+@@ -2540,7 +2539,7 @@ next:
+ 				&cam->ping_pong_csi);
+ 	}
+ 
+-	local_buf_num = (local_buf_num == 0) ? 1 : 0;
++	cam->local_buf_num = (cam->local_buf_num == 0) ? 1 : 0;
+ 
+ 	return;
+ }
+@@ -2554,11 +2553,13 @@ next:
+  */
+ static void init_camera_struct(cam_data *cam, struct platform_device *pdev)
+ {
++	struct fsl_mxc_capture_platform_data *pdata = pdev->dev.platform_data;
++
+ 	pr_debug("In MVC: init_camera_struct\n");
+ 	/* Default everything to 0 */
+ 	memset(cam, 0, sizeof(cam_data));
+ 
+-	cam->ipu = ipu_get_soc(0);
++	cam->ipu = ipu_get_soc(pdata->ipu);
+ 	if (cam->ipu == NULL)
+ 		pr_err("ERROR: v4l2 capture: failed to get ipu\n");
+ 	else if (cam->ipu == ERR_PTR(-ENODEV))
+@@ -2615,13 +2616,19 @@ static void init_camera_struct(cam_data *cam, struct platform_device *pdev)
+ 	cam->win.w.left = 0;
+ 	cam->win.w.top = 0;
+ 
+-	cam->csi = 0;  /* Need to determine how to set this correctly with
+-			* multiple video input devices. */
++	cam->csi = pdata->csi;
++	cam->mclk_source = pdata->mclk_source;
+ 
+ 	cam->enc_callback = camera_callback;
+ 	init_waitqueue_head(&cam->power_queue);
+ 	spin_lock_init(&cam->queue_int_lock);
+ 	spin_lock_init(&cam->dqueue_int_lock);
++
++	cam->self = kmalloc(sizeof(struct v4l2_int_device), GFP_KERNEL);
++	cam->self->module = THIS_MODULE;
++	sprintf(cam->self->name, "mxc_v4l2_cap%d", cam->csi);
++	cam->self->type = v4l2_int_type_master;
++	cam->self->u.master = &mxc_v4l2_master;
+ }
+ 
+ static ssize_t show_streaming(struct device *dev,
+@@ -2629,9 +2636,9 @@ static ssize_t show_streaming(struct device *dev,
+ {
+ 	struct video_device *video_dev = container_of(dev,
+ 						struct video_device, dev);
+-	cam_data *g_cam = video_get_drvdata(video_dev);
++	cam_data *cam = video_get_drvdata(video_dev);
+ 
+-	if (g_cam->capture_on)
++	if (cam->capture_on)
+ 		return sprintf(buf, "stream on\n");
+ 	else
+ 		return sprintf(buf, "stream off\n");
+@@ -2643,9 +2650,9 @@ static ssize_t show_overlay(struct device *dev,
+ {
+ 	struct video_device *video_dev = container_of(dev,
+ 						struct video_device, dev);
+-	cam_data *g_cam = video_get_drvdata(video_dev);
++	cam_data *cam = video_get_drvdata(video_dev);
+ 
+-	if (g_cam->overlay_on)
++	if (cam->overlay_on)
+ 		return sprintf(buf, "overlay on\n");
+ 	else
+ 		return sprintf(buf, "overlay off\n");
+@@ -2662,38 +2669,38 @@ static DEVICE_ATTR(fsl_v4l2_overlay_property, S_IRUGO, show_overlay, NULL);
+  */
+ static int mxc_v4l2_probe(struct platform_device *pdev)
+ {
+-	/* Create g_cam and initialize it. */
+-	g_cam = kmalloc(sizeof(cam_data), GFP_KERNEL);
+-	if (g_cam == NULL) {
++	/* Create cam and initialize it. */
++	cam_data *cam = kmalloc(sizeof(cam_data), GFP_KERNEL);
++	if (cam == NULL) {
+ 		pr_err("ERROR: v4l2 capture: failed to register camera\n");
+ 		return -1;
+ 	}
+ 
+-	init_camera_struct(g_cam, pdev);
++	init_camera_struct(cam, pdev);
+ 	pdev->dev.release = camera_platform_release;
+ 
+ 	/* Set up the v4l2 device and register it*/
+-	mxc_v4l2_int_device.priv = g_cam;
++	cam->self->priv = cam;
+ 	/* This function contains a bug that won't let this be rmmod'd. */
+-	v4l2_int_device_register(&mxc_v4l2_int_device);
++	v4l2_int_device_register(cam->self);
+ 
+ 	/* register v4l video device */
+-	if (video_register_device(g_cam->video_dev, VFL_TYPE_GRABBER, video_nr)
++	if (video_register_device(cam->video_dev, VFL_TYPE_GRABBER, video_nr)
+ 	    == -1) {
+-		kfree(g_cam);
+-		g_cam = NULL;
++		kfree(cam);
++		cam = NULL;
+ 		pr_err("ERROR: v4l2 capture: video_register_device failed\n");
+ 		return -1;
+ 	}
+ 	pr_debug("   Video device registered: %s #%d\n",
+-		 g_cam->video_dev->name, g_cam->video_dev->minor);
++		 cam->video_dev->name, cam->video_dev->minor);
+ 
+-	if (device_create_file(&g_cam->video_dev->dev,
++	if (device_create_file(&cam->video_dev->dev,
+ 			&dev_attr_fsl_v4l2_capture_property))
+ 		dev_err(&pdev->dev, "Error on creating sysfs file"
+ 			" for capture\n");
+ 
+-	if (device_create_file(&g_cam->video_dev->dev,
++	if (device_create_file(&cam->video_dev->dev,
+ 			&dev_attr_fsl_v4l2_overlay_property))
+ 		dev_err(&pdev->dev, "Error on creating sysfs file"
+ 			" for overlay\n");
+@@ -2711,24 +2718,23 @@ static int mxc_v4l2_probe(struct platform_device *pdev)
+  */
+ static int mxc_v4l2_remove(struct platform_device *pdev)
+ {
+-
+-	if (g_cam->open_count) {
++	cam_data *cam = (cam_data *)platform_get_drvdata(pdev);
++	if (cam->open_count) {
+ 		pr_err("ERROR: v4l2 capture:camera open "
+ 			"-- setting ops to NULL\n");
+ 		return -EBUSY;
+ 	} else {
+-		device_remove_file(&g_cam->video_dev->dev,
++		device_remove_file(&cam->video_dev->dev,
+ 			&dev_attr_fsl_v4l2_capture_property);
+-		device_remove_file(&g_cam->video_dev->dev,
++		device_remove_file(&cam->video_dev->dev,
+ 			&dev_attr_fsl_v4l2_overlay_property);
+ 
+ 		pr_info("V4L2 freeing image input device\n");
+ 		v4l2_int_device_unregister(&mxc_v4l2_int_device);
+-		video_unregister_device(g_cam->video_dev);
++		video_unregister_device(cam->video_dev);
+ 
+-		mxc_free_frame_buf(g_cam);
+-		kfree(g_cam);
+-		g_cam = NULL;
++		mxc_free_frame_buf(cam);
++		kfree(cam);
+ 	}
+ 
+ 	pr_info("V4L2 unregistering video\n");
+@@ -2825,6 +2831,7 @@ static int mxc_v4l2_master_attach(struct v4l2_int_device *slave)
+ 	cam_data *cam = slave->u.slave->master->priv;
+ 	struct v4l2_format cam_fmt;
+ 	int i;
++	struct sensor_data *sdata = slave->priv;
+ 
+ 	pr_debug("In MVC: mxc_v4l2_master_attach\n");
+ 	pr_debug("   slave.name = %s\n", slave->name);
+@@ -2835,17 +2842,22 @@ static int mxc_v4l2_master_attach(struct v4l2_int_device *slave)
+ 		return -1;
+ 	}
+ 
++	if (sdata->csi != cam->csi) {
++		pr_debug("%s: csi doesn't match\n", __func__);
++		return -1;
++	}
++
+ 	cam->sensor = slave;
+ 
+-	if (sensor_index < MXC_SENSOR_NUM) {
+-		cam->all_sensors[sensor_index] = slave;
+-		sensor_index++;
++	if (cam->sensor_index < MXC_SENSOR_NUM) {
++		cam->all_sensors[cam->sensor_index] = slave;
++		cam->sensor_index++;
+ 	} else {
+ 		pr_err("ERROR: v4l2 capture: slave number exceeds the maximum.\n");
+ 		return -1;
+ 	}
+ 
+-	for (i = 0; i < sensor_index; i++) {
++	for (i = 0; i < cam->sensor_index; i++) {
+ 		vidioc_int_dev_exit(cam->all_sensors[i]);
+ 		vidioc_int_s_power(cam->all_sensors[i], 0);
+ 	}
+@@ -2897,23 +2909,23 @@ static void mxc_v4l2_master_detach(struct v4l2_int_device *slave)
+ 
+ 	pr_debug("In MVC:mxc_v4l2_master_detach\n");
+ 
+-	if (sensor_index > 1) {
+-		for (i = 0; i < sensor_index; i++) {
++	if (cam->sensor_index > 1) {
++		for (i = 0; i < cam->sensor_index; i++) {
+ 			if (cam->all_sensors[i] != slave)
+ 				continue;
+ 			/* Move all the sensors behind this
+ 			 * sensor one step forward
+ 			 */
+-			for (; i < sensor_index - 1; i++)
++			for (; i < cam->sensor_index - 1; i++)
+ 				cam->all_sensors[i] = cam->all_sensors[i+1];
+ 			break;
+ 		}
+ 		/* Point current sensor to the last one */
+-		cam->sensor = cam->all_sensors[sensor_index - 2];
++		cam->sensor = cam->all_sensors[cam->sensor_index - 2];
+ 	} else
+ 		cam->sensor = NULL;
+ 
+-	sensor_index--;
++	cam->sensor_index--;
+ 	vidioc_int_dev_exit(slave);
+ }
+ 
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+index 5b7b0bf..dcb90a9 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+@@ -34,6 +34,8 @@
+ #include <mach/ipu-v3.h>
+ 
+ #include <media/v4l2-dev.h>
++#include <media/v4l2-int-device.h>
++
+ 
+ #define FRAME_NUM 10
+ 
+@@ -190,12 +192,17 @@ typedef struct _cam_data {
+ 	bool low_power;
+ 	wait_queue_head_t power_queue;
+ 	unsigned int csi;
++	u8 mclk_source;
+ 	int current_input;
+ 
++	int local_buf_num;
++
+ 	/* camera sensor interface */
+ 	struct camera_sensor *cam_sensor; 	/* old version */
+ 	struct v4l2_int_device *all_sensors[2];
+ 	struct v4l2_int_device *sensor;
++	struct v4l2_int_device *self;
++	int sensor_index;
+ 	void *ipu;
+ } cam_data;
+ 
+@@ -218,6 +225,7 @@ struct sensor_data {
+ 	int ae_mode;
+ 
+ 	u32 mclk;
++	u8 mclk_source;
+ 	int csi;
+ 
+ 	void (*io_init)(void);
+diff --git a/drivers/media/video/mxc/capture/ov3640.c b/drivers/media/video/mxc/capture/ov3640.c
+index b1d1abb..69a3ad4 100644
+--- a/drivers/media/video/mxc/capture/ov3640.c
++++ b/drivers/media/video/mxc/capture/ov3640.c
+@@ -1354,7 +1354,7 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+ 	ov3640_data.mclk = tgt_xclk;
+ 
+ 	pr_debug("   Setting mclk to %d MHz\n", tgt_xclk / 1000000);
+-	set_mclk_rate(&ov3640_data.mclk, ov3640_data.csi);
++	set_mclk_rate(&ov3640_data.mclk, ov3640_data.mclk_source);
+ 
+ 	/* Default camera frame rate is set in probe */
+ 	tgt_fps = sensor->streamcap.timeperframe.denominator /
+@@ -1442,6 +1442,7 @@ static int ov3640_probe(struct i2c_client *client,
+ 	memset(&ov3640_data, 0, sizeof(ov3640_data));
+ 	ov3640_data.mclk = 24000000; /* 6 - 54 MHz, typical 24MHz */
+ 	ov3640_data.mclk = plat_data->mclk;
++	ov3640_data.mclk_source = plat_data->mclk_source;
+ 	ov3640_data.csi = plat_data->csi;
+ 	ov3640_data.io_init = plat_data->io_init;
+ 
+diff --git a/drivers/media/video/mxc/capture/ov5640.c b/drivers/media/video/mxc/capture/ov5640.c
+index f908749..c2dfe31 100644
+--- a/drivers/media/video/mxc/capture/ov5640.c
++++ b/drivers/media/video/mxc/capture/ov5640.c
+@@ -1309,7 +1309,7 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+ 	ov5640_data.mclk = tgt_xclk;
+ 
+ 	pr_debug("   Setting mclk to %d MHz\n", tgt_xclk / 1000000);
+-	set_mclk_rate(&ov5640_data.mclk, ov5640_data.csi);
++	set_mclk_rate(&ov5640_data.mclk, ov5640_data.mclk_source);
+ 
+ 	/* Default camera frame rate is set in probe */
+ 	tgt_fps = sensor->streamcap.timeperframe.denominator /
+@@ -1397,6 +1397,7 @@ static int ov5640_probe(struct i2c_client *client,
+ 	memset(&ov5640_data, 0, sizeof(ov5640_data));
+ 	ov5640_data.mclk = 24000000; /* 6 - 54 MHz, typical 24MHz */
+ 	ov5640_data.mclk = plat_data->mclk;
++	ov5640_data.mclk_source = plat_data->mclk_source;
+ 	ov5640_data.csi = plat_data->csi;
+ 	ov5640_data.io_init = plat_data->io_init;
+ 
+diff --git a/drivers/media/video/mxc/capture/ov5640_mipi.c b/drivers/media/video/mxc/capture/ov5640_mipi.c
+index 3ed9357..d1587b1 100644
+--- a/drivers/media/video/mxc/capture/ov5640_mipi.c
++++ b/drivers/media/video/mxc/capture/ov5640_mipi.c
+@@ -909,6 +909,15 @@ bool binning_on(void)
+ 		return false;
+ }
+ 
++static void ov5640_set_virtual_channel(int channel)
++{
++	u8 channel_id;
++
++	ov5640_read_reg(0x4814, &channel_id);
++	channel_id &= ~(3 << 6);
++	ov5640_write_reg(0x4814, channel_id | (channel << 6));
++}
++
+ static int ov5640_init_mode(enum ov5640_frame_rate frame_rate,
+ 			    enum ov5640_mode mode)
+ {
+@@ -1164,6 +1173,7 @@ static int ov5640_init_mode(enum ov5640_frame_rate frame_rate,
+ 	OV5640_set_AE_target(AE_Target);
+ 	OV5640_get_light_frequency();
+ 	OV5640_set_bandingfilter();
++	ov5640_set_virtual_channel(ov5640_data.csi);
+ 
+ 	if (mipi_csi2_info) {
+ 		unsigned int i;
+@@ -1604,7 +1614,7 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+ 	ov5640_data.mclk = tgt_xclk;
+ 
+ 	pr_debug("   Setting mclk to %d MHz\n", tgt_xclk / 1000000);
+-	set_mclk_rate(&ov5640_data.mclk, ov5640_data.csi);
++	set_mclk_rate(&ov5640_data.mclk, ov5640_data.mclk_source);
+ 
+ 	/* Default camera frame rate is set in probe */
+ 	tgt_fps = sensor->streamcap.timeperframe.denominator /
+@@ -1712,6 +1722,7 @@ static int ov5640_probe(struct i2c_client *client,
+ 	memset(&ov5640_data, 0, sizeof(ov5640_data));
+ 	ov5640_data.mclk = 24000000; /* 6 - 54 MHz, typical 24MHz */
+ 	ov5640_data.mclk = plat_data->mclk;
++	ov5640_data.mclk_source = plat_data->mclk_source;
+ 	ov5640_data.csi = plat_data->csi;
+ 	ov5640_data.io_init = plat_data->io_init;
+ 
+diff --git a/drivers/media/video/mxc/capture/ov5642.c b/drivers/media/video/mxc/capture/ov5642.c
+index d6dad5f..58ee92e 100644
+--- a/drivers/media/video/mxc/capture/ov5642.c
++++ b/drivers/media/video/mxc/capture/ov5642.c
+@@ -3255,7 +3255,7 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+ 	ov5642_data.mclk = tgt_xclk;
+ 
+ 	pr_debug("   Setting mclk to %d MHz\n", tgt_xclk / 1000000);
+-	set_mclk_rate(&ov5642_data.mclk, ov5642_data.csi);
++	set_mclk_rate(&ov5642_data.mclk, ov5642_data.mclk_source);
+ 
+ 	/* Default camera frame rate is set in probe */
+ 	tgt_fps = sensor->streamcap.timeperframe.denominator /
+@@ -3368,6 +3368,7 @@ static int ov5642_probe(struct i2c_client *client,
+ 	memset(&ov5642_data, 0, sizeof(ov5642_data));
+ 	ov5642_data.mclk = 24000000; /* 6 - 54 MHz, typical 24MHz */
+ 	ov5642_data.mclk = plat_data->mclk;
++	ov5642_data.mclk_source = plat_data->mclk_source;
+ 	ov5642_data.csi = plat_data->csi;
+ 	ov5642_data.io_init = plat_data->io_init;
+ 
+diff --git a/drivers/media/video/mxc/capture/ov8820_mipi.c b/drivers/media/video/mxc/capture/ov8820_mipi.c
+index 4c2a49d..6fddbb0 100644
+--- a/drivers/media/video/mxc/capture/ov8820_mipi.c
++++ b/drivers/media/video/mxc/capture/ov8820_mipi.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -92,6 +92,7 @@ struct sensor {
+ 	int ae_mode;
+ 
+ 	u32 mclk;
++	u8 mclk_source;
+ 	int csi;
+ } ov8820_data;
+ 
+@@ -762,7 +763,7 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+ 	ov8820_data.mclk = tgt_xclk;
+ 
+ 	pr_debug("   Setting mclk to %d MHz\n", tgt_xclk / 1000000);
+-	set_mclk_rate(&ov8820_data.mclk, ov8820_data.csi);
++	set_mclk_rate(&ov8820_data.mclk, ov8820_data.mclk_source);
+ 
+ 	/* Default camera frame rate is set in probe */
+ 	tgt_fps = sensor->streamcap.timeperframe.denominator /
+@@ -871,6 +872,7 @@ static int ov8820_probe(struct i2c_client *client,
+ 	memset(&ov8820_data, 0, sizeof(ov8820_data));
+ 	ov8820_data.mclk = 24000000; /* 6 - 54 MHz, typical 24MHz */
+ 	ov8820_data.mclk = plat_data->mclk;
++	ov8820_data.mclk_source = plat_data->mclk_source;
+ 	ov8820_data.csi = plat_data->csi;
+ 
+ 	ov8820_data.i2c_client = client;
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index b476173..5437d3a 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -287,12 +287,21 @@ struct fsl_mxc_hdmi_core_platform_data {
+ 	int disp_id;
+ };
+ 
++struct fsl_mxc_capture_platform_data {
++	int csi;
++	int ipu;
++	u8 mclk_source;
++	u8 is_mipi;
++};
++
++
+ struct fsl_mxc_camera_platform_data {
+ 	char *core_regulator;
+ 	char *io_regulator;
+ 	char *analog_regulator;
+ 	char *gpo_regulator;
+ 	u32 mclk;
++	u8 mclk_source;
+ 	u32 csi;
+ 	void (*pwdn)(int pwdn);
+ 	void (*io_init)(void);
+-- 
+1.7.7.4
+

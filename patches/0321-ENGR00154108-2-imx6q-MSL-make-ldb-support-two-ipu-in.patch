@@ -1,0 +1,77 @@
+From 6fcd675fb1a2f5fcf01eb5cc9477bea879e8f065 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Thu, 4 Aug 2011 13:19:12 +0800
+Subject: [PATCH 0321/2463] ENGR00154108-2 imx6q MSL: make ldb support two ipu
+ in separate mode
+
+make ldb support two ipu in separate mode.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx53_loco.c      |    2 +-
+ arch/arm/mach-mx5/board-mx53_smd.c       |    2 +-
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   14 +++++++++++---
+ 3 files changed, 13 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx53_loco.c b/arch/arm/mach-mx5/board-mx53_loco.c
+index 69061d5..34ec414 100755
+--- a/arch/arm/mach-mx5/board-mx53_loco.c
++++ b/arch/arm/mach-mx5/board-mx53_loco.c
+@@ -584,7 +584,7 @@ static struct fsl_mxc_ldb_platform_data ldb_data = {
+ 	.ipu_id = 0,
+ 	.disp_id = 0,
+ 	.ext_ref = 1,
+-	.mode = LDB_SIN_DI0,
++	.mode = LDB_SIN0,
+ };
+ 
+ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+diff --git a/arch/arm/mach-mx5/board-mx53_smd.c b/arch/arm/mach-mx5/board-mx53_smd.c
+index 01b197d..179464b 100755
+--- a/arch/arm/mach-mx5/board-mx53_smd.c
++++ b/arch/arm/mach-mx5/board-mx53_smd.c
+@@ -716,7 +716,7 @@ static struct fsl_mxc_ldb_platform_data ldb_data = {
+ 	.ipu_id = 0,
+ 	.disp_id = 1,
+ 	.ext_ref = 1,
+-	.mode = LDB_SIN_DI1,
++	.mode = LDB_SIN1,
+ };
+ 
+ static struct mxc_spdif_platform_data mxc_spdif_data = {
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index b78b7dd..efae0aa 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -537,6 +537,12 @@ static struct imx_asrc_platform_data imx_asrc_data = {
+ 
+ static struct ipuv3_fb_platform_data sabr_fb_data[] = {
+ 	{ /*fb0*/
++	.disp_dev = "ldb",
++	.interface_pix_fmt = IPU_PIX_FMT_RGB666,
++	.mode_str = "LDB-XGA",
++	.default_bpp = 16,
++	.int_clk = false,
++	}, {
+ 	.disp_dev = "lcd",
+ 	.interface_pix_fmt = IPU_PIX_FMT_RGB565,
+ 	.mode_str = "CLAA-WVGA",
+@@ -564,10 +570,12 @@ static struct fsl_mxc_lcd_platform_data lcdif_data = {
+ };
+ 
+ static struct fsl_mxc_ldb_platform_data ldb_data = {
+-	.ipu_id = 1,
+-	.disp_id = 0,
++	.ipu_id = 0,
++	.disp_id = 1,
+ 	.ext_ref = 1,
+-	.mode = LDB_SEP,
++	.mode = LDB_SEP0,
++	.sec_ipu_id = 1,
++	.sec_disp_id = 1,
+ };
+ 
+ static struct imx_ipuv3_platform_data ipu_data[] = {
+-- 
+1.7.7.4
+

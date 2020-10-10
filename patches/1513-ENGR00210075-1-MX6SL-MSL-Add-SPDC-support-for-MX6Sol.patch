@@ -1,0 +1,480 @@
+From b133bc80f65448950d15230b946af6ed18a46415 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Sat, 19 May 2012 10:36:46 +0800
+Subject: [PATCH 1513/2463] ENGR00210075-1 - MX6SL MSL: Add SPDC support for
+ MX6SoloLite ARM2 board
+
+- Add IOMUX pad config defines and GPIO defines
+- Add platform device/data for SPDC
+- Add IRQ number define for SPDC
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig                        |    1 +
+ arch/arm/mach-mx6/board-mx6sl_arm2.c             |  160 +++++++++++++++++++++-
+ arch/arm/mach-mx6/board-mx6sl_arm2.h             |   79 +++++++++++
+ arch/arm/mach-mx6/devices-imx6q.h                |    5 +
+ arch/arm/plat-mxc/devices/Kconfig                |    3 +
+ arch/arm/plat-mxc/devices/Makefile               |    1 +
+ arch/arm/plat-mxc/devices/platform-imx-spdc-fb.c |   56 ++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h  |    4 +
+ arch/arm/plat-mxc/include/mach/epdc.h            |   29 ++++-
+ arch/arm/plat-mxc/include/mach/mx6.h             |    2 +-
+ 10 files changed, 337 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index fd89c92..c6851d0 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -96,6 +96,7 @@ config MACH_MX6SL_ARM2
+ 	select IMX_HAVE_PLATFORM_IMX_SPDIF
+ 	select IMX_HAVE_PLATFORM_PERFMON
+ 	select IMX_HAVE_PLATFORM_IMX_EPDC
++	select IMX_HAVE_PLATFORM_IMX_SPDC
+ 	select IMX_HAVE_PLATFORM_IMX_PXP
+ 	help
+ 	  Include support for i.MX 6Sololite Armadillo2 platform. This includes specific
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 08f20f6..57d26f1 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -744,6 +744,161 @@ static struct imx_epdc_fb_platform_data epdc_data = {
+ 	.disable_pins = epdc_disable_pins,
+ };
+ 
++static int spdc_get_pins(void)
++{
++	int ret = 0;
++
++	/* Claim GPIOs for SPDC pins - used during power up/down */
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDDO_0, "SPDC_D0");
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDDO_1, "SPDC_D1");
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDDO_2, "SPDC_D2");
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDDO_3, "SPDC_D3");
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDDO_4, "SPDC_D4");
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDDO_5, "SPDC_D5");
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDDO_6, "SPDC_D6");
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDDO_7, "SPDC_D7");
++
++	ret |= gpio_request(MX6SL_ARM2_EPDC_GDOE, "SIPIX_YOE");
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDDO_9, "SIPIX_PWR_RDY");
++
++	ret |= gpio_request(MX6SL_ARM2_EPDC_GDSP, "SIPIX_YDIO");
++
++	ret |= gpio_request(MX6SL_ARM2_EPDC_GDCLK, "SIPIX_YCLK");
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDSHR, "SIPIX_XDIO");
++
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDLE, "SIPIX_LD");
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDCE1, "SIPIX_SOE");
++
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDCLK, "SIPIX_XCLK");
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDDO_10, "SIPIX_SHD_N");
++	ret |= gpio_request(MX6SL_ARM2_EPDC_SDCE0, "SIPIX2_CE");
++
++	return ret;
++}
++
++static void spdc_put_pins(void)
++{
++	gpio_free(MX6SL_ARM2_EPDC_SDDO_0);
++	gpio_free(MX6SL_ARM2_EPDC_SDDO_1);
++	gpio_free(MX6SL_ARM2_EPDC_SDDO_2);
++	gpio_free(MX6SL_ARM2_EPDC_SDDO_3);
++	gpio_free(MX6SL_ARM2_EPDC_SDDO_4);
++	gpio_free(MX6SL_ARM2_EPDC_SDDO_5);
++	gpio_free(MX6SL_ARM2_EPDC_SDDO_6);
++	gpio_free(MX6SL_ARM2_EPDC_SDDO_7);
++
++	gpio_free(MX6SL_ARM2_EPDC_GDOE);
++	gpio_free(MX6SL_ARM2_EPDC_SDDO_9);
++	gpio_free(MX6SL_ARM2_EPDC_GDSP);
++	gpio_free(MX6SL_ARM2_EPDC_GDCLK);
++	gpio_free(MX6SL_ARM2_EPDC_SDSHR);
++	gpio_free(MX6SL_ARM2_EPDC_SDLE);
++	gpio_free(MX6SL_ARM2_EPDC_SDCE1);
++	gpio_free(MX6SL_ARM2_EPDC_SDCLK);
++	gpio_free(MX6SL_ARM2_EPDC_SDDO_10);
++	gpio_free(MX6SL_ARM2_EPDC_SDCE0);
++}
++
++static void spdc_enable_pins(void)
++{
++	/* Configure MUX settings to enable SPDC use */
++	mxc_iomux_v3_setup_multiple_pads(mx6sl_arm2_spdc_enable_pads, \
++				ARRAY_SIZE(mx6sl_arm2_spdc_enable_pads));
++
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDDO_0);
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDDO_1);
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDDO_2);
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDDO_3);
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDDO_4);
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDDO_5);
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDDO_6);
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDDO_7);
++	gpio_direction_input(MX6SL_ARM2_EPDC_GDOE);
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDDO_9);
++	gpio_direction_input(MX6SL_ARM2_EPDC_GDSP);
++	gpio_direction_input(MX6SL_ARM2_EPDC_GDCLK);
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDSHR);
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDLE);
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDCE1);
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDCLK);
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDDO_10);
++	gpio_direction_input(MX6SL_ARM2_EPDC_SDCE0);
++}
++
++static void spdc_disable_pins(void)
++{
++	/* Configure MUX settings for SPDC pins to
++	 * GPIO and drive to 0. */
++	mxc_iomux_v3_setup_multiple_pads(mx6sl_arm2_spdc_disable_pads, \
++				ARRAY_SIZE(mx6sl_arm2_spdc_disable_pads));
++
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDDO_0, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDDO_1, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDDO_2, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDDO_3, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDDO_4, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDDO_5, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDDO_6, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDDO_7, 0);
++
++	gpio_direction_output(MX6SL_ARM2_EPDC_GDOE, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDDO_9, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_GDSP, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_GDCLK, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDSHR, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDLE, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDCE1, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDCLK, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDDO_10, 0);
++	gpio_direction_output(MX6SL_ARM2_EPDC_SDCE0, 0);
++}
++
++static struct imx_spdc_panel_init_set spdc_init_set = {
++	.yoe_pol = false,
++	.dual_gate = false,
++	.resolution = 0,
++	.ud = false,
++	.rl = false,
++	.data_filter_n = true,
++	.power_ready = true,
++	.rgbw_mode_enable = false,
++	.hburst_len_en = true,
++};
++
++static struct fb_videomode erk_1_4_a01 = {
++	.name = "ERK_1_4_A01",
++	.refresh = 50,
++	.xres = 800,
++	.yres = 600,
++	.pixclock = 40000000,
++	.vmode = FB_VMODE_NONINTERLACED,
++};
++
++static struct imx_spdc_fb_mode spdc_panel_modes[] = {
++	{
++		&erk_1_4_a01,
++		&spdc_init_set,
++		.wave_timing = "pvi"
++	},
++};
++
++static struct imx_spdc_fb_platform_data spdc_data = {
++	.spdc_mode = spdc_panel_modes,
++	.num_modes = ARRAY_SIZE(spdc_panel_modes),
++	.get_pins = spdc_get_pins,
++	.put_pins = spdc_put_pins,
++	.enable_pins = spdc_enable_pins,
++	.disable_pins = spdc_disable_pins,
++};
++
++#if defined(CONFIG_FB_MXC_SIPIX_PANEL)
++static void setup_spdc(void)
++{
++	/* GPR0[8]: 0:EPDC, 1:SPDC */
++	mxc_iomux_set_gpr_register(0, 8, 1, 1);
++}
++#endif
++
+ static void imx6_arm2_usbotg_vbus(bool on)
+ {
+ 	if (on)
+@@ -863,7 +1018,10 @@ static void __init mx6_arm2_init(void)
+ 	imx6dl_add_imx_pxp_client();
+ 	mxc_register_device(&max17135_sensor_device, NULL);
+ 	imx6dl_add_imx_epdc(&epdc_data);
+-
++#if defined(CONFIG_FB_MXC_SIPIX_PANEL)
++	setup_spdc();
++#endif
++	imx6sl_add_imx_spdc(&spdc_data);
+ 	imx6q_add_dvfs_core(&mx6sl_arm2_dvfscore_data);
+ 
+     imx6q_init_audio();
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.h b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+index cce5737..f4cc7fe 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.h
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+@@ -225,4 +225,83 @@ static iomux_v3_cfg_t mx6sl_arm2_epdc_disable_pads[] = {
+ 	MX6SL_PAD_EPDC_PWRWAKEUP__GPIO_2_14,
+ };
+ 
++static iomux_v3_cfg_t mx6sl_arm2_spdc_enable_pads[] = {
++	/* SPDC data*/
++	MX6SL_PAD_EPDC_D0__TCON_E_DATA_0,
++	MX6SL_PAD_EPDC_D1__TCON_E_DATA_1,
++	MX6SL_PAD_EPDC_D2__TCON_E_DATA_2,
++	MX6SL_PAD_EPDC_D3__TCON_E_DATA_3,
++	MX6SL_PAD_EPDC_D4__TCON_E_DATA_4,
++	MX6SL_PAD_EPDC_D5__TCON_E_DATA_5,
++	MX6SL_PAD_EPDC_D6__TCON_E_DATA_6,
++	MX6SL_PAD_EPDC_D7__TCON_E_DATA_7,
++
++	MX6SL_PAD_EPDC_GDOE__TCON_YOEL,   /* AUO panel SIPIX_YOE */
++
++	MX6SL_PAD_EPDC_D9__TCON_E_DATA_9, /* AUO panel SIPIX_PWR_RDY*/
++
++	MX6SL_PAD_EPDC_SDCE2__TCON_YDIOUR, /* AUO panel SIPIX_YDIO */
++	MX6SL_PAD_EPDC_SDCE3__TCON_YDIODR, /* AUO panel SIPIX_YDIO */
++	MX6SL_PAD_EPDC_GDRL__TCON_YDIOUL,  /* AUO panel SIPIX_YDIO */
++	MX6SL_PAD_EPDC_GDSP__TCON_YDIODL,  /* SIPIX_YDIO/SIPIX2_SPV */
++
++	MX6SL_PAD_EPDC_GDCLK__TCON_YCKL,  /* SIPIX_YCLK/SIPIX2_CKV */
++
++	MX6SL_PAD_EPDC_SDSHR__TCON_XDIOR, /* AUO panel SIPIX_XDIO */
++	MX6SL_PAD_EPDC_SDOE__TCON_XDIOL,  /* SIPIX_XDIO/SIPIX2_OE */
++
++	MX6SL_PAD_EPDC_SDLE__TCON_LD,     /* SIPIX_LD/SIPIX2_LE */
++
++	MX6SL_PAD_EPDC_SDCE1__TCON_YOER,  /* AUO panel SIPIX_SOE */
++	MX6SL_PAD_EPDC_BDR0__TCON_RL,     /* AUO panel SIPIX_SOE */
++	MX6SL_PAD_EPDC_BDR1__TCON_UD,     /* AUO panel SIPIX_SOE */
++
++	MX6SL_PAD_EPDC_SDCLK__TCON_CL,    /* SIPIX_XCLK/SIPIX2_CL */
++
++	MX6SL_PAD_EPDC_D10__TCON_E_DATA_10, /* AUO panel SIPIX_SHD_N */
++
++	MX6SL_PAD_EPDC_SDCE0__TCON_YCKR,  /* LG panel SIPIX2_CE */
++
++	/* EPD PMIC (Maxim 17135) pins */
++	MX6SL_PAD_EPDC_VCOM0__GPIO_2_3, /* PMICA_CEN */
++	MX6SL_PAD_EPDC_PWRSTAT__GPIO_2_13,
++	MX6SL_PAD_EPDC_PWRCTRL0__GPIO_2_7,
++	MX6SL_PAD_EPDC_PWRWAKEUP__GPIO_2_14,
++};
++
++static iomux_v3_cfg_t mx6sl_arm2_spdc_disable_pads[] = {
++	MX6SL_PAD_EPDC_D0__GPIO_1_7,
++	MX6SL_PAD_EPDC_D1__GPIO_1_8,
++	MX6SL_PAD_EPDC_D2__GPIO_1_9,
++	MX6SL_PAD_EPDC_D3__GPIO_1_10,
++	MX6SL_PAD_EPDC_D4__GPIO_1_11,
++	MX6SL_PAD_EPDC_D5__GPIO_1_12,
++	MX6SL_PAD_EPDC_D6__GPIO_1_13,
++	MX6SL_PAD_EPDC_D7__GPIO_1_14,
++
++	MX6SL_PAD_EPDC_SDCE1__GPIO_1_28,
++	MX6SL_PAD_EPDC_GDOE__GPIO_2_0,
++	MX6SL_PAD_EPDC_D9__GPIO_1_16,
++	MX6SL_PAD_EPDC_SDCE2__GPIO_1_29,
++	MX6SL_PAD_EPDC_SDCE3__GPIO_1_30,
++	MX6SL_PAD_EPDC_GDRL__GPIO_2_1,
++	MX6SL_PAD_EPDC_GDSP__GPIO_2_2,
++	MX6SL_PAD_EPDC_GDCLK__GPIO_1_31,
++	MX6SL_PAD_EPDC_SDSHR__GPIO_1_26,
++	MX6SL_PAD_EPDC_SDOE__GPIO_1_25,
++	MX6SL_PAD_EPDC_SDLE__GPIO_1_24,
++	MX6SL_PAD_EPDC_SDCE1__GPIO_1_28,
++	MX6SL_PAD_EPDC_BDR0__GPIO_2_5,
++	MX6SL_PAD_EPDC_BDR1__GPIO_2_6,
++	MX6SL_PAD_EPDC_SDCLK__GPIO_1_23,
++	MX6SL_PAD_EPDC_D10__GPIO_1_17,
++	MX6SL_PAD_EPDC_SDCE0__GPIO_1_27,
++
++	/* EPD PMIC (Maxim 17135) pins */
++	MX6SL_PAD_EPDC_VCOM0__GPIO_2_3,
++	MX6SL_PAD_EPDC_PWRSTAT__GPIO_2_13,
++	MX6SL_PAD_EPDC_PWRCTRL0__GPIO_2_7,
++	MX6SL_PAD_EPDC_PWRWAKEUP__GPIO_2_14,
++};
++
+ #endif
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index ae72fa1..6f8b485 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -223,6 +223,11 @@ extern const struct imx_pxp_data imx6dl_pxp_data __initconst;
+ extern const struct imx_epdc_data imx6dl_epdc_data __initconst;
+ #define imx6dl_add_imx_epdc(pdata)	\
+ 	imx_add_imx_epdc(&imx6dl_epdc_data, pdata)
++
++extern const struct imx_epdc_data imx6sl_spdc_data __initconst;
++#define imx6sl_add_imx_spdc(pdata)	\
++	imx_add_imx_spdc(&imx6sl_spdc_data, pdata)
++
+ extern const struct imx_elcdif_data imx6dl_elcdif_data __initconst;
+ #define imx6dl_add_imx_elcdif(pdata)	\
+ 	imx_add_imx_elcdif(&imx6dl_elcdif_data, pdata)
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index 7358432..bdea66b 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -147,6 +147,9 @@ config IMX_HAVE_PLATFORM_IMX_ELCDIF
+ config IMX_HAVE_PLATFORM_IMX_EPDC
+ 	bool
+ 
++config IMX_HAVE_PLATFORM_IMX_SPDC
++	bool
++
+ config IMX_HAVE_PLATFORM_IMX_SPDIF
+ 	bool
+ 
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index e0e7eb7..386b9cb 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -47,6 +47,7 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_LDB) += platform-imx_ldb.o
+ obj-y += platform-imx-scc2.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_PXP) += platform-imx-pxp.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_EPDC) += platform-imx-epdc-fb.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_SPDC) += platform-imx-spdc-fb.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_ELCDIF) += platform-imx-elcdif-fb.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_SPDIF) += platform-imx-spdif.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_SPDIF) += platform-imx-spdif-dai.o
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-spdc-fb.c b/arch/arm/plat-mxc/devices/platform-imx-spdc-fb.c
+new file mode 100644
+index 0000000..72010e2
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx-spdc-fb.c
+@@ -0,0 +1,56 @@
++/*
++ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <asm/sizes.h>
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++
++#define imx_spdc_data_entry_single(soc, size)	\
++	{								\
++		.iobase = soc ## _SIPIX_BASE_ADDR,			\
++		.irq = soc ## _INT_SPDC,				\
++		.iosize = size,						\
++	}
++
++#ifdef CONFIG_SOC_IMX6SL
++const struct imx_epdc_data imx6sl_spdc_data __initconst =
++			imx_spdc_data_entry_single(MX6SL, SZ_16K);
++#endif
++
++struct platform_device *__init imx_add_imx_spdc(
++		const struct imx_epdc_data *data,
++		const struct imx_spdc_fb_platform_data *pdata)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + data->iosize - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.start = data->irq,
++			.end = data->irq,
++			.flags = IORESOURCE_IRQ,
++		},
++	};
++
++	return imx_add_platform_device_dmamask("imx_spdc_fb", -1,
++		res, ARRAY_SIZE(res), pdata, sizeof(*pdata), DMA_BIT_MASK(32));
++}
++
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 58d0e20..eaddb7e 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -489,6 +489,10 @@ struct platform_device *__init imx_add_imx_epdc(
+ 		const struct imx_epdc_data *data,
+ 		const struct imx_epdc_fb_platform_data *pdata);
+ 
++struct platform_device *__init imx_add_imx_spdc(
++		const struct imx_epdc_data *data,
++		const struct imx_spdc_fb_platform_data *pdata);
++
+ struct imx_spdif_data {
+ 	resource_size_t iobase;
+ 	resource_size_t irq;
+diff --git a/arch/arm/plat-mxc/include/mach/epdc.h b/arch/arm/plat-mxc/include/mach/epdc.h
+index 89abcc6..36aac88 100644
+--- a/arch/arm/plat-mxc/include/mach/epdc.h
++++ b/arch/arm/plat-mxc/include/mach/epdc.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+  *
+  * This program is free software; you can redistribute it and/or modify it
+  * under the terms of the GNU General Public License as published by the
+@@ -38,4 +38,31 @@ struct imx_epdc_fb_platform_data {
+     void (*disable_pins) (void);
+ };
+ 
++struct imx_spdc_panel_init_set {
++    bool yoe_pol;
++    bool dual_gate;
++    u8 resolution;
++    bool ud;
++    bool rl;
++    bool data_filter_n;
++    bool power_ready;
++    bool rgbw_mode_enable;
++    bool hburst_len_en;
++};
++
++struct imx_spdc_fb_mode {
++    struct fb_videomode *vmode;
++    struct imx_spdc_panel_init_set *init_set;
++    const char *wave_timing;
++};
++
++struct imx_spdc_fb_platform_data {
++    struct imx_spdc_fb_mode *spdc_mode;
++    int num_modes;
++    int (*get_pins) (void);
++    void (*put_pins) (void);
++    void (*enable_pins) (void);
++    void (*disable_pins) (void);
++};
++
+ #endif /* __MACH_EPDC_H_ */
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 1042410..51c047a 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -324,7 +324,7 @@
+ #define MX6Q_INT_IPU1_ERR		37
+ #define MX6DL_INT_RNGB			37
+ #define MX6Q_INT_IPU1_SYN		38
+-#define MX6DL_INT_SPDC			38
++#define MX6SL_INT_SPDC			38
+ #define MX6Q_INT_IPU2_ERR		39
+ #define MX6DL_INT_CSI			39
+ #define MX6Q_INT_IPU2_SYN		40
+-- 
+1.7.7.4
+

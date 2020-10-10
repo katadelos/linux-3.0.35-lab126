@@ -1,0 +1,46 @@
+From f2234f20edbc415ac837388a1d7fcf2771325b08 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Wed, 24 Oct 2012 12:31:59 +0800
+Subject: [PATCH 2179/2463] ENGR00230920-1 HDMI AUDIO: add support for HDMI
+ audio module build
+
+HDMI driver can be divided into 3 parts: machine driver, platform
+driver, codec driver.To support HDMI AUDIO loadable module build, HDMI
+machine driver should be built as loadable.
+
+In this patch, adjust HDMI audio driver's struct: move HDMI audio platform
+ driver to snd-soc-imx-objs(snd-soc-imx-objs would always be
+build-in).In this case, user need only build HDMI AUDIO machine driver
+as loadable.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ sound/soc/imx/Makefile |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/sound/soc/imx/Makefile b/sound/soc/imx/Makefile
+index adeef06..cc0a7d9 100644
+--- a/sound/soc/imx/Makefile
++++ b/sound/soc/imx/Makefile
+@@ -1,7 +1,7 @@
+ # i.MX Platform Support
+-snd-soc-imx-objs := imx-ssi.o imx-esai.o
++snd-soc-imx-objs := imx-ssi.o imx-esai.o imx-hdmi-dai.o hdmi_pcm.o
+ snd-soc-imx-fiq-objs := imx-pcm-fiq.o
+-snd-soc-imx-mx2-objs := imx-pcm-dma-mx2.o
++snd-soc-imx-mx2-objs := imx-pcm-dma-mx2.o imx-hdmi-dma.o
+ snd-soc-imx-spdif-dai-objs := imx-spdif-dai.o
+ 
+ obj-$(CONFIG_SND_IMX_SOC) += snd-soc-imx.o
+@@ -20,7 +20,7 @@ snd-soc-imx-sgtl5000-objs := imx-sgtl5000.o
+ snd-soc-imx-cs42888-objs := imx-cs42888.o
+ snd-soc-imx-spdif-objs := imx-spdif.o
+ snd-soc-imx-si4763-objs := imx-si4763.o
+-snd-soc-imx-hdmi-objs := imx-hdmi.o imx-hdmi-dai.o imx-hdmi-dma.o hdmi_pcm.o
++snd-soc-imx-hdmi-objs := imx-hdmi.o
+ 
+ obj-$(CONFIG_SND_SOC_EUKREA_TLV320) += snd-soc-eukrea-tlv320.o
+ obj-$(CONFIG_SND_SOC_PHYCORE_AC97) += snd-soc-phycore-ac97.o
+-- 
+1.7.7.4
+

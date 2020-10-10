@@ -1,0 +1,30 @@
+From d309501fa04400c2da49cd18c562095318dc29b2 Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Tue, 21 Feb 2012 12:35:20 -0600
+Subject: [PATCH 1065/2463] ENGR00174925 HDMI Kernel panic whatever plug in or
+ plug out
+
+Panic is due to runtime being a NULL pointer.
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ sound/soc/imx/imx-hdmi-dma.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/sound/soc/imx/imx-hdmi-dma.c b/sound/soc/imx/imx-hdmi-dma.c
+index eae530d..930cc2c 100644
+--- a/sound/soc/imx/imx-hdmi-dma.c
++++ b/sound/soc/imx/imx-hdmi-dma.c
+@@ -314,7 +314,8 @@ static irqreturn_t hdmi_dma_isr(int irq, void *dev_id)
+ 	status = hdmi_dma_get_irq_status();
+ 	hdmi_dma_clear_irq_status(status);
+ 
+-	if (runtime->dma_area && rtd->tx_active && (status & HDMI_IH_AHBDMAAUD_STAT0_DONE)) {
++	if (runtime && runtime->dma_area && rtd->tx_active &&
++	    (status & HDMI_IH_AHBDMAAUD_STAT0_DONE)) {
+ 		rtd->offset += rtd->period_bytes;
+ 		rtd->offset %= rtd->period_bytes * rtd->periods;
+ 
+-- 
+1.7.7.4
+

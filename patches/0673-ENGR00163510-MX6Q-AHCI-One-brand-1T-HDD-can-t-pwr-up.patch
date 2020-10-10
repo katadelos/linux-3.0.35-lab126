@@ -1,0 +1,55 @@
+From 2c91239ee6a81dfe2cb230b9a8fed755c74d216d Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Wed, 30 Nov 2011 15:28:52 +0800
+Subject: [PATCH 0673/2463] ENGR00163510 MX6Q: AHCI: One brand 1T HDD can't
+ pwr up properly
+
+More time is required by one brand 1T HDD,
+change the delay mechanism to fix it.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c |   20 +++++++++++++-------
+ 1 files changed, 13 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 8adf623..c806999 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -816,7 +816,7 @@ static struct viv_gpu_platform_data imx6q_gpu_pdata __initdata = {
+ static int mx6q_arm2_sata_init(struct device *dev, void __iomem *addr)
+ {
+ 	u32 tmpdata;
+-	int ret = 0;
++	int ret = 0, iterations = 20;
+ 	struct clk *clk;
+ 
+ 	/* Enable SATA PWR CTRL_0 of MAX7310 */
+@@ -868,12 +868,18 @@ static int mx6q_arm2_sata_init(struct device *dev, void __iomem *addr)
+ 	sata_init(addr, tmpdata);
+ 
+ 	/* Release resources when there is no device on the port */
+-	msleep(200);
+-	if ((readl(addr + PORT_SATA_SR) & 0xF) == 0) {
+-		dev_info(dev, "NO sata disk.\n");
+-		ret = -ENODEV;
+-		goto release_sata_clk;
+-	}
++	do {
++		if ((readl(addr + PORT_SATA_SR) & 0xF) == 0)
++			msleep(25);
++		else
++			break;
++
++		if (iterations == 0) {
++			dev_info(dev, "NO sata disk.\n");
++			ret = -ENODEV;
++			goto release_sata_clk;
++		}
++	} while (iterations-- > 0);
+ 
+ 	return ret;
+ 
+-- 
+1.7.7.4
+

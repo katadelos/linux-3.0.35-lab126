@@ -1,0 +1,95 @@
+From 086dd2583e9770a4ce8a4c28ad380c997e6f1cd2 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Wed, 10 Aug 2011 10:20:38 +0800
+Subject: [PATCH 0335/2463] ENGR00154648 [Mx6]SMP hotplug sometimes hang
+
+1. boot_secondary ioremap need unmap, or the
+stress test of hot-plug and suspend/resume will
+cause the virtual address space leak;
+
+2. Disable secondary CPUs need done by CPU0, move
+the SRC_SCR setting to platform_cpu_kill.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/plat_hotplug.c |   34 +++++++++++++++++++++++-----------
+ arch/arm/mach-mx6/platsmp.c      |    2 ++
+ 2 files changed, 25 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/plat_hotplug.c b/arch/arm/mach-mx6/plat_hotplug.c
+index 6ef057f..3a124b0 100644
+--- a/arch/arm/mach-mx6/plat_hotplug.c
++++ b/arch/arm/mach-mx6/plat_hotplug.c
+@@ -26,9 +26,28 @@
+ #include <linux/sched.h>
+ #include <asm/cacheflush.h>
+ 
+-
++static atomic_t cpu_die_done = ATOMIC_INIT(0);
+ int platform_cpu_kill(unsigned int cpu)
+ {
++	void __iomem *src_base = IO_ADDRESS(SRC_BASE_ADDR);
++	unsigned int val;
++
++	val = jiffies;
++	/* wait secondary cpu to die, timeout is 500ms */
++	while (atomic_read(&cpu_die_done) == 0) {
++		if (time_after(jiffies, (unsigned long)(val + HZ / 2))) {
++			printk(KERN_WARNING "cpu %d: cpu could not die\n", cpu);
++			break;
++		}
++	}
++	/*
++	 * we're ready for shutdown now, so do it
++	 */
++	val = readl(src_base + SRC_SCR_OFFSET);
++	val &= ~(1 << (BP_SRC_SCR_CORES_DBG_RST + cpu));
++	writel(val, src_base + SRC_SCR_OFFSET);
++
++	atomic_set(&cpu_die_done, 0);
+ 	return 1;
+ }
+ 
+@@ -38,23 +57,16 @@ int platform_cpu_kill(unsigned int cpu)
+  */
+ void platform_cpu_die(unsigned int cpu)
+ {
+-	void __iomem *src_base = IO_ADDRESS(SRC_BASE_ADDR);
+-	unsigned int val;
+-
+ 	if (cpu == 0) {
+ 		printk(KERN_ERR "CPU0 can't be disabled!\n");
+ 		return;
+ 	}
++
+ 	flush_cache_all();
+ 	dsb();
+ 
+-	/*
+-	 * we're ready for shutdown now, so do it
+-	 */
+-	val = readl(src_base + SRC_SCR_OFFSET);
+-	val &= ~(1 << (BP_SRC_SCR_CORES_DBG_RST + cpu));
+-	writel(val, src_base + SRC_SCR_OFFSET);
+-
++	/* tell cpu0 to kill me */
++	atomic_set(&cpu_die_done, 1);
+ 	for (;;) {
+ 		/*
+ 		 * Execute WFI
+diff --git a/arch/arm/mach-mx6/platsmp.c b/arch/arm/mach-mx6/platsmp.c
+index 123063b..5155efe 100644
+--- a/arch/arm/mach-mx6/platsmp.c
++++ b/arch/arm/mach-mx6/platsmp.c
+@@ -104,6 +104,8 @@ int __cpuinit boot_secondary(unsigned int cpu, struct task_struct *idle)
+ 	writel(0, src_base + SRC_GPR1_OFFSET + 4 * 2 * cpu + 4);
+ 	smp_send_reschedule(cpu);
+ 
++	/* unmap iram base */
++	iounmap(boot_iram_base);
+ 	/*
+ 	* now the secondary core is starting up let it run its
+ 	* calibrations, then wait for it to finish
+-- 
+1.7.7.4
+

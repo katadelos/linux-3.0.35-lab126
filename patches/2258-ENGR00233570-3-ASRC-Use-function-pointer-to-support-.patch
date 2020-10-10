@@ -1,0 +1,54 @@
+From d878a76a445ba49ba28b960175f7c5123170f7e1 Mon Sep 17 00:00:00 2001
+From: Ge Lei <b42127@freescale.com>
+Date: Thu, 15 Nov 2012 14:58:33 +0800
+Subject: [PATCH 2258/2463] ENGR00233570-3 ASRC: Use function pointer to
+ support ASRC loadable
+
+In ASoC ESAI machine driver, use ASRC ops instead of directly use ASRC
+function calling, so that it can support ASRC loadable.
+
+Signed-off-by: Ge Lei <b42127@freescale.com>
+---
+ sound/soc/imx/imx-cs42888.c |   12 ++++++++----
+ 1 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/sound/soc/imx/imx-cs42888.c b/sound/soc/imx/imx-cs42888.c
+index acec900..62d221f 100644
+--- a/sound/soc/imx/imx-cs42888.c
++++ b/sound/soc/imx/imx-cs42888.c
+@@ -82,7 +82,8 @@ static int config_asrc(struct snd_pcm_substream *substream,
+ 	if ((channel != 2) && (channel != 4) && (channel != 6))
+ 		return -EINVAL;
+ 
+-	ret = asrc_req_pair(channel, &iprtd->asrc_index);
++	ret = iprtd->asrc_pcm_p2p_ops_ko->
++				asrc_p2p_req_pair(channel, &iprtd->asrc_index);
+ 	if (ret < 0) {
+ 		pr_err("Fail to request asrc pair\n");
+ 		return -EINVAL;
+@@ -97,7 +98,7 @@ static int config_asrc(struct snd_pcm_substream *substream,
+ 	config.inclk = INCLK_NONE;
+ 	config.outclk = OUTCLK_ESAI_TX;
+ 
+-	ret = asrc_config_pair(&config);
++	ret = iprtd->asrc_pcm_p2p_ops_ko->asrc_p2p_config_pair(&config);
+ 	if (ret < 0) {
+ 		pr_err("Fail to config asrc\n");
+ 		return ret;
+@@ -142,8 +143,11 @@ static int imx_3stack_surround_hw_free(struct snd_pcm_substream *substream)
+ 
+ 	if (iprtd->asrc_enable) {
+ 		if (iprtd->asrc_index != -1) {
+-			asrc_release_pair(iprtd->asrc_index);
+-			asrc_finish_conv(iprtd->asrc_index);
++			iprtd->asrc_pcm_p2p_ops_ko->
++					asrc_p2p_release_pair(
++						iprtd->asrc_index);
++			iprtd->asrc_pcm_p2p_ops_ko->
++				asrc_p2p_finish_conv(iprtd->asrc_index);
+ 		}
+ 		iprtd->asrc_index = -1;
+ 	}
+-- 
+1.7.7.4
+

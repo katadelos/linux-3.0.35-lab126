@@ -1,0 +1,58 @@
+From e8da993468f0a42f07b4604a345fbc695e3b29d7 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Wed, 14 Dec 2011 13:10:34 +0800
+Subject: [PATCH 0743/2463] ENGR00170244-4 ARM: AHCI: Enable PDDQ mode on mx6
+ sabrelite board
+
+In order to save the power consumption, enable the
+PDDQ mode of AHCI PHY when there is no sata disk
+on the port
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |   22 ++++------------------
+ 1 files changed, 4 insertions(+), 18 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index d937d22..8295e73 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -589,7 +589,7 @@ static void __init imx6q_sabrelite_init_usb(void)
+ static int mx6q_sabrelite_sata_init(struct device *dev, void __iomem *addr)
+ {
+ 	u32 tmpdata;
+-	int ret = 0, iterations = 20;
++	int ret = 0;
+ 	struct clk *clk;
+ 
+ 	sata_clk = clk_get(dev, "imx_sata_clk");
+@@ -634,23 +634,9 @@ static int mx6q_sabrelite_sata_init(struct device *dev, void __iomem *addr)
+ 	tmpdata = clk_get_rate(clk) / 1000;
+ 	clk_put(clk);
+ 
+-	sata_init(addr, tmpdata);
+-
+-	/* Release resources when there is no device on the port */
+-	do {
+-		if ((readl(addr + PORT_SATA_SR) & 0xF) == 0)
+-			msleep(25);
+-		else
+-			break;
+-
+-		if (iterations == 0) {
+-			dev_info(dev, "NO sata disk.\n");
+-			ret = -ENODEV;
+-			goto release_sata_clk;
+-		}
+-	} while (iterations-- > 0);
+-
+-	return ret;
++	ret = sata_init(addr, tmpdata);
++	if (ret == 0)
++		return ret;
+ 
+ release_sata_clk:
+ 	clk_disable(sata_clk);
+-- 
+1.7.7.4
+

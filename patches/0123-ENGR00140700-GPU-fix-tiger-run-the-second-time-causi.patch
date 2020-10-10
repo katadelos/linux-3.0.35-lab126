@@ -1,0 +1,30 @@
+From df7963e6b09720235ce0856c68e2b842e21eb70a Mon Sep 17 00:00:00 2001
+From: Richard Zhao <richard.zhao@freescale.com>
+Date: Wed, 16 Mar 2011 10:37:52 +0800
+Subject: [PATCH 0123/2463] ENGR00140700 GPU: fix tiger run the second time
+ causing system hang
+
+The root cause is endless GSL_INTR_BLOCK_YDX_CP interrupt.
+Apply interrupt status read work around only when yamato started.
+
+Signed-off-by: Richard Zhao <richard.zhao@freescale.com>
+---
+ drivers/mxc/amd-gpu/common/gsl_intrmgr.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/amd-gpu/common/gsl_intrmgr.c b/drivers/mxc/amd-gpu/common/gsl_intrmgr.c
+index cba9fc3..ae2eb4a 100644
+--- a/drivers/mxc/amd-gpu/common/gsl_intrmgr.c
++++ b/drivers/mxc/amd-gpu/common/gsl_intrmgr.c
+@@ -59,7 +59,7 @@ kgsl_intr_decode(gsl_device_t *device, gsl_intrblock_t block_id)
+ 
+     // read the block's interrupt status bits
+     /* exclude CP block here to avoid hang in heavy loading with VPU+GPU */
+-    if (block_id == GSL_INTR_BLOCK_YDX_CP) {
++    if ((block_id == GSL_INTR_BLOCK_YDX_CP) && (device->flags & GSL_FLAGS_STARTED)) {
+ 	status = 0x80000000;
+     } else {
+ 	device->ftbl.device_regread(device, block->status_reg, &status);
+-- 
+1.7.7.4
+

@@ -1,0 +1,130 @@
+From 55d8abfd8bbdd4b3bc622bf4a24135ddb6461bf9 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Thu, 27 Sep 2012 22:47:20 +0800
+Subject: [PATCH 2109/2463] ENGR00225981-7 csi: Unify the api set_mclk_rate
+
+For CSI on MX6SL, there's only 1 CSI and hence no need to change csi souce.
+We add this parameter just for compatibility.
+
+Adjust the called api in related camera drivers.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ drivers/media/video/mxc/capture/mt9v111.c          |    4 +-
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.h |    6 ----
+ drivers/media/video/mxc/capture/ov2640.c           |    4 +-
+ drivers/media/video/mxc/capture/sensor_clock.c     |   28 +------------------
+ 4 files changed, 6 insertions(+), 36 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/mt9v111.c b/drivers/media/video/mxc/capture/mt9v111.c
+index 4305c56..3ae65db 100644
+--- a/drivers/media/video/mxc/capture/mt9v111.c
++++ b/drivers/media/video/mxc/capture/mt9v111.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -879,7 +879,7 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+ 
+ 	gpio_sensor_active();
+ 
+-	set_mclk_rate(&clock_rate);
++	set_mclk_rate(&clock_rate, 0);
+ 	mt9v111_rate_cal(&reset_frame_rate, clock_rate);
+ 	mt9v111_sensor_lib(mt9v111_device.coreReg, mt9v111_device.ifpReg);
+ 
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+index 26b14a3..034fd16 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+@@ -244,11 +244,5 @@ struct sensor_data {
+ 	void (*io_init)(void);
+ };
+ 
+-#if defined(CONFIG_MXC_IPU_V1) || defined(CONFIG_VIDEO_MXC_EMMA_CAMERA) \
+-			       || defined(CONFIG_VIDEO_MXC_CSI_CAMERA_MODULE) \
+-			       || defined(CONFIG_VIDEO_MXC_CSI_CAMERA)
+-void set_mclk_rate(uint32_t *p_mclk_freq);
+-#else
+ void set_mclk_rate(uint32_t *p_mclk_freq, uint32_t csi);
+-#endif
+ #endif				/* __MXC_V4L2_CAPTURE_H__ */
+diff --git a/drivers/media/video/mxc/capture/ov2640.c b/drivers/media/video/mxc/capture/ov2640.c
+index a0a050b..24ebd50 100644
+--- a/drivers/media/video/mxc/capture/ov2640.c
++++ b/drivers/media/video/mxc/capture/ov2640.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -801,7 +801,7 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+ 
+ 	pr_debug("   Setting mclk to %d MHz\n",
+ 		tgt_xclk / 1000000);
+-	set_mclk_rate(&ov2640_data.mclk);
++	set_mclk_rate(&ov2640_data.mclk, 0);
+ 
+ 	return ov2640_init_mode(sensor);
+ }
+diff --git a/drivers/media/video/mxc/capture/sensor_clock.c b/drivers/media/video/mxc/capture/sensor_clock.c
+index 8004aee..150659f 100644
+--- a/drivers/media/video/mxc/capture/sensor_clock.c
++++ b/drivers/media/video/mxc/capture/sensor_clock.c
+@@ -26,31 +26,6 @@
+ #include <mach/hardware.h>
+ #include <asm/mach-types.h>
+ 
+-#if defined(CONFIG_MXC_IPU_V1) || defined(CONFIG_VIDEO_MXC_EMMA_CAMERA) \
+-			       || defined(CONFIG_VIDEO_MXC_CSI_CAMERA_MODULE) \
+-			       || defined(CONFIG_VIDEO_MXC_CSI_CAMERA)
+-/*
+- * set_mclk_rate
+- *
+- * @param       p_mclk_freq  mclk frequence
+- *
+- */
+-void set_mclk_rate(uint32_t *p_mclk_freq)
+-{
+-	struct clk *clk;
+-	uint32_t freq = 0;
+-
+-	clk = clk_get(NULL, "csi_clk");
+-
+-	freq = clk_round_rate(clk, *p_mclk_freq);
+-	clk_set_rate(clk, freq);
+-
+-	*p_mclk_freq = freq;
+-
+-	clk_put(clk);
+-	pr_debug("mclk frequency = %d\n", *p_mclk_freq);
+-}
+-#else
+ /*
+  * set_mclk_rate
+  *
+@@ -81,6 +56,8 @@ void set_mclk_rate(uint32_t *p_mclk_freq, uint32_t csi)
+ 			pr_err("invalid csi num %d\n", csi);
+ 			return;
+ 		};
++	} else if (cpu_is_mx25() || cpu_is_mx6sl()) {	/* only has CSI0 */
++		mclk = "csi_clk";
+ 	} else {
+ 		if (csi == 0) {
+ 			mclk = "csi_mclk1";
+@@ -102,7 +79,6 @@ void set_mclk_rate(uint32_t *p_mclk_freq, uint32_t csi)
+ 	clk_put(clk);
+ 	pr_debug("%s frequency = %d\n", mclk, *p_mclk_freq);
+ }
+-#endif
+ 
+ /* Exported symbols for modules. */
+ EXPORT_SYMBOL(set_mclk_rate);
+-- 
+1.7.7.4
+

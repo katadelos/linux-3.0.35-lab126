@@ -1,0 +1,49 @@
+From 0b68422b6b1ad89c488675fb0225997360fe6dc4 Mon Sep 17 00:00:00 2001
+From: Adrian Alonso <aalonso@freescale.com>
+Date: Mon, 10 Dec 2012 18:40:38 -0600
+Subject: [PATCH 2346/2463] ENGR00237364: board-mx6q_sabreauto fix adv7180
+ tvin powerdown
+
+* Fix adv7180 tvin powerdown function
+  gpio power pin already exported in io-mux setup function
+  no need to request/free gpio
+* Update copyrigth year 2013.
+
+Signed-off-by: Adrian Alonso <aalonso@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   12 +++---------
+ 1 files changed, 3 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index bd51ddd..a90ade9 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -621,16 +621,10 @@ static struct pca953x_platform_data max7310_u43_platdata = {
+ 
+ static void adv7180_pwdn(int pwdn)
+ {
+-	int status = -1;
+-
+-	status = gpio_request(SABREAUTO_VIDEOIN_PWR, "tvin-pwr");
+-
+ 	if (pwdn)
+-		gpio_direction_output(SABREAUTO_VIDEOIN_PWR, 0);
++		gpio_set_value_cansleep(SABREAUTO_VIDEOIN_PWR, 0);
+ 	else
+-		gpio_direction_output(SABREAUTO_VIDEOIN_PWR, 1);
+-
+-	gpio_free(SABREAUTO_VIDEOIN_PWR);
++		gpio_set_value_cansleep(SABREAUTO_VIDEOIN_PWR, 1);
+ }
+ 
+ static void mx6q_csi0_io_init(void)
+-- 
+1.7.7.4
+

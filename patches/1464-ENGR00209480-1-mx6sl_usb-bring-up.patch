@@ -1,0 +1,174 @@
+From 21aa50c85e214dceb4a1b7d0753131e1e59a7359 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Sat, 28 Apr 2012 10:47:21 +0800
+Subject: [PATCH 1464/2463] ENGR00209480-1 mx6sl_usb bring up
+
+- add usb otg power gpio control
+- change cpu_is_mx6x() to cpu_is_mx6
+- enable usb hsic support
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_arm2.c |   43 ++++++++++++++++++++++++++++++++++
+ arch/arm/mach-mx6/board-mx6sl_arm2.h |   13 ++++++++++
+ arch/arm/mach-mx6/usb_h2.c           |    4 +++
+ arch/arm/plat-mxc/usb_common.c       |    8 +++---
+ 4 files changed, 64 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 2298e17..3879b8d 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -73,6 +73,8 @@
+ #include "cpu_op-mx6.h"
+ #include "board-mx6sl_arm2.h"
+ 
++#define MX6_ARM2_USBOTG1_PWR    IMX_GPIO_NR(4, 0)       /* KEY_COL4 */
++#define MX6_ARM2_USBOTG2_PWR    IMX_GPIO_NR(4, 2)       /* KEY_COL5 */
+ #define MX6_ARM2_SD1_WP		IMX_GPIO_NR(4, 6)	/* KEY_COL7 */
+ #define MX6_ARM2_SD1_CD		IMX_GPIO_NR(4, 7)	/* KEY_ROW7 */
+ #define MX6_ARM2_SD2_WP		IMX_GPIO_NR(4, 29)	/* SD2_DAT6 */
+@@ -111,6 +113,46 @@ static inline void mx6_arm2_init_uart(void)
+ 	imx6q_add_sdhci_usdhc_imx(2, &mx6_arm2_sd3_data);
+ }
+ 
++static void imx6_arm2_usbotg_vbus(bool on)
++{
++	if (on)
++		gpio_set_value(MX6_ARM2_USBOTG1_PWR, 1);
++	else
++		gpio_set_value(MX6_ARM2_USBOTG1_PWR, 0);
++}
++
++static void __init mx6_arm2_init_usb(void)
++{
++	int ret = 0;
++
++	imx_otg_base = MX6_IO_ADDRESS(MX6Q_USB_OTG_BASE_ADDR);
++
++	/* disable external charger detect,
++	 * or it will affect signal quality at dp.
++	 */
++
++	ret = gpio_request(MX6_ARM2_USBOTG1_PWR, "usbotg-pwr");
++	if (ret) {
++		pr_err("failed to get GPIO MX6_ARM2_USBOTG1_PWR:%d\n", ret);
++		return;
++	}
++	gpio_direction_output(MX6_ARM2_USBOTG1_PWR, 0);
++
++	ret = gpio_request(MX6_ARM2_USBOTG2_PWR, "usbh1-pwr");
++	if (ret) {
++		pr_err("failed to get GPIO MX6_ARM2_USBOTG2_PWR:%d\n", ret);
++		return;
++	}
++	gpio_direction_output(MX6_ARM2_USBOTG2_PWR, 1);
++
++	mx6_set_otghost_vbus_func(imx6_arm2_usbotg_vbus);
++	mx6_usb_dr_init();
++	mx6_usb_h1_init();
++#ifdef CONFIG_USB_EHCI_ARC_HSIC
++	mx6_usb_h2_init();
++#endif
++}
++
+ /*!
+  * Board specific initialization.
+  */
+@@ -119,6 +161,7 @@ static void __init mx6_arm2_init(void)
+ 	mxc_iomux_v3_setup_multiple_pads(mx6sl_arm2_pads, ARRAY_SIZE(mx6sl_arm2_pads));
+ 
+ 	mx6_arm2_init_uart();
++	mx6_arm2_init_usb();
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.h b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+index c2e6a28..aa25d76 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.h
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+@@ -25,6 +25,19 @@ static iomux_v3_cfg_t mx6sl_arm2_pads[] = {
+ 	MX6SL_PAD_UART1_RXD__UART1_RXD,
+ 	MX6SL_PAD_UART1_TXD__UART1_TXD,
+ 
++	/* USBOTG ID pin */
++	MX6SL_PAD_EPDC_PWRCOM__ANATOP_USBOTG1_ID,
++
++	/* USBOTG POWER GPIO */
++	MX6SL_PAD_KEY_COL4__GPIO_4_0,
++	MX6SL_PAD_KEY_COL5__GPIO_4_2,
++	/* USB OC pin */
++	MX6SL_PAD_KEY_ROW4__USB_USBOTG1_OC,
++	MX6SL_PAD_ECSPI2_SCLK__USB_USBOTG2_OC,
++	/* USB HSIC pin */
++	MX6SL_PAD_HSIC_STROBE__USB_H_STROBE,
++	MX6SL_PAD_HSIC_DAT__USB_H_DATA,
++
+ 	/* SD1 */
+ 	MX6SL_PAD_SD1_CLK__USDHC1_CLK,
+ 	MX6SL_PAD_SD1_CMD__USDHC1_CMD,
+diff --git a/arch/arm/mach-mx6/usb_h2.c b/arch/arm/mach-mx6/usb_h2.c
+index a671a95..24083fd 100644
+--- a/arch/arm/mach-mx6/usb_h2.c
++++ b/arch/arm/mach-mx6/usb_h2.c
+@@ -31,6 +31,7 @@
+ #include <mach/hardware.h>
+ #include <mach/iomux-mx6q.h>
+ #include <mach/iomux-mx6dl.h>
++#include <mach/iomux-mx6sl.h>
+ #include "devices-imx6q.h"
+ #include "regs-anadig.h"
+ #include "usb.h"
+@@ -185,6 +186,9 @@ static void hsic_start(void)
+ 	else if (cpu_is_mx6dl())
+ 		mxc_iomux_v3_setup_pad(
+ 				MX6DL_PAD_RGMII_TX_CTL__USBOH3_H2_STROBE_START);
++	else if (cpu_is_mx6sl())
++		mxc_iomux_v3_setup_pad(
++				MX6SL_PAD_HSIC_STROBE__USB_H_STROBE_START);
+ }
+ 
+ static void hsic_device_connected(void)
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index a4a3721..6cf2fa8 100755
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -88,7 +88,7 @@ static int fsl_check_usbclk(void)
+ 
+ 	usb_ahb_clk = clk_get(NULL, "usb_ahb_clk");
+ 	if (clk_enable(usb_ahb_clk)) {
+-		if (cpu_is_mx6q() || cpu_is_mx6dl())
++		if (cpu_is_mx6())
+ 			return 0; /* there is no ahb clock at mx6 */
+ 		printk(KERN_ERR "clk_enable(usb_ahb_clk) failed\n");
+ 		return -EINVAL;
+@@ -97,7 +97,7 @@ static int fsl_check_usbclk(void)
+ 
+ 	usb_clk = clk_get(NULL, "usb_clk");
+ 	if (clk_enable(usb_clk)) {
+-		if (cpu_is_mx6q() || cpu_is_mx6dl())
++		if (cpu_is_mx6())
+ 			return 0; /* there is usb_clk at mx6 */
+ 		printk(KERN_ERR "clk_enable(usb_clk) failed\n");
+ 		return -EINVAL;
+@@ -502,7 +502,7 @@ int fsl_usb_host_init(struct platform_device *pdev)
+ 
+ 	if (usb_register_remote_wakeup(pdev))
+ 		pr_debug("%s port is not a wakeup source.\n", pdata->name);
+-	if (!(cpu_is_mx6q() || cpu_is_mx6dl())) {
++	if (!(cpu_is_mx6())) {
+ 		if (xops->xcvr_type == PORTSC_PTS_SERIAL) {
+ 			if (cpu_is_mx35()) {
+ 				usbh2_set_serial_xcvr();
+@@ -814,7 +814,7 @@ int usbotg_init(struct platform_device *pdev)
+ 			return -EINVAL;
+ 		if (xops->init)
+ 			xops->init(xops);
+-		if (!((cpu_is_mx6q() || cpu_is_mx6dl()))) {
++		if (!(cpu_is_mx6())) {
+ 			UOG_PORTSC1 = UOG_PORTSC1 & ~PORTSC_PHCD;
+ 
+ 
+-- 
+1.7.7.4
+

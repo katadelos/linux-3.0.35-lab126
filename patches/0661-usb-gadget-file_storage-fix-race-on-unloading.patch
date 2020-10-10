@@ -1,0 +1,46 @@
+From 389db626f2f96a85b0e89e316a829c64bfd3e9b1 Mon Sep 17 00:00:00 2001
+From: Yauheni Kaliuta <yauheni.kaliuta@nokia.com>
+Date: Thu, 13 Oct 2011 14:19:05 +0300
+Subject: [PATCH 0661/2463] usb: gadget: file_storage: fix race on unloading
+
+There is a race, reproduced rarely if you unload the module
+when host finishes mass storage device initialization (reading
+partition table and so on): fsg_unbind() code first closes
+lun files then waits for worker thread to finish its work, as
+the result the thread may operate on already closed device
+with an oops and backtrace:
+
+[  484.937225] [<b00e403c>] (touch_atime+0x4/0x140) from [<b00a1498>] (generic_file_aio_read+0x678/0x6f0)
+[  484.946563] [<b00a1498>] (generic_file_aio_read+0x678/0x6f0) from [<b00d08c4>] (do_sync_read+0xb0/0xf4)
+[  484.955963] [<b00d08c4>] (do_sync_read+0xb0/0xf4) from [<b00d1478>] (vfs_read+0xac/0x144)
+[  484.964172] [<b00d1478>] (vfs_read+0xac/0x144) from [<af24c6a8>] (fsg_setup+0x7f4/0x900 [g_file_storage])
+[  484.973785] [<af24c6a8>] (fsg_setup+0x7f4/0x900 [g_file_storage]) from [<af24da14>] (fsg_main_thread+0x85c/0x175c [g_file_storage])
+[  484.985626] [<af24da14>] (fsg_main_thread+0x85c/0x175c [g_file_storage]) from [<b0077c48>] (kthread+0x7c/0x84)
+[  484.995666] [<b0077c48>] (kthread+0x7c/0x84) from [<b002f950>] (kernel_thread_exit+0x0/0x8)
+[  485.004028] Code: eaffffd0 e28dd008 e8bd8df0 e92d40f7 (e591400c)
+
+Change the order in unbind: wait for the thread first, then close
+the files.
+
+Signed-off-by: Yauheni Kaliuta <yauheni.kaliuta@nokia.com>
+Acked-by: Alan Stern <stern@rowland.harvard.edu>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+---
+ drivers/usb/gadget/file_storage.c |    1 -
+ 1 files changed, 0 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/usb/gadget/file_storage.c b/drivers/usb/gadget/file_storage.c
+index c1dddd1..a165ea5 100644
+--- a/drivers/usb/gadget/file_storage.c
++++ b/drivers/usb/gadget/file_storage.c
+@@ -3134,7 +3134,6 @@ static int fsg_main_thread(void *fsg_)
+ 	complete_and_exit(&fsg->thread_notifier, 0);
+ }
+ 
+-
+ /*-------------------------------------------------------------------------*/
+ 
+ 
+-- 
+1.7.7.4
+

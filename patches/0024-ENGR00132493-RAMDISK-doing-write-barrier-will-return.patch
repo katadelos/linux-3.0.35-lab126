@@ -1,0 +1,38 @@
+From 82e69e6fc05fe9075dc9312cf2fdd3fe38d34ff5 Mon Sep 17 00:00:00 2001
+From: Hu hui <b29976@freescale.com>
+Date: Wed, 20 Oct 2010 09:49:47 +0800
+Subject: [PATCH 0024/2463] ENGR00132493 RAMDISK: doing write barrier will
+ return -EIO
+
+when doing write barrier, the data of the bio is NULL, it's OK for ramdisk
+doing nothing, So the result of the bio must be success.
+
+Signed-off-by: Hu Hui <b29976@freescale.com>
+---
+ drivers/block/brd.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/block/brd.c b/drivers/block/brd.c
+index dba1c32..1539aab 100644
+--- a/drivers/block/brd.c
++++ b/drivers/block/brd.c
+@@ -331,12 +331,14 @@ static int brd_make_request(struct request_queue *q, struct bio *bio)
+ 	struct bio_vec *bvec;
+ 	sector_t sector;
+ 	int i;
+-	int err = -EIO;
++	int err = 0;
+ 
+ 	sector = bio->bi_sector;
+ 	if (sector + (bio->bi_size >> SECTOR_SHIFT) >
+-						get_capacity(bdev->bd_disk))
++						get_capacity(bdev->bd_disk)) {
++		err = -EIO;
+ 		goto out;
++	}
+ 
+ 	if (unlikely(bio->bi_rw & REQ_DISCARD)) {
+ 		err = 0;
+-- 
+1.7.7.4
+

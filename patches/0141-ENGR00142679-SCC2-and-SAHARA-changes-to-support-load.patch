@@ -1,0 +1,112 @@
+From 124e4d099b064f57d32f2638da7a323b7c8168d1 Mon Sep 17 00:00:00 2001
+From: Anish Trivedi <anish@freescale.com>
+Date: Fri, 29 Apr 2011 13:49:39 -0500
+Subject: [PATCH 0141/2463] ENGR00142679 SCC2 and SAHARA: changes to support
+ loadable modules
+
+To allow SCC2 and SAHARA drivers to work as loadable modules, needed
+to add GPL license to SAHARA driver, export a couple of functions
+from SCC2 driver, and the following data buffer mapping change in
+SAHARA driver:
+
+When compiled as a loadable module, a data buffer to be DMA'ed in the
+SAHARA driver may not be in the kernel direct-mapped region but in
+the "Kernel module space" between TASK_SIZE and high_memory-1
+(see http://www.arm.linux.org.uk/developer/memory.txt). In this
+scenario, the driver canno simply use the __pa macro to obtain
+the physical address. It must walk the page tables to find the
+page and use the page_to_phys function to find the physical
+address that corresponds to the data buffer.
+
+Signed-off-by: Anish Trivedi <anish@freescale.com>
+---
+ .../mxc/security/sahara2/sah_driver_interface.c    |    4 ++++
+ drivers/mxc/security/sahara2/sah_memory_mapper.c   |   17 ++++++++++++++---
+ drivers/mxc/security/scc2_driver.c                 |    2 +-
+ drivers/mxc/security/scc2_internals.h              |    2 ++
+ 4 files changed, 21 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mxc/security/sahara2/sah_driver_interface.c b/drivers/mxc/security/sahara2/sah_driver_interface.c
+index d810265..39a03e4 100644
+--- a/drivers/mxc/security/sahara2/sah_driver_interface.c
++++ b/drivers/mxc/security/sahara2/sah_driver_interface.c
+@@ -48,6 +48,10 @@
+ #define interruptible_sleep_on(x) sah_Handle_Interrupt()
+ #endif
+ 
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Freescale Semiconductor");
++MODULE_DESCRIPTION("Device Driver for SAHARA2 crypto hw block");
++
+ #define TEST_MODE_OFF 1
+ #define TEST_MODE_ON 2
+ 
+diff --git a/drivers/mxc/security/sahara2/sah_memory_mapper.c b/drivers/mxc/security/sahara2/sah_memory_mapper.c
+index 2e3b80b..f863b03 100644
+--- a/drivers/mxc/security/sahara2/sah_memory_mapper.c
++++ b/drivers/mxc/security/sahara2/sah_memory_mapper.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2004-2010 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -750,6 +750,7 @@ sah_Head_Desc *sah_Copy_Descriptors(fsl_shw_uco_t * user_ctx,
+ sah_Link *sah_Physicalise_Links(sah_Link * first_link)
+ {
+ 	sah_Link *link = first_link;
++	struct page *pg;
+ 
+ 	while (link != NULL) {
+ #ifdef DO_DBG
+@@ -814,8 +815,18 @@ sah_Link *sah_Physicalise_Links(sah_Link * first_link)
+ 			if (!(link->flags & SAH_PREPHYS_DATA)) {
+ 				link->original_data = link->data;
+ 
+-				/* All pointers are virtual right now */
+-				link->data = (void *)os_pa(link->data);
++				/* if the data buffer is not in kernel direct-
++				  * mapped region, find the physical addr
++				  * via other means.
++				  */
++				if (!virt_addr_valid(link->data)) {
++					pg = vmalloc_to_page(link->data);
++					link->data = (uint8_t *) (
++						page_to_phys(pg) +
++						(((unsigned int) link->data) &
++							~PAGE_MASK));
++				} else
++					link->data = (void *)os_pa(link->data);
+ #ifdef DO_DBG
+ 				os_printk("%sput: %p (%d)\n",
+ 					  (link->
+diff --git a/drivers/mxc/security/scc2_driver.c b/drivers/mxc/security/scc2_driver.c
+index a8bd3b2..a8af430 100644
+--- a/drivers/mxc/security/scc2_driver.c
++++ b/drivers/mxc/security/scc2_driver.c
+@@ -381,7 +381,7 @@ scc_return_t scc_diminish_permissions(void *part_base, uint32_t permissions)
+ 	return SCC_RET_FAIL;
+ }
+ 
+-extern scc_partition_status_t scc_partition_status(void *part_base)
++scc_partition_status_t scc_partition_status(void *part_base)
+ {
+ 	uint32_t part_no;
+ 	uint32_t part_owner;
+diff --git a/drivers/mxc/security/scc2_internals.h b/drivers/mxc/security/scc2_internals.h
+index bd7399b..34b2ed0 100644
+--- a/drivers/mxc/security/scc2_internals.h
++++ b/drivers/mxc/security/scc2_internals.h
+@@ -489,6 +489,8 @@ EXPORT_SYMBOL(scc_release_partition);
+ EXPORT_SYMBOL(scc_diminish_permissions);
+ EXPORT_SYMBOL(scc_encrypt_region);
+ EXPORT_SYMBOL(scc_decrypt_region);
++EXPORT_SYMBOL(scc_partition_status);
++EXPORT_SYMBOL(scc_virt_to_phys);
+ /*EXPORT_SYMBOL(make_vpu_partition);*/
+ 
+ 
+-- 
+1.7.7.4
+

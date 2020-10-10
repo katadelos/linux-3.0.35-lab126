@@ -1,0 +1,76 @@
+From 90151cdb95e3b51648d6d7ea8d8197176fcfcc43 Mon Sep 17 00:00:00 2001
+From: Lionel Xu <Lionel.Xu@freescale.com>
+Date: Fri, 26 Aug 2011 18:26:45 +0800
+Subject: [PATCH 0376/2463] ENGR00139255-2 MX6Q_BSP ESAI: Add esai recording
+ support
+
+Add ESAI recording to mx6q platform.
+Note: since there is pad conflict between esai record and fec, add a boot
+argument esai_record to deal with it. This argument is required to enable
+the record functionality.
+
+Signed-off-by: Lionel Xu <R63889@freescale.com>
+---
+ sound/soc/codecs/cs42888.c  |    4 +++-
+ sound/soc/imx/imx-cs42888.c |    2 +-
+ sound/soc/imx/imx-esai.c    |    2 +-
+ 3 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/sound/soc/codecs/cs42888.c b/sound/soc/codecs/cs42888.c
+index e06eb30..c810333 100644
+--- a/sound/soc/codecs/cs42888.c
++++ b/sound/soc/codecs/cs42888.c
+@@ -618,6 +618,7 @@ static int cs42888_set_dai_fmt(struct snd_soc_dai *codec_dai,
+ 		return ret;
+ 	}
+ 
++	dump_reg(codec);
+ 	return ret;
+ }
+ 
+@@ -647,7 +648,7 @@ static int cs42888_hw_params(struct snd_pcm_substream *substream,
+ 	unsigned int i;
+ 	unsigned int rate;
+ 	unsigned int ratio;
+-	u8 val;
++	u32 val;
+ 
+ 	rate = params_rate(params);	/* Sampling rate, in Hz */
+ 	ratio = cs42888->mclk / rate;	/* MCLK/LRCK ratio */
+@@ -706,6 +707,7 @@ static int cs42888_hw_params(struct snd_pcm_substream *substream,
+ 		return ret;
+ 	}
+ 
++	dump_reg(codec);
+ 	return ret;
+ }
+ 
+diff --git a/sound/soc/imx/imx-cs42888.c b/sound/soc/imx/imx-cs42888.c
+index 8943534..87c2115 100644
+--- a/sound/soc/imx/imx-cs42888.c
++++ b/sound/soc/imx/imx-cs42888.c
+@@ -155,7 +155,7 @@ static int imx_3stack_surround_hw_params(struct snd_pcm_substream *substream,
+ 		snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_PM, 2);
+ 	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_FP, lrclk_ratio);
+ 	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_PSR, 1);
+-	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_PM, 0);
++	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_PM, 2);
+ 	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_FP, lrclk_ratio);
+ 
+ 	/* set codec DAI configuration */
+diff --git a/sound/soc/imx/imx-esai.c b/sound/soc/imx/imx-esai.c
+index 3a31d07..ebd45ff 100644
+--- a/sound/soc/imx/imx-esai.c
++++ b/sound/soc/imx/imx-esai.c
+@@ -68,7 +68,7 @@ static int imx_esai_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
+ 			ecr |= ESAI_ECR_ETI;
+ 			ecr &= ~ESAI_ECR_ETO;
+ 			ecr |= ESAI_ECR_ERI;
+-			ecr |= ESAI_ECR_ERO;
++			ecr &= ~ESAI_ECR_ERO;
+ 		}
+ 	}
+ 
+-- 
+1.7.7.4
+

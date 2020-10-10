@@ -1,0 +1,138 @@
+From 7986b07e5eb283c79a04021f21e313204ae5aaab Mon Sep 17 00:00:00 2001
+From: Richard Zhao <richard.zhao@freescale.com>
+Date: Sun, 1 Apr 2012 16:49:30 +0800
+Subject: [PATCH 1258/2463] ENGR00178642-1 gpu-viv: fix suspend/resume issue
+ for #304
+
+Signed-off-by: Richard Zhao <richard.zhao@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c |   84 +++++++++++--------
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |    2 +-
+ 2 files changed, 50 insertions(+), 36 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
+index 572c728..e341b6e 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
+@@ -1156,6 +1156,40 @@ gckCOMMAND_Commit(
+         + Command->reservedTail
+         - commandBufferObject->startOffset;
+ 
++    /* Get the current offset. */
++    offset = Command->offset;
++
++    /* Compute number of bytes left in current kernel command queue. */
++    bytes = Command->pageSize - offset;
++
++    /* Query the size of WAIT/LINK command sequence. */
++    gcmkONERROR(gckHARDWARE_WaitLink(
++        hardware,
++        gcvNULL,
++        offset,
++        &waitLinkBytes,
++        gcvNULL,
++        gcvNULL
++        ));
++
++    /* Is there enough space in the current command queue? */
++    if (bytes < waitLinkBytes)
++    {
++        /* No, create a new one. */
++        gcmkONERROR(_NewQueue(Command));
++
++        /* Get the new current offset. */
++        offset = Command->offset;
++
++        /* Recompute the number of bytes in the new kernel command queue. */
++        bytes = Command->pageSize - offset;
++        gcmkASSERT(bytes >= waitLinkBytes);
++    }
++
++    /* Compute the location if WAIT/LINK command sequence. */
++    waitLinkPhysical = (gctUINT8_PTR) Command->physical + offset;
++    waitLinkLogical  = (gctUINT8_PTR) Command->logical  + offset;
++
+     /* Context switch required? */
+     if (Context == gcvNULL)
+     {
+@@ -1729,40 +1763,6 @@ gckCOMMAND_Commit(
+     gcmkONERROR(_ProcessHints(Command, ProcessID, commandBufferObject));
+ #endif
+ 
+-    /* Get the current offset. */
+-    offset = Command->offset;
+-
+-    /* Compute number of bytes left in current kernel command queue. */
+-    bytes = Command->pageSize - offset;
+-
+-    /* Query the size of WAIT/LINK command sequence. */
+-    gcmkONERROR(gckHARDWARE_WaitLink(
+-        hardware,
+-        gcvNULL,
+-        offset,
+-        &waitLinkBytes,
+-        gcvNULL,
+-        gcvNULL
+-        ));
+-
+-    /* Is there enough space in the current command queue? */
+-    if (bytes < waitLinkBytes)
+-    {
+-        /* No, create a new one. */
+-        gcmkONERROR(_NewQueue(Command));
+-
+-        /* Get the new current offset. */
+-        offset = Command->offset;
+-
+-        /* Recompute the number of bytes in the new kernel command queue. */
+-        bytes = Command->pageSize - offset;
+-        gcmkASSERT(bytes >= waitLinkBytes);
+-    }
+-
+-    /* Compute the location if WAIT/LINK command sequence. */
+-    waitLinkPhysical = (gctUINT8_PTR) Command->physical + offset;
+-    waitLinkLogical  = (gctUINT8_PTR) Command->logical  + offset;
+-
+     /* Determine the location to jump to for the command buffer being
+     ** scheduled. */
+     if (Command->newQueue)
+@@ -1980,7 +1980,21 @@ gckCOMMAND_Commit(
+     }
+ 
+     /* Submit events. */
+-    gcmkONERROR(gckEVENT_Submit(Command->kernel->eventObj, gcvTRUE, gcvFALSE));
++    status = (gckEVENT_Submit(Command->kernel->eventObj, gcvTRUE, gcvFALSE));
++
++    if (status == gcvSTATUS_INTERRUPTED || status == gcvSTATUS_TIMEOUT)
++    {
++        gcmkTRACE(
++            gcvLEVEL_INFO,
++            "%s(%d): Intterupted in gckEVENT_Submit",
++            __FUNCTION__, __LINE__
++            );
++        status = gcvSTATUS_OK;
++    }
++    else
++    {
++        gcmkONERROR(status);
++    }
+ 
+     /* Unmap the command buffer pointer. */
+     if (commandBufferMapped)
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index 467f4f3..825c88d 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -6633,7 +6633,7 @@ gckOS_AcquireSemaphore(
+     /* Acquire the semaphore. */
+     if (down_interruptible((struct semaphore *) Semaphore))
+     {
+-        gcmkONERROR(gcvSTATUS_TIMEOUT);
++        gcmkONERROR(gcvSTATUS_INTERRUPTED);
+     }
+ 
+     /* Success. */
+-- 
+1.7.7.4
+

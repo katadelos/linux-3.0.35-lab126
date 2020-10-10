@@ -1,0 +1,35 @@
+From d2cd924f86cdb57a1e6e3c1b84a4e2cecb813903 Mon Sep 17 00:00:00 2001
+From: Robin Gong <b38343@freescale.com>
+Date: Wed, 31 Oct 2012 21:41:16 +0800
+Subject: [PATCH 2203/2463] ENGR00231910 PU regulator: do not disable PU
+ regulator
+
+If system enter suspend/resume during VPU encoding on Rigel, there will be
+"VPU blocking: timeout." error . But there is ok if enter suspend/resume
+during VPU decoding and enter suspend/resume during encoding/decoding  on
+Arik, until now we didn't know the root cause, so revert it firstly.
+Because the previous patch about PU regulator is composed with four commits
+and hard to revert, now we adopt simplest way that do not disable PU regulator
+in low level. The negative impact is there will several mA increasment in
+suspend, we will fix it ASAP.
+Signed-off-by: Robin Gong <b38343@freescale.com>
+---
+ arch/arm/mach-mx6/mx6_anatop_regulator.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mx6_anatop_regulator.c b/arch/arm/mach-mx6/mx6_anatop_regulator.c
+index 9599a54..1ed5183 100644
+--- a/arch/arm/mach-mx6/mx6_anatop_regulator.c
++++ b/arch/arm/mach-mx6/mx6_anatop_regulator.c
+@@ -210,7 +210,7 @@ static int pu_disable(struct anatop_regulator *sreg)
+ {
+ 	unsigned int reg;
+ 	int ret = 0;
+-
++	return 0;
+ 	/* Disable the brown out detection since we are going to be
+ 	  * disabling the LDO.
+ 	  */
+-- 
+1.7.7.4
+

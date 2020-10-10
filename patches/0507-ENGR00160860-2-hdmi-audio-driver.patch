@@ -1,0 +1,1997 @@
+From 73b1d9d3c2222e75a661dd96b9796d3d83c4596e Mon Sep 17 00:00:00 2001
+From: Alan Tull <alan.tull@freescale.com>
+Date: Tue, 25 Oct 2011 15:41:55 -0500
+Subject: [PATCH 0507/2463] ENGR00160860-2 hdmi audio driver
+
+Audio driver for i.Mx built-in HDMI Transmitter.
+
+* Uses HDMI Transmitter's built-in DMA.
+* Adds IEC958-style digital audio header info to the raw audio.
+* Gets pixel clock from the IPU driver and calculates clock
+  regenerator values (cts and N).
+* Move ipu_id, and disp_id from the HDMI's platform data to the
+  HDMI mfd's platform data. Saves them in the hdmi mfd.
+* Add mfd functionality to update the clock regenerator values
+  when the hdmi changes the pixel clock rate or when requested
+  from the audio driver with a new audio sample rate.
+
+Signed-off-by: Alan Tull <alan.tull@freescale.com>
+---
+ drivers/mfd/mxc-hdmi-core.c       |  244 ++++++++++-
+ drivers/video/mxc_hdmi.c          |   10 +-
+ include/linux/fsl_devices.h       |    3 +
+ include/linux/mfd/mxc-hdmi-core.h |    6 +-
+ sound/soc/codecs/Kconfig          |    3 +
+ sound/soc/codecs/Makefile         |    2 +
+ sound/soc/codecs/mxc_hdmi.c       |  331 +++++++++++++++
+ sound/soc/imx/Kconfig             |    8 +
+ sound/soc/imx/Makefile            |    2 +
+ sound/soc/imx/imx-hdmi-dai.c      |  126 ++++++
+ sound/soc/imx/imx-hdmi-dma.c      |  836 +++++++++++++++++++++++++++++++++++++
+ sound/soc/imx/imx-hdmi.c          |   87 ++++
+ sound/soc/imx/imx-hdmi.h          |   89 ++++
+ 13 files changed, 1725 insertions(+), 22 deletions(-)
+
+diff --git a/drivers/mfd/mxc-hdmi-core.c b/drivers/mfd/mxc-hdmi-core.c
+index 3fe3d1e..48cc57c 100644
+--- a/drivers/mfd/mxc-hdmi-core.c
++++ b/drivers/mfd/mxc-hdmi-core.c
+@@ -35,10 +35,12 @@
+ 
+ #include <mach/clock.h>
+ #include <mach/mxc_hdmi.h>
++#include <mach/ipu-v3.h>
++#include "../mxc/ipu3/ipu_prv.h"
+ #include <linux/mfd/mxc-hdmi-core.h>
++#include <linux/fsl_devices.h>
+ 
+ struct mxc_hdmi_data {
+-	struct clk *isfr_clk;
+ 	struct platform_device *pdev;
+ 	unsigned long __iomem *reg_base;
+ 	unsigned long reg_phys_base;
+@@ -46,13 +48,18 @@ struct mxc_hdmi_data {
+ };
+ 
+ static unsigned long hdmi_base;
++struct clk *isfr_clk;
+ struct clk *iahb_clk;
+ static unsigned int irq_enable_cnt;
+ spinlock_t irq_spinlock;
+ bool irq_initialized;
+ bool irq_enabled;
+-int mxc_hdmi_pixel_clk;
+-int mxc_hdmi_ratio;
++unsigned int sample_rate;
++unsigned long pixel_clk_rate;
++struct clk *pixel_clk;
++int hdmi_ratio;
++int mxc_hdmi_ipu_id;
++int mxc_hdmi_disp_id;
+ 
+ u8 hdmi_readb(unsigned int reg)
+ {
+@@ -181,15 +188,216 @@ static void initialize_hdmi_ih_mutes(void)
+ 	hdmi_writeb(ih_mute, HDMI_IH_MUTE);
+ }
+ 
++static void hdmi_set_clock_regenerator_n(unsigned int value)
++{
++	hdmi_writeb(value & 0xff, HDMI_AUD_N1);
++	hdmi_writeb((value >> 8) & 0xff, HDMI_AUD_N2);
++	hdmi_writeb((value >> 16) & 0xff, HDMI_AUD_N3);
++}
++
++static void hdmi_set_clock_regenerator_cts(unsigned int cts)
++{
++	hdmi_writeb(cts & 0xff, HDMI_AUD_CTS1);
++	hdmi_writeb((cts >> 8) & 0xff, HDMI_AUD_CTS2);
++	hdmi_writeb(((cts >> 16) & HDMI_AUD_CTS3_AUDCTS19_16_MASK) |
++		    HDMI_AUD_CTS3_CTS_MANUAL, HDMI_AUD_CTS3);
++}
++
++static unsigned int hdmi_compute_n(unsigned int freq, unsigned long pixel_clk,
++				   unsigned int ratio)
++{
++	unsigned int n = (128 * freq) / 1000;
++
++	switch (freq) {
++	case 32000:
++		if (pixel_clk == 25170000)
++			n = (ratio == 150) ? 9152 : 4576;
++		else if (pixel_clk == 27020000)
++			n = (ratio == 150) ? 8192 : 4096;
++		else if (pixel_clk == 74170000 || pixel_clk == 148350000)
++			n = 11648;
++		else
++			n = 4096;
++		break;
++
++	case 44100:
++		if (pixel_clk == 25170000)
++			n = 7007;
++		else if (pixel_clk == 74170000)
++			n = 17836;
++		else if (pixel_clk == 148350000)
++			n = (ratio == 150) ? 17836 : 8918;
++		else
++			n = 6272;
++		break;
++
++	case 48000:
++		if (pixel_clk == 25170000)
++			n = (ratio == 150) ? 9152 : 6864;
++		else if (pixel_clk == 27020000)
++			n = (ratio == 150) ? 8192 : 6144;
++		else if (pixel_clk == 74170000)
++			n = 11648;
++		else if (pixel_clk == 148350000)
++			n = (ratio == 150) ? 11648 : 5824;
++		else
++			n = 6144;
++		break;
++
++	case 88200:
++		n = hdmi_compute_n(44100, pixel_clk, ratio) * 2;
++		break;
++
++	case 96000:
++		n = hdmi_compute_n(48000, pixel_clk, ratio) * 2;
++		break;
++
++	case 176400:
++		n = hdmi_compute_n(44100, pixel_clk, ratio) * 4;
++		break;
++
++	case 192000:
++		n = hdmi_compute_n(48000, pixel_clk, ratio) * 4;
++		break;
++
++	default:
++		break;
++	}
++
++	return n;
++}
++
++static unsigned int hdmi_compute_cts(unsigned int freq, unsigned long pixel_clk,
++				     unsigned int ratio)
++{
++	unsigned int cts = 0;
++	switch (freq) {
++	case 32000:
++		if (pixel_clk == 297000000) {
++			cts = 222750;
++			break;
++		}
++	case 48000:
++	case 96000:
++	case 192000:
++		switch (pixel_clk) {
++		case 25200000:
++		case 27000000:
++		case 54000000:
++		case 74250000:
++		case 148500000:
++			cts = pixel_clk / 1000;
++			break;
++		case 297000000:
++			cts = 247500;
++			break;
++		/*
++		 * All other TMDS clocks are not supported by
++		 * DWC_hdmi_tx. The TMDS clocks divided or
++		 * multiplied by 1,001 coefficients are not
++		 * supported.
++		 */
++		default:
++			break;
++		}
++		break;
++	case 44100:
++	case 88200:
++	case 176400:
++		switch (pixel_clk) {
++		case 25200000:
++			cts = 28000;
++			break;
++		case 27000000:
++			cts = 30000;
++			break;
++		case 54000000:
++			cts = 60000;
++			break;
++		case 74250000:
++			cts = 82500;
++			break;
++		case 148500000:
++			cts = 165000;
++			break;
++		case 297000000:
++			cts = 247500;
++			break;
++		default:
++			break;
++		}
++		break;
++	default:
++		break;
++	}
++	if (ratio == 100)
++		return cts;
++	else
++		return (cts * ratio) / 100;
++}
++
++static void hdmi_get_pixel_clk(void)
++{
++	struct ipu_soc *ipu;
++
++	if (pixel_clk == NULL) {
++		ipu = ipu_get_soc(mxc_hdmi_ipu_id);
++		pixel_clk = clk_get(ipu->dev, "pixel_clk_0");
++		if (IS_ERR(pixel_clk)) {
++			pr_err("%s could not get pixel_clk_0\n", __func__);
++			return;
++		}
++	}
++
++	pixel_clk_rate = clk_get_rate(pixel_clk);
++}
++
++/*
++ * input:  audio sample rate and video pixel rate
++ * output: N and cts written to the HDMI regs.
++ */
++void hdmi_set_clk_regenerator(void)
++{
++	unsigned int clk_n, clk_cts;
++
++	/* Get pixel clock from ipu */
++	hdmi_get_pixel_clk();
++
++	pr_debug("%s: sample rate is %d ; ratio is %d ; pixel clk is %d\n",
++		__func__, sample_rate, hdmi_ratio, (int)pixel_clk_rate);
++
++	clk_n = hdmi_compute_n(sample_rate, pixel_clk_rate, hdmi_ratio);
++	clk_cts = hdmi_compute_cts(sample_rate, pixel_clk_rate, hdmi_ratio);
++
++	if (clk_cts == 0) {
++		pr_err("%s: pixel clock not supported: %d\n",
++			__func__, (int)pixel_clk_rate);
++		return;
++	}
++
++	clk_enable(isfr_clk);
++	clk_enable(iahb_clk);
++
++	hdmi_set_clock_regenerator_n(clk_n);
++	hdmi_set_clock_regenerator_cts(clk_cts);
++
++	clk_disable(iahb_clk);
++	clk_disable(isfr_clk);
++}
++
++void hdmi_set_sample_rate(unsigned int rate)
++{
++	sample_rate = rate;
++	hdmi_set_clk_regenerator();
++}
++
+ static int mxc_hdmi_core_probe(struct platform_device *pdev)
+ {
++	struct fsl_mxc_hdmi_core_platform_data *pdata = pdev->dev.platform_data;
+ 	struct mxc_hdmi_data *hdmi_data;
+ 	struct resource *res;
+ 	int ret = 0;
+ 
+-	/* 100% for 8 bit pixels */
+-	mxc_hdmi_ratio = 100;
+-
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (!res)
+ 		return -ENOENT;
+@@ -201,27 +409,32 @@ static int mxc_hdmi_core_probe(struct platform_device *pdev)
+ 	}
+ 	hdmi_data->pdev = pdev;
+ 
++	pixel_clk = NULL;
++	sample_rate = 48000;
++	pixel_clk_rate = 74250000;
++	hdmi_ratio = 100;
++
+ 	irq_enable_cnt = 0;
+ 	irq_initialized = false;
+ 	irq_enabled = true;
+ 	spin_lock_init(&irq_spinlock);
+ 
+-	hdmi_data->isfr_clk = clk_get(&hdmi_data->pdev->dev, "hdmi_isfr_clk");
+-	if (IS_ERR(hdmi_data->isfr_clk)) {
+-		ret = PTR_ERR(hdmi_data->isfr_clk);
++	isfr_clk = clk_get(&hdmi_data->pdev->dev, "hdmi_isfr_clk");
++	if (IS_ERR(isfr_clk)) {
++		ret = PTR_ERR(isfr_clk);
+ 		dev_err(&hdmi_data->pdev->dev,
+ 			"Unable to get HDMI isfr clk: %d\n", ret);
+ 		goto eclkg;
+ 	}
+ 
+-	ret = clk_enable(hdmi_data->isfr_clk);
++	ret = clk_enable(isfr_clk);
+ 	if (ret < 0) {
+ 		dev_err(&pdev->dev, "Cannot enable HDMI clock: %d\n", ret);
+ 		goto eclke;
+ 	}
+ 
+ 	pr_debug("%s isfr_clk:%d\n", __func__,
+-		(int)clk_get_rate(hdmi_data->isfr_clk));
++		(int)clk_get_rate(isfr_clk));
+ 
+ 	iahb_clk = clk_get(&hdmi_data->pdev->dev, "hdmi_iahb_clk");
+ 	if (IS_ERR(iahb_clk)) {
+@@ -255,10 +468,13 @@ static int mxc_hdmi_core_probe(struct platform_device *pdev)
+ 
+ 	pr_debug("\n%s hdmi hw base = 0x%08x\n\n", __func__, (int)res->start);
+ 
++	mxc_hdmi_ipu_id = pdata->ipu_id;
++	mxc_hdmi_disp_id = pdata->disp_id;
++
+ 	initialize_hdmi_ih_mutes();
+ 
+ 	/* Disable HDMI clocks until video/audio sub-drivers are initialized */
+-	clk_disable(hdmi_data->isfr_clk);
++	clk_disable(isfr_clk);
+ 	clk_disable(iahb_clk);
+ 
+ 	/* Replace platform data coming in with a local struct */
+@@ -273,9 +489,9 @@ emem:
+ eclke2:
+ 	clk_put(iahb_clk);
+ eclkg2:
+-	clk_disable(hdmi_data->isfr_clk);
++	clk_disable(isfr_clk);
+ eclke:
+-	clk_put(hdmi_data->isfr_clk);
++	clk_put(isfr_clk);
+ eclkg:
+ 	kfree(hdmi_data);
+ 	return ret;
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index d48170d..95083f2 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -1137,9 +1137,6 @@ void hdmi_av_composer(struct mxc_hdmi *hdmi)
+ 		fb_mode.upper_margin + fb_mode.lower_margin +
+ 		fb_mode.vsync_len) * fb_mode.refresh;
+ 
+-	/* Expose pixel clock for audio driver */
+-	mxc_hdmi_pixel_clk = vmode->mPixelClock;
+-
+ 	dev_dbg(&hdmi->pdev->dev, "final pixclk = %d\n", vmode->mPixelClock);
+ 
+ 	/* Set up HDMI_FC_INVIDCONF */
+@@ -1553,6 +1550,7 @@ static int mxc_hdmi_setup(struct mxc_hdmi *hdmi)
+ 	hdmi_tx_hdcp_config(hdmi);
+ 	hdmi_phy_init(hdmi, TRUE);
+ 	hdmi_video_force_output(hdmi, FALSE);
++	hdmi_set_clk_regenerator();
+ 
+ 	return 0;
+ }
+@@ -1599,8 +1597,8 @@ static int mxc_hdmi_disp_init(struct mxc_dispdrv_entry *disp)
+ 	if (!plat || irq < 0)
+ 		return -ENODEV;
+ 
+-	setting->dev_id = plat->ipu_id;
+-	setting->disp_id = plat->disp_id;
++	setting->dev_id = mxc_hdmi_ipu_id;
++	setting->disp_id = mxc_hdmi_disp_id;
+ 	setting->if_fmt = IPU_PIX_FMT_RGB24;
+ 
+ 	hdmi->fbi = setting->fbi;
+@@ -1614,7 +1612,7 @@ static int mxc_hdmi_disp_init(struct mxc_dispdrv_entry *disp)
+ 
+ 	/* Initialize HDMI */
+ 	if (plat->init)
+-		plat->init(plat->ipu_id, plat->disp_id);
++		plat->init(mxc_hdmi_ipu_id, mxc_hdmi_disp_id);
+ 
+ 	hdmi->hdmi_isfr_clk = clk_get(&hdmi->pdev->dev, "hdmi_isfr_clk");
+ 	if (IS_ERR(hdmi->hdmi_isfr_clk)) {
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index 41f0055..20cce21 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -241,6 +241,9 @@ struct fsl_mxc_hdmi_platform_data {
+ 	void (*put_pins) (void);
+ 	void (*enable_pins) (void);
+ 	void (*disable_pins) (void);
++};
++
++struct fsl_mxc_hdmi_core_platform_data {
+ 	int ipu_id;
+ 	int disp_id;
+ };
+diff --git a/include/linux/mfd/mxc-hdmi-core.h b/include/linux/mfd/mxc-hdmi-core.h
+index d0712db..f449946 100644
+--- a/include/linux/mfd/mxc-hdmi-core.h
++++ b/include/linux/mfd/mxc-hdmi-core.h
+@@ -30,8 +30,10 @@ void hdmi_write4(unsigned int value, unsigned int reg);
+ void hdmi_irq_init(void);
+ void hdmi_irq_enable(int irq);
+ unsigned int hdmi_irq_disable(int irq);
++void hdmi_set_sample_rate(unsigned int rate);
++void hdmi_set_clk_regenerator(void);
+ 
+-extern int mxc_hdmi_pixel_clk;
+-extern int mxc_hdmi_ratio;
++extern int mxc_hdmi_ipu_id;
++extern int mxc_hdmi_disp_id;
+ 
+ #endif
+diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
+index 44ef5d7..99d3806 100644
+--- a/sound/soc/codecs/Kconfig
++++ b/sound/soc/codecs/Kconfig
+@@ -201,6 +201,9 @@ config SND_SOC_MAX98095
+ config SND_SOC_MAX9850
+ 	tristate
+ 
++config SND_SOC_MXC_HDMI
++       tristate
++
+ config SND_SOC_MXC_SPDIF
+        tristate
+ 
+diff --git a/sound/soc/codecs/Makefile b/sound/soc/codecs/Makefile
+index cc398bc..8efb513 100644
+--- a/sound/soc/codecs/Makefile
++++ b/sound/soc/codecs/Makefile
+@@ -17,6 +17,7 @@ snd-soc-cs4271-objs := cs4271.o
+ snd-soc-cx20442-objs := cx20442.o
+ snd-soc-da7210-objs := da7210.o
+ snd-soc-dfbmcs320-objs := dfbmcs320.o
++snd-soc-mxc-hdmi-objs := mxc_hdmi.o
+ snd-soc-mxc-spdif-objs := mxc_spdif.o
+ snd-soc-dmic-objs := dmic.o
+ snd-soc-l3-objs := l3.o
+@@ -100,6 +101,7 @@ obj-$(CONFIG_SND_SOC_AD73311) += snd-soc-ad73311.o
+ obj-$(CONFIG_SND_SOC_ADS117X)	+= snd-soc-ads117x.o
+ obj-$(CONFIG_SND_SOC_AK4104)	+= snd-soc-ak4104.o
+ obj-$(CONFIG_SND_SOC_AK4535)	+= snd-soc-ak4535.o
++obj-$(CONFIG_SND_SOC_MXC_HDMI)	+= snd-soc-mxc-hdmi.o
+ obj-$(CONFIG_SND_SOC_MXC_SPDIF)	+= snd-soc-mxc-spdif.o
+ obj-$(CONFIG_SND_SOC_AK4641)	+= snd-soc-ak4641.o
+ obj-$(CONFIG_SND_SOC_AK4642)	+= snd-soc-ak4642.o
+diff --git a/sound/soc/codecs/mxc_hdmi.c b/sound/soc/codecs/mxc_hdmi.c
+new file mode 100644
+index 0000000..c6a6bcb
+--- /dev/null
++++ b/sound/soc/codecs/mxc_hdmi.c
+@@ -0,0 +1,331 @@
++/*
++ * MXC HDMI ALSA Soc Codec Driver
++ *
++ * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <linux/slab.h>
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/init.h>
++#include <linux/io.h>
++#include <linux/delay.h>
++#include <linux/pm.h>
++#include <linux/clk.h>
++#include <linux/platform_device.h>
++#include <linux/interrupt.h>
++#include <linux/fsl_devices.h>
++
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/asoundef.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++#include <sound/soc-dapm.h>
++#include <sound/initval.h>
++#include <mach/hardware.h>
++
++#include <linux/mfd/mxc-hdmi-core.h>
++#include <mach/mxc_hdmi.h>
++#include "../imx/imx-hdmi.h"
++
++struct mxc_hdmi_priv {
++	struct snd_soc_codec codec;
++	struct snd_card *card;	/* ALSA HDMI sound card handle */
++	struct snd_pcm *pcm;	/* ALSA hdmi driver type handle */
++	struct clk *isfr_clk;
++	struct clk *iahb_clk;
++};
++
++#ifdef DEBUG
++static void dumpregs(void)
++{
++	int n, cts;
++
++	cts = (hdmi_readb(HDMI_AUD_CTS3) << 16) |
++	      (hdmi_readb(HDMI_AUD_CTS2) << 8) |
++	      hdmi_readb(HDMI_AUD_CTS1);
++
++	n = (hdmi_readb(HDMI_AUD_N3) << 16) |
++	    (hdmi_readb(HDMI_AUD_N2) << 8) |
++	    hdmi_readb(HDMI_AUD_N1);
++
++	pr_debug("\n");
++	pr_debug("HDMI_PHY_CONF0      0x%02x\n", hdmi_readb(HDMI_PHY_CONF0));
++	pr_debug("HDMI_MC_CLKDIS      0x%02x\n", hdmi_readb(HDMI_MC_CLKDIS));
++	pr_debug("HDMI_AUD_N[1-3]     0x%06x (decimal %d)\n", n, n);
++	pr_debug("HDMI_AUD_CTS[1-3]   0x%06x (decimal %d)\n", cts, cts);
++	pr_debug("HDMI_FC_AUDSCONF    0x%02x\n", hdmi_readb(HDMI_FC_AUDSCONF));
++}
++#else
++static void dumpregs(void) {}
++#endif
++
++static void hdmi_set_audio_flat(u8 value)
++{
++	/* Indicates the subpacket represents a flatline sample */
++	hdmi_mask_writeb(value, HDMI_FC_AUDSCONF,
++			 HDMI_FC_AUDSCONF_AUD_PACKET_SAMPFIT_OFFSET,
++			 HDMI_FC_AUDSCONF_AUD_PACKET_SAMPFIT_MASK);
++}
++
++static void hdmi_set_layout(unsigned int channels)
++{
++	hdmi_mask_writeb((channels > 2) ? 1 : 0, HDMI_FC_AUDSCONF,
++			HDMI_FC_AUDSCONF_AUD_PACKET_LAYOUT_OFFSET,
++			HDMI_FC_AUDSCONF_AUD_PACKET_LAYOUT_MASK);
++}
++
++static void hdmi_set_audio_infoframe(void)
++{
++	/* set to 0: means "refer to stream header" */
++	hdmi_writeb(0x00, HDMI_FC_AUDICONF0);
++	hdmi_writeb(0x00, HDMI_FC_AUDICONF1);
++	hdmi_writeb(0x00, HDMI_FC_AUDICONF2);
++}
++
++static unsigned int hdmi_playback_rates[] = { 32000, 44100, 48000, 88200, 96000 };
++
++static struct snd_pcm_hw_constraint_list playback_rate_constraints = {
++	.count = ARRAY_SIZE(hdmi_playback_rates),
++	.list = hdmi_playback_rates,
++	.mask = 0,
++};
++
++static int mxc_hdmi_codec_startup(struct snd_pcm_substream *substream,
++				  struct snd_soc_dai *dai)
++{
++	struct mxc_hdmi_priv *hdmi_priv = snd_soc_dai_get_drvdata(dai);
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	int ret;
++
++	clk_enable(hdmi_priv->isfr_clk);
++	clk_enable(hdmi_priv->iahb_clk);
++
++	pr_debug("%s hdmi clks: isfr:%d iahb:%d\n", __func__,
++		(int)clk_get_rate(hdmi_priv->isfr_clk),
++		(int)clk_get_rate(hdmi_priv->iahb_clk));
++
++	ret = snd_pcm_hw_constraint_list(runtime, 0,
++					 SNDRV_PCM_HW_PARAM_RATE,
++					 &playback_rate_constraints);
++	if (ret < 0)
++		return ret;
++
++	ret = snd_pcm_hw_constraint_integer(runtime,
++					SNDRV_PCM_HW_PARAM_PERIODS);
++	if (ret < 0)
++		return ret;
++
++	hdmi_set_audio_flat(0);
++	hdmi_set_audio_infoframe();
++
++	return 0;
++}
++
++static int mxc_hdmi_codec_prepare(struct snd_pcm_substream *substream,
++				  struct snd_soc_dai *dai)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++
++	hdmi_set_layout(runtime->channels);
++	hdmi_set_sample_rate(runtime->rate);
++	dumpregs();
++
++	return 0;
++}
++
++static void mxc_hdmi_codec_shutdown(struct snd_pcm_substream *substream,
++				   struct snd_soc_dai *dai)
++{
++	struct mxc_hdmi_priv *hdmi_priv = snd_soc_dai_get_drvdata(dai);
++
++	clk_disable(hdmi_priv->iahb_clk);
++	clk_disable(hdmi_priv->isfr_clk);
++}
++
++/*
++ * IEC60958 status functions
++ */
++static int mxc_hdmi_iec_info(struct snd_kcontrol *kcontrol,
++			     struct snd_ctl_elem_info *uinfo)
++{
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_IEC958;
++	uinfo->count = 1;
++
++	return 0;
++}
++
++static int mxc_hdmi_iec_get(struct snd_kcontrol *kcontrol,
++			    struct snd_ctl_elem_value *uvalue)
++{
++	int i;
++
++	for (i = 0 ; i < 4 ; i++)
++		uvalue->value.iec958.status[i] = iec_header.status[i];
++
++	return 0;
++}
++
++static int mxc_hdmi_iec_put(struct snd_kcontrol *kcontrol,
++			    struct snd_ctl_elem_value *uvalue)
++{
++	int i;
++
++	/* Do not allow professional mode */
++	if (uvalue->value.iec958.status[0] & IEC958_AES0_PROFESSIONAL)
++		return -EPERM;
++
++	for (i = 0 ; i < 4 ; i++) {
++		iec_header.status[i] = uvalue->value.iec958.status[i];
++		pr_debug("%s status[%d]=0x%02x\n", __func__, i,
++			 iec_header.status[i]);
++	}
++
++	return 0;
++}
++
++static struct snd_kcontrol_new mxc_hdmi_ctrls[] = {
++	/* status cchanel controller */
++	{
++	 .iface = SNDRV_CTL_ELEM_IFACE_MIXER,
++	 .name = SNDRV_CTL_NAME_IEC958("", PLAYBACK, DEFAULT),
++	 .access = SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_WRITE |
++		SNDRV_CTL_ELEM_ACCESS_VOLATILE,
++	 .info = mxc_hdmi_iec_info,
++	 .get = mxc_hdmi_iec_get,
++	 .put = mxc_hdmi_iec_put,
++	 },
++};
++
++static struct snd_soc_dai_ops mxc_hdmi_codec_dai_ops = {
++	.startup = mxc_hdmi_codec_startup,
++	.prepare = mxc_hdmi_codec_prepare,
++	.shutdown = mxc_hdmi_codec_shutdown,
++};
++
++static struct snd_soc_dai_driver mxc_hdmi_codec_dai = {
++	.name = "mxc-hdmi-soc",
++	.playback = {
++		.stream_name = "Playback",
++		.channels_min = 2,
++		.channels_max = 8,
++		.rates = MXC_HDMI_RATES_PLAYBACK,
++		.formats = MXC_HDMI_FORMATS_PLAYBACK,
++	},
++	.ops = &mxc_hdmi_codec_dai_ops,
++};
++
++static int mxc_hdmi_codec_soc_probe(struct snd_soc_codec *codec)
++{
++	struct mxc_hdmi_priv *hdmi_priv;
++	int ret = 0;
++
++	hdmi_priv = kzalloc(sizeof(struct mxc_hdmi_priv), GFP_KERNEL);
++	if (hdmi_priv == NULL)
++		return -ENOMEM;
++
++	hdmi_priv->isfr_clk = clk_get(NULL, "hdmi_isfr_clk");
++	if (IS_ERR(hdmi_priv->isfr_clk)) {
++		ret = PTR_ERR(hdmi_priv->isfr_clk);
++		pr_err("%s Unable to get HDMI isfr clk: %d\n", __func__, ret);
++		goto e_clk_get1;
++	}
++
++	hdmi_priv->iahb_clk = clk_get(NULL, "hdmi_iahb_clk");
++	if (IS_ERR(hdmi_priv->iahb_clk)) {
++		ret = PTR_ERR(hdmi_priv->iahb_clk);
++		pr_err("%s Unable to get HDMI iahb clk: %d\n", __func__, ret);
++		goto e_clk_get2;
++	}
++
++	ret = snd_soc_add_controls(codec, mxc_hdmi_ctrls,
++			     ARRAY_SIZE(mxc_hdmi_ctrls));
++	if (ret)
++		goto e_add_ctrls;
++
++	snd_soc_codec_set_drvdata(codec, hdmi_priv);
++
++	return 0;
++
++e_add_ctrls:
++	clk_put(hdmi_priv->iahb_clk);
++e_clk_get2:
++	clk_put(hdmi_priv->isfr_clk);
++e_clk_get1:
++	kfree(hdmi_priv);
++	return ret;
++}
++
++static struct snd_soc_codec_driver soc_codec_dev_hdmi = {
++	.probe = mxc_hdmi_codec_soc_probe,
++};
++
++static int __devinit mxc_hdmi_codec_probe(struct platform_device *pdev)
++{
++	int ret = 0;
++
++	dev_info(&pdev->dev, "MXC HDMI Audio\n");
++
++	ret = snd_soc_register_codec(&pdev->dev, &soc_codec_dev_hdmi,
++				     &mxc_hdmi_codec_dai, 1);
++	if (ret) {
++		dev_err(&pdev->dev, "failed to register codec\n");
++		return ret;
++	}
++
++	return 0;
++}
++
++static int __devexit mxc_hdmi_codec_remove(struct platform_device *pdev)
++{
++	struct mxc_hdmi_priv *hdmi_priv = platform_get_drvdata(pdev);
++
++	snd_soc_unregister_codec(&pdev->dev);
++	platform_set_drvdata(pdev, NULL);
++	kfree(hdmi_priv);
++
++	return 0;
++}
++
++struct platform_driver mxc_hdmi_driver = {
++	.driver = {
++		   .name = "mxc_hdmi_soc",
++		   .owner = THIS_MODULE,
++		   },
++	.probe = mxc_hdmi_codec_probe,
++	.remove = __devexit_p(mxc_hdmi_codec_remove),
++};
++
++static int __init mxc_hdmi_codec_init(void)
++{
++	return platform_driver_register(&mxc_hdmi_driver);
++}
++
++static void __exit mxc_hdmi_codec_exit(void)
++{
++	return platform_driver_unregister(&mxc_hdmi_driver);
++}
++
++module_init(mxc_hdmi_codec_init);
++module_exit(mxc_hdmi_codec_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("MXC HDMI Audio");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/imx/Kconfig b/sound/soc/imx/Kconfig
+index 63bf841..3b7a02c 100644
+--- a/sound/soc/imx/Kconfig
++++ b/sound/soc/imx/Kconfig
+@@ -90,4 +90,12 @@ config SND_SOC_IMX_SPDIF
+ 	  Say Y if you want to add support for SoC audio on a IMX development
+ 	  board with S/PDIF.
+ 
++config SND_SOC_IMX_HDMI
++	tristate "SoC Audio support for IMX - HDMI"
++	default n
++	select SND_SOC_MXC_HDMI
++	select MFD_MXC_HDMI
++	help
++	  Say Y if you want to add support for SoC audio through IMX HDMI.
++
+ endif	# SND_IMX_SOC
+diff --git a/sound/soc/imx/Makefile b/sound/soc/imx/Makefile
+index a6e135b..4ac4aed 100644
+--- a/sound/soc/imx/Makefile
++++ b/sound/soc/imx/Makefile
+@@ -16,6 +16,8 @@ snd-soc-imx-sgtl5000-objs := imx-sgtl5000.o
+ 
+ obj-$(CONFIG_SND_SOC_EUKREA_TLV320) += snd-soc-eukrea-tlv320.o
+ obj-$(CONFIG_SND_SOC_PHYCORE_AC97) += snd-soc-phycore-ac97.o
++snd-soc-imx-hdmi-objs := imx-hdmi.o imx-hdmi-dai.o imx-hdmi-dma.o
+ obj-$(CONFIG_SND_SOC_MX27VIS_AIC32X4) += snd-soc-mx27vis-aic32x4.o
+ obj-$(CONFIG_SND_MXC_SOC_WM1133_EV1) += snd-soc-wm1133-ev1.o
+ obj-$(CONFIG_SND_SOC_IMX_SGTL5000) += snd-soc-imx-sgtl5000.o
++obj-$(CONFIG_SND_SOC_IMX_HDMI) += snd-soc-imx-hdmi.o
+diff --git a/sound/soc/imx/imx-hdmi-dai.c b/sound/soc/imx/imx-hdmi-dai.c
+new file mode 100644
+index 0000000..71cb3a5
+--- /dev/null
++++ b/sound/soc/imx/imx-hdmi-dai.c
+@@ -0,0 +1,126 @@
++/*
++ * ALSA SoC HDMI Audio Layer for MXS
++ *
++ * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ *
++ * Based on stmp3xxx_spdif_dai.c
++ * Vladimir Barinov <vbarinov@embeddedalley.com>
++ * Copyright 2008 SigmaTel, Inc
++ * Copyright 2008 Embedded Alley Solutions, Inc
++ *
++ * This file is licensed under the terms of the GNU General Public License
++ * version 2.  This program  is licensed "as is" without any warranty of any
++ * kind, whether express or implied.
++ */
++
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/dma-mapping.h>
++#include <linux/slab.h>
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/soc.h>
++#include <mach/dma.h>
++#include <mach/hardware.h>
++
++#include <linux/mfd/mxc-hdmi-core.h>
++#include "imx-hdmi.h"
++
++static struct snd_soc_dai_driver imx_hdmi_dai = {
++	.playback = {
++		.channels_min = 2,
++		.channels_max = 8,
++		.rates = MXC_HDMI_RATES_PLAYBACK,
++		.formats = MXC_HDMI_FORMATS_PLAYBACK,
++	},
++};
++
++static int imx_hdmi_dai_probe(struct platform_device *pdev)
++{
++	struct imx_hdmi *hdmi_data;
++	int ret = 0;
++
++	hdmi_data = kzalloc(sizeof(*hdmi_data), GFP_KERNEL);
++	if (!hdmi_data)
++		return -ENOMEM;
++
++	dev_set_drvdata(&pdev->dev, hdmi_data);
++	hdmi_data->pdev = pdev;
++
++	hdmi_data->irq = platform_get_irq(pdev, 0);
++	if (hdmi_data->irq <= 0) {
++		dev_err(&pdev->dev, "MXC hdmi: invalid irq number (%d)\n",
++			hdmi_data->irq);
++		goto e_reg_dai;
++	}
++
++	ret = snd_soc_register_dai(&pdev->dev, &imx_hdmi_dai);
++	if (ret) {
++		dev_err(&pdev->dev, "register DAI failed\n");
++		goto e_reg_dai;
++	}
++
++	hdmi_data->soc_platform_pdev =
++		platform_device_alloc("imx-hdmi-soc-audio", 0);
++
++	if (!hdmi_data->soc_platform_pdev) {
++		dev_err(&pdev->dev, "failed platform_device_alloc\n");
++		goto e_alloc_dai;
++	}
++
++	platform_set_drvdata(hdmi_data->soc_platform_pdev, hdmi_data);
++
++	ret = platform_device_add(hdmi_data->soc_platform_pdev);
++	if (ret) {
++		dev_err(&pdev->dev, "failed to add platform device\n");
++		platform_device_put(hdmi_data->soc_platform_pdev);
++		goto e_pdev_add;
++	}
++
++	return 0;
++e_pdev_add:
++	platform_device_put(hdmi_data->soc_platform_pdev);
++e_alloc_dai:
++	snd_soc_unregister_dai(&pdev->dev);
++e_reg_dai:
++	kfree(hdmi_data);
++	return ret;
++}
++
++static int __devexit imx_hdmi_dai_remove(struct platform_device *pdev)
++{
++	struct imx_hdmi *hdmi_data = platform_get_drvdata(pdev);
++
++	snd_soc_unregister_dai(&pdev->dev);
++	kfree(hdmi_data);
++
++	return 0;
++}
++
++static struct platform_driver imx_hdmi_driver = {
++	.probe = imx_hdmi_dai_probe,
++	.remove = __devexit_p(imx_hdmi_dai_remove),
++	.driver = {
++		.name = "imx-hdmi-soc-dai",
++		.owner = THIS_MODULE,
++	},
++};
++
++static int __init imx_hdmi_dai_init(void)
++{
++	return platform_driver_register(&imx_hdmi_driver);
++}
++
++static void __exit imx_hdmi_dai_exit(void)
++{
++	platform_driver_unregister(&imx_hdmi_driver);
++}
++
++module_init(imx_hdmi_dai_init);
++module_exit(imx_hdmi_dai_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("IMX HDMI TX DAI");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/imx/imx-hdmi-dma.c b/sound/soc/imx/imx-hdmi-dma.c
+new file mode 100644
+index 0000000..1c875a2
+--- /dev/null
++++ b/sound/soc/imx/imx-hdmi-dma.c
+@@ -0,0 +1,836 @@
++/*
++ * imx-hdmi-dma.c  --  HDMI DMA driver for ALSA Soc Audio Layer
++ *
++ * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ *
++ * based on imx-pcm-dma-mx2.c
++ * Copyright 2009 Sascha Hauer <s.hauer@pengutronix.de>
++ *
++ * This code is based on code copyrighted by Freescale,
++ * Liam Girdwood, Javier Martin and probably others.
++ *
++ *  This program is free software; you can redistribute  it and/or modify it
++ *  under  the terms of  the GNU General  Public License as published by the
++ *  Free Software Foundation;  either version 2 of the  License, or (at your
++ *  option) any later version.
++ */
++
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/device.h>
++#include <linux/dma-mapping.h>
++#include <linux/init.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/slab.h>
++
++#include <sound/core.h>
++#include <sound/initval.h>
++#include <sound/pcm.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++
++#include <linux/mfd/mxc-hdmi-core.h>
++#include <mach/mxc_hdmi.h>
++#include "imx-hdmi.h"
++
++struct imx_hdmi_dma_runtime_data {
++	struct snd_pcm_substream *tx_substream;
++
++	unsigned long buffer_bytes;
++	void *buf;
++	int period_time;
++
++	int periods;
++	int period_bytes;
++	int dma_period_bytes;
++	int buffer_ratio;
++
++	unsigned long offset;
++
++	int channels;
++	snd_pcm_format_t format;
++	int rate;
++	int sample_align;
++	int sample_bits;
++
++	int frame_idx;
++
++	int irq;
++	struct clk *isfr_clk;
++	struct clk *iahb_clk;
++
++	bool tx_active;
++	spinlock_t irq_lock;
++};
++
++hdmi_audio_header_t iec_header;
++
++/*
++ * Note that the period size for DMA != period size for ALSA because the
++ * driver adds iec frame info to the audio samples (in hdmi_dma_copy).
++ *
++ * Each 4 byte subframe = 1 byte of iec data + 3 byte audio sample.
++ *
++ * A 16 bit audio sample becomes 32 bits including the frame info. Ratio=2
++ * A 24 bit audio sample becomes 32 bits including the frame info. Ratio=3:4
++ * If the 24 bit raw audio is in 32 bit words, the
++ *
++ *  Original  Packed into  subframe  Ratio of size        Format
++ *   sample    how many      size    of DMA buffer
++ *   (bits)      bits                to ALSA buffer
++ *  --------  -----------  --------  --------------  ------------------------
++ *     16         16          32          2          SNDRV_PCM_FORMAT_S16_LE
++ *     24         24          32          1.33       SNDRV_PCM_FORMAT_S24_3LE*
++ *     24         32          32          1          SNDRV_PCM_FORMAT_S24_LE
++ *
++ * *so SNDRV_PCM_FORMAT_S24_3LE is not supported.
++ */
++
++/*
++ * The minimum dma period is one IEC audio frame (192 * 4 * channels).
++ * The maximum dma period for the HDMI DMA is 8K.
++ *
++ *   channels       minimum          maximum
++ *                 dma period       dma period
++ *   --------  ------------------   ----------
++ *       2     192 * 4 * 2 = 1536   * 4 = 6144
++ *       4     192 * 4 * 4 = 3072   * 2 = 6144
++ *       6     192 * 4 * 6 = 4608   * 1 = 4608
++ *       8     192 * 4 * 8 = 6144   * 1 = 6144
++ *
++ * Bottom line:
++ * 1. Must keep the ratio of DMA buffer to ALSA buffer consistent.
++ * 2. frame_idx is saved in the private data, so even if a frame cannot be
++ *    transmitted in a period, it can be continued in the next period.  This
++ *    is necessary for 6 ch.
++ */
++#define HDMI_DMA_PERIOD_BYTES		(6144)
++#define HDMI_DMA_BUF_SIZE		(64 * 1024)
++
++struct imx_hdmi_dma_runtime_data *hdmi_dma_priv;
++
++#ifdef DEBUG
++static void dumpregs(void)
++{
++	pr_debug("\n");
++	pr_debug("HDMI_AHB_DMA_CONF0           0x%02x\n", hdmi_readb(HDMI_AHB_DMA_CONF0));
++	pr_debug("HDMI_AHB_DMA_START           0x%02x\n", hdmi_readb(HDMI_AHB_DMA_START));
++	pr_debug("HDMI_AHB_DMA_STOP            0x%02x\n", hdmi_readb(HDMI_AHB_DMA_STOP));
++	pr_debug("HDMI_AHB_DMA_THRSLD          0x%02x\n", hdmi_readb(HDMI_AHB_DMA_THRSLD));
++	pr_debug("HDMI_AHB_DMA_STRADDR[0-3]    0x%08x\n", hdmi_read4(HDMI_AHB_DMA_STRADDR0));
++	pr_debug("HDMI_AHB_DMA_STPADDR[0-3]    0x%08x\n", hdmi_read4(HDMI_AHB_DMA_STPADDR0));
++	pr_debug("HDMI_AHB_DMA_BSTADDR[0-3]    0x%08x\n", hdmi_read4(HDMI_AHB_DMA_BSTADDR0));
++	pr_debug("HDMI_AHB_DMA_MBLENGTH0       0x%02x\n", hdmi_readb(HDMI_AHB_DMA_MBLENGTH0));
++	pr_debug("HDMI_AHB_DMA_MBLENGTH1       0x%02x\n", hdmi_readb(HDMI_AHB_DMA_MBLENGTH1));
++	pr_debug("HDMI_AHB_DMA_STAT            0x%02x\n", hdmi_readb(HDMI_AHB_DMA_STAT));
++	pr_debug("HDMI_AHB_DMA_INT             0x%02x\n", hdmi_readb(HDMI_AHB_DMA_INT));
++	pr_debug("HDMI_AHB_DMA_MASK            0x%02x\n", hdmi_readb(HDMI_AHB_DMA_MASK));
++	pr_debug("HDMI_AHB_DMA_POL             0x%02x\n", hdmi_readb(HDMI_AHB_DMA_POL));
++	pr_debug("HDMI_AHB_DMA_CONF1           0x%02x\n", hdmi_readb(HDMI_AHB_DMA_CONF1));
++	pr_debug("HDMI_AHB_DMA_BUFFSTAT        0x%02x\n", hdmi_readb(HDMI_AHB_DMA_BUFFSTAT));
++	pr_debug("HDMI_AHB_DMA_BUFFINT         0x%02x\n", hdmi_readb(HDMI_AHB_DMA_BUFFINT));
++	pr_debug("HDMI_AHB_DMA_BUFFMASK        0x%02x\n", hdmi_readb(HDMI_AHB_DMA_BUFFMASK));
++	pr_debug("HDMI_AHB_DMA_BUFFPOL         0x%02x\n", hdmi_readb(HDMI_AHB_DMA_BUFFPOL));
++	pr_debug("HDMI_IH_MUTE_AHBDMAAUD_STAT0 0x%02x\n", hdmi_readb(HDMI_IH_MUTE_AHBDMAAUD_STAT0));
++	pr_debug("HDMI_IH_AHBDMAAUD_STAT0      0x%02x\n", hdmi_readb(HDMI_IH_AHBDMAAUD_STAT0));
++	pr_debug("HDMI_IH_MUTE                 0x%02x\n", hdmi_readb(HDMI_IH_MUTE));
++	pr_debug("\n");
++}
++
++static void dumprtd(struct imx_hdmi_dma_runtime_data *rtd)
++{
++	pr_debug("\n");
++	pr_debug("channels         = %d\n", rtd->channels);
++	pr_debug("periods          = %d\n", rtd->periods);
++	pr_debug("period_bytes     = %d\n", rtd->period_bytes);
++	pr_debug("dma period_bytes = %d\n", rtd->dma_period_bytes);
++	pr_debug("buffer_ratio     = %d\n", rtd->buffer_ratio);
++	pr_debug("dma buf addr     = 0x%08x\n", (int)rtd->buf);
++	pr_debug("dma buf size     = %d\n", (int)rtd->buffer_bytes);
++	pr_debug("sample_rate      = %d\n", (int)rtd->rate);
++}
++#else
++static void dumpregs(void)
++{
++}
++
++static void dumprtd(struct imx_hdmi_dma_runtime_data *rtd)
++{
++}
++#endif
++
++static void hdmi_dma_start(void)
++{
++	hdmi_mask_writeb(1, HDMI_AHB_DMA_START,
++			HDMI_AHB_DMA_START_START_OFFSET,
++			HDMI_AHB_DMA_START_START_MASK);
++}
++
++static void hdmi_dma_stop(void)
++{
++	hdmi_mask_writeb(1, HDMI_AHB_DMA_STOP,
++			HDMI_AHB_DMA_STOP_STOP_OFFSET,
++			HDMI_AHB_DMA_STOP_STOP_MASK);
++}
++
++static void hdmi_fifo_reset(void)
++{
++	hdmi_mask_writeb(1, HDMI_AHB_DMA_CONF0,
++			 HDMI_AHB_DMA_CONF0_SW_FIFO_RST_OFFSET,
++			 HDMI_AHB_DMA_CONF0_SW_FIFO_RST_MASK);
++}
++
++/*
++ * Conditions for DMA to work:
++ * ((final_addr - initial_addr)>>2)+1) < 2k.  So max period is 8k.
++ * (inital_addr & 0x3) == 0
++ * (final_addr  & 0x3) == 0x3
++ *
++ * The DMA Period should be an integer multiple of the IEC 60958 audio
++ * frame size, which is 768 bytes (192 * 4).
++ */
++static void hdmi_dma_set_addr(int start_addr, int dma_period_bytes)
++{
++	int final_addr = start_addr + dma_period_bytes - 1;
++
++	hdmi_write4(start_addr, HDMI_AHB_DMA_STRADDR0);
++	hdmi_write4(final_addr, HDMI_AHB_DMA_STPADDR0);
++}
++
++static u8 hdmi_dma_get_irq_status(void)
++{
++	return hdmi_readb(HDMI_IH_AHBDMAAUD_STAT0);
++}
++
++static void hdmi_dma_clear_irq_status(u8 status)
++{
++	hdmi_writeb(status, HDMI_IH_AHBDMAAUD_STAT0);
++}
++
++static void hdmi_dma_irq_mask(int mask)
++{
++	if (mask)
++		hdmi_writeb(0xff, HDMI_AHB_DMA_MASK);
++	else
++		hdmi_writeb((u8)~HDMI_AHB_DMA_DONE, HDMI_AHB_DMA_MASK);
++}
++
++static void hdmi_dma_irq_mute(int mute)
++{
++	if (mute)
++		hdmi_writeb(0xff, HDMI_IH_MUTE_AHBDMAAUD_STAT0);
++	else
++		hdmi_writeb(0x00, HDMI_IH_MUTE_AHBDMAAUD_STAT0);
++}
++
++static irqreturn_t hdmi_dma_isr(int irq, void *dev_id)
++{
++	struct imx_hdmi_dma_runtime_data *rtd = dev_id;
++	struct snd_pcm_substream *substream = rtd->tx_substream;
++	struct snd_dma_buffer *dma_buffer;
++	unsigned int status;
++	unsigned int dma_offset;
++	unsigned long flags;
++
++	spin_lock_irqsave(&rtd->irq_lock, flags);
++
++	if (!rtd->tx_active) {
++		spin_unlock_irqrestore(&rtd->irq_lock, flags);
++		return IRQ_HANDLED;
++	}
++
++	hdmi_dma_irq_mute(1);
++	status = hdmi_dma_get_irq_status();
++	hdmi_dma_clear_irq_status(status);
++
++	if (status & HDMI_IH_AHBDMAAUD_STAT0_DONE) {
++		rtd->offset += rtd->period_bytes;
++		rtd->offset %= rtd->period_bytes * rtd->periods;
++
++		dma_offset = rtd->offset * rtd->buffer_ratio;
++
++		snd_pcm_period_elapsed(substream);
++
++		pr_debug("HDMI DMA Done interrupt: period_bytes=%d offset=%d\n",
++			rtd->period_bytes, (int)rtd->offset);
++
++		dma_buffer = &substream->dma_buffer;
++
++		hdmi_dma_set_addr(dma_buffer->addr + dma_offset,
++				  rtd->dma_period_bytes);
++
++		hdmi_dma_start();
++	}
++
++	hdmi_dma_irq_mute(0);
++
++	spin_unlock_irqrestore(&rtd->irq_lock, flags);
++	return IRQ_HANDLED;
++}
++
++static void hdmi_dma_enable_hlock(int enable)
++{
++	hdmi_mask_writeb(enable, HDMI_AHB_DMA_CONF0,
++			 HDMI_AHB_DMA_CONF0_EN_HLOCK_OFFSET,
++			 HDMI_AHB_DMA_CONF0_EN_HLOCK_MASK);
++}
++
++static void hdmi_dma_set_incr_type(int incr_type)
++{
++	u8 value = hdmi_readb(HDMI_AHB_DMA_CONF0) &
++			~(HDMI_AHB_DMA_CONF0_BURST_MODE |
++			  HDMI_AHB_DMA_CONF0_INCR_TYPE_MASK);
++
++	switch (incr_type) {
++	case 1:
++		break;
++	case 4:
++		value |= HDMI_AHB_DMA_CONF0_BURST_MODE;
++		break;
++	case 8:
++		value |= HDMI_AHB_DMA_CONF0_BURST_MODE |
++			 HDMI_AHB_DMA_CONF0_INCR8;
++		break;
++	case 16:
++		value |= HDMI_AHB_DMA_CONF0_BURST_MODE |
++			 HDMI_AHB_DMA_CONF0_INCR16;
++		break;
++	default:
++		pr_err("%s: invalid increment type: %d", __func__, incr_type);
++		BUG();
++		return;
++	}
++
++	hdmi_writeb(value, HDMI_AHB_DMA_CONF0);
++}
++
++static void hdmi_dma_enable_channels(int channels)
++{
++	switch (channels) {
++	case 2:
++		hdmi_writeb(0x03, HDMI_AHB_DMA_CONF1);
++		break;
++	case 4:
++		hdmi_writeb(0x0f, HDMI_AHB_DMA_CONF1);
++		break;
++	case 6:
++		hdmi_writeb(0x3f, HDMI_AHB_DMA_CONF1);
++		break;
++	case 8:
++		hdmi_writeb(0xff, HDMI_AHB_DMA_CONF1);
++		break;
++	default:
++		WARN(1, "%s - invalid audio channels number: %d\n",
++			__func__, channels);
++		break;
++	}
++}
++
++static void hdmi_dma_configure_dma(int channels)
++{
++	hdmi_dma_enable_hlock(1);
++	hdmi_dma_set_incr_type(4);
++	hdmi_writeb(64, HDMI_AHB_DMA_THRSLD);
++	hdmi_dma_enable_channels(channels);
++}
++
++
++static void hdmi_dma_init_iec_header(void)
++{
++	iec_header.U = 0;
++
++	iec_header.B.consumer = 0;		/* Consumer use */
++	iec_header.B.linear_pcm = 0;		/* linear pcm audio */
++	iec_header.B.copyright = 1;		/* no copyright */
++	iec_header.B.pre_emphasis = 0;		/* 2 channels without pre-emphasis */
++	iec_header.B.mode = 0;			/* Mode 0 */
++
++	iec_header.B.category_code = 0;
++
++	iec_header.B.source = 2;		/* stereo */
++	iec_header.B.channel = 0;
++
++	iec_header.B.sample_freq = 0x02;	/* 48 KHz */
++	iec_header.B.clock_acc = 0;		/* Level II */
++
++	iec_header.B.word_length = 0x02;	/* 16 bits */
++	iec_header.B.org_sample_freq = 0x0D;	/* 48 KHz */
++
++	iec_header.B.cgms_a = 0;	/* Copying is permitted without restriction */
++}
++
++static int hdmi_dma_update_iec_header(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct imx_hdmi_dma_runtime_data *rtd = runtime->private_data;
++
++	iec_header.B.source = rtd->channels;
++
++	switch (rtd->rate) {
++	case 32000:
++		iec_header.B.sample_freq = 0x03;
++		iec_header.B.org_sample_freq = 0x0C;
++		break;
++	case 44100:
++		iec_header.B.sample_freq = 0x00;
++		iec_header.B.org_sample_freq = 0x0F;
++		break;
++	case 48000:
++		iec_header.B.sample_freq = 0x02;
++		iec_header.B.org_sample_freq = 0x0D;
++		break;
++	case 96000:
++		iec_header.B.sample_freq = 0x0A;
++		iec_header.B.org_sample_freq = 0x05;
++		break;
++	case 192000:
++		iec_header.B.sample_freq = 0x0E;
++		iec_header.B.org_sample_freq = 0x01;
++		break;
++	default:
++		pr_err("HDMI Audio sample rate error");
++		return -EFAULT;
++	}
++
++	switch (rtd->format) {
++	case SNDRV_PCM_FORMAT_S16_LE:
++		iec_header.B.word_length = 0x02;
++		break;
++	case SNDRV_PCM_FORMAT_S24_LE:
++		iec_header.B.word_length = 0x0b;
++		break;
++	default:
++		return -EFAULT;
++	}
++
++	return 0;
++}
++
++/*
++ * The HDMI block transmits the audio data without adding any of the audio
++ * frame bits.  So we have to copy the raw dma data from the ALSA buffer
++ * to the DMA buffer, adding the frame information.
++ */
++static int hdmi_dma_copy(struct snd_pcm_substream *substream, int channel,
++			snd_pcm_uframes_t pos, void __user *buf,
++			snd_pcm_uframes_t frames)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct imx_hdmi_dma_runtime_data *rtd = runtime->private_data;
++	unsigned int count = frames_to_bytes(runtime, frames);
++	unsigned int pos_bytes = frames_to_bytes(runtime, pos);
++
++	u8 *addr_start;
++	u8 *addr_end;
++	u32 *addr_cur;
++	int subframe_idx, i;
++	hdmi_audio_dma_data_t hdmi_audio_dma_data;
++	u32 pcm_data;
++
++	addr_start = rtd->buf + (pos_bytes * rtd->buffer_ratio);
++	addr_end = addr_start + (frames * rtd->channels * 4);
++	addr_cur = (u32 *)addr_start;
++
++	while ((count > 0) && ((u32)addr_cur < (u32)addr_end)) {
++		for (subframe_idx = 1 ; subframe_idx <= rtd->channels ; subframe_idx++) {
++			pcm_data = 0;
++			if (copy_from_user(&pcm_data, buf, rtd->sample_align))
++				return -EFAULT;
++			buf += rtd->sample_align;
++			count -= rtd->sample_align;
++
++			hdmi_audio_dma_data.U = 0;
++			iec_header.B.channel = subframe_idx;
++
++			/* fill b (start-of-block) */
++			hdmi_audio_dma_data.B.b = (rtd->frame_idx == 0) ? 1 : 0;
++
++			/* fill c (channel status) */
++			if (rtd->frame_idx < 42)
++				hdmi_audio_dma_data.B.c =
++					(iec_header.U >> rtd->frame_idx) & 0x1;
++			else
++				hdmi_audio_dma_data.B.c = 0;
++
++			/* fill p (parity) */
++			for (i = 0 ; i < rtd->sample_bits ; i++)
++				hdmi_audio_dma_data.B.p ^= (pcm_data >> i) & 0x01;
++			hdmi_audio_dma_data.B.p ^= hdmi_audio_dma_data.B.c;
++			hdmi_audio_dma_data.B.p ^= hdmi_audio_dma_data.B.u;
++			hdmi_audio_dma_data.B.p ^= hdmi_audio_dma_data.B.v;
++
++			/* fill data */
++			if (rtd->sample_bits == 16)
++				hdmi_audio_dma_data.B.data = pcm_data << 8;
++			else
++				hdmi_audio_dma_data.B.data = pcm_data;
++
++			*addr_cur = hdmi_audio_dma_data.U;
++			addr_cur++;
++		}
++
++		rtd->frame_idx++;
++		if (rtd->frame_idx == 192)
++			rtd->frame_idx = 0;
++	}
++
++	return 0;
++}
++
++static int hdmi_dma_hw_params(struct snd_pcm_substream *substream,
++				struct snd_pcm_hw_params *params)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct imx_hdmi_dma_runtime_data *rtd = runtime->private_data;
++	struct snd_dma_buffer *dma_buffer = &substream->dma_buffer;
++
++	rtd->buffer_bytes = params_buffer_bytes(params);
++	rtd->periods = params_periods(params);
++	rtd->period_bytes = params_period_bytes(params);
++	rtd->channels = params_channels(params);
++	rtd->format = params_format(params);
++	rtd->rate = params_rate(params);
++
++	rtd->offset = 0;
++	rtd->period_time = HZ / (params_rate(params) / params_period_size(params));
++	rtd->buf = (unsigned int *)dma_buffer->area;
++
++	switch (rtd->format) {
++	case SNDRV_PCM_FORMAT_S16_LE:
++		rtd->buffer_ratio = 2;
++		rtd->sample_align = 2;
++		rtd->sample_bits = 16;
++		break;
++
++	case SNDRV_PCM_FORMAT_S24_LE:	/* 24 bit audio in 32 bit word */
++		rtd->buffer_ratio = 1;
++		rtd->sample_align = 4;
++		rtd->sample_bits = 24;
++		break;
++	default:
++		pr_err("%s HDMI Audio invalid sample format (%d)\n",
++			__func__, rtd->format);
++		return -EINVAL;
++	}
++
++	rtd->dma_period_bytes = rtd->period_bytes * rtd->buffer_ratio;
++
++	snd_pcm_set_runtime_buffer(substream, &substream->dma_buffer);
++
++	hdmi_dma_configure_dma(rtd->channels);
++	hdmi_dma_set_addr(dma_buffer->addr, rtd->dma_period_bytes);
++
++	dumprtd(rtd);
++
++	hdmi_dma_update_iec_header(substream);
++
++	return 0;
++}
++
++static int hdmi_dma_trigger(struct snd_pcm_substream *substream, int cmd)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct imx_hdmi_dma_runtime_data *rtd = runtime->private_data;
++
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++	case SNDRV_PCM_TRIGGER_RESUME:
++	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		rtd->frame_idx = 0;
++		dumpregs();
++		hdmi_dma_start();
++		break;
++
++	case SNDRV_PCM_TRIGGER_STOP:
++	case SNDRV_PCM_TRIGGER_SUSPEND:
++	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
++		hdmi_dma_stop();
++		break;
++
++	default:
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
++static snd_pcm_uframes_t hdmi_dma_pointer(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct imx_hdmi_dma_runtime_data *rtd = runtime->private_data;
++
++	return bytes_to_frames(substream->runtime, rtd->offset);
++}
++
++static struct snd_pcm_hardware snd_imx_hardware = {
++	.info = SNDRV_PCM_INFO_INTERLEAVED |
++		SNDRV_PCM_INFO_BLOCK_TRANSFER |
++		SNDRV_PCM_INFO_PAUSE |
++		SNDRV_PCM_INFO_RESUME,
++	.formats = MXC_HDMI_FORMATS_PLAYBACK,
++	.rate_min = 32000,
++	.channels_min = 2,
++	.channels_max = 8,
++	.buffer_bytes_max = HDMI_DMA_BUF_SIZE / 2,
++	.period_bytes_min = HDMI_DMA_PERIOD_BYTES / 2,
++	.period_bytes_max = HDMI_DMA_PERIOD_BYTES / 2,
++	.periods_min = 4,
++	.periods_max = 255,
++	.fifo_size = 0,
++};
++
++static unsigned int hw_channels[] = {2, 4, 6, 8};
++
++static struct snd_pcm_hw_constraint_list hw_constraint_channels = {
++	.count = ARRAY_SIZE(hw_channels),
++	.list = hw_channels,
++	.mask = 0,
++};
++
++static void hdmi_dma_irq_enable(struct imx_hdmi_dma_runtime_data *rtd)
++{
++	unsigned long flags;
++
++	hdmi_writeb(0xff, HDMI_AHB_DMA_POL);
++	hdmi_writeb(0xff, HDMI_AHB_DMA_BUFFPOL);
++
++	spin_lock_irqsave(&hdmi_dma_priv->irq_lock, flags);
++
++	hdmi_dma_clear_irq_status(0xff);
++	hdmi_irq_enable(hdmi_dma_priv->irq);
++	hdmi_dma_irq_mute(0);
++	hdmi_dma_irq_mask(0);
++	hdmi_dma_priv->tx_active = true;
++
++	spin_unlock_irqrestore(&hdmi_dma_priv->irq_lock, flags);
++
++}
++
++static void hdmi_dma_irq_disable(struct imx_hdmi_dma_runtime_data *rtd)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&rtd->irq_lock, flags);
++
++	hdmi_dma_irq_mask(1);
++	hdmi_dma_irq_mute(1);
++	hdmi_irq_disable(rtd->irq);
++	hdmi_dma_clear_irq_status(0xff);
++	rtd->tx_active = false;
++
++	spin_unlock_irqrestore(&rtd->irq_lock, flags);
++}
++
++static int hdmi_dma_open(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	int ret;
++
++	runtime->private_data = hdmi_dma_priv;
++
++	clk_enable(hdmi_dma_priv->isfr_clk);
++	clk_enable(hdmi_dma_priv->iahb_clk);
++
++	pr_debug("%s hdmi clks: isfr:%d iahb:%d\n", __func__,
++		(int)clk_get_rate(hdmi_dma_priv->isfr_clk),
++		(int)clk_get_rate(hdmi_dma_priv->iahb_clk));
++
++	hdmi_fifo_reset();
++
++	ret = snd_pcm_hw_constraint_integer(substream->runtime,
++			SNDRV_PCM_HW_PARAM_PERIODS);
++	if (ret < 0)
++		return ret;
++
++	ret = snd_pcm_hw_constraint_list(runtime, 0,
++					SNDRV_PCM_HW_PARAM_CHANNELS,
++					&hw_constraint_channels);
++	if (ret < 0)
++		return ret;
++
++	snd_soc_set_runtime_hwparams(substream, &snd_imx_hardware);
++
++	hdmi_dma_irq_enable(hdmi_dma_priv);
++
++	return 0;
++}
++
++static int hdmi_dma_close(struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct imx_hdmi_dma_runtime_data *rtd = runtime->private_data;
++
++	hdmi_dma_irq_disable(rtd);
++
++	clk_disable(rtd->iahb_clk);
++	clk_disable(rtd->isfr_clk);
++
++	return 0;
++}
++
++static struct snd_pcm_ops imx_hdmi_dma_pcm_ops = {
++	.open		= hdmi_dma_open,
++	.close		= hdmi_dma_close,
++	.ioctl		= snd_pcm_lib_ioctl,
++	.hw_params	= hdmi_dma_hw_params,
++	.trigger	= hdmi_dma_trigger,
++	.pointer	= hdmi_dma_pointer,
++	.copy		= hdmi_dma_copy,
++};
++
++static int imx_pcm_preallocate_dma_buffer(struct snd_pcm *pcm, int stream)
++{
++	struct snd_pcm_substream *substream = pcm->streams[stream].substream;
++	struct snd_dma_buffer *buf = &substream->dma_buffer;
++	size_t size = HDMI_DMA_BUF_SIZE;
++
++	buf->area = dma_alloc_writecombine(pcm->card->dev, size,
++					   &buf->addr, GFP_KERNEL);
++	if (!buf->area)
++		return -ENOMEM;
++
++	buf->dev.type = SNDRV_DMA_TYPE_DEV;
++	buf->dev.dev = pcm->card->dev;
++	buf->private_data = NULL;
++	buf->bytes = size;
++
++	hdmi_dma_priv->tx_substream = substream;
++
++	return 0;
++}
++
++static u64 hdmi_dmamask = DMA_BIT_MASK(32);
++
++static int imx_hdmi_dma_pcm_new(struct snd_card *card, struct snd_soc_dai *dai,
++				struct snd_pcm *pcm)
++{
++	int ret = 0;
++
++	if (!card->dev->dma_mask)
++		card->dev->dma_mask = &hdmi_dmamask;
++
++	if (!card->dev->coherent_dma_mask)
++		card->dev->coherent_dma_mask = DMA_BIT_MASK(32);
++
++	ret = imx_pcm_preallocate_dma_buffer(pcm,
++		SNDRV_PCM_STREAM_PLAYBACK);
++	if (ret)
++		goto out;
++out:
++	return ret;
++}
++
++static void imx_hdmi_dma_pcm_free(struct snd_pcm *pcm)
++{
++	struct snd_pcm_substream *substream;
++	struct snd_dma_buffer *buf;
++	int stream;
++
++	for (stream = 0; stream < 2; stream++) {
++		substream = pcm->streams[stream].substream;
++		if (!substream)
++			continue;
++
++		buf = &substream->dma_buffer;
++		if (!buf->area)
++			continue;
++
++		dma_free_writecombine(pcm->card->dev, buf->bytes,
++				      buf->area, buf->addr);
++		buf->area = NULL;
++	}
++}
++
++static struct snd_soc_platform_driver imx_soc_platform_mx2 = {
++	.ops		= &imx_hdmi_dma_pcm_ops,
++	.pcm_new	= imx_hdmi_dma_pcm_new,
++	.pcm_free	= imx_hdmi_dma_pcm_free,
++};
++
++static int __devinit imx_soc_platform_probe(struct platform_device *pdev)
++{
++	struct imx_hdmi *hdmi_drvdata = platform_get_drvdata(pdev);
++	int ret = 0;
++
++	hdmi_dma_priv = kzalloc(sizeof(*hdmi_dma_priv), GFP_KERNEL);
++	if (hdmi_dma_priv == NULL)
++		return -ENOMEM;
++
++	hdmi_dma_priv->tx_active = false;
++	spin_lock_init(&hdmi_dma_priv->irq_lock);
++	hdmi_dma_priv->irq = hdmi_drvdata->irq;
++
++	hdmi_dma_init_iec_header();
++
++	/* Initialize IRQ at HDMI core level */
++	hdmi_irq_init();
++
++	hdmi_dma_priv->isfr_clk = clk_get(&pdev->dev, "hdmi_isfr_clk");
++	if (IS_ERR(hdmi_dma_priv->isfr_clk)) {
++		ret = PTR_ERR(hdmi_dma_priv->isfr_clk);
++		dev_err(&pdev->dev, "Unable to get HDMI isfr clk: %d\n", ret);
++		goto e_clk_get1;
++	}
++
++	hdmi_dma_priv->iahb_clk = clk_get(&pdev->dev, "hdmi_iahb_clk");
++	if (IS_ERR(hdmi_dma_priv->iahb_clk)) {
++		ret = PTR_ERR(hdmi_dma_priv->iahb_clk);
++		dev_err(&pdev->dev, "Unable to get HDMI ahb clk: %d\n", ret);
++		goto e_clk_get2;
++	}
++
++	/* The HDMI block's irq line is shared with HDMI video. */
++	if (request_irq(hdmi_dma_priv->irq, hdmi_dma_isr, IRQF_SHARED,
++			"hdmi dma", hdmi_dma_priv)) {
++		dev_err(&pdev->dev, "MXC hdmi: failed to request irq %d\n",
++		       hdmi_dma_priv->irq);
++		ret = -EBUSY;
++		goto e_irq;
++	}
++
++	ret = snd_soc_register_platform(&pdev->dev, &imx_soc_platform_mx2);
++	if (ret)
++		goto e_irq;
++
++	return 0;
++
++e_irq:
++	clk_put(hdmi_dma_priv->iahb_clk);
++e_clk_get2:
++	clk_put(hdmi_dma_priv->isfr_clk);
++e_clk_get1:
++	kfree(hdmi_dma_priv);
++
++	return ret;
++}
++
++static int __devexit imx_soc_platform_remove(struct platform_device *pdev)
++{
++	free_irq(hdmi_dma_priv->irq, hdmi_dma_priv);
++	snd_soc_unregister_platform(&pdev->dev);
++	kfree(hdmi_dma_priv);
++	return 0;
++}
++
++static struct platform_driver imx_hdmi_dma_driver = {
++	.driver = {
++			.name = "imx-hdmi-soc-audio",
++			.owner = THIS_MODULE,
++	},
++	.probe = imx_soc_platform_probe,
++	.remove = __devexit_p(imx_soc_platform_remove),
++};
++
++static int __init hdmi_dma_init(void)
++{
++	return platform_driver_register(&imx_hdmi_dma_driver);
++}
++module_init(hdmi_dma_init);
++
++static void __exit hdmi_dma_exit(void)
++{
++	platform_driver_unregister(&imx_hdmi_dma_driver);
++}
++module_exit(hdmi_dma_exit);
+diff --git a/sound/soc/imx/imx-hdmi.c b/sound/soc/imx/imx-hdmi.c
+new file mode 100644
+index 0000000..f2316c1
+--- /dev/null
++++ b/sound/soc/imx/imx-hdmi.c
+@@ -0,0 +1,87 @@
++/*
++ * ASoC HDMI Transmitter driver for IMX development boards
++ *
++ * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ *
++ * based on stmp3780_devb_spdif.c
++ *
++ * Vladimir Barinov <vbarinov@embeddedalley.com>
++ *
++ * Copyright 2008 SigmaTel, Inc
++ * Copyright 2008 Embedded Alley Solutions, Inc
++ *
++ * This file is licensed under the terms of the GNU General Public License
++ * version 2.  This program  is licensed "as is" without any warranty of any
++ * kind, whether express or implied.
++ */
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/timer.h>
++#include <linux/interrupt.h>
++#include <linux/platform_device.h>
++#include <linux/clk.h>
++#include <linux/io.h>
++
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/soc.h>
++#include <sound/soc-dapm.h>
++
++#include <asm/mach-types.h>
++#include <asm/dma.h>
++#include <mach/hardware.h>
++
++#include <mach/mxc_hdmi.h>
++#include <linux/mfd/mxc-hdmi-core.h>
++#include "imx-hdmi.h"
++
++/* imx digital audio interface glue - connects codec <--> CPU */
++static struct snd_soc_dai_link imx_hdmi_dai_link = {
++	.name = "IMX HDMI TX",
++	.stream_name = "IMX HDMI TX",
++	.codec_dai_name = "mxc-hdmi-soc",
++	.codec_name = "mxc_hdmi_soc.0",
++	.cpu_dai_name = "imx-hdmi-soc-dai.0",
++	.platform_name = "imx-hdmi-soc-audio.0",
++};
++
++static struct snd_soc_card snd_soc_card_imx_hdmi = {
++	.name = "imx-hdmi-soc",
++	.dai_link = &imx_hdmi_dai_link,
++	.num_links = 1,
++};
++
++static struct platform_device *imx_hdmi_snd_device;
++
++static int __init imx_hdmi_init(void)
++{
++	int ret = 0;
++
++	imx_hdmi_snd_device = platform_device_alloc("soc-audio", 4);
++	if (!imx_hdmi_snd_device) {
++		pr_err("%s - failed platform_device_alloc\n", __func__);
++		return -ENOMEM;
++	}
++
++	platform_set_drvdata(imx_hdmi_snd_device, &snd_soc_card_imx_hdmi);
++
++	ret = platform_device_add(imx_hdmi_snd_device);
++	if (ret) {
++		pr_err("ASoC HDMI TX: Platform device allocation failed\n");
++		platform_device_put(imx_hdmi_snd_device);
++	}
++
++	return ret;
++}
++
++static void __exit imx_hdmi_exit(void)
++{
++	platform_device_unregister(imx_hdmi_snd_device);
++}
++
++module_init(imx_hdmi_init);
++module_exit(imx_hdmi_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("IMX HDMI TX ASoC driver");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/imx/imx-hdmi.h b/sound/soc/imx/imx-hdmi.h
+new file mode 100644
+index 0000000..52c58dd
+--- /dev/null
++++ b/sound/soc/imx/imx-hdmi.h
+@@ -0,0 +1,89 @@
++/*
++ * MXC HDMI ALSA Soc Codec Driver
++ *
++ * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#ifndef __IMX_HDMI_H
++#define __IMX_HDMI_H
++
++#define DRV_NAME "imx-hdmi"
++
++struct imx_hdmi {
++	int irq;
++	struct platform_device *pdev;
++	struct platform_device *soc_platform_pdev;
++};
++
++#define MXC_HDMI_RATES_PLAYBACK			(SNDRV_PCM_RATE_32000 | \
++						 SNDRV_PCM_RATE_44100 | \
++						 SNDRV_PCM_RATE_48000 | \
++						 SNDRV_PCM_RATE_88200 | \
++						 SNDRV_PCM_RATE_96000)
++
++#define MXC_HDMI_FORMATS_PLAYBACK		(SNDRV_PCM_FMTBIT_S16_LE | \
++						 SNDRV_PCM_FMTBIT_S24_LE)
++
++typedef union {
++	uint64_t  U;
++	struct {
++		unsigned consumer:1;
++		unsigned linear_pcm:1;
++		unsigned copyright:1;
++		unsigned pre_emphasis:3;
++		unsigned mode:2;
++
++		unsigned category_code:8;
++
++		unsigned source:4;
++		unsigned channel:4;
++
++		unsigned sample_freq:4;
++		unsigned clock_acc:2;
++		unsigned reserved0:2;
++
++		unsigned word_length:4;
++		unsigned org_sample_freq:4;
++
++		unsigned cgms_a:2;
++		unsigned reserved1:6;
++
++		unsigned reserved2:8;
++
++		unsigned reserved3:8;
++	} B;
++	unsigned char status[8];
++} hdmi_audio_header_t;
++
++typedef union {
++	uint32_t  U;
++	struct {
++		unsigned data:24;
++		unsigned v:1;
++		unsigned u:1;
++		unsigned c:1;
++		unsigned p:1;
++		unsigned b:1;
++		unsigned reserved:3;
++	} B;
++} hdmi_audio_dma_data_t;
++
++extern hdmi_audio_header_t iec_header;
++
++#endif /* __IMX_HDMI_H */
+-- 
+1.7.7.4
+

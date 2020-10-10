@@ -1,0 +1,451 @@
+From a84f463713864a961c2a7ed8a282afd497354bf4 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Tue, 5 Jul 2011 14:46:05 +0800
+Subject: [PATCH 0217/2463] ENGR00139241-3 mx6 sata: mx5x ahci related
+ modificatoins
+
+mx5x ahci related modificatoins when enable ahci on mx6q
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx5/Kconfig           |    4 +-
+ arch/arm/mach-mx5/board-mx53_loco.c |  144 +++++++++++------------------------
+ arch/arm/mach-mx5/board-mx53_smd.c  |  144 +++++++++++------------------------
+ arch/arm/mach-mx5/devices-imx53.h   |    6 +-
+ 4 files changed, 97 insertions(+), 201 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/Kconfig b/arch/arm/mach-mx5/Kconfig
+index 513e1b8..944ff0a 100755
+--- a/arch/arm/mach-mx5/Kconfig
++++ b/arch/arm/mach-mx5/Kconfig
+@@ -219,7 +219,7 @@ config MACH_MX53_SMD
+ 	select IMX_HAVE_PLATFORM_MXC_GPU
+ 	select IMX_HAVE_PLATFORM_SDHCI_ESDHC_IMX
+ 	select IMX_HAVE_PLATFORM_IMX_SRTC
+-	select IMX_HAVE_PLATFORM_SATA_AHCI
++	select IMX_HAVE_PLATFORM_AHCI
+ 	help
+ 	  Include support for MX53 SMD platform. This includes specific
+ 	  configurations for the board and its peripherals.
+@@ -233,8 +233,8 @@ config MACH_MX53_LOCO
+ 	select IMX_HAVE_PLATFORM_IMX_SRTC
+ 	select IMX_HAVE_PLATFORM_MXC_GPU
+ 	select IMX_HAVE_PLATFORM_SDHCI_ESDHC_IMX
+-	select IMX_HAVE_PLATFORM_SATA_AHCI
+ 	select IMX_HAVE_PLATFORM_GPIO_KEYS
++	select IMX_HAVE_PLATFORM_AHCI
+ 	help
+ 	  Include support for MX53 LOCO platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx5/board-mx53_loco.c b/arch/arm/mach-mx5/board-mx53_loco.c
+index a10a3d0..7f45381 100755
+--- a/arch/arm/mach-mx5/board-mx53_loco.c
++++ b/arch/arm/mach-mx5/board-mx53_loco.c
+@@ -60,6 +60,8 @@
+ #define LOCO_FEC_PHY_RST		IMX_GPIO_NR(7, 6)
+ #define LOCO_USBH1_VBUS			IMX_GPIO_NR(7, 8)
+ 
++static struct clk *sata_clk, *sata_ref_clk;
++
+ extern void __iomem *arm_plat_base;
+ extern void __iomem *gpc_base;
+ extern void __iomem *ccm_base;
+@@ -453,127 +455,73 @@ static void __init mx53_loco_io_init(void)
+ }
+ 
+ /* HW Initialization, if return 0, initialization is successful. */
+-static int sata_init(struct device *dev, void __iomem *addr)
++static int mx53_loco_sata_init(struct device *dev, void __iomem *addr)
+ {
+-	void __iomem *mmio;
+-	struct clk *clk;
+-	int ret = 0;
+ 	u32 tmpdata;
++	int ret = 0;
++	struct clk *clk;
+ 
+-	clk = clk_get(dev, "imx_sata_clk");
+-	ret = IS_ERR(clk);
+-	if (ret) {
+-		printk(KERN_ERR "AHCI can't get clock.\n");
+-		return ret;
++	sata_clk = clk_get(dev, "imx_sata_clk");
++	if (IS_ERR(sata_clk)) {
++		dev_err(dev, "no sata clock.\n");
++		return PTR_ERR(sata_clk);
+ 	}
+-	ret = clk_enable(clk);
++	ret = clk_enable(sata_clk);
+ 	if (ret) {
+-		printk(KERN_ERR "AHCI can't enable clock.\n");
+-		clk_put(clk);
+-		return ret;
++		dev_err(dev, "can't enable sata clock.\n");
++		goto put_sata_clk;
+ 	}
+ 
+-	/* Get the AHB clock rate, and configure the TIMER1MS reg later */
+-	clk = clk_get(NULL, "ahb_clk");
+-	ret = IS_ERR(clk);
+-	if (ret) {
+-		printk(KERN_ERR "AHCI can't get AHB clock.\n");
+-		goto no_ahb_clk;
+-	}
+-
+-	mmio = ioremap(MX53_SATA_BASE_ADDR, SZ_2K);
+-	if (mmio == NULL) {
+-		printk(KERN_ERR "Failed to map SATA REGS\n");
+-		goto no_ahb_clk;
+-	}
+-
+-	tmpdata = readl(mmio + HOST_CAP);
+-	if (!(tmpdata & HOST_CAP_SSS)) {
+-		tmpdata |= HOST_CAP_SSS;
+-		writel(tmpdata, mmio + HOST_CAP);
+-	}
+-
+-	if (!(readl(mmio + HOST_PORTS_IMPL) & 0x1))
+-		writel((readl(mmio + HOST_PORTS_IMPL) | 0x1),
+-			mmio + HOST_PORTS_IMPL);
+-
+-	tmpdata = clk_get_rate(clk) / 1000;
+-	writel(tmpdata, mmio + HOST_TIMER1MS);
+-
+-	clk = clk_get(dev, "usb_phy1_clk");
+-	ret = IS_ERR(clk);
+-	if (ret) {
+-		printk(KERN_ERR "AHCI can't get USB PHY1 CLK.\n");
+-		goto no_ahb_clk;
++	sata_ref_clk = clk_get(NULL, "usb_phy1_clk");
++	if (IS_ERR(sata_ref_clk)) {
++		dev_err(dev, "no sata ref clock.\n");
++		ret = PTR_ERR(sata_ref_clk);
++		goto release_sata_clk;
+ 	}
+-	ret = clk_enable(clk);
++	ret = clk_enable(sata_ref_clk);
+ 	if (ret) {
+-		printk(KERN_ERR "AHCI Can't enable USB PHY1 clock.\n");
+-		clk_put(clk);
+-		goto no_ahb_clk;
++		dev_err(dev, "can't enable sata ref clock.\n");
++		goto put_sata_ref_clk;
+ 	}
+ 
+-	/* Release resources when there is no device on the port */
+-	if ((readl(mmio + PORT_SATA_SR) & 0xF) == 0) {
+-		iounmap(mmio);
+-		ret = -ENODEV;
+-		goto no_device;
++	/* Get the AHB clock rate, and configure the TIMER1MS reg later */
++	clk = clk_get(NULL, "ahb_clk");
++	if (IS_ERR(clk)) {
++		dev_err(dev, "no ahb clock.\n");
++		ret = PTR_ERR(clk);
++		goto release_sata_ref_clk;
+ 	}
++	tmpdata = clk_get_rate(clk) / 1000;
++	clk_put(clk);
+ 
+-	iounmap(mmio);
++	sata_init(addr, tmpdata);
+ 
+ 	return ret;
+ 
+-no_device:
+-	printk(KERN_INFO "NO SATA device is found, relase resource!\n");
+-	clk = clk_get(dev, "usb_phy1_clk");
+-	if (IS_ERR(clk)) {
+-		clk = NULL;
+-		printk(KERN_ERR "AHCI can't get USB PHY1 CLK.\n");
+-	} else {
+-		clk_disable(clk);
+-		clk_put(clk);
+-	}
+-
+-no_ahb_clk:
+-	clk = clk_get(dev, "imx_sata_clk");
+-	if (IS_ERR(clk)) {
+-		clk = NULL;
+-		printk(KERN_ERR "IMX SATA can't get clock.\n");
+-	} else {
+-		clk_disable(clk);
+-		clk_put(clk);
+-	}
++release_sata_ref_clk:
++	clk_disable(sata_ref_clk);
++put_sata_ref_clk:
++	clk_put(sata_ref_clk);
++release_sata_clk:
++	clk_disable(sata_clk);
++put_sata_clk:
++	clk_put(sata_clk);
+ 
+ 	return ret;
+ }
+ 
+-static void sata_exit(struct device *dev)
++static void mx53_loco_sata_exit(struct device *dev)
+ {
+-	struct clk *clk;
+-
+-	clk = clk_get(dev, "usb_phy1_clk");
+-	if (IS_ERR(clk)) {
+-		clk = NULL;
+-		printk(KERN_ERR "AHCI can't get USB PHY1 CLK.\n");
+-	} else {
+-		clk_disable(clk);
+-		clk_put(clk);
+-	}
++	clk_disable(sata_ref_clk);
++	clk_put(sata_ref_clk);
+ 
+-	clk = clk_get(dev, "imx_sata_clk");
+-	if (IS_ERR(clk)) {
+-		clk = NULL;
+-		printk(KERN_ERR "IMX SATA can't get clock.\n");
+-	} else {
+-		clk_disable(clk);
+-		clk_put(clk);
+-	}
++	clk_disable(sata_clk);
++	clk_put(sata_clk);
+ }
+ 
+-static struct ahci_platform_data sata_data = {
+-	.init = sata_init,
+-	.exit = sata_exit,
++static struct ahci_platform_data mx53_loco_sata_data = {
++	.init = mx53_loco_sata_init,
++	.exit = mx53_loco_sata_exit,
+ };
+ 
+ static struct mxc_audio_platform_data loco_audio_data;
+@@ -766,7 +714,7 @@ static void __init mx53_loco_board_init(void)
+ 
+ 	imx53_add_sdhci_esdhc_imx(0, &mx53_loco_sd1_data);
+ 	imx53_add_sdhci_esdhc_imx(2, &mx53_loco_sd3_data);
+-	imx53_add_ahci_imx(0, &sata_data);
++	imx53_add_ahci(0, &mx53_loco_sata_data);
+ 	imx53_add_iim(&iim_data);
+ 
+ 	/* USB */
+diff --git a/arch/arm/mach-mx5/board-mx53_smd.c b/arch/arm/mach-mx5/board-mx53_smd.c
+index bde6a3e..b712aea 100755
+--- a/arch/arm/mach-mx5/board-mx53_smd.c
++++ b/arch/arm/mach-mx5/board-mx53_smd.c
+@@ -81,6 +81,8 @@
+ #define MX53_SMD_ECSPI1_CS0	IMX_GPIO_NR(2, 30)
+ #define MX53_SMD_ECSPI1_CS1	IMX_GPIO_NR(3, 19)
+ 
++static struct clk *sata_clk, *sata_ref_clk;
++
+ extern int mx53_smd_init_da9052(void);
+ 
+ static iomux_v3_cfg_t mx53_smd_pads[] = {
+@@ -506,12 +508,11 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ };
+ 
+ /* HW Initialization, if return 0, initialization is successful. */
+-static int sata_init(struct device *dev, void __iomem *addr)
++static int mx53_smd_sata_init(struct device *dev, void __iomem *addr)
+ {
+-	void __iomem *mmio;
+-	struct clk *clk;
+-	int ret = 0;
+ 	u32 tmpdata;
++	int ret = 0;
++	struct clk *clk;
+ 
+ 	/* Enable SATA PWR  */
+ 	ret = gpio_request(MX53_SMD_SATA_PWR_EN, "ahci-sata-pwr");
+@@ -521,120 +522,67 @@ static int sata_init(struct device *dev, void __iomem *addr)
+ 	}
+ 	gpio_direction_output(MX53_SMD_SATA_PWR_EN, 1);
+ 
+-	clk = clk_get(dev, "imx_sata_clk");
+-	ret = IS_ERR(clk);
+-	if (ret) {
+-		printk(KERN_ERR "AHCI can't get clock.\n");
+-		return ret;
+-	}
+-	ret = clk_enable(clk);
+-	if (ret) {
+-		printk(KERN_ERR "AHCI can't enable clock.\n");
+-		clk_put(clk);
+-		return ret;
++	sata_clk = clk_get(dev, "imx_sata_clk");
++	if (IS_ERR(sata_clk)) {
++		dev_err(dev, "no sata clock.\n");
++		return PTR_ERR(sata_clk);
+ 	}
+-
+-	/* Get the AHB clock rate, and configure the TIMER1MS reg later */
+-	clk = clk_get(NULL, "ahb_clk");
+-	ret = IS_ERR(clk);
++	ret = clk_enable(sata_clk);
+ 	if (ret) {
+-		printk(KERN_ERR "AHCI can't get AHB clock.\n");
+-		goto no_ahb_clk;
++		dev_err(dev, "can't enable sata clock.\n");
++		goto put_sata_clk;
+ 	}
+ 
+-	mmio = ioremap(MX53_SATA_BASE_ADDR, SZ_2K);
+-	if (mmio == NULL) {
+-		printk(KERN_ERR "Failed to map SATA REGS\n");
+-		goto no_ahb_clk;
+-	}
+-
+-	tmpdata = readl(mmio + HOST_CAP);
+-	if (!(tmpdata & HOST_CAP_SSS)) {
+-		tmpdata |= HOST_CAP_SSS;
+-		writel(tmpdata, mmio + HOST_CAP);
+-	}
+-
+-	if (!(readl(mmio + HOST_PORTS_IMPL) & 0x1))
+-		writel((readl(mmio + HOST_PORTS_IMPL) | 0x1),
+-			mmio + HOST_PORTS_IMPL);
+-
+-	tmpdata = clk_get_rate(clk) / 1000;
+-	writel(tmpdata, mmio + HOST_TIMER1MS);
+-
+-	clk = clk_get(dev, "usb_phy1_clk");
+-	ret = IS_ERR(clk);
+-	if (ret) {
+-		printk(KERN_ERR "AHCI can't get USB PHY1 CLK.\n");
+-		goto no_ahb_clk;
++	sata_ref_clk = clk_get(NULL, "usb_phy1_clk");
++	if (IS_ERR(sata_ref_clk)) {
++		dev_err(dev, "no sata ref clock.\n");
++		ret = PTR_ERR(sata_ref_clk);
++		goto release_sata_clk;
+ 	}
+-	ret = clk_enable(clk);
++	ret = clk_enable(sata_ref_clk);
+ 	if (ret) {
+-		printk(KERN_ERR "AHCI Can't enable USB PHY1 clock.\n");
+-		clk_put(clk);
+-		goto no_ahb_clk;
++		dev_err(dev, "can't enable sata ref clock.\n");
++		goto put_sata_ref_clk;
+ 	}
+ 
+-	/* Release resources when there is no device on the port */
+-	if ((readl(mmio + PORT_SATA_SR) & 0xF) == 0) {
+-		iounmap(mmio);
+-		ret = -ENODEV;
+-		goto no_device;
++	/* Get the AHB clock rate, and configure the TIMER1MS reg later */
++	clk = clk_get(NULL, "ahb_clk");
++	if (IS_ERR(clk)) {
++		dev_err(dev, "no ahb clock.\n");
++		ret = PTR_ERR(clk);
++		goto release_sata_ref_clk;
+ 	}
++	tmpdata = clk_get_rate(clk) / 1000;
++	clk_put(clk);
+ 
+-	iounmap(mmio);
++	sata_init(addr, tmpdata);
+ 
+ 	return ret;
+ 
+-no_device:
+-	printk(KERN_INFO "NO SATA device is found, relase resource!\n");
+-	clk = clk_get(dev, "usb_phy1_clk");
+-	if (IS_ERR(clk)) {
+-		clk = NULL;
+-		printk(KERN_ERR "AHCI can't get USB PHY1 CLK.\n");
+-	} else {
+-		clk_disable(clk);
+-		clk_put(clk);
+-	}
+-
+-no_ahb_clk:
+-	clk = clk_get(dev, "imx_sata_clk");
+-	if (IS_ERR(clk)) {
+-		clk = NULL;
+-		printk(KERN_ERR "IMX SATA can't get clock.\n");
+-	} else {
+-		clk_disable(clk);
+-		clk_put(clk);
+-	}
++release_sata_ref_clk:
++	clk_disable(sata_ref_clk);
++put_sata_ref_clk:
++	clk_put(sata_ref_clk);
++release_sata_clk:
++	clk_disable(sata_clk);
++put_sata_clk:
++	clk_put(sata_clk);
+ 
+ 	return ret;
+ }
+ 
+-static void sata_exit(struct device *dev)
++static void mx53_smd_sata_exit(struct device *dev)
+ {
+-	struct clk *clk;
++	clk_disable(sata_ref_clk);
++	clk_put(sata_ref_clk);
+ 
+-	clk = clk_get(dev, "usb_phy1_clk");
+-	if (IS_ERR(clk)) {
+-		clk = NULL;
+-		printk(KERN_ERR "AHCI can't get USB PHY1 CLK.\n");
+-	} else {
+-		clk_disable(clk);
+-		clk_put(clk);
+-	}
+-
+-	clk = clk_get(dev, "imx_sata_clk");
+-	if (IS_ERR(clk)) {
+-		clk = NULL;
+-		printk(KERN_ERR "IMX SATA can't get clock.\n");
+-	} else {
+-		clk_disable(clk);
+-		clk_put(clk);
+-	}
++	clk_disable(sata_clk);
++	clk_put(sata_clk);
+ }
+ 
+-static struct ahci_platform_data sata_data = {
+-	.init = sata_init,
+-	.exit = sata_exit,
++static struct ahci_platform_data mx53_smd_sata_data = {
++	.init = mx53_smd_sata_init,
++	.exit = mx53_smd_sata_exit,
+ };
+ 
+ static void mx53_smd_usbotg_vbus(bool on)
+@@ -830,7 +778,7 @@ static void __init mx53_smd_board_init(void)
+ 	imx53_add_sdhci_esdhc_imx(0, &mx53_smd_sd1_data);
+ 	imx53_add_sdhci_esdhc_imx(1, &mx53_smd_sd2_data);
+ 	imx53_add_sdhci_esdhc_imx(2, &mx53_smd_sd3_data);
+-	imx53_add_ahci_imx(0, &sata_data);
++	imx53_add_ahci(0, &mx53_smd_sata_data);
+ 
+ 	mx53_smd_init_usb();
+ 	imx53_add_iim(&iim_data);
+diff --git a/arch/arm/mach-mx5/devices-imx53.h b/arch/arm/mach-mx5/devices-imx53.h
+index 0311af3..18ce6b9 100755
+--- a/arch/arm/mach-mx5/devices-imx53.h
++++ b/arch/arm/mach-mx5/devices-imx53.h
+@@ -69,9 +69,9 @@ extern const struct imx_srtc_data imx53_imx_srtc_data __initconst;
+ 	platform_device_register_resndata(NULL, "mxc_v4l2_capture",\
+ 			id, NULL, 0, NULL, 0);
+ 
+-extern const struct imx_ahci_imx_data imx53_ahci_imx_data[] __initconst;
+-#define imx53_add_ahci_imx(id, pdata)		\
+-	imx_add_ahci_imx(&imx53_ahci_imx_data[id], pdata)
++extern const struct imx_ahci_data imx53_ahci_data[] __initconst;
++#define imx53_add_ahci(id, pdata)		\
++	imx_add_ahci(&imx53_ahci_data[id], pdata)
+ 
+ extern const struct imx_imx_ssi_data imx53_imx_ssi_data[] __initconst;
+ #define imx53_add_imx_ssi(id, pdata)		\
+-- 
+1.7.7.4
+

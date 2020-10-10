@@ -1,0 +1,30 @@
+From cef228084ed439a34c0ae7afaa8ed322133fcd39 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Mon, 13 Aug 2012 15:26:23 +0800
+Subject: [PATCH 1893/2463] ENGR00216786-3 V4L2 output: Allocate DMA buffer
+ from DMA zone
+
+Allocate DMA buffer from DMA zone, and the system can configure reserve dma
+size through proc fs file under /proc/sys/vm/lowmem_reserve_ratio.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_vout.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_vout.c b/drivers/media/video/mxc/output/mxc_vout.c
+index 4b3617f..366d27a 100644
+--- a/drivers/media/video/mxc/output/mxc_vout.c
++++ b/drivers/media/video/mxc/output/mxc_vout.c
+@@ -244,7 +244,7 @@ static int alloc_dma_buf(struct mxc_vout_output *vout, struct dma_mem *buf)
+ {
+ 
+ 	buf->vaddr = dma_alloc_coherent(vout->vbq.dev, buf->size, &buf->paddr,
+-						GFP_KERNEL);
++						GFP_DMA | GFP_KERNEL);
+ 	if (!buf->vaddr) {
+ 		v4l2_err(vout->vfd->v4l2_dev,
+ 			"cannot get dma buf size:0x%x\n", buf->size);
+-- 
+1.7.7.4
+

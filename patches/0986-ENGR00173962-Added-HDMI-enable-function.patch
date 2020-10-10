@@ -1,0 +1,125 @@
+From 9b1a9b77fd2cfbae8fd4819d8773411aab679309 Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Wed, 8 Feb 2012 13:45:18 +0800
+Subject: [PATCH 0986/2463] ENGR00173962 Added HDMI enable function
+
+Whenever IPU clock change or gating, the HDMI PHY should reset or config again,
+otherwise the HDMI PHY will not work.
+It is the root cause for Ubuntu can't show GUI to HDMI device when bootup
+and GPU application tutorial4_es20 no output to HDMI device.
+Added enable function in mxcfb_set_par() to fix aboved two issue.
+
+Added HDMI initialization check, only one HDMI instanse supported.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |    9 +++++++++
+ drivers/video/mxc_hdmi.c         |   30 ++++++++++++++++++++++++++++++
+ 2 files changed, 39 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index ba43b51..97238d8 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -450,6 +450,15 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 
+ 	ipu_enable_channel(mxc_fbi->ipu, mxc_fbi->ipu_ch);
+ 
++	if (mxc_fbi->dispdrv && mxc_fbi->dispdrv->drv->enable) {
++		retval = mxc_fbi->dispdrv->drv->enable(mxc_fbi->dispdrv);
++		if (retval < 0) {
++			dev_err(fbi->device, "enable error, dispdrv:%s.\n",
++					mxc_fbi->dispdrv->drv->name);
++			return -EINVAL;
++		}
++	}
++
+ 	return retval;
+ }
+ 
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index 6572c1b..35df3d9 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -180,6 +180,8 @@ struct mxc_hdmi {
+ 
+ struct i2c_client *hdmi_i2c;
+ 
++static bool hdmi_inited;
++
+ extern const struct fb_videomode mxc_cea_mode[64];
+ 
+ #ifdef DEBUG
+@@ -1693,6 +1695,19 @@ static void mxc_hdmi_cable_connected(struct mxc_hdmi *hdmi)
+ 	dev_dbg(&hdmi->pdev->dev, "%s exit\n", __func__);
+ }
+ 
++static int mxc_hdmi_power_on(struct mxc_dispdrv_handle *disp)
++{
++	struct mxc_hdmi *hdmi = mxc_dispdrv_getdata(disp);
++	mxc_hdmi_phy_init(hdmi);
++	return 0;
++}
++
++static void mxc_hdmi_power_off(struct mxc_dispdrv_handle *disp)
++{
++	struct mxc_hdmi *hdmi = mxc_dispdrv_getdata(disp);
++	mxc_hdmi_phy_disable(hdmi);
++}
++
+ static void mxc_hdmi_cable_disconnected(struct mxc_hdmi *hdmi)
+ {
+ 	dev_dbg(&hdmi->pdev->dev, "%s\n", __func__);
+@@ -2084,6 +2099,13 @@ static int mxc_hdmi_disp_init(struct mxc_dispdrv_handle *disp,
+ 
+ 	dev_dbg(&hdmi->pdev->dev, "%s\n", __func__);
+ 
++	/* Check hdmi disp init once */
++	if (hdmi_inited) {
++		dev_err(&hdmi->pdev->dev,
++				"Error only one HDMI output support now!\n");
++		return -1;
++	}
++
+ 	if (!plat || irq < 0)
+ 		return -ENODEV;
+ 
+@@ -2208,6 +2230,8 @@ static int mxc_hdmi_disp_init(struct mxc_dispdrv_handle *disp,
+ 
+ 	dev_dbg(&hdmi->pdev->dev, "%s exit\n", __func__);
+ 
++	hdmi_inited = true;
++
+ 	return ret;
+ 
+ efbclient:
+@@ -2250,6 +2274,8 @@ static void mxc_hdmi_disp_deinit(struct mxc_dispdrv_handle *disp)
+ 
+ 	platform_device_unregister(hdmi->pdev);
+ 
++	hdmi_inited = false;
++
+ 	kfree(hdmi);
+ }
+ 
+@@ -2257,6 +2283,8 @@ static struct mxc_dispdrv_driver mxc_hdmi_drv = {
+ 	.name	= DISPDRV_HDMI,
+ 	.init	= mxc_hdmi_disp_init,
+ 	.deinit	= mxc_hdmi_disp_deinit,
++	.enable = mxc_hdmi_power_on,
++	.disable = mxc_hdmi_power_off,
+ };
+ 
+ static int __devinit mxc_hdmi_probe(struct platform_device *pdev)
+@@ -2285,6 +2313,8 @@ static int __devinit mxc_hdmi_probe(struct platform_device *pdev)
+ 		goto ecore;
+ 	}
+ 
++	hdmi_inited = false;
++
+ 	hdmi->disp_mxc_hdmi = mxc_dispdrv_register(&mxc_hdmi_drv);
+ 	if (IS_ERR(hdmi->disp_mxc_hdmi)) {
+ 		dev_err(&pdev->dev, "Failed to register dispdrv - 0x%x\n",
+-- 
+1.7.7.4
+

@@ -1,0 +1,209 @@
+From 4bd2adf35782aa7f40277cbfd3be01ff6133241c Mon Sep 17 00:00:00 2001
+From: Alan Tull <alan.tull@freescale.com>
+Date: Thu, 1 Sep 2011 11:51:09 -0500
+Subject: [PATCH 0396/2463] ENGR00155845-2 mfd for hdmi
+
+This is a mfd for the internal HDMI Transmitter on i.Mx.  It handles
+resources that are shared by the seperate video and audio drivers.
+
+Signed-off-by: Alan Tull <alan.tull@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig                    |   37 ++++++++++++++-
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c           |    1 +
+ arch/arm/mach-mx6/devices-imx6q.h                  |    4 ++
+ arch/arm/plat-mxc/devices/Makefile                 |    1 +
+ arch/arm/plat-mxc/devices/platform-mxc-hdmi-core.c |   50 ++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h    |    9 ++++
+ arch/arm/plat-mxc/include/mach/mxc_hdmi.h          |    8 +++-
+ 7 files changed, 108 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 6f3f626..88f9e81 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1162,7 +1162,42 @@ CONFIG_SSB_POSSIBLE=y
+ # Sonics Silicon Backplane
+ #
+ # CONFIG_SSB is not set
+-# CONFIG_MFD_SUPPORT is not set
++CONFIG_MFD_SUPPORT=y
++CONFIG_MFD_CORE=y
++# CONFIG_MFD_88PM860X is not set
++# CONFIG_MFD_SM501 is not set
++# CONFIG_MFD_ASIC3 is not set
++# CONFIG_HTC_EGPIO is not set
++# CONFIG_HTC_PASIC3 is not set
++# CONFIG_HTC_I2CPLD is not set
++# CONFIG_UCB1400_CORE is not set
++# CONFIG_TPS65010 is not set
++# CONFIG_TPS6507X is not set
++# CONFIG_TWL4030_CORE is not set
++# CONFIG_MFD_STMPE is not set
++# CONFIG_MFD_TC3589X is not set
++# CONFIG_MFD_TMIO is not set
++# CONFIG_MFD_T7L66XB is not set
++# CONFIG_MFD_TC6387XB is not set
++# CONFIG_MFD_TC6393XB is not set
++# CONFIG_PMIC_DA903X is not set
++# CONFIG_PMIC_ADP5520 is not set
++# CONFIG_MFD_MAX8925 is not set
++# CONFIG_MFD_MAX8998 is not set
++# CONFIG_MFD_WM8400 is not set
++# CONFIG_MFD_WM831X_I2C is not set
++# CONFIG_MFD_WM831X_SPI is not set
++# CONFIG_MFD_WM8350_I2C is not set
++# CONFIG_MFD_WM8994 is not set
++# CONFIG_MFD_PCF50633 is not set
++# CONFIG_PMIC_DIALOG is not set
++# CONFIG_MFD_MC13XXX is not set
++# CONFIG_ABX500_CORE is not set
++# CONFIG_EZX_PCAP is not set
++# CONFIG_MFD_TPS6586X is not set
++# CONFIG_MFD_WL1273_CORE is not set
++# CONFIG_MFD_MAX17135 is not set
++CONFIG_MFD_MXC_HDMI=y
+ # CONFIG_REGULATOR is not set
+ CONFIG_MEDIA_SUPPORT=y
+ 
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index b447c24..9a82a3b 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -788,6 +788,7 @@ static void __init mx6_board_init(void)
+ 			ARRAY_SIZE(mx6q_sabreauto_esai_record_pads));
+ 
+ 	mx6q_sabreauto_init_uart();
++	imx6q_add_mxc_hdmi_core();
+ 
+ 	imx6q_add_ipuv3(0, &ipu_data[0]);
+ 	imx6q_add_ipuv3(1, &ipu_data[1]);
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index c9cf454..2cc9d76 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -112,6 +112,10 @@ extern const struct fsl_mxc_lcd_platform_data imx6q_mxc_hdmi_data __initconst;
+ #define imx6q_add_mxc_hdmi(pdata)	\
+ 	imx_add_mxc_hdmi(&imx6q_mxc_hdmi_data, pdata)
+ 
++extern const struct imx_mxc_hdmi_core_data imx6q_mxc_hdmi_core_data __initconst;
++#define imx6q_add_mxc_hdmi_core()		\
++	imx_add_mxc_hdmi_core(&imx6q_mxc_hdmi_core_data)
++
+ extern const struct imx_vpu_data imx6q_vpu_data __initconst;
+ #define imx6q_add_vpu() imx_add_vpu(&imx6q_vpu_data)
+ 
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index f1bac4b..0159733 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -54,4 +54,5 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_FSL_OTG) += platform-fsl-usb2-otg.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_FSL_USB_WAKEUP) += platform-fsl-usb2-wakeup.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_PM) += platform-imx-pm.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_MXC_HDMI) +=  platform-mxc_hdmi.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_MXC_HDMI) +=  platform-mxc-hdmi-core.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_ASRC) += platform-imx-asrc.o
+diff --git a/arch/arm/plat-mxc/devices/platform-mxc-hdmi-core.c b/arch/arm/plat-mxc/devices/platform-mxc-hdmi-core.c
+new file mode 100644
+index 0000000..bee2de3
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-mxc-hdmi-core.c
+@@ -0,0 +1,50 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <asm/sizes.h>
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++
++#define imx6_mxc_hdmi_core_data_entry_single(soc, size)	\
++	{								\
++		.iobase = soc ## _HDMI_ARB_BASE_ADDR,			\
++		.iosize = size,						\
++	}
++
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_mxc_hdmi_core_data imx6q_mxc_hdmi_core_data __initconst =
++	imx6_mxc_hdmi_core_data_entry_single(MX6Q, SZ_32K + SZ_4K);
++#endif
++
++struct platform_device *__init imx_add_mxc_hdmi_core(
++	const struct imx_mxc_hdmi_core_data *data)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + data->iosize - 1,
++			.flags = IORESOURCE_MEM,
++		},
++	};
++
++	return imx_add_platform_device_dmamask("mxc_hdmi_core", -1,
++					res, ARRAY_SIZE(res), NULL, 0,
++					DMA_BIT_MASK(32));
++}
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 93e73f4..ec688e0 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -547,6 +547,15 @@ struct imx_mxc_hdmi_data {
+ struct platform_device *__init imx_add_mxc_hdmi(
+ 		const struct imx_mxc_hdmi_data *data,
+ 		const struct fsl_mxc_lcd_platform_data *pdata);
++
++struct imx_mxc_hdmi_core_data {
++	resource_size_t iobase;
++	resource_size_t iosize;
++};
++
++struct platform_device *__init imx_add_mxc_hdmi_core(
++	const struct imx_mxc_hdmi_core_data *data);
++
+ #include <mach/mxc_asrc.h>
+ struct imx_imx_asrc_data {
+ 	int id;
+diff --git a/arch/arm/plat-mxc/include/mach/mxc_hdmi.h b/arch/arm/plat-mxc/include/mach/mxc_hdmi.h
+index d41332d..53a17af 100644
+--- a/arch/arm/plat-mxc/include/mach/mxc_hdmi.h
++++ b/arch/arm/plat-mxc/include/mach/mxc_hdmi.h
+@@ -45,7 +45,9 @@
+ #define HDMI_IH_CEC_STAT0                       0x0106
+ #define HDMI_IH_VP_STAT0                        0x0107
+ #define HDMI_IH_I2CMPHY_STAT0                   0x0108
+-#define HDMI_IH_AHBDMAAUD_STAT0                 0x0180
++#define HDMI_IH_AHBDMAAUD_STAT0                 0x0109
++
++#define HDMI_IH_MUTE_FC_STAT0                   0x0180
+ #define HDMI_IH_MUTE_FC_STAT1                   0x0181
+ #define HDMI_IH_MUTE_FC_STAT2                   0x0182
+ #define HDMI_IH_MUTE_AS_STAT0                   0x0183
+@@ -583,6 +585,10 @@ enum {
+ 	HDMI_IH_PHY_STAT0_TX_PHY_LOCK_CLEAR = 0x2,
+ 	HDMI_IH_PHY_STAT0_HDP_CLEAR = 0x1,
+ 
++/* IH_MUTE field values */
++	HDMI_IH_MUTE_MUTE_WAKEUP_INTERRUPT = 0x2,
++	HDMI_IH_MUTE_MUTE_ALL_INTERRUPT = 0x1,
++
+ /* TX_INVID0 field values */
+ 	HDMI_TX_INVID0_INTERNAL_DE_GENERATOR_MASK = 0x80,
+ 	HDMI_TX_INVID0_INTERNAL_DE_GENERATOR_ENABLE = 0x80,
+-- 
+1.7.7.4
+

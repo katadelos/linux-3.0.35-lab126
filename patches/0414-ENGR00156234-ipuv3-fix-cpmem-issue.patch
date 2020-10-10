@@ -1,0 +1,97 @@
+From d34cc28c1cd50302eee93a9d92594263e0a82601 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Thu, 8 Sep 2011 12:47:52 +0800
+Subject: [PATCH 0414/2463] ENGR00156234 ipuv3: fix cpmem issue
+
+sometimes update to cpmem may not correct.
+make ipu_get_soc more robust.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c    |    4 ++++
+ drivers/mxc/ipu3/ipu_param_mem.h |   19 +++++++++++++++++--
+ drivers/mxc/ipu3/ipu_prv.h       |    2 ++
+ 3 files changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 2a1eecd..8159076 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -329,6 +329,8 @@ struct ipu_soc *ipu_get_soc(int id)
+ {
+ 	if (id >= MXC_IPU_MAX_NUM)
+ 		return ERR_PTR(-ENODEV);
++	else if (!ipu_array[id].online)
++		return ERR_PTR(-ENODEV);
+ 	else
+ 		return &(ipu_array[id]);
+ }
+@@ -494,6 +496,8 @@ static int __devinit ipu_probe(struct platform_device *pdev)
+ 
+ 	register_ipu_device(ipu, pdev->id);
+ 
++	ipu->online = true;
++
+ 	return ret;
+ 
+ failed_clk_setup:
+diff --git a/drivers/mxc/ipu3/ipu_param_mem.h b/drivers/mxc/ipu3/ipu_param_mem.h
+index d2ad269..7fbd4e1 100644
+--- a/drivers/mxc/ipu3/ipu_param_mem.h
++++ b/drivers/mxc/ipu3/ipu_param_mem.h
+@@ -215,6 +215,21 @@ static inline void _ipu_ch_param_dump(struct ipu_soc *ipu, int ch)
+ 		 ipu_ch_param_read_field_io(ipu_ch_param_addr(ipu, ch), 1, 143, 5));
+ }
+ 
++static inline void fill_cpmem(struct ipu_soc *ipu, int ch, struct ipu_ch_param *params)
++{
++	int i, w;
++	void *addr = ipu_ch_param_addr(ipu, ch);
++
++	/* 2 words, 5 valid data */
++	for (w = 0; w < 2; w++) {
++		for (i = 0; i < 5; i++) {
++			writel(params->word[w].data[i], addr);
++			addr += 4;
++		}
++		addr += 12;
++	}
++}
++
+ static inline void _ipu_ch_param_init(struct ipu_soc *ipu, int ch,
+ 				      uint32_t pixel_fmt, uint32_t width,
+ 				      uint32_t height, uint32_t stride,
+@@ -429,7 +444,7 @@ static inline void _ipu_ch_param_init(struct ipu_soc *ipu, int ch,
+ 	ipu_ch_param_set_field(&params, 0, 68, 22, v_offset / 8);
+ 
+ 	dev_dbg(ipu->dev, "initializing idma ch %d @ %p\n", ch, ipu_ch_param_addr(ipu, ch));
+-	memcpy(ipu_ch_param_addr(ipu, ch), &params, sizeof(params));
++	fill_cpmem(ipu, ch, &params);
+ 	if (addr2) {
+ 		ipu_ch_param_set_field(&params, 1, 0, 29, addr2 >> 3);
+ 		ipu_ch_param_set_field(&params, 1, 29, 29, 0);
+@@ -440,7 +455,7 @@ static inline void _ipu_ch_param_init(struct ipu_soc *ipu, int ch,
+ 
+ 		dev_dbg(ipu->dev, "initializing idma ch %d @ %p sub cpmem\n", ch,
+ 					ipu_ch_param_addr(ipu, sub_ch));
+-		memcpy(ipu_ch_param_addr(ipu, sub_ch), &params, sizeof(params));
++		fill_cpmem(ipu, sub_ch, &params);
+ 	}
+ };
+ 
+diff --git a/drivers/mxc/ipu3/ipu_prv.h b/drivers/mxc/ipu3/ipu_prv.h
+index fdb4845..c2d44e6 100644
+--- a/drivers/mxc/ipu3/ipu_prv.h
++++ b/drivers/mxc/ipu3/ipu_prv.h
+@@ -51,6 +51,8 @@ enum csc_type_t {
+ };
+ 
+ struct ipu_soc {
++	bool online;
++
+ 	/*clk*/
+ 	struct clk *ipu_clk;
+ 	struct clk *di_clk[2];
+-- 
+1.7.7.4
+

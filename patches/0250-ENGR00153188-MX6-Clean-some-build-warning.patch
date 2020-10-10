@@ -1,0 +1,47 @@
+From ad2e4540b199bf59e40c6588206274c90dc03187 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Fri, 15 Jul 2011 19:28:22 +0800
+Subject: [PATCH 0250/2463] ENGR00153188 [MX6]Clean some build warning
+
+1. smp build mis-match warning;
+2. IO_ADDRESS pointer type;
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/headsmp.S          |    1 -
+ arch/arm/plat-mxc/include/mach/mx6.h |    3 +--
+ 2 files changed, 1 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/headsmp.S b/arch/arm/mach-mx6/headsmp.S
+index 331e844..590e55f 100644
+--- a/arch/arm/mach-mx6/headsmp.S
++++ b/arch/arm/mach-mx6/headsmp.S
+@@ -19,7 +19,6 @@
+ #include <linux/linkage.h>
+ #include <linux/init.h>
+ 
+-        __INIT
+ ENTRY(v7_invalidate_l1)
+         mov     r0, #0
+         mcr     p15, 2, r0, c0, c0, 0
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 6c44cd5..6ccbdac 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -259,12 +259,11 @@
+  * it returns 0xDEADBEEF
+  */
+ #define IO_ADDRESS(x)   \
+-	(void __force __iomem *) \
+ 	(((((x) >= (unsigned long)AIPS1_ARB_BASE_ADDR) && \
+ 	  ((x) <= (unsigned long)AIPS2_ARB_END_ADDR)) || \
+ 	  ((x) >= (unsigned long)ARM_PERIPHBASE && \
+ 	  ((x) <= (unsigned long)(ARM_PERIPHBASE + ARM_PERIPHBASE)))) ? \
+-	   MX6_IO_ADDRESS(x) : 0xDEADBEEF)
++	   MX6_IO_ADDRESS(x) : (void __force __iomem *)0xDEADBEEF)
+ 
+ /*
+  * Interrupt numbers
+-- 
+1.7.7.4
+

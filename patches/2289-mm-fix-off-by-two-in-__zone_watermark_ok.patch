@@ -1,0 +1,35 @@
+From 2dd93590bafc75bc2850f6c1e4992133fb214e06 Mon Sep 17 00:00:00 2001
+From: Michal Hocko <mhocko@suse.cz>
+Date: Tue, 10 Jan 2012 15:08:02 -0800
+Subject: [PATCH 2289/2463] mm: fix off-by-two in __zone_watermark_ok()
+
+Commit 88f5acf88ae6 ("mm: page allocator: adjust the per-cpu counter
+threshold when memory is low") changed the form how free_pages is
+calculated but it forgot that we used to do free_pages - ((1 << order) -
+1) so we ended up with off-by-two when calculating free_pages.
+
+Reported-by: Wang Sheng-Hui <shhuiw@gmail.com>
+Signed-off-by: Michal Hocko <mhocko@suse.cz>
+Acked-by: Mel Gorman <mgorman@suse.de>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+Signed-off-by: Linus Torvalds <torvalds@linux-foundation.org>
+---
+ mm/page_alloc.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/mm/page_alloc.c b/mm/page_alloc.c
+index 947a7e9..ea4b9dc 100644
+--- a/mm/page_alloc.c
++++ b/mm/page_alloc.c
+@@ -1474,7 +1474,7 @@ static bool __zone_watermark_ok(struct zone *z, int order, unsigned long mark,
+ 	long min = mark;
+ 	int o;
+ 
+-	free_pages -= (1 << order) + 1;
++	free_pages -= (1 << order) - 1;
+ 	if (alloc_flags & ALLOC_HIGH)
+ 		min -= min / 2;
+ 	if (alloc_flags & ALLOC_HARDER)
+-- 
+1.7.7.4
+

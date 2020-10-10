@@ -1,0 +1,46 @@
+From 81d30792f4f81dcdd27cc3d8c894f611a8b08d53 Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Fri, 1 Jun 2012 18:14:12 +0800
+Subject: [PATCH 1566/2463] ENGR00211844 MX6x HDMI display can't show video to
+ after suspend/resume
+
+Added hdmi clock gating/ungating when devide suspend/resume
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ drivers/video/mxc_hdmi.c |   14 ++++++++++++--
+ 1 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index 5ef2c9f..e778b4e 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -2087,13 +2087,23 @@ static int mxc_hdmi_fb_event(struct notifier_block *nb,
+ 	case FB_EVENT_SUSPEND:
+ 		dev_dbg(&hdmi->pdev->dev,
+ 			"event=FB_EVENT_SUSPEND\n");
+-		mxc_hdmi_phy_disable(hdmi);
++
++		if (hdmi->blank == FB_BLANK_UNBLANK) {
++			mxc_hdmi_phy_disable(hdmi);
++			clk_disable(hdmi->hdmi_iahb_clk);
++			clk_disable(hdmi->hdmi_isfr_clk);
++		}
+ 		break;
+ 
+ 	case FB_EVENT_RESUME:
+ 		dev_dbg(&hdmi->pdev->dev,
+ 			"event=FB_EVENT_RESUME\n");
+-		mxc_hdmi_phy_init(hdmi);
++
++		if (hdmi->blank == FB_BLANK_UNBLANK) {
++			clk_enable(hdmi->hdmi_iahb_clk);
++			clk_enable(hdmi->hdmi_isfr_clk);
++			mxc_hdmi_phy_init(hdmi);
++		}
+ 		break;
+ 
+ 	}
+-- 
+1.7.7.4
+

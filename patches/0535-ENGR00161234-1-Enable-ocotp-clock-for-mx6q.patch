@@ -1,0 +1,66 @@
+From 9dd98e89134224cc3add7c3587735fd049085938 Mon Sep 17 00:00:00 2001
+From: Terry Lv <r65388@freescale.com>
+Date: Wed, 2 Nov 2011 17:14:39 +0800
+Subject: [PATCH 0535/2463] ENGR00161234-1: Enable ocotp clock for mx6q
+
+Add clock enable code to driver.
+OCOTP driver missed code to enable clock in driver.
+Thus if ocotp clock is not enabled in clock.c, ocotp will not work.
+
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/char/fsl_otp.c |   19 +++++++++++++++++++
+ 1 files changed, 19 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/char/fsl_otp.c b/drivers/char/fsl_otp.c
+index 5517e55..05ad55e 100755
+--- a/drivers/char/fsl_otp.c
++++ b/drivers/char/fsl_otp.c
+@@ -40,6 +40,7 @@ static struct attribute **attrs;
+ static struct kobj_attribute *kattr;
+ static struct attribute_group attr_group;
+ static struct mxc_otp_platform_data *otp_data;
++static struct clk *otp_clk;
+ 
+ static inline unsigned int get_reg_index(struct kobj_attribute *tmp)
+ {
+@@ -177,6 +178,12 @@ static int __devinit fsl_otp_probe(struct platform_device *pdev)
+ 	if (pdata == NULL)
+ 		return -ENODEV;
+ 
++	/* Enable clock */
++	if (pdata->clock_name) {
++		otp_clk = clk_get(&pdev->dev, pdata->clock_name);
++		clk_enable(otp_clk);
++	}
++
+ 	retval = alloc_otp_attr(pdata);
+ 	if (retval)
+ 		return retval;
+@@ -207,11 +214,23 @@ error:
+ 
+ static int otp_remove(struct platform_device *pdev)
+ {
++	struct mxc_otp_platform_data *pdata;
++
++	pdata = pdev->dev.platform_data;
++	if (pdata == NULL)
++		return -ENODEV;
++
+ 	kobject_put(otp_kobj);
+ 	otp_kobj = NULL;
+ 
+ 	free_otp_attr();
+ 	unmap_ocotp_addr();
++
++	if (pdata->clock_name) {
++		clk_disable(otp_clk);
++		clk_put(otp_clk);
++	}
++
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

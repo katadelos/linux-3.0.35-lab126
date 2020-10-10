@@ -1,0 +1,1094 @@
+From d95ecbd625a9b9d1cd98e49a6d065eba26e99692 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Thu, 21 Jun 2012 14:40:40 +0800
+Subject: [PATCH 1632/2463] ENGR00213944-02: mmc: sdhci: [MX6] support SD v3.0
+ memory cards.
+
+- Add variable pad speed setting per SD clk freq.
+- Add SD3.0 support on SD1, SD2, and SD3.
+- Enhance drive strength on SD pad to improve its compatibility.
+- change the definition of pad speed changing interface
+- combine pad speed setting for different SD host controllers into one function.
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+Acked-by: Lily Zhang
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c          |  141 +++++++++-------------
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c     |   64 ++++++-----
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c     |   81 +++++++------
+ arch/arm/mach-mx6/board-mx6sl_arm2.c         |   84 +++++++++++++
+ arch/arm/mach-mx6/board-mx6sl_arm2.h         |   78 +++++++++----
+ arch/arm/plat-mxc/include/mach/esdhc.h       |    2 +-
+ arch/arm/plat-mxc/include/mach/iomux-mx6sl.h |  166 +++++++++++++++++++++-----
+ drivers/mmc/host/sdhci-esdhc.h               |    8 +-
+ 8 files changed, 417 insertions(+), 207 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 1e87db5..0852398 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -176,111 +176,84 @@ enum sd_pad_mode {
+ 	SD_PAD_MODE_HIGH_SPEED,
+ };
+ 
+-static int plt_sd3_pad_change(int clock)
++static int plt_sd_pad_change(unsigned int index, int clock)
+ {
++	/* LOW speed is the default state of SD pads */
+ 	static enum sd_pad_mode pad_mode = SD_PAD_MODE_LOW_SPEED;
+ 
+-	iomux_v3_cfg_t *sd3_pads_200mhz = NULL;
+-	iomux_v3_cfg_t *sd3_pads_100mhz = NULL;
+-	iomux_v3_cfg_t *sd3_pads_50mhz = NULL;
++	iomux_v3_cfg_t *sd_pads_200mhz;
++	iomux_v3_cfg_t *sd_pads_100mhz;
++	iomux_v3_cfg_t *sd_pads_50mhz;
+ 
+-	u32 sd3_pads_200mhz_cnt;
+-	u32 sd3_pads_100mhz_cnt;
+-	u32 sd3_pads_50mhz_cnt;
++	u32 sd_pads_200mhz_cnt;
++	u32 sd_pads_100mhz_cnt;
++	u32 sd_pads_50mhz_cnt;
+ 
+-	if (cpu_is_mx6q()) {
+-		sd3_pads_200mhz = mx6q_sd3_200mhz;
+-		sd3_pads_100mhz = mx6q_sd3_100mhz;
+-		sd3_pads_50mhz = mx6q_sd3_50mhz;
+-
+-		sd3_pads_200mhz_cnt = ARRAY_SIZE(mx6q_sd3_200mhz);
+-		sd3_pads_100mhz_cnt = ARRAY_SIZE(mx6q_sd3_100mhz);
+-		sd3_pads_50mhz_cnt = ARRAY_SIZE(mx6q_sd3_50mhz);
+-	} else if (cpu_is_mx6dl()) {
+-		sd3_pads_200mhz = mx6dl_sd3_200mhz;
+-		sd3_pads_100mhz = mx6dl_sd3_100mhz;
+-		sd3_pads_50mhz = mx6dl_sd3_50mhz;
+-
+-		sd3_pads_200mhz_cnt = ARRAY_SIZE(mx6dl_sd3_200mhz);
+-		sd3_pads_100mhz_cnt = ARRAY_SIZE(mx6dl_sd3_100mhz);
+-		sd3_pads_50mhz_cnt = ARRAY_SIZE(mx6dl_sd3_50mhz);
+-	}
+-
+-	if (clock > 100000000) {
+-		if (pad_mode == SD_PAD_MODE_HIGH_SPEED)
+-			return 0;
+-		BUG_ON(!sd3_pads_200mhz);
+-		pad_mode = SD_PAD_MODE_HIGH_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(sd3_pads_200mhz,
+-							sd3_pads_200mhz_cnt);
+-	} else if (clock > 52000000) {
+-		if (pad_mode == SD_PAD_MODE_MED_SPEED)
+-			return 0;
+-		BUG_ON(!sd3_pads_100mhz);
+-		pad_mode = SD_PAD_MODE_MED_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(sd3_pads_100mhz,
+-							sd3_pads_100mhz_cnt);
+-	} else {
+-		if (pad_mode == SD_PAD_MODE_LOW_SPEED)
+-			return 0;
+-		BUG_ON(!sd3_pads_50mhz);
+-		pad_mode = SD_PAD_MODE_LOW_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(sd3_pads_50mhz,
+-							sd3_pads_50mhz_cnt);
+-	}
+-}
+-
+-static int plt_sd4_pad_change(int clock)
+-{
+-	static enum sd_pad_mode pad_mode = SD_PAD_MODE_LOW_SPEED;
+-
+-	iomux_v3_cfg_t *sd4_pads_200mhz = NULL;
+-	iomux_v3_cfg_t *sd4_pads_100mhz = NULL;
+-	iomux_v3_cfg_t *sd4_pads_50mhz = NULL;
++	switch (index) {
++	case 2:
++		if (cpu_is_mx6q()) {
++			sd_pads_200mhz = mx6q_sd3_200mhz;
++			sd_pads_100mhz = mx6q_sd3_100mhz;
++			sd_pads_50mhz = mx6q_sd3_50mhz;
+ 
+-	u32 sd4_pads_200mhz_cnt;
+-	u32 sd4_pads_100mhz_cnt;
+-	u32 sd4_pads_50mhz_cnt;
++			sd_pads_200mhz_cnt = ARRAY_SIZE(mx6q_sd3_200mhz);
++			sd_pads_100mhz_cnt = ARRAY_SIZE(mx6q_sd3_100mhz);
++			sd_pads_50mhz_cnt = ARRAY_SIZE(mx6q_sd3_50mhz);
++		} else if (cpu_is_mx6dl()) {
++			sd_pads_200mhz = mx6dl_sd3_200mhz;
++			sd_pads_100mhz = mx6dl_sd3_100mhz;
++			sd_pads_50mhz = mx6dl_sd3_50mhz;
+ 
+-	if (cpu_is_mx6q()) {
+-		sd4_pads_200mhz = mx6q_sd4_200mhz;
+-		sd4_pads_100mhz = mx6q_sd4_100mhz;
+-		sd4_pads_50mhz = mx6q_sd4_50mhz;
++			sd_pads_200mhz_cnt = ARRAY_SIZE(mx6dl_sd3_200mhz);
++			sd_pads_100mhz_cnt = ARRAY_SIZE(mx6dl_sd3_100mhz);
++			sd_pads_50mhz_cnt = ARRAY_SIZE(mx6dl_sd3_50mhz);
++		}
++		break;
++	case 3:
++		if (cpu_is_mx6q()) {
++			sd_pads_200mhz = mx6q_sd4_200mhz;
++			sd_pads_100mhz = mx6q_sd4_100mhz;
++			sd_pads_50mhz = mx6q_sd4_50mhz;
+ 
+-		sd4_pads_200mhz_cnt = ARRAY_SIZE(mx6q_sd4_200mhz);
+-		sd4_pads_100mhz_cnt = ARRAY_SIZE(mx6q_sd4_100mhz);
+-		sd4_pads_50mhz_cnt = ARRAY_SIZE(mx6q_sd4_50mhz);
+-	} else if (cpu_is_mx6dl()) {
+-		sd4_pads_200mhz = mx6dl_sd4_200mhz;
+-		sd4_pads_100mhz = mx6dl_sd4_100mhz;
+-		sd4_pads_50mhz = mx6dl_sd4_50mhz;
++			sd_pads_200mhz_cnt = ARRAY_SIZE(mx6q_sd4_200mhz);
++			sd_pads_100mhz_cnt = ARRAY_SIZE(mx6q_sd4_100mhz);
++			sd_pads_50mhz_cnt = ARRAY_SIZE(mx6q_sd4_50mhz);
++		} else if (cpu_is_mx6dl()) {
++			sd_pads_200mhz = mx6dl_sd4_200mhz;
++			sd_pads_100mhz = mx6dl_sd4_100mhz;
++			sd_pads_50mhz = mx6dl_sd4_50mhz;
+ 
+-		sd4_pads_200mhz_cnt = ARRAY_SIZE(mx6dl_sd4_200mhz);
+-		sd4_pads_100mhz_cnt = ARRAY_SIZE(mx6dl_sd4_100mhz);
+-		sd4_pads_50mhz_cnt = ARRAY_SIZE(mx6dl_sd4_50mhz);
++			sd_pads_200mhz_cnt = ARRAY_SIZE(mx6dl_sd4_200mhz);
++			sd_pads_100mhz_cnt = ARRAY_SIZE(mx6dl_sd4_100mhz);
++			sd_pads_50mhz_cnt = ARRAY_SIZE(mx6dl_sd4_50mhz);
++		}
++		break;
++	default:
++		printk(KERN_ERR "no such SD host controller index %d\n", index);
++		return -EINVAL;
+ 	}
+ 
+ 	if (clock > 100000000) {
+ 		if (pad_mode == SD_PAD_MODE_HIGH_SPEED)
+ 			return 0;
+-
++		BUG_ON(!sd_pads_200mhz);
+ 		pad_mode = SD_PAD_MODE_HIGH_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(sd4_pads_200mhz,
+-							sd4_pads_200mhz_cnt);
++		return mxc_iomux_v3_setup_multiple_pads(sd_pads_200mhz,
++							sd_pads_200mhz_cnt);
+ 	} else if (clock > 52000000) {
+ 		if (pad_mode == SD_PAD_MODE_MED_SPEED)
+ 			return 0;
+-
++		BUG_ON(!sd_pads_100mhz);
+ 		pad_mode = SD_PAD_MODE_MED_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(sd4_pads_100mhz,
+-							sd4_pads_100mhz_cnt);
++		return mxc_iomux_v3_setup_multiple_pads(sd_pads_100mhz,
++							sd_pads_100mhz_cnt);
+ 	} else {
+ 		if (pad_mode == SD_PAD_MODE_LOW_SPEED)
+ 			return 0;
+-
++		BUG_ON(!sd_pads_50mhz);
+ 		pad_mode = SD_PAD_MODE_LOW_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(sd4_pads_50mhz,
+-							sd4_pads_50mhz_cnt);
++		return mxc_iomux_v3_setup_multiple_pads(sd_pads_50mhz,
++							sd_pads_50mhz_cnt);
+ 	}
+ }
+ 
+@@ -291,7 +264,7 @@ static const struct esdhc_platform_data mx6_arm2_sd3_data __initconst = {
+ 	.support_8bit		= 1,
+ 	.keep_power_at_suspend	= 1,
+ 	.delay_line		= 0,
+-	.platform_pad_change	= plt_sd3_pad_change,
++	.platform_pad_change	= plt_sd_pad_change,
+ };
+ 
+ /* No card detect signal for SD4 on ARM2 board*/
+@@ -299,7 +272,7 @@ static const struct esdhc_platform_data mx6_arm2_sd4_data __initconst = {
+ 	.always_present		= 1,
+ 	.support_8bit		= 1,
+ 	.keep_power_at_suspend	= 1,
+-	.platform_pad_change	= plt_sd4_pad_change,
++	.platform_pad_change	= plt_sd_pad_change,
+ };
+ 
+ static int __init gpmi_nand_platform_init(void)
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 12a4a83..8b4125d 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -208,57 +208,63 @@ static void __init imx6q_add_android_device_buttons(void)
+ static void __init imx6q_add_android_device_buttons(void) {}
+ #endif
+ 
+-static int plt_sd3_pad_change(int clock)
++static int plt_sd_pad_change(unsigned int index, int clock)
+ {
++	/* LOW speed is the default state of SD pads */
+ 	static enum sd_pad_mode pad_mode = SD_PAD_MODE_LOW_SPEED;
+ 
+-	iomux_v3_cfg_t *sd3_pads_200mhz = NULL;
+-	iomux_v3_cfg_t *sd3_pads_100mhz = NULL;
+-	iomux_v3_cfg_t *sd3_pads_50mhz = NULL;
++	iomux_v3_cfg_t *sd_pads_200mhz;
++	iomux_v3_cfg_t *sd_pads_100mhz;
++	iomux_v3_cfg_t *sd_pads_50mhz;
+ 
+-	u32 sd3_pads_200mhz_cnt;
+-	u32 sd3_pads_100mhz_cnt;
+-	u32 sd3_pads_50mhz_cnt;
++	u32 sd_pads_200mhz_cnt;
++	u32 sd_pads_100mhz_cnt;
++	u32 sd_pads_50mhz_cnt;
++
++	if (index != 2) {
++		printk(KERN_ERR"no such SD host controller index %d\n", index);
++		return -EINVAL;
++	}
+ 
+ 	if (cpu_is_mx6q()) {
+-		sd3_pads_200mhz = mx6q_sd3_200mhz;
+-		sd3_pads_100mhz = mx6q_sd3_100mhz;
+-		sd3_pads_50mhz = mx6q_sd3_50mhz;
++		sd_pads_200mhz = mx6q_sd3_200mhz;
++		sd_pads_100mhz = mx6q_sd3_100mhz;
++		sd_pads_50mhz = mx6q_sd3_50mhz;
+ 
+-		sd3_pads_200mhz_cnt = ARRAY_SIZE(mx6q_sd3_200mhz);
+-		sd3_pads_100mhz_cnt = ARRAY_SIZE(mx6q_sd3_100mhz);
+-		sd3_pads_50mhz_cnt = ARRAY_SIZE(mx6q_sd3_50mhz);
++		sd_pads_200mhz_cnt = ARRAY_SIZE(mx6q_sd3_200mhz);
++		sd_pads_100mhz_cnt = ARRAY_SIZE(mx6q_sd3_100mhz);
++		sd_pads_50mhz_cnt = ARRAY_SIZE(mx6q_sd3_50mhz);
+ 	} else if (cpu_is_mx6dl()) {
+-		sd3_pads_200mhz = mx6dl_sd3_200mhz;
+-		sd3_pads_100mhz = mx6dl_sd3_100mhz;
+-		sd3_pads_50mhz = mx6dl_sd3_50mhz;
++		sd_pads_200mhz = mx6dl_sd3_200mhz;
++		sd_pads_100mhz = mx6dl_sd3_100mhz;
++		sd_pads_50mhz = mx6dl_sd3_50mhz;
+ 
+-		sd3_pads_200mhz_cnt = ARRAY_SIZE(mx6dl_sd3_200mhz);
+-		sd3_pads_100mhz_cnt = ARRAY_SIZE(mx6dl_sd3_100mhz);
+-		sd3_pads_50mhz_cnt = ARRAY_SIZE(mx6dl_sd3_50mhz);
++		sd_pads_200mhz_cnt = ARRAY_SIZE(mx6dl_sd3_200mhz);
++		sd_pads_100mhz_cnt = ARRAY_SIZE(mx6dl_sd3_100mhz);
++		sd_pads_50mhz_cnt = ARRAY_SIZE(mx6dl_sd3_50mhz);
+ 	}
+ 
+ 	if (clock > 100000000) {
+ 		if (pad_mode == SD_PAD_MODE_HIGH_SPEED)
+ 			return 0;
+-		BUG_ON(!sd3_pads_200mhz);
++		BUG_ON(!sd_pads_200mhz);
+ 		pad_mode = SD_PAD_MODE_HIGH_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(sd3_pads_200mhz,
+-							sd3_pads_200mhz_cnt);
++		return mxc_iomux_v3_setup_multiple_pads(sd_pads_200mhz,
++							sd_pads_200mhz_cnt);
+ 	} else if (clock > 52000000) {
+ 		if (pad_mode == SD_PAD_MODE_MED_SPEED)
+ 			return 0;
+-		BUG_ON(!sd3_pads_100mhz);
++		BUG_ON(!sd_pads_100mhz);
+ 		pad_mode = SD_PAD_MODE_MED_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(sd3_pads_100mhz,
+-							sd3_pads_100mhz_cnt);
++		return mxc_iomux_v3_setup_multiple_pads(sd_pads_100mhz,
++							sd_pads_100mhz_cnt);
+ 	} else {
+ 		if (pad_mode == SD_PAD_MODE_LOW_SPEED)
+ 			return 0;
+-		BUG_ON(!sd3_pads_50mhz);
++		BUG_ON(!sd_pads_50mhz);
+ 		pad_mode = SD_PAD_MODE_LOW_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(sd3_pads_50mhz,
+-							sd3_pads_50mhz_cnt);
++		return mxc_iomux_v3_setup_multiple_pads(sd_pads_50mhz,
++							sd_pads_50mhz_cnt);
+ 	}
+ }
+ 
+@@ -269,7 +275,7 @@ static const struct esdhc_platform_data mx6q_sabreauto_sd3_data __initconst = {
+ 	.support_18v		= 1,
+ 	.support_8bit		= 1,
+ 	.delay_line		= 0,
+-	.platform_pad_change	= plt_sd3_pad_change,
++	.platform_pad_change	= plt_sd_pad_change,
+ };
+ 
+ static const struct esdhc_platform_data mx6q_sabreauto_sd1_data __initconst = {
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index 693c0e6..63d3f16 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -349,59 +349,64 @@ enum sd_pad_mode {
+ 	SD_PAD_MODE_HIGH_SPEED,
+ };
+ 
+-static int plt_sd3_pad_change(int clock)
++static int plt_sd_pad_change(unsigned int index, int clock)
+ {
++	/* LOW speed is the default state of SD pads */
+ 	static enum sd_pad_mode pad_mode = SD_PAD_MODE_LOW_SPEED;
+ 
+-	if (clock > 100000000) {
+-		if (pad_mode == SD_PAD_MODE_HIGH_SPEED)
+-			return 0;
+-
+-		pad_mode = SD_PAD_MODE_HIGH_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(mx6q_sd3_200mhz,
+-					ARRAY_SIZE(mx6q_sd3_200mhz));
+-	} else if (clock > 52000000) {
+-		if (pad_mode == SD_PAD_MODE_MED_SPEED)
+-			return 0;
+-
+-		pad_mode = SD_PAD_MODE_MED_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(mx6q_sd3_100mhz,
+-					ARRAY_SIZE(mx6q_sd3_100mhz));
+-	} else {
+-		if (pad_mode == SD_PAD_MODE_LOW_SPEED)
+-			return 0;
+-
+-		pad_mode = SD_PAD_MODE_LOW_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(mx6q_sd3_50mhz,
+-					ARRAY_SIZE(mx6q_sd3_50mhz));
++	iomux_v3_cfg_t *sd_pads_200mhz;
++	iomux_v3_cfg_t *sd_pads_100mhz;
++	iomux_v3_cfg_t *sd_pads_50mhz;
++
++	u32 sd_pads_200mhz_cnt;
++	u32 sd_pads_100mhz_cnt;
++	u32 sd_pads_50mhz_cnt;
++
++	switch (index) {
++	case 2:
++		sd_pads_200mhz = mx6q_sd3_200mhz;
++		sd_pads_100mhz = mx6q_sd3_100mhz;
++		sd_pads_50mhz = mx6q_sd3_50mhz;
++
++		sd_pads_200mhz_cnt = ARRAY_SIZE(mx6q_sd3_200mhz);
++		sd_pads_100mhz_cnt = ARRAY_SIZE(mx6q_sd3_100mhz);
++		sd_pads_50mhz_cnt = ARRAY_SIZE(mx6q_sd3_50mhz);
++		break;
++	case 3:
++		sd_pads_200mhz = mx6q_sd4_200mhz;
++		sd_pads_100mhz = mx6q_sd4_100mhz;
++		sd_pads_50mhz = mx6q_sd4_50mhz;
++
++		sd_pads_200mhz_cnt = ARRAY_SIZE(mx6q_sd4_200mhz);
++		sd_pads_100mhz_cnt = ARRAY_SIZE(mx6q_sd4_100mhz);
++		sd_pads_50mhz_cnt = ARRAY_SIZE(mx6q_sd4_50mhz);
++		break;
++	default:
++		printk(KERN_ERR "no such SD host controller index %d\n", index);
++		return -EINVAL;
+ 	}
+-}
+-
+-static int plt_sd4_pad_change(int clock)
+-{
+-	static enum sd_pad_mode pad_mode = SD_PAD_MODE_LOW_SPEED;
+ 
+ 	if (clock > 100000000) {
+ 		if (pad_mode == SD_PAD_MODE_HIGH_SPEED)
+ 			return 0;
+-
++		BUG_ON(!sd_pads_200mhz);
+ 		pad_mode = SD_PAD_MODE_HIGH_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(mx6q_sd4_200mhz,
+-					ARRAY_SIZE(mx6q_sd4_200mhz));
++		return mxc_iomux_v3_setup_multiple_pads(sd_pads_200mhz,
++							sd_pads_200mhz_cnt);
+ 	} else if (clock > 52000000) {
+ 		if (pad_mode == SD_PAD_MODE_MED_SPEED)
+ 			return 0;
+-
++		BUG_ON(!sd_pads_100mhz);
+ 		pad_mode = SD_PAD_MODE_MED_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(mx6q_sd4_100mhz,
+-					ARRAY_SIZE(mx6q_sd4_100mhz));
++		return mxc_iomux_v3_setup_multiple_pads(sd_pads_100mhz,
++							sd_pads_100mhz_cnt);
+ 	} else {
+ 		if (pad_mode == SD_PAD_MODE_LOW_SPEED)
+ 			return 0;
+-
++		BUG_ON(!sd_pads_50mhz);
+ 		pad_mode = SD_PAD_MODE_LOW_SPEED;
+-		return mxc_iomux_v3_setup_multiple_pads(mx6q_sd4_50mhz,
+-					ARRAY_SIZE(mx6q_sd4_50mhz));
++		return mxc_iomux_v3_setup_multiple_pads(sd_pads_50mhz,
++							sd_pads_50mhz_cnt);
+ 	}
+ }
+ 
+@@ -409,14 +414,14 @@ static const struct esdhc_platform_data mx6q_sabrelite_sd3_data __initconst = {
+ 	.cd_gpio = MX6Q_SABRELITE_SD3_CD,
+ 	.wp_gpio = MX6Q_SABRELITE_SD3_WP,
+ 	.keep_power_at_suspend = 1,
+-	.platform_pad_change = plt_sd3_pad_change,
++	.platform_pad_change = plt_sd_pad_change,
+ };
+ 
+ static const struct esdhc_platform_data mx6q_sabrelite_sd4_data __initconst = {
+ 	.cd_gpio = MX6Q_SABRELITE_SD4_CD,
+ 	.wp_gpio = MX6Q_SABRELITE_SD4_WP,
+ 	.keep_power_at_suspend = 1,
+-	.platform_pad_change = plt_sd4_pad_change,
++	.platform_pad_change = plt_sd_pad_change,
+ };
+ 
+ static const struct anatop_thermal_platform_data
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 69fb1ad..dc0059f 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -133,12 +133,91 @@ static int max17135_regulator_init(struct max17135 *max17135);
+ struct clk *extern_audio_root;
+ 
+ extern int __init mx6sl_arm2_init_pfuze100(u32 int_gpio);
++
++enum sd_pad_mode {
++	SD_PAD_MODE_LOW_SPEED,
++	SD_PAD_MODE_MED_SPEED,
++	SD_PAD_MODE_HIGH_SPEED,
++};
++
++static int plt_sd_pad_change(unsigned int index, int clock)
++{
++	/* LOW speed is the default state of SD pads */
++	static enum sd_pad_mode pad_mode = SD_PAD_MODE_LOW_SPEED;
++
++	iomux_v3_cfg_t *sd_pads_200mhz;
++	iomux_v3_cfg_t *sd_pads_100mhz;
++	iomux_v3_cfg_t *sd_pads_50mhz;
++
++	u32 sd_pads_200mhz_cnt;
++	u32 sd_pads_100mhz_cnt;
++	u32 sd_pads_50mhz_cnt;
++
++	switch (index) {
++	case 0:
++		sd_pads_200mhz = mx6sl_sd1_200mhz;
++		sd_pads_100mhz = mx6sl_sd1_100mhz;
++		sd_pads_50mhz = mx6sl_sd1_50mhz;
++
++		sd_pads_200mhz_cnt = ARRAY_SIZE(mx6sl_sd1_200mhz);
++		sd_pads_100mhz_cnt = ARRAY_SIZE(mx6sl_sd1_100mhz);
++		sd_pads_50mhz_cnt = ARRAY_SIZE(mx6sl_sd1_50mhz);
++		break;
++	case 1:
++		sd_pads_200mhz = mx6sl_sd2_200mhz;
++		sd_pads_100mhz = mx6sl_sd2_100mhz;
++		sd_pads_50mhz = mx6sl_sd2_50mhz;
++
++		sd_pads_200mhz_cnt = ARRAY_SIZE(mx6sl_sd2_200mhz);
++		sd_pads_100mhz_cnt = ARRAY_SIZE(mx6sl_sd2_100mhz);
++		sd_pads_50mhz_cnt = ARRAY_SIZE(mx6sl_sd2_50mhz);
++		break;
++	case 2:
++		sd_pads_200mhz = mx6sl_sd3_200mhz;
++		sd_pads_100mhz = mx6sl_sd3_100mhz;
++		sd_pads_50mhz = mx6sl_sd3_50mhz;
++
++		sd_pads_200mhz_cnt = ARRAY_SIZE(mx6sl_sd3_200mhz);
++		sd_pads_100mhz_cnt = ARRAY_SIZE(mx6sl_sd3_100mhz);
++		sd_pads_50mhz_cnt = ARRAY_SIZE(mx6sl_sd3_50mhz);
++		break;
++	default:
++		printk(KERN_ERR "no such SD host controller index %d\n", index);
++		return -EINVAL;
++	}
++
++	if (clock > 100000000) {
++		if (pad_mode == SD_PAD_MODE_HIGH_SPEED)
++			return 0;
++		BUG_ON(!sd_pads_200mhz);
++		pad_mode = SD_PAD_MODE_HIGH_SPEED;
++		return mxc_iomux_v3_setup_multiple_pads(sd_pads_200mhz,
++							sd_pads_200mhz_cnt);
++	} else if (clock > 52000000) {
++		if (pad_mode == SD_PAD_MODE_MED_SPEED)
++			return 0;
++		BUG_ON(!sd_pads_100mhz);
++		pad_mode = SD_PAD_MODE_MED_SPEED;
++		return mxc_iomux_v3_setup_multiple_pads(sd_pads_100mhz,
++							sd_pads_100mhz_cnt);
++	} else {
++		if (pad_mode == SD_PAD_MODE_LOW_SPEED)
++			return 0;
++		BUG_ON(!sd_pads_50mhz);
++		pad_mode = SD_PAD_MODE_LOW_SPEED;
++		return mxc_iomux_v3_setup_multiple_pads(sd_pads_50mhz,
++							sd_pads_50mhz_cnt);
++	}
++}
++
+ static const struct esdhc_platform_data mx6_arm2_sd1_data __initconst = {
+ 	.cd_gpio		= MX6_ARM2_SD1_CD,
+ 	.wp_gpio		= MX6_ARM2_SD1_WP,
+ 	.support_8bit		= 1,
++	.support_18v		= 1,
+ 	.keep_power_at_suspend	= 1,
+ 	.delay_line		= 0,
++	.platform_pad_change = plt_sd_pad_change,
+ };
+ 
+ static const struct esdhc_platform_data mx6_arm2_sd2_data __initconst = {
+@@ -146,12 +225,17 @@ static const struct esdhc_platform_data mx6_arm2_sd2_data __initconst = {
+ 	.wp_gpio		= MX6_ARM2_SD2_WP,
+ 	.keep_power_at_suspend	= 1,
+ 	.delay_line		= 0,
++	.support_18v		= 1,
++	.platform_pad_change = plt_sd_pad_change,
+ };
+ 
+ static const struct esdhc_platform_data mx6_arm2_sd3_data __initconst = {
+ 	.cd_gpio		= MX6_ARM2_SD3_CD,
++	.wp_gpio		= -1,
+ 	.keep_power_at_suspend	= 1,
+ 	.delay_line		= 0,
++	.support_18v		= 1,
++	.platform_pad_change = plt_sd_pad_change,
+ };
+ 
+ #define mV_to_uV(mV) (mV * 1000)
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.h b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+index b0c262c..d720ab3 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.h
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+@@ -50,36 +50,36 @@ static iomux_v3_cfg_t mx6sl_arm2_pads[] = {
+ 	MX6SL_PAD_HSIC_DAT__USB_H_DATA,
+ 
+ 	/* SD1 */
+-	MX6SL_PAD_SD1_CLK__USDHC1_CLK,
+-	MX6SL_PAD_SD1_CMD__USDHC1_CMD,
+-	MX6SL_PAD_SD1_DAT0__USDHC1_DAT0,
+-	MX6SL_PAD_SD1_DAT1__USDHC1_DAT1,
+-	MX6SL_PAD_SD1_DAT2__USDHC1_DAT2,
+-	MX6SL_PAD_SD1_DAT3__USDHC1_DAT3,
+-	MX6SL_PAD_SD1_DAT4__USDHC1_DAT4,
+-	MX6SL_PAD_SD1_DAT5__USDHC1_DAT5,
+-	MX6SL_PAD_SD1_DAT6__USDHC1_DAT6,
+-	MX6SL_PAD_SD1_DAT7__USDHC1_DAT7,
++	MX6SL_PAD_SD1_CLK__USDHC1_CLK_50MHZ,
++	MX6SL_PAD_SD1_CMD__USDHC1_CMD_50MHZ,
++	MX6SL_PAD_SD1_DAT0__USDHC1_DAT0_50MHZ,
++	MX6SL_PAD_SD1_DAT1__USDHC1_DAT1_50MHZ,
++	MX6SL_PAD_SD1_DAT2__USDHC1_DAT2_50MHZ,
++	MX6SL_PAD_SD1_DAT3__USDHC1_DAT3_50MHZ,
++	MX6SL_PAD_SD1_DAT4__USDHC1_DAT4_50MHZ,
++	MX6SL_PAD_SD1_DAT5__USDHC1_DAT5_50MHZ,
++	MX6SL_PAD_SD1_DAT6__USDHC1_DAT6_50MHZ,
++	MX6SL_PAD_SD1_DAT7__USDHC1_DAT7_50MHZ,
+ 	/* SD1 CD & WP */
+ 	MX6SL_PAD_KEY_ROW7__GPIO_4_7,
+ 	MX6SL_PAD_KEY_COL7__GPIO_4_6,
+ 	/* SD2 */
+-	MX6SL_PAD_SD2_CLK__USDHC2_CLK,
+-	MX6SL_PAD_SD2_CMD__USDHC2_CMD,
+-	MX6SL_PAD_SD2_DAT0__USDHC2_DAT0,
+-	MX6SL_PAD_SD2_DAT1__USDHC2_DAT1,
+-	MX6SL_PAD_SD2_DAT2__USDHC2_DAT2,
+-	MX6SL_PAD_SD2_DAT3__USDHC2_DAT3,
++	MX6SL_PAD_SD2_CLK__USDHC2_CLK_50MHZ,
++	MX6SL_PAD_SD2_CMD__USDHC2_CMD_50MHZ,
++	MX6SL_PAD_SD2_DAT0__USDHC2_DAT0_50MHZ,
++	MX6SL_PAD_SD2_DAT1__USDHC2_DAT1_50MHZ,
++	MX6SL_PAD_SD2_DAT2__USDHC2_DAT2_50MHZ,
++	MX6SL_PAD_SD2_DAT3__USDHC2_DAT3_50MHZ,
+ 	/* SD2 CD & WP */
+ 	MX6SL_PAD_SD2_DAT7__GPIO_5_0,
+ 	MX6SL_PAD_SD2_DAT6__GPIO_4_29,
+ 	/* SD3 */
+-	MX6SL_PAD_SD3_CLK__USDHC3_CLK,
+-	MX6SL_PAD_SD3_CMD__USDHC3_CMD,
+-	MX6SL_PAD_SD3_DAT0__USDHC3_DAT0,
+-	MX6SL_PAD_SD3_DAT1__USDHC3_DAT1,
+-	MX6SL_PAD_SD3_DAT2__USDHC3_DAT2,
+-	MX6SL_PAD_SD3_DAT3__USDHC3_DAT3,
++	MX6SL_PAD_SD3_CLK__USDHC3_CLK_50MHZ,
++	MX6SL_PAD_SD3_CMD__USDHC3_CMD_50MHZ,
++	MX6SL_PAD_SD3_DAT0__USDHC3_DAT0_50MHZ,
++	MX6SL_PAD_SD3_DAT1__USDHC3_DAT1_50MHZ,
++	MX6SL_PAD_SD3_DAT2__USDHC3_DAT2_50MHZ,
++	MX6SL_PAD_SD3_DAT3__USDHC3_DAT3_50MHZ,
+ 	/* SD3 CD */
+ 	MX6SL_PAD_REF_CLK_32K__GPIO_3_22,
+ 
+@@ -318,4 +318,38 @@ static iomux_v3_cfg_t mx6sl_arm2_elan_pads[] = {
+ 	MX6SL_PAD_KEY_COL6__GPIO_4_4,		/* RST */
+ };
+ 
++#define MX6SL_USDHC_8BIT_PAD_SETTING(id, speed)	\
++mx6sl_sd##id##_##speed##mhz[] = {		\
++	MX6SL_PAD_SD##id##_CLK__USDHC##id##_CLK_##speed##MHZ,	\
++	MX6SL_PAD_SD##id##_CMD__USDHC##id##_CMD_##speed##MHZ,	\
++	MX6SL_PAD_SD##id##_DAT0__USDHC##id##_DAT0_##speed##MHZ,	\
++	MX6SL_PAD_SD##id##_DAT1__USDHC##id##_DAT1_##speed##MHZ,	\
++	MX6SL_PAD_SD##id##_DAT2__USDHC##id##_DAT2_##speed##MHZ,	\
++	MX6SL_PAD_SD##id##_DAT3__USDHC##id##_DAT3_##speed##MHZ,	\
++	MX6SL_PAD_SD##id##_DAT4__USDHC##id##_DAT4_##speed##MHZ,	\
++	MX6SL_PAD_SD##id##_DAT5__USDHC##id##_DAT5_##speed##MHZ,	\
++	MX6SL_PAD_SD##id##_DAT6__USDHC##id##_DAT6_##speed##MHZ,	\
++	MX6SL_PAD_SD##id##_DAT7__USDHC##id##_DAT7_##speed##MHZ,	\
++}
++#define MX6SL_USDHC_4BIT_PAD_SETTING(id, speed)	\
++mx6sl_sd##id##_##speed##mhz[] = {		\
++	MX6SL_PAD_SD##id##_CLK__USDHC##id##_CLK_##speed##MHZ,	\
++	MX6SL_PAD_SD##id##_CMD__USDHC##id##_CMD_##speed##MHZ,	\
++	MX6SL_PAD_SD##id##_DAT0__USDHC##id##_DAT0_##speed##MHZ,	\
++	MX6SL_PAD_SD##id##_DAT1__USDHC##id##_DAT1_##speed##MHZ,	\
++	MX6SL_PAD_SD##id##_DAT2__USDHC##id##_DAT2_##speed##MHZ,	\
++	MX6SL_PAD_SD##id##_DAT3__USDHC##id##_DAT3_##speed##MHZ,	\
++}
++
++
++static iomux_v3_cfg_t MX6SL_USDHC_8BIT_PAD_SETTING(1, 50);
++static iomux_v3_cfg_t MX6SL_USDHC_8BIT_PAD_SETTING(1, 100);
++static iomux_v3_cfg_t MX6SL_USDHC_8BIT_PAD_SETTING(1, 200);
++static iomux_v3_cfg_t MX6SL_USDHC_4BIT_PAD_SETTING(2, 50);
++static iomux_v3_cfg_t MX6SL_USDHC_4BIT_PAD_SETTING(2, 100);
++static iomux_v3_cfg_t MX6SL_USDHC_4BIT_PAD_SETTING(2, 200);
++static iomux_v3_cfg_t MX6SL_USDHC_4BIT_PAD_SETTING(3, 50);
++static iomux_v3_cfg_t MX6SL_USDHC_4BIT_PAD_SETTING(3, 100);
++static iomux_v3_cfg_t MX6SL_USDHC_4BIT_PAD_SETTING(3, 200);
++
+ #endif
+diff --git a/arch/arm/plat-mxc/include/mach/esdhc.h b/arch/arm/plat-mxc/include/mach/esdhc.h
+index 71ce149..bb15db1 100644
+--- a/arch/arm/plat-mxc/include/mach/esdhc.h
++++ b/arch/arm/plat-mxc/include/mach/esdhc.h
+@@ -35,6 +35,6 @@ struct esdhc_platform_data {
+ 	unsigned int support_8bit;
+ 	unsigned int keep_power_at_suspend;
+ 	unsigned int delay_line;
+-	int (*platform_pad_change)(int clock);
++	int (*platform_pad_change)(unsigned int index, int clock);
+ };
+ #endif /* __ASM_ARCH_IMX_ESDHC_H */
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h b/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
+index 3815e96..52442b5 100755
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
+@@ -37,15 +37,15 @@
+ 
+ #define MX6SL_USDHC_PAD_CTRL (PAD_CTL_PKE | PAD_CTL_PUE |		\
+ 		PAD_CTL_PUS_22K_UP  | PAD_CTL_SPEED_LOW |		\
+-		PAD_CTL_DSE_40ohm   | PAD_CTL_SRE_FAST  | PAD_CTL_HYS)
++		PAD_CTL_DSE_40ohm   | PAD_CTL_SRE_FAST | PAD_CTL_HYS)
+ 
+ #define MX6SL_USDHC_PAD_CTRL_100MHZ (PAD_CTL_PKE | PAD_CTL_PUE |	\
+-		PAD_CTL_PUS_47K_UP  | PAD_CTL_SPEED_MED |		\
+-		PAD_CTL_DSE_40ohm   | PAD_CTL_SRE_FAST  | PAD_CTL_HYS)
++		PAD_CTL_PUS_22K_UP  | PAD_CTL_SPEED_MED |		\
++		PAD_CTL_DSE_34ohm   | PAD_CTL_SRE_FAST  | PAD_CTL_HYS)
+ 
+ #define MX6SL_USDHC_PAD_CTRL_200MHZ (PAD_CTL_PKE | PAD_CTL_PUE |	\
+-		PAD_CTL_PUS_47K_UP  | PAD_CTL_SPEED_HIGH |		\
+-		PAD_CTL_DSE_40ohm   | PAD_CTL_SRE_FAST   | PAD_CTL_HYS)
++		PAD_CTL_PUS_22K_UP  | PAD_CTL_SPEED_HIGH |		\
++		PAD_CTL_DSE_34ohm   | PAD_CTL_SRE_FAST   | PAD_CTL_HYS)
+ 
+ #define MX6SL_ENET_PAD_CTRL (PAD_CTL_PKE | PAD_CTL_PUE  |		\
+ 		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED |		\
+@@ -2425,8 +2425,12 @@
+ #define MX6SL_PAD_RESET_IN_B__SRC_RESET_B                                     \
+ 		IOMUX_PAD(NO_PAD_I, NO_MUX_I, 0, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD1_CLK__USDHC1_CLK                                         \
++#define MX6SL_PAD_SD1_CLK__USDHC1_CLK_50MHZ                                   \
+ 		IOMUX_PAD(0x0534, 0x022C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD1_CLK__USDHC1_CLK_100MHZ                                  \
++	IOMUX_PAD(0x0534, 0x022C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD1_CLK__USDHC1_CLK_200MHZ                                  \
++	IOMUX_PAD(0x0534, 0x022C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD1_CLK__FEC_MDIO                                           \
+ 		IOMUX_PAD(0x0534, 0x022C, 1, 0x06F4, 2, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD1_CLK__KPP_COL_0                                          \
+@@ -2442,8 +2446,12 @@
+ #define MX6SL_PAD_SD1_CLK__PL301_SIM_MX6SL_PER1_HADDR_25                      \
+ 		IOMUX_PAD(0x0534, 0x022C, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD1_CMD__USDHC1_CMD                                         \
++#define MX6SL_PAD_SD1_CMD__USDHC1_CMD_50MHZ                                   \
+ 		IOMUX_PAD(0x0538, 0x0230, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD1_CMD__USDHC1_CMD_100MHZ                                  \
++	IOMUX_PAD(0x0538, 0x0230, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD1_CMD__USDHC1_CMD_200MHZ                                  \
++	IOMUX_PAD(0x0538, 0x0230, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD1_CMD__FEC_TX_CLK                                         \
+ 		IOMUX_PAD(0x0538, 0x0230, 1, 0x070C, 2, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD1_CMD__KPP_ROW_0                                          \
+@@ -2459,8 +2467,12 @@
+ #define MX6SL_PAD_SD1_CMD__PL301_SIM_MX6SL_PER1_HADDR_26                      \
+ 		IOMUX_PAD(0x0538, 0x0230, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD1_DAT0__USDHC1_DAT0                                       \
++#define MX6SL_PAD_SD1_DAT0__USDHC1_DAT0_50MHZ                                 \
+ 		IOMUX_PAD(0x053C, 0x0234, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD1_DAT0__USDHC1_DAT0_100MHZ                                \
++	IOMUX_PAD(0x053C, 0x0234, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD1_DAT0__USDHC1_DAT0_200MHZ                                \
++	IOMUX_PAD(0x053C, 0x0234, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD1_DAT0__FEC_RX_ER                                         \
+ 		IOMUX_PAD(0x053C, 0x0234, 1, 0x0708, 2, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD1_DAT0__KPP_COL_1                                         \
+@@ -2476,8 +2488,12 @@
+ #define MX6SL_PAD_SD1_DAT0__PL301_SIM_MX6SL_PER1_HADDR_27                     \
+ 		IOMUX_PAD(0x053C, 0x0234, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD1_DAT1__USDHC1_DAT1                                       \
++#define MX6SL_PAD_SD1_DAT1__USDHC1_DAT1_50MHZ                                 \
+ 		IOMUX_PAD(0x0540, 0x0238, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD1_DAT1__USDHC1_DAT1_100MHZ                                \
++	IOMUX_PAD(0x0540, 0x0238, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD1_DAT1__USDHC1_DAT1_200MHZ                                \
++	IOMUX_PAD(0x0540, 0x0238, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD1_DAT1__FEC_RX_DV                                         \
+ 		IOMUX_PAD(0x0540, 0x0238, 1, 0x0704, 2, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD1_DAT1__KPP_ROW_1                                         \
+@@ -2493,8 +2509,12 @@
+ #define MX6SL_PAD_SD1_DAT1__PL301_SIM_MX6SL_PER1_HADDR_28                     \
+ 		IOMUX_PAD(0x0540, 0x0238, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD1_DAT2__USDHC1_DAT2                                       \
++#define MX6SL_PAD_SD1_DAT2__USDHC1_DAT2_50MHZ                                 \
+ 		IOMUX_PAD(0x0544, 0x023C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD1_DAT2__USDHC1_DAT2_100MHZ                                \
++	IOMUX_PAD(0x0544, 0x023C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD1_DAT2__USDHC1_DAT2_200MHZ                                \
++	IOMUX_PAD(0x0544, 0x023C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD1_DAT2__FEC_RDATA_1                                       \
+ 		IOMUX_PAD(0x0544, 0x023C, 1, 0x06FC, 2, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD1_DAT2__KPP_COL_2                                         \
+@@ -2510,8 +2530,12 @@
+ #define MX6SL_PAD_SD1_DAT2__PL301_SIM_MX6SL_PER1_HADDR_29                     \
+ 		IOMUX_PAD(0x0544, 0x023C, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD1_DAT3__USDHC1_DAT3                                       \
++#define MX6SL_PAD_SD1_DAT3__USDHC1_DAT3_50MHZ                                 \
+ 		IOMUX_PAD(0x0548, 0x0240, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD1_DAT3__USDHC1_DAT3_100MHZ                                \
++	IOMUX_PAD(0x0548, 0x0240, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD1_DAT3__USDHC1_DAT3_200MHZ                                \
++	IOMUX_PAD(0x0548, 0x0240, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD1_DAT3__FEC_TDATA_0                                       \
+ 		IOMUX_PAD(0x0548, 0x0240, 1, 0x0000, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD1_DAT3__KPP_ROW_2                                         \
+@@ -2527,8 +2551,12 @@
+ #define MX6SL_PAD_SD1_DAT3__PL301_SIM_MX6SL_PER1_HADDR_30                     \
+ 		IOMUX_PAD(0x0548, 0x0240, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD1_DAT4__USDHC1_DAT4                                       \
++#define MX6SL_PAD_SD1_DAT4__USDHC1_DAT4_50MHZ                                 \
+ 		IOMUX_PAD(0x054C, 0x0244, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD1_DAT4__USDHC1_DAT4_100MHZ                                \
++	IOMUX_PAD(0x054C, 0x0244, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD1_DAT4__USDHC1_DAT4_200MHZ                                \
++	IOMUX_PAD(0x054C, 0x0244, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD1_DAT4__FEC_MDC                                           \
+ 		IOMUX_PAD(0x054C, 0x0244, 1, 0x0000, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD1_DAT4__KPP_COL_3                                         \
+@@ -2546,8 +2574,12 @@
+ #define MX6SL_PAD_SD1_DAT4__PL301_SIM_MX6SL_PER1_HADDR_31                     \
+ 		IOMUX_PAD(0x054C, 0x0244, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD1_DAT5__USDHC1_DAT5                                       \
++#define MX6SL_PAD_SD1_DAT5__USDHC1_DAT5_50MHZ                                 \
+ 		IOMUX_PAD(0x0550, 0x0248, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD1_DAT5__USDHC1_DAT5_100MHZ                                \
++	IOMUX_PAD(0x0550, 0x0248, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD1_DAT5__USDHC1_DAT5_200MHZ                                \
++	IOMUX_PAD(0x0550, 0x0248, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD1_DAT5__FEC_RDATA_0                                       \
+ 		IOMUX_PAD(0x0550, 0x0248, 1, 0x06F8, 2, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD1_DAT5__KPP_ROW_3                                         \
+@@ -2565,8 +2597,12 @@
+ #define MX6SL_PAD_SD1_DAT5__PL301_SIM_MX6SL_PER1_HPROT_3                      \
+ 		IOMUX_PAD(0x0550, 0x0248, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD1_DAT6__USDHC1_DAT6                                       \
++#define MX6SL_PAD_SD1_DAT6__USDHC1_DAT6_50MHZ                                 \
+ 		IOMUX_PAD(0x0554, 0x024C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD1_DAT6__USDHC1_DAT6_100MHZ                                \
++	IOMUX_PAD(0x0554, 0x024C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD1_DAT6__USDHC1_DAT6_200MHZ                                \
++	IOMUX_PAD(0x0554, 0x024C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD1_DAT6__FEC_TX_EN                                         \
+ 		IOMUX_PAD(0x0554, 0x024C, 1, 0x0000, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD1_DAT6__KPP_COL_4                                         \
+@@ -2584,8 +2620,12 @@
+ #define MX6SL_PAD_SD1_DAT6__PL301_SIM_MX6SL_PER1_HPROT_2                      \
+ 		IOMUX_PAD(0x0554, 0x024C, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD1_DAT7__USDHC1_DAT7                                       \
++#define MX6SL_PAD_SD1_DAT7__USDHC1_DAT7_50MHZ                                 \
+ 		IOMUX_PAD(0x0558, 0x0250, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD1_DAT7__USDHC1_DAT7_100MHZ                                \
++	IOMUX_PAD(0x0558, 0x0250, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD1_DAT7__USDHC1_DAT7_200MHZ                                \
++	IOMUX_PAD(0x0558, 0x0250, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD1_DAT7__FEC_TDATA_1                                       \
+ 		IOMUX_PAD(0x0558, 0x0250, 1, 0x0000, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD1_DAT7__KPP_ROW_4                                         \
+@@ -2603,8 +2643,12 @@
+ #define MX6SL_PAD_SD1_DAT7__PL301_SIM_MX6SL_PER1_HMASTLOCK                    \
+ 		IOMUX_PAD(0x0558, 0x0250, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD2_CLK__USDHC2_CLK                                         \
++#define MX6SL_PAD_SD2_CLK__USDHC2_CLK_50MHZ                                   \
+ 		IOMUX_PAD(0x055C, 0x0254, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD2_CLK__USDHC2_CLK_100MHZ                                  \
++	IOMUX_PAD(0x055C, 0x0254, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD2_CLK__USDHC2_CLK_200MHZ                                  \
++	IOMUX_PAD(0x055C, 0x0254, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD2_CLK__AUDMUX_AUD4_RXFS                                   \
+ 		IOMUX_PAD(0x055C, 0x0254, 1, 0x05F0, 2, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD2_CLK__ECSPI3_SCLK                                        \
+@@ -2620,8 +2664,12 @@
+ #define MX6SL_PAD_SD2_CLK__PL301_SIM_MX6SL_PER1_HPROT_1                       \
+ 		IOMUX_PAD(0x055C, 0x0254, 7, 0x07EC, 1, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD2_CMD__USDHC2_CMD                                         \
++#define MX6SL_PAD_SD2_CMD__USDHC2_CMD_50MHZ                                   \
+ 		IOMUX_PAD(0x0560, 0x0258, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD2_CMD__USDHC2_CMD_100MHZ                                  \
++	IOMUX_PAD(0x0560, 0x0258, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD2_CMD__USDHC2_CMD_200MHZ                                  \
++	IOMUX_PAD(0x0560, 0x0258, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD2_CMD__AUDMUX_AUD4_RXC                                    \
+ 		IOMUX_PAD(0x0560, 0x0258, 1, 0x05EC, 2, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD2_CMD__ECSPI3_SS0                                         \
+@@ -2637,8 +2685,12 @@
+ #define MX6SL_PAD_SD2_CMD__PL301_SIM_MX6SL_PER1_HADDR_21                      \
+ 		IOMUX_PAD(0x0560, 0x0258, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD2_DAT0__USDHC2_DAT0                                       \
++#define MX6SL_PAD_SD2_DAT0__USDHC2_DAT0_50MHZ                                 \
+ 		IOMUX_PAD(0x0564, 0x025C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD2_DAT0__USDHC2_DAT0_100MHZ                                \
++	IOMUX_PAD(0x0564, 0x025C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD2_DAT0__USDHC2_DAT0_200MHZ                                \
++	IOMUX_PAD(0x0564, 0x025C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD2_DAT0__AUDMUX_AUD4_RXD                                   \
+ 		IOMUX_PAD(0x0564, 0x025C, 1, 0x05E4, 2, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD2_DAT0__ECSPI3_MOSI                                       \
+@@ -2656,8 +2708,12 @@
+ #define MX6SL_PAD_SD2_DAT0__PL301_SIM_MX6SL_PER1_HPROT_0                      \
+ 		IOMUX_PAD(0x0564, 0x025C, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD2_DAT1__USDHC2_DAT1                                       \
++#define MX6SL_PAD_SD2_DAT1__USDHC2_DAT1_50MHZ                                 \
+ 		IOMUX_PAD(0x0568, 0x0260, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD2_DAT1__USDHC2_DAT1_100MHZ                                \
++	IOMUX_PAD(0x0568, 0x0260, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD2_DAT1__USDHC2_DAT1_200MHZ                                \
++	IOMUX_PAD(0x0568, 0x0260, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD2_DAT1__AUDMUX_AUD4_TXC                                   \
+ 		IOMUX_PAD(0x0568, 0x0260, 1, 0x05F4, 2, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD2_DAT1__ECSPI3_MISO                                       \
+@@ -2675,8 +2731,12 @@
+ #define MX6SL_PAD_SD2_DAT1__PL301_SIM_MX6SL_PER1_HBURST_1                     \
+ 		IOMUX_PAD(0x0568, 0x0260, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD2_DAT2__USDHC2_DAT2                                       \
++#define MX6SL_PAD_SD2_DAT2__USDHC2_DAT2_50MHZ                                 \
+ 		IOMUX_PAD(0x056C, 0x0264, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD2_DAT2__USDHC2_DAT2_100MHZ                                \
++	IOMUX_PAD(0x056C, 0x0264, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD2_DAT2__USDHC2_DAT2_200MHZ                                \
++	IOMUX_PAD(0x056C, 0x0264, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD2_DAT2__AUDMUX_AUD4_TXFS                                  \
+ 		IOMUX_PAD(0x056C, 0x0264, 1, 0x05F8, 2, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD2_DAT2__FEC_COL                                           \
+@@ -2694,8 +2754,12 @@
+ #define MX6SL_PAD_SD2_DAT2__PL301_SIM_MX6SL_PER1_HADDR_22                     \
+ 		IOMUX_PAD(0x056C, 0x0264, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD2_DAT3__USDHC2_DAT3                                       \
++#define MX6SL_PAD_SD2_DAT3__USDHC2_DAT3_50MHZ                                 \
+ 		IOMUX_PAD(0x0570, 0x0268, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD2_DAT3__USDHC2_DAT3_100MHZ                                \
++	IOMUX_PAD(0x0570, 0x0268, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD2_DAT3__USDHC2_DAT3_200MHZ                                \
++	IOMUX_PAD(0x0570, 0x0268, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD2_DAT3__AUDMUX_AUD4_TXD                                   \
+ 		IOMUX_PAD(0x0570, 0x0268, 1, 0x05E8, 2, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD2_DAT3__FEC_RX_CLK                                        \
+@@ -2713,8 +2777,12 @@
+ #define MX6SL_PAD_SD2_DAT3__PL301_SIM_MX6SL_PER1_HBURST_0                     \
+ 		IOMUX_PAD(0x0570, 0x0268, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD2_DAT4__USDHC2_DAT4                                       \
++#define MX6SL_PAD_SD2_DAT4__USDHC2_DAT4_50MHZ                                 \
+ 		IOMUX_PAD(0x0574, 0x026C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD2_DAT4__USDHC2_DAT4_100MHZ                                \
++	IOMUX_PAD(0x0574, 0x026C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD2_DAT4__USDHC2_DAT4_200MHZ                                \
++	IOMUX_PAD(0x0574, 0x026C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD2_DAT4__USDHC3_DAT4                                       \
+ 		IOMUX_PAD(0x0574, 0x026C, 1, 0x083C, 1, MX6SL_USDHC_PAD_CTRL)
+ #define MX6SL_PAD_SD2_DAT4__UART2_TXD                                         \
+@@ -2732,8 +2800,12 @@
+ #define MX6SL_PAD_SD2_DAT4__PL301_SIM_MX6SL_PER1_HADDR_10                     \
+ 		IOMUX_PAD(0x0574, 0x026C, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD2_DAT5__USDHC2_DAT5                                       \
++#define MX6SL_PAD_SD2_DAT5__USDHC2_DAT5_50MHZ                                 \
+ 		IOMUX_PAD(0x0578, 0x0270, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD2_DAT5__USDHC2_DAT5_100MHZ                                \
++	IOMUX_PAD(0x0578, 0x0270, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD2_DAT5__USDHC2_DAT5_200MHZ                                \
++	IOMUX_PAD(0x0578, 0x0270, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD2_DAT5__USDHC3_DAT5                                       \
+ 		IOMUX_PAD(0x0578, 0x0270, 1, 0x0840, 1, MX6SL_USDHC_PAD_CTRL)
+ #define MX6SL_PAD_SD2_DAT5__UART2_TXD                                         \
+@@ -2751,8 +2823,12 @@
+ #define MX6SL_PAD_SD2_DAT5__PL301_SIM_MX6SL_PER1_HADDR_20                     \
+ 		IOMUX_PAD(0x0578, 0x0270, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD2_DAT6__USDHC2_DAT6                                       \
++#define MX6SL_PAD_SD2_DAT6__USDHC2_DAT6_50MHZ                                 \
+ 		IOMUX_PAD(0x057C, 0x0274, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD2_DAT6__USDHC2_DAT6_100MHZ                                \
++	IOMUX_PAD(0x057C, 0x0274, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD2_DAT6__USDHC2_DAT6_200MHZ                                \
++	IOMUX_PAD(0x057C, 0x0274, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD2_DAT6__USDHC3_DAT6                                       \
+ 		IOMUX_PAD(0x057C, 0x0274, 1, 0x0844, 1, MX6SL_USDHC_PAD_CTRL)
+ #define MX6SL_PAD_SD2_DAT6__UART2_CTS                                         \
+@@ -2770,8 +2846,12 @@
+ #define MX6SL_PAD_SD2_DAT6__PL301_SIM_MX6SL_PER1_HADDR_19                     \
+ 		IOMUX_PAD(0x057C, 0x0274, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD2_DAT7__USDHC2_DAT7                                       \
++#define MX6SL_PAD_SD2_DAT7__USDHC2_DAT7_50MHZ                                 \
+ 		IOMUX_PAD(0x0580, 0x0278, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD2_DAT7__USDHC2_DAT7_100MHZ                                \
++	IOMUX_PAD(0x0580, 0x0278, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD2_DAT7__USDHC2_DAT7_200MHZ                                \
++	IOMUX_PAD(0x0580, 0x0278, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD2_DAT7__USDHC3_DAT7                                       \
+ 		IOMUX_PAD(0x0580, 0x0278, 1, 0x0848, 1, MX6SL_USDHC_PAD_CTRL)
+ #define MX6SL_PAD_SD2_DAT7__UART2_CTS                                         \
+@@ -2806,8 +2886,12 @@
+ #define MX6SL_PAD_SD2_RST__PL301_SIM_MX6SL_PER1_HBURST_2                      \
+ 		IOMUX_PAD(0x0584, 0x027C, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD3_CLK__USDHC3_CLK                                         \
++#define MX6SL_PAD_SD3_CLK__USDHC3_CLK_50MHZ                                   \
+ 		IOMUX_PAD(0x0588, 0x0280, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD3_CLK__USDHC3_CLK_100MHZ                                  \
++	IOMUX_PAD(0x0588, 0x0280, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD3_CLK__USDHC3_CLK_200MHZ                                  \
++	IOMUX_PAD(0x0588, 0x0280, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD3_CLK__AUDMUX_AUD5_RXFS                                   \
+ 		IOMUX_PAD(0x0588, 0x0280, 1, 0x0608, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD3_CLK__KPP_COL_5                                          \
+@@ -2823,8 +2907,12 @@
+ #define MX6SL_PAD_SD3_CLK__PL301_SIM_MX6SL_PER1_HADDR_13                      \
+ 		IOMUX_PAD(0x0588, 0x0280, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD3_CMD__USDHC3_CMD                                         \
++#define MX6SL_PAD_SD3_CMD__USDHC3_CMD_50MHZ                                   \
+ 		IOMUX_PAD(0x058C, 0x0284, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD3_CMD__USDHC3_CMD_100MHZ                                  \
++	IOMUX_PAD(0x058C, 0x0284, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD3_CMD__USDHC3_CMD_200MHZ                                  \
++	IOMUX_PAD(0x058C, 0x0284, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD3_CMD__AUDMUX_AUD5_RXC                                    \
+ 		IOMUX_PAD(0x058C, 0x0284, 1, 0x0604, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD3_CMD__KPP_ROW_5                                          \
+@@ -2840,8 +2928,12 @@
+ #define MX6SL_PAD_SD3_CMD__PL301_SIM_MX6SL_PER1_HADDR_18                      \
+ 		IOMUX_PAD(0x058C, 0x0284, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD3_DAT0__USDHC3_DAT0                                       \
++#define MX6SL_PAD_SD3_DAT0__USDHC3_DAT0_50MHZ                                 \
+ 		IOMUX_PAD(0x0590, 0x0288, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD3_DAT0__USDHC3_DAT0_100MHZ                                \
++	IOMUX_PAD(0x0590, 0x0288, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD3_DAT0__USDHC3_DAT0_200MHZ                                \
++	IOMUX_PAD(0x0590, 0x0288, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD3_DAT0__AUDMUX_AUD5_RXD                                   \
+ 		IOMUX_PAD(0x0590, 0x0288, 1, 0x05FC, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD3_DAT0__KPP_COL_6                                         \
+@@ -2857,8 +2949,12 @@
+ #define MX6SL_PAD_SD3_DAT0__PL301_SIM_MX6SL_PER1_HADDR_11                     \
+ 		IOMUX_PAD(0x0590, 0x0288, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD3_DAT1__USDHC3_DAT1                                       \
++#define MX6SL_PAD_SD3_DAT1__USDHC3_DAT1_50MHZ                                 \
+ 		IOMUX_PAD(0x0594, 0x028C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD3_DAT1__USDHC3_DAT1_100MHZ                                \
++	IOMUX_PAD(0x0594, 0x028C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD3_DAT1__USDHC3_DAT1_200MHZ                                \
++	IOMUX_PAD(0x0594, 0x028C, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD3_DAT1__AUDMUX_AUD5_TXC                                   \
+ 		IOMUX_PAD(0x0594, 0x028C, 1, 0x060C, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD3_DAT1__KPP_ROW_6                                         \
+@@ -2874,8 +2970,12 @@
+ #define MX6SL_PAD_SD3_DAT1__PL301_SIM_MX6SL_PER1_HADDR_17                     \
+ 		IOMUX_PAD(0x0594, 0x028C, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD3_DAT2__USDHC3_DAT2                                       \
++#define MX6SL_PAD_SD3_DAT2__USDHC3_DAT2_50MHZ                                 \
+ 		IOMUX_PAD(0x0598, 0x0290, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD3_DAT2__USDHC3_DAT2_100MHZ                                \
++	IOMUX_PAD(0x0598, 0x0290, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD3_DAT2__USDHC3_DAT2_200MHZ                                \
++	IOMUX_PAD(0x0598, 0x0290, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD3_DAT2__AUDMUX_AUD5_TXFS                                  \
+ 		IOMUX_PAD(0x0598, 0x0290, 1, 0x0610, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD3_DAT2__KPP_COL_7                                         \
+@@ -2891,8 +2991,12 @@
+ #define MX6SL_PAD_SD3_DAT2__PL301_SIM_MX6SL_PER1_HADDR_14                     \
+ 		IOMUX_PAD(0x0598, 0x0290, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+-#define MX6SL_PAD_SD3_DAT3__USDHC3_DAT3                                       \
++#define MX6SL_PAD_SD3_DAT3__USDHC3_DAT3_50MHZ                                 \
+ 		IOMUX_PAD(0x059C, 0x0294, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
++#define MX6SL_PAD_SD3_DAT3__USDHC3_DAT3_100MHZ                                \
++	IOMUX_PAD(0x059C, 0x0294, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_100MHZ)
++#define MX6SL_PAD_SD3_DAT3__USDHC3_DAT3_200MHZ                                \
++	IOMUX_PAD(0x059C, 0x0294, 0, 0x0000, 0, MX6SL_USDHC_PAD_CTRL_200MHZ)
+ #define MX6SL_PAD_SD3_DAT3__AUDMUX_AUD5_TXD                                   \
+ 		IOMUX_PAD(0x059C, 0x0294, 1, 0x0600, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_SD3_DAT3__KPP_ROW_7                                         \
+diff --git a/drivers/mmc/host/sdhci-esdhc.h b/drivers/mmc/host/sdhci-esdhc.h
+index c64cdcd..82e0455 100644
+--- a/drivers/mmc/host/sdhci-esdhc.h
++++ b/drivers/mmc/host/sdhci-esdhc.h
+@@ -13,6 +13,7 @@
+ 
+ #ifndef _DRIVERS_MMC_SDHCI_ESDHC_H
+ #define _DRIVERS_MMC_SDHCI_ESDHC_H
++#include <linux/platform_device.h>
+ 
+ /*
+  * Ops and quirks for the Freescale eSDHC controller.
+@@ -52,6 +53,7 @@ static inline void esdhc_set_clock(struct sdhci_host *host, unsigned int clock)
+ 	u32 temp;
+ 	struct esdhc_platform_data *boarddata;
+ 	int ddr_mode = 0;
++	struct platform_device *pdev = to_platform_device(host->mmc->parent);
+ 
+ 	boarddata = host->mmc->parent->platform_data;
+ 	if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+@@ -94,8 +96,10 @@ static inline void esdhc_set_clock(struct sdhci_host *host, unsigned int clock)
+ 	 * board needs to reconfig its pad for
+ 	 * corresponding sd bus frequency
+ 	 */
+-	if (boarddata->platform_pad_change)
+-		boarddata->platform_pad_change(clock);
++	if (boarddata->platform_pad_change) {
++		BUG_ON(!pdev);
++		boarddata->platform_pad_change(pdev->id, clock);
++	}
+ out:
+ 	host->clock = clock;
+ }
+-- 
+1.7.7.4
+

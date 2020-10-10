@@ -1,0 +1,37 @@
+From 76f691466a56fc235d4f4e138195dc78a5823c37 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Thu, 2 Aug 2012 16:03:17 +0800
+Subject: [PATCH 1856/2463] ENGR00219191: mmc: esdhc: escape BROKEN_ADMA quirk
+ on mx6dl TO 1.1 chips
+
+- On mx6dl TO 1.1, adma now can work when ahb bus frequency is low like
+24Mhz.
+Note:
+	hw issue number:TKT093233
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/host/sdhci-esdhc-imx.c |    7 +++++++
+ 1 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index 7beb8b9..e173686 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -821,6 +821,13 @@ static int esdhc_pltfm_init(struct sdhci_host *host, struct sdhci_pltfm_data *pd
+ 		host->quirks |= SDHCI_QUIRK_NO_MULTIBLOCK
+ 			| SDHCI_QUIRK_BROKEN_ADMA;
+ 
++	/*
++	 * on mx6dl TO 1.1, ADMA can work when ahb bus frequency is low,
++	 * like 24Mhz.
++	 */
++	if (mx6dl_revision() >= IMX_CHIP_REVISION_1_1)
++		host->quirks &= ~SDHCI_QUIRK_BROKEN_ADMA;
++
+ 	if (cpu_is_mx6())
+ 		host->quirks2 |= SDHCI_QUIRK_BROKEN_AUTO_CMD23,
+ 
+-- 
+1.7.7.4
+

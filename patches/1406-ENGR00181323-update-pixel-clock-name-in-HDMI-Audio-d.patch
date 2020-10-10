@@ -1,0 +1,34 @@
+From e06bd223b1f5b8590cd5dcb741ba4c8b4a88c0f2 Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Wed, 2 May 2012 15:23:28 +0800
+Subject: [PATCH 1406/2463] ENGR00181323 update pixel clock name in HDMI Audio
+ driver
+
+update pixel clock name in HDMI Audio driver
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ drivers/mfd/mxc-hdmi-core.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mfd/mxc-hdmi-core.c b/drivers/mfd/mxc-hdmi-core.c
+index 92fdf71..7ca59435 100644
+--- a/drivers/mfd/mxc-hdmi-core.c
++++ b/drivers/mfd/mxc-hdmi-core.c
+@@ -421,9 +421,11 @@ static void hdmi_get_pixel_clk(void)
+ 
+ 	if (pixel_clk == NULL) {
+ 		ipu = ipu_get_soc(mxc_hdmi_ipu_id);
+-		pixel_clk = clk_get(ipu->dev, "pixel_clk_0");
++		pixel_clk = clk_get(ipu->dev,
++				ipu_lookups[mxc_hdmi_ipu_id][mxc_hdmi_disp_id].con_id);
+ 		if (IS_ERR(pixel_clk)) {
+-			pr_err("%s could not get pixel_clk_0\n", __func__);
++			pr_err("%s could not get ipu%d_pixel_clk_%d\n", __func__,
++						mxc_hdmi_ipu_id + 1, mxc_hdmi_disp_id);
+ 			return;
+ 		}
+ 	}
+-- 
+1.7.7.4
+

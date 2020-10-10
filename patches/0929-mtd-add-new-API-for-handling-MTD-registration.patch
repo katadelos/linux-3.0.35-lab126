@@ -1,0 +1,110 @@
+From 9c2de8ccb89b3689bbfd73cf749787b4a09b24ce Mon Sep 17 00:00:00 2001
+From: Dmitry Eremin-Solenikov <dbaryshkov@gmail.com>
+Date: Fri, 25 Mar 2011 22:26:25 +0300
+Subject: [PATCH 0929/2463] mtd: add new API for handling MTD registration
+
+Lots (nearly all) mtd drivers contain nearly the similar code that
+calls parse_mtd_partitions, provides some platform-default values, if
+parsing fails, and registers  mtd device.
+
+This is an aim to provide single implementation of this scenario:
+mtd_device_parse_register() which will handle all this parsing and
+defaults.
+
+Artem: amended comments
+
+Signed-off-by: Dmitry Eremin-Solenikov <dbaryshkov@gmail.com>
+Signed-off-by: Artem Bityutskiy <Artem.Bityutskiy@nokia.com>
+---
+ drivers/mtd/mtdcore.c   |   58 +++++++++++++++++++++++++++++++++++++++++++++++
+ include/linux/mtd/mtd.h |    5 ++++
+ 2 files changed, 63 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mtd/mtdcore.c b/drivers/mtd/mtdcore.c
+index c510aff..1326747 100644
+--- a/drivers/mtd/mtdcore.c
++++ b/drivers/mtd/mtdcore.c
+@@ -452,6 +452,64 @@ int mtd_device_register(struct mtd_info *master,
+ EXPORT_SYMBOL_GPL(mtd_device_register);
+ 
+ /**
++ * mtd_device_parse_register - parse partitions and register an MTD device.
++ *
++ * @mtd: the MTD device to register
++ * @types: the list of MTD partition probes to try, see
++ *         'parse_mtd_partitions()' for more information
++ * @origin: start address of MTD device, %0 unless you are sure you need this.
++ * @parts: fallback partition information to register, if parsing fails;
++ *         only valid if %nr_parts > %0
++ * @nr_parts: the number of partitions in parts, if zero then the full
++ *            MTD device is registered if no partition info is found
++ *
++ * This function aggregates MTD partitions parsing (done by
++ * 'parse_mtd_partitions()') and MTD device and partitions registering. It
++ * basically follows the most common pattern found in many MTD drivers:
++ *
++ * * It first tries to probe partitions on MTD device @mtd using parsers
++ *   specified in @types (if @types is %NULL, then the default list of parsers
++ *   is used, see 'parse_mtd_partitions()' for more information). If none are
++ *   found this functions tries to fallback to information specified in
++ *   @parts/@nr_parts.
++ * * If any parititioning info was found, this function registers the found
++ *   partitions.
++ * * If no partitions were found this function just registers the MTD device
++ *   @mtd and exits.
++ *
++ * Returns zero in case of success and a negative error code in case of failure.
++ */
++int mtd_device_parse_register(struct mtd_info *mtd, const char **types,
++			      unsigned long origin,
++			      const struct mtd_partition *parts,
++			      int nr_parts)
++{
++	int err;
++	struct mtd_partition *real_parts;
++
++	err = parse_mtd_partitions(mtd, types, &real_parts, origin);
++	if (err <= 0 && nr_parts) {
++		real_parts = kmemdup(parts, sizeof(*parts) * nr_parts,
++				     GFP_KERNEL);
++		err = nr_parts;
++		if (!parts)
++			err = -ENOMEM;
++	}
++
++	if (err > 0) {
++		err = add_mtd_partitions(mtd, real_parts, err);
++		kfree(real_parts);
++	} else if (err == 0) {
++		err = add_mtd_device(mtd);
++		if (err == 1)
++			err = -ENODEV;
++	}
++
++	return err;
++}
++EXPORT_SYMBOL_GPL(mtd_device_parse_register);
++
++/**
+  * mtd_device_unregister - unregister an existing MTD device.
+  *
+  * @master: the MTD device to unregister.  This will unregister both the master
+diff --git a/include/linux/mtd/mtd.h b/include/linux/mtd/mtd.h
+index 2541fb8..d28a241 100644
+--- a/include/linux/mtd/mtd.h
++++ b/include/linux/mtd/mtd.h
+@@ -327,6 +327,11 @@ struct mtd_partition;
+ extern int mtd_device_register(struct mtd_info *master,
+ 			       const struct mtd_partition *parts,
+ 			       int nr_parts);
++extern int mtd_device_parse_register(struct mtd_info *mtd,
++			      const char **part_probe_types,
++			      unsigned long origin,
++			      const struct mtd_partition *defparts,
++			      int defnr_parts);
+ extern int mtd_device_unregister(struct mtd_info *master);
+ extern struct mtd_info *get_mtd_device(struct mtd_info *mtd, int num);
+ extern int __get_mtd_device(struct mtd_info *mtd);
+-- 
+1.7.7.4
+

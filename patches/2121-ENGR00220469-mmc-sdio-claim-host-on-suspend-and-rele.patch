@@ -1,0 +1,50 @@
+From a3d595ec8c5247da37b85a83d5188d865c9046ab Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Tue, 9 Oct 2012 08:58:41 +0800
+Subject: [PATCH 2121/2463] ENGR00220469 mmc: sdio: claim host on suspend and
+ release on resuming
+
+issue:
+Since there's no sync mechanism between sdio bus suspending and sdio_irq_thread,
+it will cause that sdio_irq_thread still makes sdhc request even after sdio bus
+suspends.
+
+fix:
+On suspending sdio bus, claim host, so that:
+1. mmc_sdio_suspend will wait for finishing of sdio_irq_thread.
+2. sdio_irq_thread will be blocked even being scheduled.
+And release host on resuming.
+
+Acked-by: Aisheng DONG <b29396@freescale.com>
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/core/sdio.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mmc/core/sdio.c b/drivers/mmc/core/sdio.c
+index 16b7484..cc3736b 100644
+--- a/drivers/mmc/core/sdio.c
++++ b/drivers/mmc/core/sdio.c
+@@ -638,6 +638,9 @@ static int mmc_sdio_suspend(struct mmc_host *host)
+ 		mmc_release_host(host);
+ 	}
+ 
++	if (!err)
++		mmc_claim_host(host);
++
+ 	return err;
+ }
+ 
+@@ -648,9 +651,6 @@ static int mmc_sdio_resume(struct mmc_host *host)
+ 	BUG_ON(!host);
+ 	BUG_ON(!host->card);
+ 
+-	/* Basic card reinitialization. */
+-	mmc_claim_host(host);
+-
+ 	/* No need to reinitialize powered-resumed nonremovable cards */
+ 	if (mmc_card_is_removable(host) && !mmc_card_keep_power(host))
+ 		err = mmc_sdio_init_card(host, host->ocr, host->card,
+-- 
+1.7.7.4
+

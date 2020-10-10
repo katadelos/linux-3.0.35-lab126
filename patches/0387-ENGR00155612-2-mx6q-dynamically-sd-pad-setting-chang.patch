@@ -1,0 +1,36 @@
+From 9edebaaecac9006b9a40c3c7f435a735bbe83b0e Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Wed, 31 Aug 2011 13:28:37 +0800
+Subject: [PATCH 0387/2463] ENGR00155612-2 [mx6q]dynamically sd pad setting
+ change
+
+call platform callback funtion, if exists, when clock frequency
+is changed.
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ drivers/mmc/host/sdhci-esdhc.h |    8 ++++++++
+ 1 files changed, 8 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-esdhc.h b/drivers/mmc/host/sdhci-esdhc.h
+index c4e8fad..c78ce0c 100644
+--- a/drivers/mmc/host/sdhci-esdhc.h
++++ b/drivers/mmc/host/sdhci-esdhc.h
+@@ -88,6 +88,14 @@ static inline void esdhc_set_clock(struct sdhci_host *host, unsigned int clock)
+ 		| (pre_div << ESDHC_PREDIV_SHIFT));
+ 	sdhci_writel(host, temp, ESDHC_SYSTEM_CONTROL);
+ 	mdelay(100);
++
++	/* if there's board callback function
++	 * for pad setting change, that means
++	 * board needs to reconfig its pad for
++	 * corresponding sd bus frequency
++	 */
++	if (boarddata->platform_pad_change)
++		boarddata->platform_pad_change(clock);
+ out:
+ 	host->clock = clock;
+ }
+-- 
+1.7.7.4
+

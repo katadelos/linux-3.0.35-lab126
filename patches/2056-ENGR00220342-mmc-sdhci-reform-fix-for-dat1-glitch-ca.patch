@@ -1,0 +1,71 @@
+From 9bb464fc3b5a4798ff92238ce8d8e2f68c4c5d40 Mon Sep 17 00:00:00 2001
+From: Jianzheng Zhou <jianzheng.zhou@freescale.com>
+Date: Mon, 24 Sep 2012 09:50:59 +0800
+Subject: [PATCH 2056/2463] ENGR00220342 mmc: sdhci:reform fix for dat1 glitch
+ causes system panic
+
+refix this bug, sdhci_init should be done before request_irq to
+clear those wild interrupts.
+Former fix commit is 4e3a2b40a16b8d5065b680ab86df288515cdea9c.
+
+Signed-off-by: Jianzheng Zhou <jianzheng.zhou@freescale.com>
+---
+ drivers/mmc/host/sdhci-esdhc-imx.c |   13 -------------
+ drivers/mmc/host/sdhci.c           |   10 +++++-----
+ 2 files changed, 5 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index e173686..39eb287 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -869,19 +869,6 @@ static int esdhc_pltfm_init(struct sdhci_host *host, struct sdhci_pltfm_data *pd
+ 	reg = readl(host->ioaddr + SDHCI_MIX_CTRL);
+ 	reg &= ~SDHCI_MIX_CTRL_DDREN;
+ 	writel(reg, host->ioaddr + SDHCI_MIX_CTRL);
+-	/* disable card interrupt enable bit, and clear status bit
+-	 * the default value of this enable bit is 1, but it should
+-	 * be 0 regarding to standard host controller spec 2.1.3.
+-	 * if this bit is 1, it may cause some problems.
+-	 * there's dat1 glitch when some cards inserting into the slot,
+-	 * thus wrongly generate a card interrupt that will cause
+-	 * system panic because it lacks of sdio handler
+-	 * following code will solve the problem.
+-	 */
+-	reg = sdhci_readl(host, SDHCI_INT_ENABLE);
+-	reg &= ~SDHCI_INT_CARD_INT;
+-	sdhci_writel(host, reg, SDHCI_INT_ENABLE);
+-	sdhci_writel(host, SDHCI_INT_CARD_INT, SDHCI_INT_STATUS);
+ 
+ 	if (boarddata) {
+ 		/* Device is always present, e.x, populated emmc device */
+diff --git a/drivers/mmc/host/sdhci.c b/drivers/mmc/host/sdhci.c
+index 123459d..d642020 100755
+--- a/drivers/mmc/host/sdhci.c
++++ b/drivers/mmc/host/sdhci.c
+@@ -2889,11 +2889,6 @@ int sdhci_add_host(struct sdhci_host *host)
+ 		host->tuning_timer.function = sdhci_tuning_timer;
+ 	}
+ 
+-	ret = request_irq(host->irq, sdhci_irq, IRQF_SHARED,
+-		mmc_hostname(mmc), host);
+-	if (ret)
+-		goto untasklet;
+-
+ 	host->vmmc = regulator_get(mmc_dev(mmc), "vmmc");
+ 	if (IS_ERR(host->vmmc)) {
+ 		printk(KERN_INFO "%s: no vmmc regulator found\n", mmc_hostname(mmc));
+@@ -2904,6 +2899,11 @@ int sdhci_add_host(struct sdhci_host *host)
+ 
+ 	sdhci_init(host, 0);
+ 
++	ret = request_irq(host->irq, sdhci_irq, IRQF_SHARED,
++		mmc_hostname(mmc), host);
++	if (ret)
++		goto untasklet;
++
+ #ifdef CONFIG_MMC_DEBUG
+ 	sdhci_dumpregs(host);
+ #endif
+-- 
+1.7.7.4
+

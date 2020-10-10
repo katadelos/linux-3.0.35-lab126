@@ -1,0 +1,90 @@
+From a26a60fc576b12caf8da0eede2f655ae9c5b20c8 Mon Sep 17 00:00:00 2001
+From: Zhang Jiejing <jiejing.zhang@freescale.com>
+Date: Mon, 16 Jul 2012 13:51:30 +0800
+Subject: [PATCH 1755/2463] ENGR00216013-2 mx6: not call memblock_free after
+ reserve memory.
+
+Remove call memblock_free after reserve memory with memblock_allocate().
+The function of memblock_free is to remove the memory block from reserve list
+of memblock, it will totally lost the info about how much phy memory
+we have.
+
+Skipping call this can make the reserved memory be accountable in
+memblock With no side-effect.
+
+After doing this, we can know how much our phy memory is, then can add check
+in our driver like(vpu) to check the phy memory valid or not before vpu start
+use the address.
+
+Signed-off-by: Zhang Jiejing <jiejing.zhang@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c      |    1 -
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    1 -
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |    1 -
+ arch/arm/mach-mx6/board-mx6q_sabresd.c   |    1 -
+ arch/arm/mach-mx6/board-mx6sl_arm2.c     |    1 -
+ 5 files changed, 0 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 0aa0941..5ef310b 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -2225,7 +2225,6 @@ static void __init mx6_arm2_reserve(void)
+ 	if (imx6_gpu_pdata.reserved_mem_size) {
+ 		phys = memblock_alloc_base(
+ 			imx6_gpu_pdata.reserved_mem_size, SZ_4K, SZ_2G);
+-		memblock_free(phys, imx6_gpu_pdata.reserved_mem_size);
+ 		memblock_remove(phys, imx6_gpu_pdata.reserved_mem_size);
+ 		imx6_gpu_pdata.reserved_mem_base = phys;
+ 	}
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 2bb915a..5bd85eb 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -1640,7 +1640,6 @@ static void __init mx6q_reserve(void)
+ 	if (imx6q_gpu_pdata.reserved_mem_size) {
+ 		phys = memblock_alloc_base(imx6q_gpu_pdata.reserved_mem_size,
+ 			SZ_4K, SZ_2G);
+-		memblock_free(phys, imx6q_gpu_pdata.reserved_mem_size);
+ 		memblock_remove(phys, imx6q_gpu_pdata.reserved_mem_size);
+ 		imx6q_gpu_pdata.reserved_mem_base = phys;
+ 	}
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index 57b83ff..3098e0d 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -1243,7 +1243,6 @@ static void __init mx6q_sabrelite_reserve(void)
+ 	if (imx6q_gpu_pdata.reserved_mem_size) {
+ 		phys = memblock_alloc_base(imx6q_gpu_pdata.reserved_mem_size,
+ 					   SZ_4K, SZ_1G);
+-		memblock_free(phys, imx6q_gpu_pdata.reserved_mem_size);
+ 		memblock_remove(phys, imx6q_gpu_pdata.reserved_mem_size);
+ 		imx6q_gpu_pdata.reserved_mem_base = phys;
+ 	}
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index cefb3b3..e3caf4c 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1896,7 +1896,6 @@ static void __init mx6q_sabresd_reserve(void)
+ 	if (imx6q_gpu_pdata.reserved_mem_size) {
+ 		phys = memblock_alloc_base(imx6q_gpu_pdata.reserved_mem_size,
+ 					   SZ_4K, SZ_1G);
+-		memblock_free(phys, imx6q_gpu_pdata.reserved_mem_size);
+ 		memblock_remove(phys, imx6q_gpu_pdata.reserved_mem_size);
+ 		imx6q_gpu_pdata.reserved_mem_base = phys;
+ 	}
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 4592fd6..7258526 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -1313,7 +1313,6 @@ static void __init mx6_arm2_reserve(void)
+ 	if (imx6q_gpu_pdata.reserved_mem_size) {
+ 		phys = memblock_alloc_base(imx6q_gpu_pdata.reserved_mem_size,
+ 					   SZ_4K, MEMBLOCK_ALLOC_ACCESSIBLE);
+-		memblock_free(phys, imx6q_gpu_pdata.reserved_mem_size);
+ 		memblock_remove(phys, imx6q_gpu_pdata.reserved_mem_size);
+ 		imx6q_gpu_pdata.reserved_mem_base = phys;
+ 	}
+-- 
+1.7.7.4
+

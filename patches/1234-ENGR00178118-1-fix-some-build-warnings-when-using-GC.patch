@@ -1,0 +1,91 @@
+From 7ad35a2cd61c118f75d35908cbf0944876b90af2 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Tue, 27 Mar 2012 21:20:27 +0800
+Subject: [PATCH 1234/2463] ENGR00178118-1 fix some build warnings when using
+ GCC 4.6.2
+
+fix some build warnings when using GCC 4.6.2:
+
+drivers/cpufreq/cpufreq_interactive.c:127:6:
+warning:'irq_count' may be used uninitialized in this function [-Wuninitialized]
+drivers/media/video/mxc/output/mxc_vout.c:1346:5:
+warning: 'ret' may be used uninitialized in this function [-Wuninitialized]
+drivers/video/mxc/mxc_ipuv3_fb.c:1329:23:
+warning: operation on 'mxc_fbi->cur_ipu_buf' may be undefined [-Wsequence-point]
+drivers/video/mxc/mxc_ipuv3_fb.c:1376:24:
+warning: operation on 'mxc_fbi->cur_ipu_buf' may be undefined [-Wsequence-point]
+drivers/video/mxc/mxc_ipuv3_fb.c:1377:24:
+warning: operation on 'mxc_fbi->cur_ipu_buf' may be undefined [-Wsequence-point]
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ drivers/cpufreq/cpufreq_interactive.c     |    4 ++--
+ drivers/media/video/mxc/output/mxc_vout.c |    2 +-
+ drivers/video/mxc/mxc_ipuv3_fb.c          |    9 ++++++---
+ 3 files changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/cpufreq/cpufreq_interactive.c b/drivers/cpufreq/cpufreq_interactive.c
+index bb49f40..2ccd9dd 100644
+--- a/drivers/cpufreq/cpufreq_interactive.c
++++ b/drivers/cpufreq/cpufreq_interactive.c
+@@ -101,7 +101,7 @@ static struct irq_desc *cpufreq_irq_desc[MAX_CPUFREQ_IRQ_NUMBER];
+ static bool cpufreq_interactive_check_irq(void)
+ {
+ 	bool val;
+-	unsigned int irq_count, i;
++	unsigned int irq_count = 0, i;
+ 	static unsigned int irq_count_start[MAX_CPUFREQ_IRQ_NUMBER];
+ 	static unsigned int irq_count_end[MAX_CPUFREQ_IRQ_NUMBER];
+ 
+@@ -778,7 +778,7 @@ err_freeuptask:
+ 
+ int cpufreq_gov_irq_tuner_register(struct irq_tuner dbs_irq_tuner)
+ {
+-	int i, ret;
++	int i, ret = 0;
+ 	static bool init_flag;
+ 
+ 	/* Init the global irq_tuner_ins structure */
+diff --git a/drivers/media/video/mxc/output/mxc_vout.c b/drivers/media/video/mxc/output/mxc_vout.c
+index 2c22cee..43b5367 100644
+--- a/drivers/media/video/mxc/output/mxc_vout.c
++++ b/drivers/media/video/mxc/output/mxc_vout.c
+@@ -1293,7 +1293,7 @@ static int set_window_position(struct mxc_vout_output *vout, struct mxcfb_pos *p
+ {
+ 	struct fb_info *fbi = vout->fbi;
+ 	mm_segment_t old_fs;
+-	int ret;
++	int ret = 0;
+ 
+ 	if (vout->disp_support_windows) {
+ 		old_fs = get_fs();
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 8a37afd..62685a5 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -1326,7 +1326,8 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 		return -ETIMEDOUT;
+ 	}
+ 
+-	mxc_fbi->cur_ipu_buf = (++mxc_fbi->cur_ipu_buf) % 3;
++	++mxc_fbi->cur_ipu_buf;
++	mxc_fbi->cur_ipu_buf %= 3;
+ 	mxc_fbi->cur_ipu_alpha_buf = !mxc_fbi->cur_ipu_alpha_buf;
+ 
+ 	dev_dbg(info->device, "Updating SDC %s buf %d address=0x%08lX\n",
+@@ -1373,8 +1374,10 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 					       IPU_INPUT_BUFFER, 1),
+ 			ipu_check_buffer_ready(mxc_fbi->ipu, mxc_fbi->ipu_ch,
+ 					       IPU_INPUT_BUFFER, 2));
+-		mxc_fbi->cur_ipu_buf = (++mxc_fbi->cur_ipu_buf) % 3;
+-		mxc_fbi->cur_ipu_buf = (++mxc_fbi->cur_ipu_buf) % 3;
++		++mxc_fbi->cur_ipu_buf;
++		mxc_fbi->cur_ipu_buf %= 3;
++		++mxc_fbi->cur_ipu_buf;
++		mxc_fbi->cur_ipu_buf %= 3;
+ 		mxc_fbi->cur_ipu_alpha_buf = !mxc_fbi->cur_ipu_alpha_buf;
+ 		ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+ 		ipu_enable_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+-- 
+1.7.7.4
+

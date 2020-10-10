@@ -1,0 +1,123 @@
+From 7ded0ecccf2c54dc8e92510ce49028f0e85a01ba Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Mon, 11 Jun 2012 14:31:20 +0800
+Subject: [PATCH 1591/2463] ENGR00212992 usb: fix potential bug with fast plug
+ in/out with usb charger
+
+- Move imx_usb_vbus_disconnect to work queue, and wait or cancel
+charger detect worker when vbus is disconnected if charger detect
+worker still hasn't finished.
+- Move pull down dp from imx_usb_vbus_disconnect to udc vbus
+disconnect interrupt handler, the reason is udc->gadget.speed should
+to be updated at that ISR.
+- Select POWER_SUPPLY if USB_GADGET_ARC is configured to fix the build
+error for manufacture tools firmware's build.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/gadget/Kconfig           |    1 +
+ drivers/usb/gadget/arcotg_udc.c      |   13 +++++++------
+ drivers/usb/gadget/imx_usb_charger.c |    8 ++++----
+ 3 files changed, 12 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/usb/gadget/Kconfig b/drivers/usb/gadget/Kconfig
+index 43006e4..085c709 100755
+--- a/drivers/usb/gadget/Kconfig
++++ b/drivers/usb/gadget/Kconfig
+@@ -159,6 +159,7 @@ config USB_GADGET_ARC
+ 	depends on ARCH_MXC || ARCH_STMP3XXX || ARCH_MXS
+ 	select USB_GADGET_DUALSPEED
+ 	select USB_OTG_UTILS
++	select POWER_SUPPLY
+ 	help
+ 	   Some Freescale processors have a USBOTG controller,
+ 	   which supports device mode.
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 8def722..90eb986 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -491,7 +491,6 @@ static void dr_controller_run(struct fsl_udc *udc)
+ 	if (!(temp & OTGSC_B_SESSION_VALID)) {
+ 		/* Set stopped before low power mode */
+ 		udc->vbus_active = false;
+-		imx_usb_vbus_disconnect(&udc->charger); /* charger disconnect */
+ 		udc->stopped = 1;
+ 		/* enable wake up */
+ 		dr_wake_up_enable(udc, true);
+@@ -513,7 +512,8 @@ static void dr_controller_run(struct fsl_udc *udc)
+ 		/* disable pulldown dp and dm */
+ 		dr_discharge_line(udc->pdata, false);
+ 		udc->vbus_active = true;
+-		imx_usb_vbus_connect(&udc->charger); /* charger detect */
++		/* notify vbus is connected */
++		imx_usb_vbus_connect(&udc->charger);
+ 		printk(KERN_DEBUG "%s: udc out low power mode\n", __func__);
+ 	}
+ 
+@@ -2182,9 +2182,10 @@ static void fsl_gadget_disconnect_event(struct work_struct *work)
+ 
+ 	pdata = udc->pdata;
+ 
++	 /* notify vbus is disconnected */
++	imx_usb_vbus_disconnect(&udc->charger);
+ 	/* wait line to se0 */
+ 	dr_discharge_line(pdata, true);
+-
+ 	/*
+ 	 * Wait class drivers finish, an well-behaviour class driver should
+ 	 * call ep_disable when it is notified to be disconnected.
+@@ -2242,11 +2243,12 @@ bool try_wake_up_udc(struct fsl_udc *udc)
+ 			udc->stopped = 0;
+ 			/* disable pulldown dp and dm */
+ 			dr_discharge_line(pdata, false);
+-			imx_usb_vbus_connect(&udc->charger); /* charger detect */
++			/* notify vbus is connected */
++			imx_usb_vbus_connect(&udc->charger);
+ 			printk(KERN_DEBUG "%s: udc out low power mode\n", __func__);
+ 		} else {
+ 			udc->vbus_active = false;
+-			imx_usb_vbus_disconnect(&udc->charger); /* charger disconnect */
++			fsl_pullup(&udc_controller->gadget, false); /* usbcmd.rs=0 */
+ 			/* here we need disable B_SESSION_IRQ, after
+ 			 * schedule_work finished, it need to be enabled again.
+ 			 * Doing like this can avoid conflicting between rapid
+@@ -2257,7 +2259,6 @@ bool try_wake_up_udc(struct fsl_udc *udc)
+ 				fsl_writel(tmp &
+ 					   (~OTGSC_B_SESSION_VALID_IRQ_EN),
+ 					   &dr_regs->otgsc);
+-
+ 			/* update port status */
+ 			fsl_udc_speed_update(udc);
+ 			spin_unlock(&udc->lock);
+diff --git a/drivers/usb/gadget/imx_usb_charger.c b/drivers/usb/gadget/imx_usb_charger.c
+index 41043b4..e102042 100644
+--- a/drivers/usb/gadget/imx_usb_charger.c
++++ b/drivers/usb/gadget/imx_usb_charger.c
+@@ -178,7 +178,7 @@ static int usb_charger_detect(struct usb_charger *charger)
+ 	return 1;
+ }
+ 
+-void usb_charger_init(struct usb_charger *charger)
++static void usb_charger_init(struct usb_charger *charger)
+ {
+ 	charger->bc = BATTERY_CHARGING_SPEC_1_2;
+ 	charger->detect = usb_charger_detect;
+@@ -298,12 +298,12 @@ EXPORT_SYMBOL(imx_usb_vbus_connect);
+  */
+ int imx_usb_vbus_disconnect(struct usb_charger *charger)
+ {
+-	if (charger->dp_pullup)
+-		charger->dp_pullup(false); /* usbcmd.rs = 0 */
+-
+ 	if (!charger->enable)
+ 		return 0;
+ 
++	/* in case, the charger detect is doing or pending */
++	cancel_work_sync(&charger->work);
++
+ 	charger->online = 0;
+ 	charger->present = 0;
+ 	charger->max_current = 0;
+-- 
+1.7.7.4
+

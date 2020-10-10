@@ -1,0 +1,44 @@
+From b8f85a69ca7b041429e39aa191f919d019e88a56 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Tue, 7 Aug 2012 19:23:13 +0800
+Subject: [PATCH 1876/2463] ENGR00220011-1 Revert ENGR00212529 show video to
+ fb0, the color space incorrect
+
+Revert ENGR00212529 MX6x show video to fb0 when bootup,
+the color space incorrect.
+
+Update IPU DP CSC setting should not change the DP FG window's position setting,
+it can be update when enabling IPU DP channel.
+Otherwise, it will appear NFB4EOF_ERR and flip irq timeout errors.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_disp.c |   12 ++++++++++--
+ 1 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index 0c09256..9522c94 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -2014,8 +2014,16 @@ int32_t _ipu_disp_set_window_pos(struct ipu_soc *ipu, ipu_channel_t channel,
+ 
+ 	ipu_dp_write(ipu, (x_pos << 16) | y_pos, DP_FG_POS(flow));
+ 
+-	reg = ipu_cm_read(ipu, IPU_SRM_PRI2) | 0x8;
+-	ipu_cm_write(ipu, reg, IPU_SRM_PRI2);
++	if (ipu_is_channel_busy(ipu, channel)) {
++		/* controled by FSU if channel enabled */
++		reg = ipu_cm_read(ipu, IPU_SRM_PRI2) & (~(0x3 << dp_srm_shift));
++		reg |= (0x1 << dp_srm_shift);
++		ipu_cm_write(ipu, reg, IPU_SRM_PRI2);
++	} else {
++		/* disable auto swap, controled by MCU if channel disabled */
++		reg = ipu_cm_read(ipu, IPU_SRM_PRI2) & (~(0x3 << dp_srm_shift));
++		ipu_cm_write(ipu, reg, IPU_SRM_PRI2);
++	}
+ 
+ 	return 0;
+ }
+-- 
+1.7.7.4
+

@@ -1,0 +1,51 @@
+From 908ea079a2aa628b21006a5db56beed775bc5a0f Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Wed, 2 Nov 2011 14:38:27 -0500
+Subject: [PATCH 0533/2463] ENGR00161292 [mx6q] Fix incompatible pointer
+ warnings
+
+Fix build warnings regarding initialization from incompatible pointer type.
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ drivers/regulator/anatop-regulator.c |    5 +++--
+ drivers/video/backlight/pwm_bl.c     |    3 ++-
+ 2 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/regulator/anatop-regulator.c b/drivers/regulator/anatop-regulator.c
+index 8eb7658..61ad1c2 100644
+--- a/drivers/regulator/anatop-regulator.c
++++ b/drivers/regulator/anatop-regulator.c
+@@ -27,12 +27,13 @@
+ #include <linux/regulator/driver.h>
+ #include <linux/regulator/anatop-regulator.h>
+ 
+-static int anatop_set_voltage(struct regulator_dev *reg, int MiniV, int uv)
++static int anatop_set_voltage(struct regulator_dev *reg, int min_uV,
++				  int max_uV, unsigned *selector)
+ {
+ 	struct anatop_regulator *anatop_reg = rdev_get_drvdata(reg);
+ 
+ 	if (anatop_reg->rdata->set_voltage)
+-		return anatop_reg->rdata->set_voltage(anatop_reg, uv);
++		return anatop_reg->rdata->set_voltage(anatop_reg, max_uV);
+ 	else
+ 		return -ENOTSUPP;
+ }
+diff --git a/drivers/video/backlight/pwm_bl.c b/drivers/video/backlight/pwm_bl.c
+index 5754565..5d5c43b 100644
+--- a/drivers/video/backlight/pwm_bl.c
++++ b/drivers/video/backlight/pwm_bl.c
+@@ -63,7 +63,8 @@ static int pwm_backlight_get_brightness(struct backlight_device *bl)
+ 	return bl->props.brightness;
+ }
+ 
+-static int pwm_backlight_check_fb(struct fb_info *info)
++static int pwm_backlight_check_fb(struct backlight_device *bl,
++					struct fb_info *info)
+ {
+ 	char *id = info->fix.id;
+ 	if (!strcmp(id, "DISP3 BG"))
+-- 
+1.7.7.4
+

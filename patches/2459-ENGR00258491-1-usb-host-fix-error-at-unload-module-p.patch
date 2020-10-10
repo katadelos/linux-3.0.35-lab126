@@ -1,0 +1,90 @@
+From d4748486c77fac7d480d963aa1c9164a9d7ae7f0 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Fri, 12 Apr 2013 16:04:37 +0800
+Subject: [PATCH 2459/2463] ENGR00258491-1 usb: host: fix error at unload
+ module path
+
+- When take the PHY out of low power mode, it needs to
+call PHY's API, only set controller register is
+not enough for some platforms
+- usb_put_hcd will free hcd, all hcd related operation should
+be prior to it.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/host/ehci-arc.c |   33 +++++++++++++++++----------------
+ 1 files changed, 17 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index 078ccb3..af894a3 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -333,7 +333,6 @@ static void usb_hcd_fsl_remove(struct usb_hcd *hcd,
+ {
+ 	struct ehci_hcd *ehci = hcd_to_ehci(hcd);
+ 	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
+-	u32 tmp;
+ 
+ 	if (!test_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags)) {
+ 		/* Need open clock for register access */
+@@ -343,31 +342,35 @@ static void usb_hcd_fsl_remove(struct usb_hcd *hcd,
+ 		/*disable the wakeup to avoid an abnormal wakeup interrupt*/
+ 		usb_host_set_wakeup(hcd->self.controller, false);
+ 
+-		tmp = ehci_readl(ehci, &ehci->regs->port_status[0]);
+-		if (tmp & PORT_PTS_PHCD) {
+-			tmp &= ~PORT_PTS_PHCD;
+-			ehci_writel(ehci, tmp, &ehci->regs->port_status[0]);
+-			msleep(100);
+-		}
++		/* Put the PHY out of low power mode */
++		fsl_usb_lowpower_mode(pdata, false);
+ 	}
+ 
++	/* disable the host wakeup */
++	usb_host_set_wakeup(hcd->self.controller, false);
++	/*free the ehci_fsl_pre_irq  */
++	free_irq(hcd->irq, (void *)pdev);
++
++	usb_remove_hcd(hcd);
++
++	ehci_port_power(ehci, 0);
++
++	iounmap(hcd->regs);
++
+ 	if (ehci->transceiver) {
+ 		(void)otg_set_host(ehci->transceiver, 0);
+ 		otg_put_transceiver(ehci->transceiver);
+ 	} else {
+ 		release_mem_region(hcd->rsrc_start, hcd->rsrc_len);
+ 	}
+-	/*disable the host wakeup and put phy to low power mode */
+-	usb_host_set_wakeup(hcd->self.controller, false);
+-	/*free the ehci_fsl_pre_irq  */
+-	free_irq(hcd->irq, (void *)pdev);
+-	usb_remove_hcd(hcd);
++
+ 	usb_put_hcd(hcd);
+ 
+ 	fsl_usb_lowpower_mode(pdata, true);
+ 
+-	/* DDD shouldn't we turn off the power here? */
+-	fsl_platform_set_vbus_power(pdata, 0);
++	/* Close the VBUS */
++	if (pdata->xcvr_ops && pdata->xcvr_ops->set_vbus_power)
++		pdata->xcvr_ops->set_vbus_power(pdata->xcvr_ops, pdata, 0);
+ 
+ 	/*
+ 	 * do platform specific un-initialization:
+@@ -375,8 +378,6 @@ static void usb_hcd_fsl_remove(struct usb_hcd *hcd,
+ 	 */
+ 	if (pdata->exit)
+ 		pdata->exit(pdata->pdev);
+-
+-	iounmap(hcd->regs);
+ }
+ 
+ static void fsl_setup_phy(struct ehci_hcd *ehci,
+-- 
+1.7.7.4
+

@@ -1,0 +1,151 @@
+From 0346ca036a008c96f837fb49513949cc177f8ea8 Mon Sep 17 00:00:00 2001
+From: Terry Lv <r65388@freescale.com>
+Date: Thu, 15 Nov 2012 16:50:41 +0800
+Subject: [PATCH 2262/2463] ENGR00233800: CAAM: running sha_speed in cryptodev
+ crashed
+
+The reason is that when switching from SHA1 to SHA256, cryptodev will
+create a new session.
+But in this new session, the __ctx in allocated req is not fully initialized.
+Thus dma_buf in __ctx will be a random value.
+If the value is 0 or some address in DMA memory, that will be ok,
+otherwise, it will crashed in dma_unmap_single().
+The calling sequence is:
+ahash_final_ctx=>try_buf_map_to_sec_sg()=>dma_unmap_single()
+When calling dma_unmap_single(), the parameter buf_dma is invalid in
+crash case.
+The error msg is:
+kernel BUG at arch/arm/mm/dma-mapping.c:478!
+
+requested hash CRYPTO_SHA2_256, Unable to handle kernel NULL pointer
+dereference at virtual address 00000000
+got sha256 with driver sha256-caapgd = e4ea0000
+m
+        Encrypting in chunks of 256 b[00000000] *pgd=74edb831ytes: ,
+	*pte=00000000, *ppte=00000000
+	Internal error: Oops: 817 [#1] PREEMPT SMP
+	Modules linked in: cryptodev
+	CPU: 0    Not tainted  (3.0.35-02200-ge392070-dirty #68)
+     PC is at __bug+0x1c/0x28
+     LR is at __bug+0x18/0x28
+     pc : [<80044260>]    lr : [<8004425c>]    psr: 60000013
+     sp : e4ec7c40  ip : ea9a2000  fp : 00000010
+     r10: 883f8038  r9 : 883f8038  r8 : e4803060
+     r7 : 00000000  r6 : 00000001  r5 : 00000000  r4 : 6f66c10a
+     r3 : 00000000  r2 : 80aafd5c  r1 : 60000093  r0 : 00000033
+     Flags: nZCv  IRQs on  FIQs on  Mode SVC_32  ISA ARM  Segment user
+     Control: 10c53c7d  Table: 74ea004a  DAC: 00000015
+     Process sha_speed (pid: 2747, stack limit = 0xe4ec62f0)
+     Stack: (0xe4ec7c40 to 0xe4ec8000)
+     7c40: 74803184 8004a424 e4803000 e4730c08 e4262840 803c50dc
+     e4786f20 883f8000
+     7c60: 00000020 00000000 00000028 883f8018 e43ffcc0 e4803000
+     00000000 803c3d04
+     7c80: 00000004 80041104 e4ec6000 00000000 7efc4b64 803c3d10
+     e4774a3c 802079f8
+     7ca0: e43ffd1c e43ffcc0 00000000 7f0031a0 e4ec7e0c e43ffcc0
+     e4ec7e0c 7f00240c
+     7cc0: 00000100 e4786f20 e481bd40 e4ec7cd8 e4ec7cdc 7f0016b4
+     e4803200 00000000
+     7ce0: e4094480 00000000 7efc4b2c 00000004 80041104 7f001b64
+     8c81200c 00000000
+     7d00: 3fe1c2a2 2aba7e2c 00000000 00000000 00000000 00000000
+     00000000 2abc8870
+     7d20: 2abc8870 2abc8870 7efc4e10 00000000 2aba3000 00000000
+     2abc7f48 00000000
+     7d40: 00000000 00000000 00000000 00000000 00000000 00000000
+     2abc7f88 2abc7f80
+     7d60: 2abc7f50 2abc7f60 2abc7f68 00000000 00000000 00000000
+     2abc7f70 2abc7f78
+     7d80: 00000000 32616873 2a003635 00000000 00000000 2abc7fa0
+     2abc7fa8 2abc7fb0
+     7da0: 2abc7f90 00000000 00000000 2abc7f98 00000000 00000000
+     00000000 00000000
+     7dc0: 00000000 32616873 632d3635 006d6161 00000000 00000000
+     00000000 00000000
+     7de0: 2abc7fc0 2abc7fb8 00000000 2abc7fd0 00000000 00000000
+     00000000 00000000
+     7e00: 00000000 00000000 00000001 3fe1c2a2 00000000 00000100
+     00012008 00000000
+     7e20: 7efc4ab8 00000000 00000000 8006a120 e4044740 8c80ef40
+     00000001 00000000
+     7e40: 00000002 e4044740 e4ec7e7c 8006f5f4 e4ec6000 8007ffd4
+     e4348880 60000093
+     7e60: 00000000 80ae6de8 e4253200 8004e0fc 00000261 8028c0f4
+     e4877000 80ae6de8
+     7e80: e4786f20 e481bd40 00000261 8028c0f4 000059ac 00000000
+     36390b02 00000000
+     7ea0: e4cd7b6c e43488d0 8c80e4c4 00000038 e43488d0 802342dc
+     0000003f e43488d0
+     7ec0: 8c80e4b8 8c80e4b8 00000038 80090714 0000003f 8aafab02
+     00000000 80091134
+     7ee0: 8aafab02 0000003f e4ec6000 80a99cc0 e4eed510 7efc4b2c
+     e4ef96e0 00000004
+     7f00: 80041104 800febd0 60a9b3cd e4786f20 e4348880 00000000
+     e4ec7f88 e43488d0
+     7f20: e4ec6000 00000000 00000000 80091408 00000000 00000001
+     00000001 e4ec7f78
+     7f40: 000059b1 00000000 fffffff7 80aedc50 80a8a0c0 00000000
+     00000000 e4ec7f90
+     7f60: 7efc4b20 e4ef96e0 7efc4b2c c01c6368 00000004 80041104
+     e4ec6000 00000000
+     7f80: 7efc4b64 800ff0d4 00000000 00000000 00000109 00000000
+     00000000 00008628
+     7fa0: 00000036 80040f80 00000000 00000000 00000004 c01c6368
+     7efc4b2c 7efc4b2c
+     7fc0: 00000000 00000000 00008628 00000036 00000000 00000000
+     2abc8000 7efc4b64
+     7fe0: 00000000 7efc4a90 00008b5c 2ac857bc 80000010 00000004
+     e28bd000 e8bd0800
+     [<80044260>] (__bug+0x1c/0x28) from [<8004a424>]
+     (___dma_single_dev_to_cpu+0x84/0x94)
+     [<8004a424>] (___dma_single_dev_to_cpu+0x84/0x94) from [<803c50dc>]
+     (ahash_final_ctx+0x1a0/0x41c)
+     [<803c50dc>] (ahash_final_ctx+0x1a0/0x41c) from [<803c3d10>]
+     (ahash_final+0xc/0x10)
+     [<803c3d10>] (ahash_final+0xc/0x10) from [<802079f8>]
+     (crypto_ahash_op+0x28/0xc0)
+     [<802079f8>] (crypto_ahash_op+0x28/0xc0) from [<7f0031a0>]
+     (cryptodev_hash_final+0x30/0xc0 [cryptodev])
+     [<7f0031a0>] (cryptodev_hash_final+0x30/0xc0 [cryptodev]) from
+     [<7f00240c>] (crypto_run+0x10c/0x398 [cryptodev])
+     [<7f00240c>] (crypto_run+0x10c/0x398 [cryptodev]) from [<7f001b64>]
+     (cryptodev_ioctl+0x360/0x768 [cryptodev])
+     [<7f001b64>] (cryptodev_ioctl+0x360/0x768 [cryptodev]) from
+     [<800febd0>] (do_vfs_ioctl+0x80/0x54c)
+     [<800febd0>] (do_vfs_ioctl+0x80/0x54c) from [<800ff0d4>]
+     (sys_ioctl+0x38/0x5c)
+     [<800ff0d4>] (sys_ioctl+0x38/0x5c) from [<80040f80>]
+     (ret_fast_syscall+0x0/0x30)
+     Code: e59f0010 e1a01003 eb12fddb e3a03000 (e5833000)
+     ---[ end trace 0057f6be00952f77 ]---
+
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/crypto/caam/caamhash.c |    6 ++----
+ 1 files changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/crypto/caam/caamhash.c b/drivers/crypto/caam/caamhash.c
+index ee06515..03daad6 100644
+--- a/drivers/crypto/caam/caamhash.c
++++ b/drivers/crypto/caam/caamhash.c
+@@ -1505,14 +1505,12 @@ static int ahash_init(struct ahash_request *req)
+ {
+ 	struct caam_hash_state *state = ahash_request_ctx(req);
+ 
++	memset(state, 0, sizeof(struct caam_hash_state));
++
+ 	state->update = ahash_update_first;
+ 	state->finup = ahash_finup_first;
+ 	state->final = ahash_final_no_ctx;
+ 
+-	state->current_buf = 0;
+-	state->buflen_0 = 0;
+-	state->buflen_1 = 0;
+-
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

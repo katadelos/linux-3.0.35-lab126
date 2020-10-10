@@ -1,0 +1,75 @@
+From 91ba4a06fa7f170dda0b49c07316642d9d4980b6 Mon Sep 17 00:00:00 2001
+From: Adrian Alonso <aalonso@freescale.com>
+Date: Tue, 19 Feb 2013 10:49:19 -0600
+Subject: [PATCH 2442/2463] ENGR00237365: board-mx6q_sabreauto fix mipi-csi2
+ settings
+
+* Correct mipi-csi2 settings only one data line is used
+* Add mx6q_mipi_csi1_io_init ipu-csi setting callback
+  use virtual channel 1 and attach it to CSI1 -> IPU0
+* Set i2c slave address to 0x52
+* Set ipu-csi clko_clk
+
+Signed-off-by: Adrian Alonso <aalonso@freescale.com>
+(cherry picked from commit c8000cb42cfb6170c95ad4adc8fe4b2473612e92)
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   19 +++++++++++++------
+ 1 files changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 99db549..8df99df 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -688,6 +688,12 @@ static struct fsl_mxc_tvin_platform_data adv7180_data = {
+ 	.io_init	= mx6q_csi0_io_init,
+ };
+ 
++static void mx6q_mipi_csi1_io_init(void)
++{
++	if (cpu_is_mx6dl())
++		mxc_iomux_set_gpr_register(13, 3, 3, 1);
++}
++
+ static struct fsl_mxc_tvin_platform_data adv7280_data = {
+ 	.dvddio_reg	= NULL,
+ 	.dvdd_reg	= NULL,
+@@ -695,8 +701,9 @@ static struct fsl_mxc_tvin_platform_data adv7280_data = {
+ 	.pvdd_reg	= NULL,
+ 	.pwdn		= NULL,
+ 	.cvbs		= true,
++	.io_init    = mx6q_mipi_csi1_io_init,
+ 	/* csi slave reg address */
+-	.csi_tx_addr = 0x51,
++	.csi_tx_addr = 0x52,
+ };
+ 
+ static struct imxi2c_platform_data mx6q_sabreauto_i2c2_data = {
+@@ -1047,10 +1054,10 @@ static struct fsl_mxc_ldb_platform_data ldb_data = {
+ static struct imx_ipuv3_platform_data ipu_data[] = {
+ 	{
+ 		.rev		= 4,
+-		.csi_clk[0]	= "ccm_clk0",
++		.csi_clk[0]	= "clko_clk",
+ 	}, {
+ 		.rev		= 4,
+-		.csi_clk[0]	= "ccm_clk0",
++		.csi_clk[0]	= "clko_clk",
+ 	},
+ };
+ 
+@@ -1123,9 +1130,9 @@ static const struct flexcan_platform_data
+ 
+ static struct mipi_csi2_platform_data mipi_csi2_pdata = {
+ 	.ipu_id		= 0,
+-	.csi_id		= 0,
+-	.v_channel	= 0,
+-	.lanes		= 2,
++	.csi_id		= 1,
++	.v_channel	= 1,
++	.lanes		= 1,
+ 	.dphy_clk	= "mipi_pllref_clk",
+ 	.pixel_clk	= "emi_clk",
+ };
+-- 
+1.7.7.4
+

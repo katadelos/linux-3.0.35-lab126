@@ -1,0 +1,93 @@
+From 0f43a953ace7a700a51aa7512c1a60cbb23c0077 Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Tue, 12 Jul 2011 11:08:22 +0800
+Subject: [PATCH 0235/2463] ENGR00152547-02 [MX6Q]add SDHC3.0 support on uSDHC
+ controller
+
+add CMD used on SDHC3.0 card
+add specific parameters for SDHC3.0 card tuning
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ include/linux/mmc/card.h  |    4 ++++
+ include/linux/mmc/host.h  |    6 +++++-
+ include/linux/mmc/sd.h    |    4 +++-
+ include/linux/mmc/sdhci.h |    3 +++
+ 4 files changed, 15 insertions(+), 2 deletions(-)
+
+diff --git a/include/linux/mmc/card.h b/include/linux/mmc/card.h
+index 6e652f9a..b7702db 100644
+--- a/include/linux/mmc/card.h
++++ b/include/linux/mmc/card.h
+@@ -93,6 +93,7 @@ struct sd_scr {
+ 	unsigned char		cmds;
+ #define SD_SCR_CMD20_SUPPORT   (1<<0)
+ #define SD_SCR_CMD23_SUPPORT   (1<<1)
++	unsigned char		sda_vsn3;
+ };
+ 
+ struct sd_ssr {
+@@ -182,6 +183,9 @@ struct mmc_card {
+ #define MMC_STATE_HIGHSPEED_DDR (1<<4)		/* card is in high speed mode */
+ #define MMC_STATE_ULTRAHIGHSPEED (1<<5)		/* card is in ultra high speed mode */
+ #define MMC_CARD_SDXC		(1<<6)		/* card is SDXC */
++#define MMC_STATE_SD_SDR50	(1<<5)		/* card is in sdr50 mode */
++#define MMC_STATE_SD_SDR104	(1<<6)		/* card is in sdr104 mode */
++#define MMC_STATE_SD_DDR50	(1<<7)		/* card is in ddr50 mode */
+ 	unsigned int		quirks; 	/* card quirks */
+ #define MMC_QUIRK_LENIENT_FN0	(1<<0)		/* allow SDIO FN0 writes outside of the VS CCCR range */
+ #define MMC_QUIRK_BLKSZ_FOR_BYTE_MODE (1<<1)	/* use func->cur_blksize */
+diff --git a/include/linux/mmc/host.h b/include/linux/mmc/host.h
+index f8d1e74..66bf0fb 100644
+--- a/include/linux/mmc/host.h
++++ b/include/linux/mmc/host.h
+@@ -74,6 +74,8 @@ struct mmc_ios {
+ #define MMC_SET_DRIVER_TYPE_A	1
+ #define MMC_SET_DRIVER_TYPE_C	2
+ #define MMC_SET_DRIVER_TYPE_D	3
++	unsigned int	tuning_flag;		/* request tuning only */
++	unsigned int	tuning;			/* tuning parameter */
+ };
+ 
+ struct mmc_host_ops {
+@@ -231,7 +233,9 @@ struct mmc_host {
+ 	unsigned int		max_req_size;	/* maximum number of bytes in one req */
+ 	unsigned int		max_blk_size;	/* maximum size of one mmc block */
+ 	unsigned int		max_blk_count;	/* maximum number of blocks in one req */
+-
++	unsigned int		tuning_min;
++	unsigned int		tuning_max;
++	unsigned int		tuning_step;
+ 	/* private data */
+ 	spinlock_t		lock;		/* lock for claim and bus ops */
+ 
+diff --git a/include/linux/mmc/sd.h b/include/linux/mmc/sd.h
+index 7d35d52..ae7cf95 100644
+--- a/include/linux/mmc/sd.h
++++ b/include/linux/mmc/sd.h
+@@ -91,5 +91,7 @@
+ #define SD_SWITCH_ACCESS_DEF	0
+ #define SD_SWITCH_ACCESS_HS	1
+ 
+-#endif
++#define SD_VOLTAGE_SWITCH	11
++#define SD_TUNING_CMD		19
+ 
++#endif
+diff --git a/include/linux/mmc/sdhci.h b/include/linux/mmc/sdhci.h
+index 6a68c4e..eb07153 100644
+--- a/include/linux/mmc/sdhci.h
++++ b/include/linux/mmc/sdhci.h
+@@ -159,6 +159,9 @@ struct sdhci_host {
+ 	unsigned int		tuning_mode;	/* Re-tuning mode supported by host */
+ #define SDHCI_TUNING_MODE_1	0
+ 	struct timer_list	tuning_timer;	/* Timer for tuning */
++	unsigned int		tuning_min;
++	unsigned int		tuning_max;
++	unsigned int		tuning_step;
+ 
+ 	unsigned long private[0] ____cacheline_aligned;
+ };
+-- 
+1.7.7.4
+

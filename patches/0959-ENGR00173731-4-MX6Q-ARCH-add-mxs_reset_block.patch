@@ -1,0 +1,71 @@
+From ead70eb7efc6afbecf14941ae17e47d9a933061b Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Wed, 1 Feb 2012 16:12:33 +0800
+Subject: [PATCH 0959/2463] ENGR00173731-4 MX6Q/ARCH : add mxs_reset_block()
+
+add mxs_reset_block() for mx6q.
+In order to keep the same code as the community, I reduce the
+parameters to one.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/mach-mx6/system.c              |    7 ++++++-
+ arch/arm/plat-mxc/include/mach/common.h |    1 +
+ arch/arm/plat-mxc/include/mach/system.h |    3 +--
+ 3 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index efc838e..185be00 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -243,7 +243,7 @@ static int __mxs_reset_block(void __iomem *hwreg, int just_enable)
+ 	return 0;
+ }
+ 
+-int mxs_reset_block(void __iomem *hwreg, int just_enable)
++static int _mxs_reset_block(void __iomem *hwreg, int just_enable)
+ {
+ 	int try = 10;
+ 	int r;
+@@ -256,4 +256,9 @@ int mxs_reset_block(void __iomem *hwreg, int just_enable)
+ 	}
+ 	return r;
+ }
++
++int mxs_reset_block(void __iomem *hwreg)
++{
++	return _mxs_reset_block(hwreg, false);
++}
+ EXPORT_SYMBOL(mxs_reset_block);
+diff --git a/arch/arm/plat-mxc/include/mach/common.h b/arch/arm/plat-mxc/include/mach/common.h
+index a8d1982..6248969 100755
+--- a/arch/arm/plat-mxc/include/mach/common.h
++++ b/arch/arm/plat-mxc/include/mach/common.h
+@@ -87,4 +87,5 @@ extern int mx53_revision(void);
+ extern int mx50_revision(void);
+ extern int mx53_display_revision(void);
+ extern unsigned long mx6_timer_rate(void);
++extern int mxs_reset_block(void __iomem *);
+ #endif
+diff --git a/arch/arm/plat-mxc/include/mach/system.h b/arch/arm/plat-mxc/include/mach/system.h
+index 1a51cca..7021c85 100755
+--- a/arch/arm/plat-mxc/include/mach/system.h
++++ b/arch/arm/plat-mxc/include/mach/system.h
+@@ -1,7 +1,7 @@
+ /*
+  *  Copyright (C) 1999 ARM Limited
+  *  Copyright (C) 2000 Deep Blue Solutions Ltd
+- *  Copyright 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *  Copyright 2004-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -25,5 +25,4 @@ extern void mx5_cpu_lp_set(enum mxc_cpu_pwr_mode mode);
+ void arch_idle(void);
+ 
+ void arch_reset(char mode, const char *cmd);
+-int mxs_reset_block(void __iomem *hwreg, int just_enable);
+ #endif /* __ASM_ARCH_MXC_SYSTEM_H__ */
+-- 
+1.7.7.4
+

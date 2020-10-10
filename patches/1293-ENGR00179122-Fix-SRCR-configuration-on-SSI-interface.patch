@@ -1,0 +1,31 @@
+From 94832241e64b6600607861b8832fd6dd1673c727 Mon Sep 17 00:00:00 2001
+From: Alejandro Sierra <b18039@freescale.com>
+Date: Tue, 10 Apr 2012 12:26:49 -0500
+Subject: [PATCH 1293/2463] ENGR00179122 Fix SRCR configuration on SSI
+ interface
+
+SRCR was bad configured on the DAI format
+configuration function on the imx-ssi.c file.
+When SSI was configured as master.
+
+Signed-off-by: Alejandro Sierra <b18039@freescale.com>
+---
+ sound/soc/imx/imx-ssi.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/imx/imx-ssi.c b/sound/soc/imx/imx-ssi.c
+index 1efcfc1..4d6319c 100644
+--- a/sound/soc/imx/imx-ssi.c
++++ b/sound/soc/imx/imx-ssi.c
+@@ -158,6 +158,8 @@ static int imx_ssi_set_dai_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
+ 		scr |= SSI_SCR_SYN;
+ 
+ 	writel(strcr, ssi->base + SSI_STCR);
++	if ((fmt & SND_SOC_DAIFMT_MASTER_MASK) == SND_SOC_DAIFMT_CBS_CFS)
++		strcr &= ~(SSI_STCR_TFDIR | SSI_STCR_TXDIR);
+ 	writel(strcr, ssi->base + SSI_SRCR);
+ 	writel(scr, ssi->base + SSI_SCR);
+ 
+-- 
+1.7.7.4
+

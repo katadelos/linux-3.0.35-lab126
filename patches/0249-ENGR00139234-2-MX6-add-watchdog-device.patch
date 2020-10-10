@@ -1,0 +1,98 @@
+From 3a9e86ea0d0602d3ad55af96144db31e412db201 Mon Sep 17 00:00:00 2001
+From: Frank Li <Frank.Li@freescale.com>
+Date: Fri, 15 Jul 2011 14:33:10 +0800
+Subject: [PATCH 0249/2463] ENGR00139234-2 MX6: add watchdog device
+
+Add watchdog device
+
+Signed-off-by: Frank Li <Frank.Li@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig                     |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c      |    1 +
+ arch/arm/mach-mx6/clock.c                     |    6 ++++++
+ arch/arm/mach-mx6/devices-imx6q.h             |    3 +++
+ arch/arm/plat-mxc/devices/platform-imx2-wdt.c |    9 +++++++++
+ 5 files changed, 20 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 2ff2d19..77eae0a 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -37,6 +37,7 @@ config MACH_MX6Q_SABREAUTO
+ 	select IMX_HAVE_PLATFORM_FSL_USB_WAKEUP
+ 	select IMX_HAVE_PLATFORM_AHCI
+ 	select IMX_HAVE_PLATFORM_IMX_OCOTP
++	select IMX_HAVE_PLATFORM_IMX2_WDT
+ 	help
+ 	  Include support for i.MX 6Quad SABRE Automotive Infotainment platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index e61463d..b45081a 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -510,6 +510,7 @@ static void __init mx6_board_init(void)
+ 	gpio_request(MX6Q_SABREAUTO_LDB_BACKLIGHT, "ldb-backlight");
+ 	gpio_direction_output(MX6Q_SABREAUTO_LDB_BACKLIGHT, 1);
+ 	imx6q_add_otp();
++	imx6q_add_imx2_wdt(0, NULL);
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 1fc5c94..61cb235 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -3858,6 +3858,10 @@ static struct clk usboh3_clk = {
+ 	.disable = _clk_disable,
+ };
+ 
++static struct clk dummy_clk = {
++	.id = 0,
++};
++
+ #define _REGISTER_CLOCK(d, n, c) \
+ 	{ \
+ 		.dev_id = d, \
+@@ -3963,6 +3967,8 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "usboh3_clk", usboh3_clk),
+ 	_REGISTER_CLOCK(NULL, "usb_phy1_clk", usb_phy1_clk),
+ 	_REGISTER_CLOCK(NULL, "video_27M_clk", video_27M_clk),
++	_REGISTER_CLOCK("imx2-wdt.0", NULL, dummy_clk),
++	_REGISTER_CLOCK("imx2-wdt.1", NULL, dummy_clk),
+ };
+ 
+ 
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 7f993c0..1a304a0 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -104,3 +104,6 @@ extern const struct imx_otp_data imx6q_otp_data __initconst;
+ #define imx6q_add_otp() \
+ 	imx_add_otp(&imx6q_otp_data);
+ 
++extern const struct imx_imx2_wdt_data imx6q_imx2_wdt_data[] __initconst;
++#define imx6q_add_imx2_wdt(id, pdata)   \
++	imx_add_imx2_wdt(&imx6q_imx2_wdt_data[id])
+diff --git a/arch/arm/plat-mxc/devices/platform-imx2-wdt.c b/arch/arm/plat-mxc/devices/platform-imx2-wdt.c
+index 5e07ef2..872515a 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx2-wdt.c
++++ b/arch/arm/plat-mxc/devices/platform-imx2-wdt.c
+@@ -62,6 +62,15 @@ const struct imx_imx2_wdt_data imx53_imx2_wdt_data[] __initconst = {
+ };
+ #endif /* ifdef CONFIG_SOC_IMX53 */
+ 
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_imx2_wdt_data imx6q_imx2_wdt_data[] __initconst = {
++#define imx6q_imx2_wdt_data_entry(_id, _hwid)                           \
++	imx_imx2_wdt_data_entry(MX6Q, _id, _hwid, SZ_16K)
++	imx6q_imx2_wdt_data_entry(0, 1),
++	imx6q_imx2_wdt_data_entry(1, 2),
++};
++#endif
++
+ struct platform_device *__init imx_add_imx2_wdt(
+ 		const struct imx_imx2_wdt_data *data)
+ {
+-- 
+1.7.7.4
+

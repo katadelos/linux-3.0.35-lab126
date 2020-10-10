@@ -1,0 +1,57 @@
+From d0a8710979c4c60a06717f0e4c8ff650ddc2715d Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Tue, 21 Aug 2012 17:51:18 +0800
+Subject: [PATCH 1937/2463] ENGR00220833 mx6sl: USB hsic: enable mx6sl hsic
+ function
+
+- Set MX6SL_PAD_HSIC_DAT and MX6SL_PAD_HSIC_STROBE pad DDR attribute as DDR3
+- Add imx6sl_add_fsl_ehci_hs and imx6sl_add_fsl_usb2_hs_wakeup in usb_h2.c
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_arm2.c |    5 +++++
+ arch/arm/mach-mx6/usb_h2.c           |   11 +++++++++--
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 1d76abb..5e3d915 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -1080,6 +1080,11 @@ static void __init mx6_arm2_init_usb(void)
+ 	mx6_set_otghost_vbus_func(imx6_arm2_usbotg_vbus);
+ 	mx6_usb_dr_init();
+ #ifdef CONFIG_USB_EHCI_ARC_HSIC
++	mxc_iomux_set_specialbits_register(MX6SL_PAD_HSIC_DAT,
++		PAD_CTL_DDR_SEL_DDR3, PAD_CTL_DDR_SEL_MASK);
++	mxc_iomux_set_specialbits_register(MX6SL_PAD_HSIC_STROBE,
++		PAD_CTL_DDR_SEL_DDR3, PAD_CTL_DDR_SEL_MASK);
++
+ 	mx6_usb_h2_init();
+ #endif
+ }
+diff --git a/arch/arm/mach-mx6/usb_h2.c b/arch/arm/mach-mx6/usb_h2.c
+index 24083fd..37cad03 100644
+--- a/arch/arm/mach-mx6/usb_h2.c
++++ b/arch/arm/mach-mx6/usb_h2.c
+@@ -227,9 +227,16 @@ void __init mx6_usb_h2_init(void)
+ 	struct platform_device *pdev, *pdev_wakeup;
+ 	static void __iomem *anatop_base_addr = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
+ 	usbh2_config.wakeup_pdata = &usbh2_wakeup_config;
+-	pdev = imx6q_add_fsl_ehci_hs(2, &usbh2_config);
++	if (cpu_is_mx6sl())
++		pdev = imx6sl_add_fsl_ehci_hs(2, &usbh2_config);
++	else
++		pdev = imx6q_add_fsl_ehci_hs(2, &usbh2_config);
++
+ 	usbh2_wakeup_config.usb_pdata[0] = pdev->dev.platform_data;
+-	pdev_wakeup = imx6q_add_fsl_usb2_hs_wakeup(2, &usbh2_wakeup_config);
++	if (cpu_is_mx6sl())
++		pdev_wakeup = imx6sl_add_fsl_usb2_hs_wakeup(2, &usbh2_wakeup_config);
++	else
++		pdev_wakeup = imx6q_add_fsl_usb2_hs_wakeup(2, &usbh2_wakeup_config);
+ 	((struct fsl_usb2_platform_data *)(pdev->dev.platform_data))->wakeup_pdata =
+ 		pdev_wakeup->dev.platform_data;
+ 	/* Some phy and power's special controls for host2
+-- 
+1.7.7.4
+

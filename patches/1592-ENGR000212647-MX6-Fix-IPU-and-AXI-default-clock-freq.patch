@@ -1,0 +1,129 @@
+From 1a6a359e9714007cc3fb03dcd61f3c38801f3a1f Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Thu, 7 Jun 2012 00:16:06 -0500
+Subject: [PATCH 1592/2463] ENGR000212647 MX6 - Fix IPU and AXI default clock
+ frequency
+
+The max freq for IPU and AXI clocks is 264MHz. Hence source
+IPU from mmdc_ch0 clock on MX6 to get maximum frequency.
+And source AXI from periph_clk on for max freq.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/bus_freq.c |   40 ----------------------------------------
+ arch/arm/mach-mx6/clock.c    |   16 ++++++----------
+ 2 files changed, 6 insertions(+), 50 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index 7428993..36a8190 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -49,7 +49,6 @@
+ #define LPAPM_CLK	24000000
+ #define DDR_MED_CLK	400000000
+ #define DDR3_NORMAL_CLK	528000000
+-#define AXI_CLK_RATE		270000000
+ #define GPC_PGC_GPU_PGCR_OFFSET		0x260
+ #define GPC_CNTR_OFFSET				0x0
+ 
+@@ -92,9 +91,6 @@ struct timeval end_time;
+ static int cpu_op_nr;
+ static struct cpu_op *cpu_op_tbl;
+ static struct clk *pll2_400;
+-static struct clk *axi_clk;
+-static struct clk *periph_clk;
+-static struct clk *pll3_540;
+ static struct clk *cpu_clk;
+ static unsigned int org_ldo;
+ static struct clk *pll3;
+@@ -126,11 +122,6 @@ static void reduce_bus_freq_handler(struct work_struct *work)
+ 		return;
+ 	}
+ 
+-	/* Set the axi_clk to be sourced from the periph_clk.
+-	  * So that its frequency can be lowered down to 50MHz
+-	  * or 24MHz as the case may be. */
+-	clk_set_parent(axi_clk, periph_clk);
+-
+ 	clk_enable(pll3);
+ 
+ 	if (lp_audio_freq) {
+@@ -239,16 +230,6 @@ int set_high_bus_freq(int high_bus_freq)
+ 	}
+ 	clk_enable(pll3);
+ 
+-	if (clk_get_parent(axi_clk) != pll3_540) {
+-		/* We need to set axi_clk to be sourced from PLL3_540MHz. */
+-		/* Ensure the divider is set to divide by 2 before changing the
+-		  * parent. */
+-		if (low_bus_freq_mode)
+-			clk_set_rate(axi_clk, clk_get_rate(axi_clk) / 2);
+-		clk_set_parent(axi_clk, pll3_540);
+-		clk_set_rate(axi_clk, AXI_CLK_RATE);
+-	}
+-
+ 	/* Enable the PU LDO */
+ 	if (cpu_is_mx6q() && low_bus_freq_mode) {
+ 		__raw_writel(org_ldo, ANADIG_REG_CORE);
+@@ -401,27 +382,6 @@ static int __devinit busfreq_probe(struct platform_device *pdev)
+ 		return PTR_ERR(cpu_clk);
+ 	}
+ 
+-	axi_clk = clk_get(NULL, "axi_clk");
+-	if (IS_ERR(axi_clk)) {
+-		printk(KERN_DEBUG "%s: failed to get axi_clk\n",
+-		       __func__);
+-		return PTR_ERR(axi_clk);
+-	}
+-
+-	periph_clk = clk_get(NULL, "periph_clk");
+-	if (IS_ERR(periph_clk)) {
+-		printk(KERN_DEBUG "%s: failed to get periph_clk\n",
+-		       __func__);
+-		return PTR_ERR(periph_clk);
+-	}
+-
+-	pll3_540 = clk_get(NULL, "pll3_pfd_540M");
+-	if (IS_ERR(pll3_540)) {
+-		printk(KERN_DEBUG "%s: failed to get periph_clk\n",
+-		       __func__);
+-		return PTR_ERR(pll3_540);
+-	}
+-
+ 	err = sysfs_create_file(&busfreq_dev->kobj, &dev_attr_enable.attr);
+ 	if (err) {
+ 		printk(KERN_ERR
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index ed7174a..2f58ca3 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5342,20 +5342,16 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 		/* on mx6dl gpu2d_axi_clk source from mmdc0 directly */
+ 		clk_set_parent(&gpu2d_axi_clk, &mmdc_ch0_axi_clk[0]);
+ 
++		clk_set_parent(&ipu1_clk, &pll2_pfd_400M);
+ 		/* pxp & epdc */
+ 		clk_set_parent(&ipu2_clk, &pll2_pfd_400M);
+ 		clk_set_rate(&ipu2_clk, 200000000);
+-	} else if (cpu_is_mx6q())
+-		/* Donot source IPU from MMDC clock, as it can be scaled. */
+-		clk_set_parent(&ipu2_clk, &pll3_pfd_540M);
+-
+-	/* Donot source IPU from MMDC clock, as it can be scaled. */
+-	clk_set_parent(&ipu1_clk, &pll3_pfd_540M);
++	} else if (cpu_is_mx6q()) {
++		clk_set_parent(&ipu2_clk, &mmdc_ch0_axi_clk[0]);
++		clk_set_parent(&ipu1_clk, &mmdc_ch0_axi_clk[0]);
++	}
+ 
+-	/* set axi_clk parent to pll3_pfd_540M, don't source from
+-	  * periph_clk as it can be scaled.
+-	  */
+-	clk_set_parent(&axi_clk, &pll3_pfd_540M);
++	clk_set_parent(&axi_clk, &periph_clk);
+ 	/* Need to keep PLL3_PFD_540M enabled until AXI is sourced from it. */
+ 	clk_enable(&axi_clk);
+ 
+-- 
+1.7.7.4
+

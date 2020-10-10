@@ -1,0 +1,121 @@
+From 55520be29519f0a4ec6045b1db2d963f383378c8 Mon Sep 17 00:00:00 2001
+From: Zhang Jiejing <jiejing.zhang@freescale.com>
+Date: Fri, 15 Apr 2011 09:59:03 +0800
+Subject: [PATCH 0109/2463] ENGR00137340-1 ASOC: add headphone detection
+ support for imx-sgtl5000.c
+
+add a asoc headphone detection, it's a generic way using by asoc area.
+
+Signed-off-by: Zhang Jiejing <jiejing.zhang@freescale.com>
+---
+ include/linux/fsl_devices.h  |    4 +-
+ sound/soc/imx/imx-sgtl5000.c |   47 ++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 47 insertions(+), 4 deletions(-)
+
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index d28f9db..6cc1a4e 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -271,8 +271,8 @@ struct mxc_audio_platform_data {
+ 	int ext_ram;
+ 	struct clk *ssi_clk[2];
+ 
+-	int hp_irq;
+-	int (*hp_status) (void);
++	int hp_gpio;
++	int hp_active_low;	/* headphone irq is active loaw */
+ 
+ 	int sysclk;
+ 
+diff --git a/sound/soc/imx/imx-sgtl5000.c b/sound/soc/imx/imx-sgtl5000.c
+index 3ccf263..4da55ad 100644
+--- a/sound/soc/imx/imx-sgtl5000.c
++++ b/sound/soc/imx/imx-sgtl5000.c
+@@ -15,13 +15,15 @@
+ #include <linux/moduleparam.h>
+ #include <linux/device.h>
+ #include <linux/i2c.h>
++#include <linux/fsl_devices.h>
++#include <linux/gpio.h>
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+ #include <sound/soc.h>
++#include <sound/jack.h>
+ #include <sound/soc-dapm.h>
+ #include <asm/mach-types.h>
+ #include <mach/audmux.h>
+-#include <linux/fsl_devices.h>
+ 
+ #include "../codecs/sgtl5000.h"
+ #include "imx-ssi.h"
+@@ -32,8 +34,27 @@ static struct imx_sgtl5000_priv {
+ 	struct platform_device *pdev;
+ } card_priv;
+ 
++static struct snd_soc_jack hs_jack;
+ static struct snd_soc_card imx_sgtl5000;
+ 
++/* Headphones jack detection DAPM pins */
++static struct snd_soc_jack_pin hs_jack_pins[] = {
++	{
++		.pin = "Headphone Jack",
++		.mask = SND_JACK_HEADPHONE,
++	},
++};
++
++/* Headphones jack detection gpios */
++static struct snd_soc_jack_gpio hs_jack_gpios[] = {
++	[0] = {
++		/* gpio is set on per-platform basis */
++		.name           = "hp-gpio",
++		.report         = SND_JACK_HEADPHONE,
++		.debounce_time	= 200,
++	},
++};
++
+ static int sgtl5000_params(struct snd_pcm_substream *substream,
+ 	struct snd_pcm_hw_params *params)
+ {
+@@ -226,9 +247,28 @@ static int imx_3stack_sgtl5000_init(struct snd_soc_pcm_runtime *rtd)
+ 
+ 	snd_soc_dapm_disable_pin(&codec->dapm, "Line In Jack");
+ 	snd_soc_dapm_enable_pin(&codec->dapm, "Headphone Jack");
+-
+ 	snd_soc_dapm_sync(&codec->dapm);
+ 
++	/* Jack detection API stuff */
++	ret = snd_soc_jack_new(codec, "Headphone Jack",
++			       SND_JACK_HEADPHONE, &hs_jack);
++	if (ret)
++		return ret;
++
++	ret = snd_soc_jack_add_pins(&hs_jack, ARRAY_SIZE(hs_jack_pins),
++				hs_jack_pins);
++	if (ret) {
++		printk(KERN_ERR "failed to call  snd_soc_jack_add_pins\n");
++		return ret;
++	}
++
++	ret = snd_soc_jack_add_gpios(&hs_jack, ARRAY_SIZE(hs_jack_gpios),
++				hs_jack_gpios);
++	if (ret) {
++		printk(KERN_ERR "failed to call snd_soc_jack_add_gpios\n");
++		return ret;
++	}
++
+ 	return 0;
+ }
+ 
+@@ -291,6 +331,9 @@ static int __devinit imx_sgtl5000_probe(struct platform_device *pdev)
+ 
+ 	card_priv.sysclk = plat->sysclk;
+ 
++	hs_jack_gpios[0].gpio = plat->hp_gpio;
++	hs_jack_gpios[0].invert = plat->hp_active_low;
++
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

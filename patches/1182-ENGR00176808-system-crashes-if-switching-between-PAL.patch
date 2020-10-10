@@ -1,0 +1,37 @@
+From 43a0ddd5c62fd201167a0f0b0b1e2616c2f81324 Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Wed, 14 Mar 2012 10:34:11 +0800
+Subject: [PATCH 1182/2463] ENGR00176808 system crashes if switching between
+ PAL & NTSC
+
+it's a video out issue instead of camera/tvin.
+the queue list and active list should be cleared in stream off function.
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_vout.c |    4 +++-
+ 1 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_vout.c b/drivers/media/video/mxc/output/mxc_vout.c
+index 094f5b2..2c22cee 100644
+--- a/drivers/media/video/mxc/output/mxc_vout.c
++++ b/drivers/media/video/mxc/output/mxc_vout.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -1459,6 +1459,8 @@ static int mxc_vidioc_streamoff(struct file *file, void *fh, enum v4l2_buf_type
+ 
+ 		ret = videobuf_streamoff(&vout->vbq);
+ 	}
++	INIT_LIST_HEAD(&vout->queue_list);
++	INIT_LIST_HEAD(&vout->active_list);
+ 
+ 	return ret;
+ }
+-- 
+1.7.7.4
+

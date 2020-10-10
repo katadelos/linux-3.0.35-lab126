@@ -1,0 +1,29 @@
+From 8d070f97c7f53633a9951623c6dcf78f3393bb89 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <richard.zhao@freescale.com>
+Date: Thu, 14 Jul 2011 10:23:05 +0800
+Subject: [PATCH 0244/2463] ENGR00153092 ARM: mx6q_sabreauto: restrict gpu
+ reserved memory addr < 2G
+
+gc2000 driver 4.3 can not support reserved memory addr > 2G
+
+Signed-off-by: Richard Zhao <richard.zhao@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 6c09b52..e58a9f8 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -534,7 +534,7 @@ static void __init mx6q_reserve(void)
+ 	phys_addr_t phys;
+ 
+ 	if (imx6q_gc2000_pdata.reserved_mem_size) {
+-		phys = memblock_alloc(imx6q_gc2000_pdata.reserved_mem_size, SZ_4K);
++		phys = memblock_alloc_base(imx6q_gc2000_pdata.reserved_mem_size, SZ_4K, SZ_2G);
+ 		memblock_free(phys, imx6q_gc2000_pdata.reserved_mem_size);
+ 		memblock_remove(phys, imx6q_gc2000_pdata.reserved_mem_size);
+ 		imx6q_gc2000_pdata.reserved_mem_base = phys;
+-- 
+1.7.7.4
+

@@ -1,0 +1,52 @@
+From 1daabd7de3caab398b589900ed8bc657bbc96090 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Tue, 31 Jan 2012 10:54:24 +0800
+Subject: [PATCH 0912/2463] ENGR00173369-2 Revert "ENGR00139247-6 DMA : add
+ DMA support for imx6q"
+
+This reverts commit ab11e98c15ecb29eaf93114cb928478c98d637e9.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/dma/Kconfig   |    2 +-
+ drivers/dma/mxs-dma.c |    4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/dma/Kconfig b/drivers/dma/Kconfig
+index 0f67f79..2df7ceb 100644
+--- a/drivers/dma/Kconfig
++++ b/drivers/dma/Kconfig
+@@ -239,7 +239,7 @@ config IMX_DMA
+ 
+ config MXS_DMA
+ 	bool "MXS DMA support"
+-	depends on SOC_IMX23 || SOC_IMX28 || SOC_IMX50 || SOC_IMX6Q
++	depends on SOC_IMX23 || SOC_IMX28 || SOC_IMX50
+ 	select DMA_ENGINE
+ 	help
+ 	  Support the MXS DMA engine. This engine including APBH-DMA
+diff --git a/drivers/dma/mxs-dma.c b/drivers/dma/mxs-dma.c
+index dfb0a6d..a44c2ba 100644
+--- a/drivers/dma/mxs-dma.c
++++ b/drivers/dma/mxs-dma.c
+@@ -27,7 +27,7 @@
+ #include <mach/mxs.h>
+ #include <mach/dma.h>
+ #include <mach/common.h>
+-#if defined(CONFIG_SOC_IMX50) || defined(CONFIG_SOC_IMX6Q)
++#ifdef CONFIG_SOC_IMX50
+ #include <mach/system.h>
+ #endif
+ 
+@@ -587,7 +587,7 @@ static int __init mxs_dma_init(struct mxs_dma_engine *mxs_dma)
+ 
+ #if defined(CONFIG_SOC_IMX23) || defined(CONFIG_SOC_IMX28)
+ 	ret = mxs_reset_block(mxs_dma->base);
+-#elif defined(CONFIG_SOC_IMX50) || defined(CONFIG_SOC_IMX6Q)
++#elif defined(CONFIG_SOC_IMX50)
+ 	ret = mxs_reset_block(mxs_dma->base, true);
+ #endif
+ 
+-- 
+1.7.7.4
+

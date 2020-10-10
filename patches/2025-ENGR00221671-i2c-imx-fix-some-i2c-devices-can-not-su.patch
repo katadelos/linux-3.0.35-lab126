@@ -1,0 +1,46 @@
+From 065460d901c686577639ec7e535e74a8c6df3d42 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Mon, 10 Sep 2012 13:05:26 +0800
+Subject: [PATCH 2025/2463] ENGR00221671 - i2c :imx : fix some i2c devices can
+ not suspend
+
+i2c device (isl29023) can not suspend once during hdmi
+audio suspend/resume test, and print log:
+
+pm_op(): i2c_device_pm_suspend+0x0/0x38 returns -4 PM: Device
+2-0044 failed to suspend: error -4 PM: Some devices failed to
+suspend PM: resume of devices complete after 40.936 msecs
+Restarting tasks ... done.
+
+Because suspend function in isl29023 driver requires i2c bus
+to write isl29023 device. I2C apdater driver process any signal
+as exception during waiting the bus idle, so once user space sent
+out signal during suspend, I2C device cannot request bus.
+
+Using "fatal_signal_pending()" instead of "signal_pending()"
+to avoid the waiting of bus idle to be terminated by general
+signals except SIGKILL. After the change, i2c adapter can be
+terminated by kill signal from user space with "CTRL+C" or
+kill command operation.
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ drivers/i2c/busses/i2c-imx.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/i2c/busses/i2c-imx.c b/drivers/i2c/busses/i2c-imx.c
+index 4c2a62b..df9fca3 100644
+--- a/drivers/i2c/busses/i2c-imx.c
++++ b/drivers/i2c/busses/i2c-imx.c
+@@ -141,7 +141,7 @@ static int i2c_imx_bus_busy(struct imx_i2c_struct *i2c_imx, int for_busy)
+ 			break;
+ 		if (!for_busy && !(temp & I2SR_IBB))
+ 			break;
+-		if (signal_pending(current)) {
++		if (fatal_signal_pending(current)) {
+ 			dev_dbg(&i2c_imx->adapter.dev,
+ 				"<%s> I2C Interrupted\n", __func__);
+ 			return -EINTR;
+-- 
+1.7.7.4
+

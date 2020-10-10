@@ -1,0 +1,826 @@
+From cd423cdcb6b53b0ac05d260de6a098379bfc4147 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Sun, 7 Oct 2012 15:16:22 -0500
+Subject: [PATCH 2114/2463] ENGR00227249 MX6SL-Add support for low latency
+ STANDBY mode.
+
+Change STANDBY mode to support the following for MX6SL:
+1. assert VSTBY
+2. ARM is power gated.
+3. XTAL is ON
+4. LDO 2P5 is disabled, weak 2P5 is enabled.
+5. LDO 1p1 is enabled.
+
+Implement this for a higher power but lower latency on resume
+from STANDBY mode.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/mx6_suspend.S      |  469 ++++++++++++++++++++++++++++++++--
+ arch/arm/mach-mx6/pm.c               |   23 ++-
+ arch/arm/mach-mx6/system.c           |   83 ++++---
+ arch/arm/plat-mxc/include/mach/mxc.h |    4 +-
+ 4 files changed, 517 insertions(+), 62 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mx6_suspend.S b/arch/arm/mach-mx6/mx6_suspend.S
+index 0533ad1..a5815ef 100644
+--- a/arch/arm/mach-mx6/mx6_suspend.S
++++ b/arch/arm/mach-mx6/mx6_suspend.S
+@@ -32,7 +32,7 @@
+ #define MMDC_MAPSR_OFFSET 	0x404
+ #define MMDC_MAPSR_PSS 		(1 << 4)
+ #define MMDC_MAPSR_PSD 		(1 << 0)
+-#define IRAM_SUSPEND_SIZE 	(1 << 12)
++#define IRAM_SUSPEND_SIZE 	(1 << 13)
+ 
+ /*************************************************************
+ mx6_suspend:
+@@ -50,6 +50,333 @@ see define in include/linux/suspend.h
+ r1: iram_paddr
+ r2: suspend_iram_base
+ *************************************************************/
++	.macro	mx6sl_standy_saving_set
++
++	/* Move periph_clk to OSC_CLK. */
++	ldr	r1, =CCM_BASE_ADDR
++	add	r1, r1, #PERIPBASE_VIRT
++
++	/* Ensure the periph_clk2_sel to OSC clk. */
++	ldr	r0, [r1, #0x18]
++	bic	r0, r0, #0x3000
++	orr	r0, r0, #0x1000
++	str	r0, [r1, #0x18]
++
++	ldr	r0, [r1, #0x14]
++	orr	r0, r0, #0x2000000
++	str	r0, [r1, #0x14]
++
++periph_clk_switch:
++	ldr	r0, [r1, #0x48]
++	cmp	r0, #0
++	bne	periph_clk_switch
++
++	/* Set the divider to divider by 8 */
++	ldr	r0, [r1, #0x14]
++	orr	r0, r0, #0x70000
++	orr	r0, r0, #0x1c00
++	str	r0, [r1, #0x14]
++
++ahb_podf:
++	ldr	r0, [r1, #0x48]
++	cmp	r0, #0
++	bne	ahb_podf
++
++	/* Move DDR clk to PLL3 clock.
++	  */
++	/* First set the divider to 2. */
++	ldr	r0, [r1, #0x14]
++	orr	r0, r0, #0x1
++	str	r0, [r1, #0x14]
++
++	ldr	r0, [r1, #0x18]
++	bic	r0, r0, #0x100000
++	str	r0, [r1, #0x18]
++
++	ldr	r0, [r1, #0x14]
++	orr	r0, r0, #0x4000000
++	str	r0, [r1, #0x14]
++
++ddr_switch:
++	ldr	r0, [r1, #0x48]
++	cmp	r0, #0
++	bne	ddr_switch
++
++	/* Set DDR clock to divide by 8. */
++	ldr	r0, [r1, #0x14]
++	orr	r0, r0, #0x38
++	str	r0, [r1, #0x14]
++
++mmdc_div:
++	ldr	r0, [r1, #0x48]
++	cmp	r0, #0
++	bne	mmdc_div
++
++	/* Now Switch ARM to run from
++	  * step_clk sourced from OSC.
++	  */
++	ldr	r0, [r1, #0xc]
++	bic	r0, r1, #0x100
++	str	r0, [r1, #0x0c]
++
++	/* Now switch PLL1_SW_CLK to step_clk. */
++	ldr	r0, [r1, #0x0c]
++	orr	r0, r0, #0x4
++	str	r0, [r1, #0x0c]
++
++	ldr	r1, =ANATOP_BASE_ADDR
++	add	r1, r1, #PERIPBASE_VIRT
++
++	/* Need to clock gate the 528 PFDs before
++	  * powering down PLL2.
++	  * Only the PLL2_PFD2_400M should be ON
++	  * as it feeds the MMDC/AHB
++	  */
++	ldr     r0, [r1, #0x100]
++	orr    r0, r0, #0x800000
++	str     r0, [r1, #0x100]
++
++	/* Now bypass PLL1 and PLL2. */
++	ldr	r0, =0x10000
++	str	r0, [r1, #0x4]
++	str	r0, [r1, #0x34]
++
++	/* Now do all the analog savings. */
++
++	/* Disable 1p1 brown out. */
++	ldr	r0, [r1, #0x110]
++	bic	r0, r0, #0x2
++	str	r0, [r1, #0x110]
++
++	/* Enable the weak 2P5 */
++	ldr	r0, [r1, #0x130]
++	orr	r0, r0, #0x40000
++	str	r0, [r1, #0x130]
++
++	/*Disable main 2p5. */
++	ldr	r0, [r1, #0x130]
++	bic	r0, r0, #0x1
++	str	r0, [r1, #0x130]
++
++
++	/* Set the OSC bias current to -37.5%
++	* to drop the power on VDDHIGH.
++	*/
++	ldr	r0, [r1, #0x150]
++	orr	r0, r0, #0xC000
++	str	r0, [r1, #0x150]
++	.endm
++
++	.macro	mx6sl_standby_savings_restore
++
++	/* Set the OSC bias current to max
++	* value for normal operation.
++	*/
++	ldr	r6, [r1, #0x150]
++	bic	r6, r6, #0xC000
++	str	r6, [r1, #0x150]
++
++	/*Enable main 2p5. */
++	ldr	r6, [r1, #0x130]
++	orr	r6, r6, #0x1
++	str	r6, [r1, #0x130]
++
++	/* Ensure the 2P5 is up. */
++loop_2p5:
++	ldr	r6, [r1, #0x130]
++	and	r6, r6, #0x20000
++	cmp	r6, #0x20000
++	bne	loop_2p5
++
++	/* Disable the  weak 2P5 */
++	ldr	r6, [r1, #0x130]
++	bic	r6, r6, #0x40000
++	str	r6, [r1, #0x130]
++
++	/* Enable 1p1 brown out. */
++	ldr	r6, [r1, #0x110]
++	orr	r6, r6, #0x2
++	str	r6, [r1, #0x110]
++
++	/* Unbypass PLLs and
++	  * wait for relock.
++	  */
++	ldr	r6, =(1 << 16)
++	str	r6, [r1, #0x08]
++	str	r6, [r1, #0x38]
++
++wait_for_pll_lock:
++	ldr	r6, [r1, #0x0]
++	and	r6, r6, #0x80000000
++	cmp	r6, #0x80000000
++	bne	wait_for_pll_lock
++
++	/* Set PLL1_sw_clk back to PLL1. */
++	ldr	r6, [r3, #0x0c]
++	bic	r6, r6, #0x4
++	str	r6, [r3, #0xc]
++
++	/* Need to enable the 528 PFDs after
++	  * powering up PLL2.
++	  * Only the PLL2_PFD2_400M should be ON
++	  * as it feeds the MMDC. Rest should have
++	  * been managed by clock code.
++	  */
++	 ldr	r6, [r1, #0x100]
++	 bic	r6, r6, #0x800000
++	 str	r6, [r1, #0x100]
++
++	/* Move periph_clk back
++	  * to PLL2_PFD2_400.
++	  */
++	ldr	r6, [r3, #0x14]
++	bic	r6, r6, #0x2000000
++	str	r6, [r3, #0x14]
++
++	/* Set the dividers to default value. */
++	ldr	r6, [r3, #0x14]
++	bic	r6, r6, #0x70000
++	bic	r6, r6, #0x1c00
++	orr	r6, r6, #0x10800
++	str	r6, [r3, #0x14]
++
++ahb_podf1:
++	ldr	r0, [r3, #0x48]
++	cmp	r0, #0
++	bne	ahb_podf1
++
++periph_clk_switch1:
++	ldr	r6, [r3, #0x48]
++	cmp	r6, #0
++	bne     periph_clk_switch1
++
++	/* Move MMDC back to PLL2_PFD2_400 */
++	ldr	r6, [r3, #0x14]
++	bic	r6, r6, #0x4000000
++	str	r6, [r3, #0x14]
++
++mmdc_loop2:
++	ldr	r6, [r3, #0x48]
++	cmp	r6, #0
++	bne	mmdc_loop2
++
++	/* Set DDR clock to divide by 1. */
++	ldr	r6, [r3, #0x14]
++	bic	r6, r0, #0x38
++	str	r6, [r3, #0x14]
++
++mmdc_div1:
++	ldr	r6, [r3, #0x48]
++	cmp	r6, #0
++	bne	mmdc_div1
++
++	.endm
++
++	.macro	mx6sl_standby_pg_savings_restore
++
++	/* Set the OSC bias current to max
++	* value for normal operation.
++	*/
++	ldr	r6, [r1, #0x150]
++	bic	r6, r6, #0xC000
++	str	r6, [r1, #0x150]
++
++	/*Enable main 2p5. */
++	ldr	r6, [r1, #0x130]
++	orr	r6, r6, #0x1
++	str	r6, [r1, #0x130]
++
++	/* Ensure the 2P5 is up. */
++loop_2p5_1:
++	ldr	r6, [r1, #0x130]
++	and	r6, r6, #0x20000
++	cmp	r6, #0x20000
++	bne	loop_2p5_1
++
++	/* Disable the  weak 2P5 */
++	ldr	r6, [r1, #0x130]
++	bic	r6, r6, #0x40000
++	str	r6, [r1, #0x130]
++
++	/* Enable 1p1 brown out. */
++	ldr	r6, [r1, #0x110]
++	orr	r6, r6, #0x2
++	str	r6, [r1, #0x110]
++
++	/* Unbypass PLLs and
++	  * wait for relock.
++	  */
++	ldr	r6, =(1 << 16)
++	str	r6, [r1, #0x08]
++	str	r6, [r1, #0x38]
++
++wait_for_pll_lock1:
++	ldr	r6, [r1, #0x0]
++	and	r6, r6, #0x80000000
++	cmp	r6, #0x80000000
++	bne	wait_for_pll_lock1
++
++	/* Set PLL1_sw_clk back to PLL1. */
++	ldr	r6, [r3, #0x0c]
++	bic	r6, r6, #0x4
++	str	r6, [r3, #0xc]
++
++	/* Need to enable the 528 PFDs after
++	  * powering up PLL2.
++	  * Only the PLL2_PFD2_400M should be ON
++	  * as it feeds the MMDC. Rest should have
++	  * been managed by clock code.
++	  */
++	 ldr	r6, [r1, #0x100]
++	 bic	r6, r6, #0x800000
++	 str	r6, [r1, #0x100]
++
++	/* Move DDR clock back to PLL2_PFD2_400 */
++	ldr	r6, [r3, #0x14]
++	bic	r6, r6, #0x4000000
++	str	r6, [r3, #0x14]
++
++mmdc_loop3:
++	ldr	r6, [r3, #0x48]
++	cmp	r6, #0
++	bne	mmdc_loop3
++
++	/* Set DDR clock to divide by 1. */
++	ldr	r6, [r3, #0x14]
++	bic	r6, r6, #0x38
++	str	r6, [r3, #0x14]
++
++mmdc_div2:
++	ldr	r6, [r3, #0x48]
++	cmp	r6, #0
++	bne	mmdc_div2
++
++	/* Move periph_clk back
++	  * to PLL2_PFD2_400.
++	  */
++	ldr	r6, [r3, #0x14]
++	bic	r6, r6, #0x2000000
++	str	r6, [r3, #0x14]
++
++periph_clk_switch2:
++	ldr	r6, [r3, #0x48]
++	cmp	r6, #0
++	bne     periph_clk_switch2
++
++	/* Set the dividers to default value. */
++	ldr	r6, [r3, #0x14]
++	bic	r6, r6, #0x70000
++	bic	r6, r6, #0x1c00
++	orr	r6, r6, #0x10800
++	str	r6, [r3, #0x14]
++
++ahb_podf2:
++	ldr	r6, [r3, #0x48]
++	cmp	r6, #0
++	bne	ahb_podf2
++
++	.endm
++
+ 	.macro	sl_ddr_io_save
+ 
+ 	ldr	r4, [r1, #0x30c] /* DRAM_DQM0 */
+@@ -617,6 +944,10 @@ ENTRY(mx6_suspend)
+ suspend mode entry
+ *************************************************************/
+ 	mov	r12, r3 /* Save CPU type to r12*/
++	mov	r11, r0	/* Save the state in r11 */
++
++	cmp	r12, #MXC_CPU_MX6SL
++	beq	dormant
+ 
+ 	cmp	r0, #0x1
+ 	bne	dormant		/* dormant mode */
+@@ -666,14 +997,17 @@ suspend mode entry
+ never run to here
+ ************************************************************/
+ 	b 	out	/* exit standby */
+-
++	/* Place the literal pool here so that
++	  * literals are within 4KB range
++	  */
++	.ltorg
+ /************************************************************
+ dormant entry, data save in stack, save sp in the src_gpr2
+ ************************************************************/
+ dormant:
+ 	mov 	r3, r1
+ 	mov 	r0, r1
+-	add 	r0, r0, #IRAM_SUSPEND_SIZE /* 4K */
++	add 	r0, r0, #IRAM_SUSPEND_SIZE /* 8K */
+ 	ldr 	r4, =SRC_BASE_ADDR
+ 	add 	r4, r4, #PERIPBASE_VIRT
+ 	str 	r0, [r4, #SRC_GPR2_OFFSET] /* set src_gpr2 */
+@@ -701,10 +1035,12 @@ saved register and context as below:
+ 	iram_suspend base */
+ 
+ 	mov	r0, r2 		/* get suspend_iram_base */
+-	add	r0, r0, #IRAM_SUSPEND_SIZE	/* 4K */
++	add	r0, r0, #IRAM_SUSPEND_SIZE	/* 8K */
+ 
+ 	mov	r4, r12			@ Store cpu type
+ 	stmfd	r0!, {r4}
++	mov	r4, r11			@ Store state entered
++	stmfd	r0!, {r4}
+ 
+ 	ldr	r1, =MX6Q_IOMUXC_BASE_ADDR
+ 	add	r1, r1, #PERIPBASE_VIRT
+@@ -784,6 +1120,9 @@ set ddr iomux to low power mode
+ 	ldr	r1, =SRC_BASE_ADDR
+ 	add	r1, r1, #PERIPBASE_VIRT
+ 	ldr	r0, [r1]
++	ldr	r1, =CCM_BASE_ADDR
++	add	r1, r1, #PERIPBASE_VIRT
++	ldr	r0, [r1]
+ #ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	ldr	r1, =ANATOP_BASE_ADDR
+ 	add	r1, r1, #PERIPBASE_VIRT
+@@ -795,14 +1134,23 @@ set ddr iomux to low power mode
+ 
+ 	ldr	r1, =MMDC_P0_BASE_ADDR
+ 	add	r1, r1, #PERIPBASE_VIRT
+-	ldr	r0, [r1, #MMDC_MAPSR_OFFSET]
+-	bic	r0, #MMDC_MAPSR_PSD 		/* enable lpm */
+-	str	r0, [r1, #MMDC_MAPSR_OFFSET]
+-refresh:
+-	ldr	r0, [r1, #MMDC_MAPSR_OFFSET] 	/* MMDC_MAPSR */
+-	and	r0, r0, #MMDC_MAPSR_PSS 	/* PSS bit */
+-	cmp	r0, #0
+-	beq	refresh
++
++	/* Put DDR explicitly into self-refresh. */
++	 /* Disable Automatic power savings. */
++	 ldr    r0, [r1, #0x404]
++	 orr    r0, r0, #0x01
++	 str    r0, [r1, #0x404]
++
++	 /* Make the DDR explicitly enter self-refresh. */
++	 ldr     r0, [r1, #0x404]
++	 orr    r0, r0, #0x200000
++	 str     r0, [r1, #0x404]
++
++	poll_dvfs_set_1:
++	 ldr     r0, [r1, #0x404]
++	 and     r0, r0, #0x2000000
++	 cmp    r0, #0x2000000
++	 bne     poll_dvfs_set_1
+ 
+ 	/* set mmdc iomux to low power mode */
+ 	ldr	r1, =MX6Q_IOMUXC_BASE_ADDR
+@@ -822,6 +1170,22 @@ sl_io_set_lpm:
+ 
+ ddr_io_set_lpm_done:
+ 
++	/* Do Analog Power Optimizations
++	  * for MX6SL in standby mode.
++	  */
++	cmp	r12, #MXC_CPU_MX6SL
++	bne	no_analog_savings
++	cmp	r11, #1
++	bne	no_analog_savings
++
++	/* We are here because on
++	* MX6SL, we want to lower
++	* the power in Standby mode.
++	*/
++	mx6sl_standy_saving_set
++
++no_analog_savings:
++
+ /****************************************************************
+ save resume pointer into SRC_GPR1
+ ****************************************************************/
+@@ -832,13 +1196,14 @@ save resume pointer into SRC_GPR1
+ 	ldr	r1, =SRC_BASE_ADDR
+ 	add	r1, r1, #PERIPBASE_VIRT
+ 	str	r3, [r1, #SRC_GPR1_OFFSET]
++
+ #ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	ldr	r1, =ANATOP_BASE_ADDR
+ 	add	r1, r1, #PERIPBASE_VIRT
+-	ldr	r3, [r1, #0x140]
+-	bic	r3, r3, #0x1f
+-	orr	r3, r3, #0x1e
+-	str	r3, [r1, #0x140]
++	ldr	r4, [r1, #0x140]
++	bic	r4, r4, #0x1f
++	orr	r4, r4, #0x1e
++	str	r4, [r1, #0x140]
+ #endif
+ /****************************************************************
+ execute a wfi instruction to let SOC go into stop mode.
+@@ -863,11 +1228,26 @@ system immediately.
+ #endif
+ 
+ 	mov	r0, r2 		/* get suspend_iram_base */
+-	add	r0, r0, #IRAM_SUSPEND_SIZE	/* 4K */
++	add	r0, r0, #IRAM_SUSPEND_SIZE	/* 8K */
+ 
+ 	ldmea	r0!, {r12}	@ get cpu type to make ddr io
+ 				@ offset right
+ 
++	ldmea	r0!, {r11}	@ standby or mem
++
++	cmp	r12, #MXC_CPU_MX6SL
++	bne	no_analog_restore
++
++	cmp	r11, #0x1
++	bne	no_analog_restore
++
++	ldr	r3, =CCM_BASE_ADDR
++	add	r3, r3, #PERIPBASE_VIRT
++
++	/* Restore the analog settings. */
++	mx6sl_standby_savings_restore
++
++no_analog_restore:
+ 	ldr	r1, =MX6Q_IOMUXC_BASE_ADDR
+ 	add	r1, r1, #PERIPBASE_VIRT
+ 
+@@ -884,6 +1264,26 @@ sl_io_restore:
+ 	sl_ddr_io_restore
+ 
+ ddr_io_restore_done:
++	/* Ensure DDR exits self-refresh. */
++	ldr	r1, =MMDC_P0_BASE_ADDR
++	add	r1, r1, #PERIPBASE_VIRT
++
++	/* clear DVFS - exit from self refresh mode */
++	ldr	r6, [r1, #0x404]
++	bic	r6, r6, #0x200000
++	str	r6, [r1, #0x404]
++
++poll_dvfs_clear_1:
++	ldr	r6, [r1, #0x404]
++	and	r6, r6, #0x2000000
++	cmp	r6, #0x2000000
++	beq	poll_dvfs_clear_1
++
++	/* Enable Automatic power savings. */
++	ldr	r6, [r1, #0x404]
++	bic	r6, r6, #0x01
++	str	r6, [r1, #0x404]
++
+ 	/* Add enough nops so that the
+ 	  * prefetcher will not get instructions
+ 	  * from DDR before its IO pads
+@@ -930,6 +1330,7 @@ when SOC exit stop mode, arm core restart from here, currently
+ are running with MMU off.
+ ****************************************************************/
+ resume:
++
+ #ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	ldr	r1, =ANATOP_BASE_ADDR
+ 	ldr	r3, [r1, #0x140]
+@@ -954,6 +1355,22 @@ resume:
+ 
+ 	ldmea	r0!, {r12}	@ get cpu type
+ 
++	ldmea	r0!, {r11}	@ standby or mem
++
++
++	cmp	r12, #MXC_CPU_MX6SL
++	bne	no_analog_restore1
++
++	cmp	r11, #0x1
++	bne	no_analog_restore1
++
++	ldr	r1, =ANATOP_BASE_ADDR
++	ldr	r3, =CCM_BASE_ADDR
++
++	/* Restore the analog settings. */
++	mx6sl_standby_pg_savings_restore
++
++no_analog_restore1:
+ 	/* Restore DDR IO */
+ 	ldr	r1, =MX6Q_IOMUXC_BASE_ADDR
+ 
+@@ -970,6 +1387,24 @@ sl_io_dsm_restore:
+ 	sl_ddr_io_restore
+ 
+ ddr_io_restore_dsm_done:
++	/* Ensure DDR exits self-refresh. */
++	ldr	r1, =MMDC_P0_BASE_ADDR
++
++	/* clear DVFS - exit from self refresh mode */
++	ldr	r6, [r1, #0x404]
++	bic	r6, r6, #0x200000
++	str	r6, [r1, #0x404]
++
++poll_dvfs_clear_2:
++	ldr	r6, [r1, #0x404]
++	and	r6, r6, #0x2000000
++	cmp	r6, #0x2000000
++	beq	poll_dvfs_clear_2
++
++	/* Enable Automatic power savings. */
++	ldr	r6, [r1, #0x404]
++	bic	r6, r6, #0x01
++	str	r6, [r1, #0x404]
+ 
+ #ifdef CONFIG_CACHE_L2X0
+ 	ldr r2, =L2_BASE_ADDR
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index 60bd6cd..faf1a59 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -112,7 +112,6 @@ static u32 ccm_analog_pfd528;
+ static u32 ccm_analog_pll3_480;
+ static u32 ccm_anadig_ana_misc2;
+ static bool usb_vbus_wakeup_enabled;
+-static u32 pu_val;
+ 
+ /*
+  * The USB VBUS wakeup should be disabled to avoid vbus wake system
+@@ -283,6 +282,7 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 	unsigned int cpu_type;
+ 	struct gic_dist_state gds;
+ 	struct gic_cpu_state gcs;
++	bool arm_pg = false;
+ 
+ 	if (cpu_is_mx6q())
+ 		cpu_type = MXC_CPU_MX6Q;
+@@ -320,9 +320,16 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 		disp_power_down();
+ 		usb_power_down_handler();
+ 		mxc_cpu_lp_set(ARM_POWER_OFF);
++		arm_pg = true;
+ 		break;
+ 	case PM_SUSPEND_STANDBY:
+-		mxc_cpu_lp_set(STOP_POWER_OFF);
++		if (cpu_is_mx6sl()) {
++			disp_power_down();
++			usb_power_down_handler();
++			mxc_cpu_lp_set(STOP_XTAL_ON);
++			arm_pg = true;
++		} else
++			mxc_cpu_lp_set(STOP_POWER_OFF);
+ 		break;
+ 	default:
+ 		return -EINVAL;
+@@ -338,7 +345,7 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 		local_flush_tlb_all();
+ 		flush_cache_all();
+ 
+-		if (state == PM_SUSPEND_MEM) {
++		if (arm_pg) {
+ 			/* preserve gic state */
+ 			save_gic_dist_state(0, &gds);
+ 			save_gic_cpu_state(0, &gcs);
+@@ -347,10 +354,12 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 		suspend_in_iram(state, (unsigned long)iram_paddr,
+ 			(unsigned long)suspend_iram_base, cpu_type);
+ 
+-		if (state == PM_SUSPEND_MEM) {
++		if (arm_pg) {
+ 			/* restore gic registers */
+ 			restore_gic_dist_state(0, &gds);
+ 			restore_gic_cpu_state(0, &gcs);
++		}
++		if (state == PM_SUSPEND_MEM || (cpu_is_mx6sl())) {
+ 			usb_power_up_handler();
+ 			disp_power_up();
+ 		}
+@@ -458,10 +467,10 @@ static int __init pm_init(void)
+ 
+ 	suspend_set_ops(&mx6_suspend_ops);
+ 	/* Move suspend routine into iRAM */
+-	cpaddr = (unsigned long)iram_alloc(SZ_4K, &iram_paddr);
++	cpaddr = (unsigned long)iram_alloc(SZ_8K, &iram_paddr);
+ 	/* Need to remap the area here since we want the memory region
+ 		 to be executable. */
+-	suspend_iram_base = __arm_ioremap(iram_paddr, SZ_4K,
++	suspend_iram_base = __arm_ioremap(iram_paddr, SZ_8K,
+ 					  MT_MEMORY_NONCACHED);
+ 	pr_info("cpaddr = %x suspend_iram_base=%x\n",
+ 		(unsigned int)cpaddr, (unsigned int)suspend_iram_base);
+@@ -470,7 +479,7 @@ static int __init pm_init(void)
+ 	 * Need to run the suspend code from IRAM as the DDR needs
+ 	 * to be put into low power mode manually.
+ 	 */
+-	memcpy((void *)cpaddr, mx6_suspend, SZ_4K);
++	memcpy((void *)cpaddr, mx6_suspend, SZ_8K);
+ 
+ 	suspend_in_iram = (void *)suspend_iram_base;
+ 
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 97629d0..2f1516d 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -132,8 +132,16 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 			stop_mode = 2;
+ 		}
+ 		break;
+-	case STOP_POWER_ON:
++	case STOP_XTAL_ON:
+ 		ccm_clpcr |= 0x2 << MXC_CCM_CLPCR_LPM_OFFSET;
++		ccm_clpcr |= MXC_CCM_CLPCR_VSTBY;
++		ccm_clpcr &= ~MXC_CCM_CLPCR_SBYOS;
++		if (cpu_is_mx6sl()) {
++			ccm_clpcr |= MXC_CCM_CLPCR_BYP_MMDC_CH0_LPM_HS;
++			ccm_clpcr |= MXC_CCM_CLPCR_BYPASS_PMIC_VFUNC_READY;
++		} else
++			ccm_clpcr |= MXC_CCM_CLPCR_BYP_MMDC_CH1_LPM_HS;
++		stop_mode = 3;
+ 
+ 		break;
+ 	default:
+@@ -146,7 +154,7 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 		/* Power down and power up sequence */
+ 		__raw_writel(0xFFFFFFFF, gpc_base + GPC_PGC_CPU_PUPSCR_OFFSET);
+ 		__raw_writel(0xFFFFFFFF, gpc_base + GPC_PGC_CPU_PDNSCR_OFFSET);
+-		if (stop_mode == 2) {
++		if (stop_mode >= 2) {
+ 			/* dormant mode, need to power off the arm core */
+ 			__raw_writel(0x1, gpc_base + GPC_PGC_CPU_PDN_OFFSET);
+ 			if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+@@ -171,45 +179,48 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 						HW_ANADIG_REG_CORE);
+ 				}
+ 			} else {
+-				/* Disable VDDHIGH_IN to VDDSNVS_IN power path,
+-				 * only used when VDDSNVS_IN is powered by dedicated
+-				 * power rail */
+-				anatop_val = __raw_readl(anatop_base +
+-					HW_ANADIG_ANA_MISC0);
+-				anatop_val |= BM_ANADIG_ANA_MISC0_RTC_RINGOSC_EN;
+-				__raw_writel(anatop_val, anatop_base +
+-					HW_ANADIG_ANA_MISC0);
+-				/* Need to enable pull down if 2P5 is disabled */
+-				anatop_val = __raw_readl(anatop_base +
+-					HW_ANADIG_REG_2P5);
+-				anatop_val |= BM_ANADIG_REG_2P5_ENABLE_PULLDOWN;
+-				__raw_writel(anatop_val, anatop_base +
+-					HW_ANADIG_REG_2P5);
+-				/* We need to allow the memories to be clock gated
+-				 * in STOP mode, else the power consumption will
+-				 * be very high. */
+-				reg = __raw_readl(MXC_CCM_CGPR);
+-				reg |= MXC_CCM_CGPR_MEM_IPG_STOP_MASK;
+-				__raw_writel(reg, MXC_CCM_CGPR);
++				if (stop_mode == 2) {
++					/* Disable VDDHIGH_IN to VDDSNVS_IN
++					  * power path, only used when VDDSNVS_IN
++					  * is powered by dedicated
++					 * power rail */
++					anatop_val = __raw_readl(anatop_base +
++						HW_ANADIG_ANA_MISC0);
++					anatop_val |= BM_ANADIG_ANA_MISC0_RTC_RINGOSC_EN;
++					__raw_writel(anatop_val, anatop_base +
++						HW_ANADIG_ANA_MISC0);
++					/* Need to enable pull down if 2P5 is disabled */
++					anatop_val = __raw_readl(anatop_base +
++						HW_ANADIG_REG_2P5);
++					anatop_val |= BM_ANADIG_REG_2P5_ENABLE_PULLDOWN;
++					__raw_writel(anatop_val, anatop_base +
++						HW_ANADIG_REG_2P5);
++				}
+ 			}
+ 			/* DL's TO1.0 can't support DSM mode due to ipg glitch */
+-			if (mx6dl_revision() != IMX_CHIP_REVISION_1_0)
++			if ((mx6dl_revision() != IMX_CHIP_REVISION_1_0)
++					&& stop_mode != 3)
+ 				__raw_writel(__raw_readl(MXC_CCM_CCR) |
+ 					MXC_CCM_CCR_RBC_EN, MXC_CCM_CCR);
+ 
+-			/* Make sure we clear WB_COUNT and re-config it */
+-			__raw_writel(__raw_readl(MXC_CCM_CCR) &
+-				(~MXC_CCM_CCR_WB_COUNT_MASK) &
+-				(~MXC_CCM_CCR_REG_BYPASS_CNT_MASK), MXC_CCM_CCR);
+-			udelay(80);
+-			/* Reconfigurate WB and RBC counter, need to set WB counter
+-			 * to 0x7 to make sure it work normally */
+-			__raw_writel(__raw_readl(MXC_CCM_CCR) |
+-				(0x7 << MXC_CCM_CCR_WB_COUNT_OFFSET) |
+-				(0x20 << MXC_CCM_CCR_REG_BYPASS_CNT_OFFSET), MXC_CCM_CCR);
+-
+-			/* Set WB_PER enable */
+-			ccm_clpcr |= MXC_CCM_CLPCR_WB_PER_AT_LPM;
++			if (stop_mode != 3) {
++				/* Make sure we clear WB_COUNT
++				  * and re-config it.
++				  */
++				__raw_writel(__raw_readl(MXC_CCM_CCR) &
++					(~MXC_CCM_CCR_WB_COUNT_MASK) &
++					(~MXC_CCM_CCR_REG_BYPASS_CNT_MASK), MXC_CCM_CCR);
++				udelay(80);
++				/* Reconfigurate WB and RBC counter, need to set WB counter
++				 * to 0x7 to make sure it work normally */
++				__raw_writel(__raw_readl(MXC_CCM_CCR) |
++					(0x7 << MXC_CCM_CCR_WB_COUNT_OFFSET) |
++					(0x20 << MXC_CCM_CCR_REG_BYPASS_CNT_OFFSET),
++					MXC_CCM_CCR);
++
++				/* Set WB_PER enable */
++				ccm_clpcr |= MXC_CCM_CLPCR_WB_PER_AT_LPM;
++			}
+ 		}
+ 		if (cpu_is_mx6sl() ||
+ 			(mx6q_revision() > IMX_CHIP_REVISION_1_1) ||
+diff --git a/arch/arm/plat-mxc/include/mach/mxc.h b/arch/arm/plat-mxc/include/mach/mxc.h
+index 2315909..4260d4a 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc.h
++++ b/arch/arm/plat-mxc/include/mach/mxc.h
+@@ -266,8 +266,8 @@ enum mxc_cpu_pwr_mode {
+ 	WAIT_CLOCKED,		/* wfi only */
+ 	WAIT_UNCLOCKED,		/* WAIT */
+ 	WAIT_UNCLOCKED_POWER_OFF,	/* WAIT + SRPG */
+-	STOP_POWER_ON,		/* just STOP */
+-	STOP_POWER_OFF,		/* STOP + SRPG */
++	STOP_XTAL_ON,		/* STOP + SRPG + XTAL_ON*/
++	STOP_POWER_OFF,		/* STOP + XTAL_OFF */
+ 	ARM_POWER_OFF,		/* STOP + SRPG + ARM power off */
+ };
+ 
+-- 
+1.7.7.4
+

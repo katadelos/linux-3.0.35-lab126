@@ -1,0 +1,38 @@
+From 91adf6e6226fc1ae6d5f7bfe32bd4a343a666c7d Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Thu, 21 Jun 2012 17:31:24 +0800
+Subject: [PATCH 1637/2463] ENGR00214568 - SPDC : fix dma free unmatched size
+
+- Kernel will print dma free warning when no Sipix panel
+  connect. Fix dma free unmatched size.
+
+Signed-off-by: Fugang Duan <B38611@freescale.com>
+---
+ drivers/video/mxc/mxc_spdc_fb.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_spdc_fb.c b/drivers/video/mxc/mxc_spdc_fb.c
+index 449e606..67561a7 100644
+--- a/drivers/video/mxc/mxc_spdc_fb.c
++++ b/drivers/video/mxc/mxc_spdc_fb.c
+@@ -3998,7 +3998,7 @@ release_regulator1:
+ release_irq:
+ 	free_irq(fb_data->spdc_irq, fb_data);
+ release_lut_buf:
+-	dma_free_coherent(&pdev->dev, fb_data->pre_buf_size,
++	dma_free_coherent(&pdev->dev, fb_data->lut_buf_size,
+ 		fb_data->virt_lut_buf, fb_data->phy_lut_buf);
+ release_cnt_buf:
+ 	dma_free_coherent(&pdev->dev, fb_data->cnt_buf_size,
+@@ -4101,7 +4101,7 @@ static int mxc_spdc_fb_remove(struct platform_device *pdev)
+ 		fb_data->virt_pre_buf, fb_data->phy_pre_buf);
+ 	dma_free_coherent(&pdev->dev, fb_data->cnt_buf_size,
+ 		fb_data->virt_cnt_buf, fb_data->phy_cnt_buf);
+-	dma_free_coherent(&pdev->dev, fb_data->pre_buf_size,
++	dma_free_coherent(&pdev->dev, fb_data->lut_buf_size,
+ 		fb_data->virt_lut_buf, fb_data->phy_lut_buf);
+ 
+ 	sysfs_remove_group(&info->device->kobj, &spdc_attr_group);
+-- 
+1.7.7.4
+

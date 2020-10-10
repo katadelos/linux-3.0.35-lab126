@@ -1,0 +1,68 @@
+From 766891eaf8d16f06b4c306bcc386d560980a12cf Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Mon, 21 May 2012 18:39:05 +0800
+Subject: [PATCH 1511/2463] ENGR00209739-4 add AUDMUX/SDMA support for MX6SL
+
+check CONFIG_ARCH_MX6 to replace cpu type
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ arch/arm/plat-mxc/audmux-v2.c                |    8 +++-----
+ arch/arm/plat-mxc/devices/platform-imx-dma.c |   20 +++++++++++---------
+ 2 files changed, 14 insertions(+), 14 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/audmux-v2.c b/arch/arm/plat-mxc/audmux-v2.c
+index 8933cac..c36ddb3 100644
+--- a/arch/arm/plat-mxc/audmux-v2.c
++++ b/arch/arm/plat-mxc/audmux-v2.c
+@@ -186,13 +186,11 @@ EXPORT_SYMBOL_GPL(mxc_audmux_v2_configure_port);
+ 
+ static int mxc_audmux_v2_init(void)
+ {
+-	int ret;
++	int ret = -1;
+ 
+ #if defined(CONFIG_ARCH_MX6)
+-	if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+-		audmux_base = MX6_IO_ADDRESS(MX6Q_AUDMUX_BASE_ADDR);
+-		ret = 0;
+-	}
++	audmux_base = MX6_IO_ADDRESS(MX6Q_AUDMUX_BASE_ADDR);
++	ret = 0;
+ #endif
+ #if defined(CONFIG_ARCH_MX5)
+ 	if (cpu_is_mx51()) {
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-dma.c b/arch/arm/plat-mxc/devices/platform-imx-dma.c
+index 65a71ac..e7caaf4 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx-dma.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-dma.c
+@@ -260,15 +260,17 @@ static int __init imxXX_add_imx_dma(void)
+ 		ret = imx_add_imx_sdma(&imx53_imx_sdma_data);
+ 	} else
+ #endif
+-#if defined(CONFIG_SOC_IMX6Q)
+-	if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+-		int to_version = 1;
+-		imx6q_imx_sdma_data.pdata.to_version = to_version;
+-		if (to_version == 1)
+-			imx6q_imx_sdma_data.pdata.script_addrs =
+-							&addr_imx6q_to1;
+-		ret = imx_add_imx_sdma(&imx6q_imx_sdma_data);
+-	} else
++#if defined(CONFIG_ARCH_MX6)
++	int to_version = 1;
++	imx6q_imx_sdma_data.pdata.to_version = to_version;
++	if (to_version == 1)
++		imx6q_imx_sdma_data.pdata.script_addrs =
++						&addr_imx6q_to1;
++	ret = imx_add_imx_sdma(&imx6q_imx_sdma_data);
++	if (IS_ERR(ret))
++		return PTR_ERR(ret);
++
++	return 0;
+ #endif
+ 		ret = ERR_PTR(-ENODEV);
+ 
+-- 
+1.7.7.4
+

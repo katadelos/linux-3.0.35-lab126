@@ -1,0 +1,55 @@
+From 54ed35e105e2e95a37d8336e64a45a661d35d46b Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Fri, 13 Apr 2012 16:30:54 +0800
+Subject: [PATCH 1316/2463] ENGR00179628-1 SSI: enable dual-fifo feature as
+ default
+
+enable SSI dual-fifo feature as default setting
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ drivers/dma/imx-sdma.c  |    5 ++++-
+ sound/soc/imx/imx-ssi.c |    4 ++++
+ 2 files changed, 8 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/dma/imx-sdma.c b/drivers/dma/imx-sdma.c
+index 6f168fe..1b98d73 100644
+--- a/drivers/dma/imx-sdma.c
++++ b/drivers/dma/imx-sdma.c
+@@ -576,6 +576,9 @@ static void sdma_get_pc(struct sdma_channel *sdmac,
+ 		emi_2_per = sdma->script_addrs->mcu_2_app_addr;
+ 		break;
+ 	case IMX_DMATYPE_SSI_SP:
++		per_2_emi = sdma->script_addrs->ssish_2_mcu_addr;
++		emi_2_per = sdma->script_addrs->mcu_2_ssish_addr;
++		break;
+ 	case IMX_DMATYPE_MMC:
+ 	case IMX_DMATYPE_SDHC:
+ 	case IMX_DMATYPE_CSPI_SP:
+@@ -1155,7 +1158,7 @@ static void sdma_issue_pending(struct dma_chan *chan)
+ 	 */
+ }
+ 
+-#define SDMA_SCRIPT_ADDRS_ARRAY_SIZE_V1	34
++#define SDMA_SCRIPT_ADDRS_ARRAY_SIZE_V1	37
+ 
+ static void sdma_add_scripts(struct sdma_engine *sdma,
+ 		const struct sdma_script_start_addrs *addr)
+diff --git a/sound/soc/imx/imx-ssi.c b/sound/soc/imx/imx-ssi.c
+index 4d6319c..aff891a 100644
+--- a/sound/soc/imx/imx-ssi.c
++++ b/sound/soc/imx/imx-ssi.c
+@@ -157,6 +157,10 @@ static int imx_ssi_set_dai_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
+ 	if (ssi->flags & IMX_SSI_SYN)
+ 		scr |= SSI_SCR_SYN;
+ 
++	/* Dual-FIFO support */
++	strcr |= SSI_STCR_TFEN1;
++	scr |= SSI_SCR_TCH_EN;
++
+ 	writel(strcr, ssi->base + SSI_STCR);
+ 	if ((fmt & SND_SOC_DAIFMT_MASTER_MASK) == SND_SOC_DAIFMT_CBS_CFS)
+ 		strcr &= ~(SSI_STCR_TFDIR | SSI_STCR_TXDIR);
+-- 
+1.7.7.4
+

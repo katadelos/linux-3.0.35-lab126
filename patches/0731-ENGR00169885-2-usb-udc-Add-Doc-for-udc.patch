@@ -1,0 +1,37 @@
+From 4f915957d7a6b92d3d9bc4ef5a8a10dd58be64fb Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Fri, 9 Dec 2011 14:17:24 +0800
+Subject: [PATCH 0731/2463] ENGR00169885-2 usb-udc: Add Doc for udc
+
+Add remote wakeup test method to udc doc
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ Documentation/arm/imx/udc.txt |   16 ++++++++++++++++
+ 1 files changed, 16 insertions(+), 0 deletions(-)
+
+diff --git a/Documentation/arm/imx/udc.txt b/Documentation/arm/imx/udc.txt
+new file mode 100644
+index 0000000..fdbaa84
+--- /dev/null
++++ b/Documentation/arm/imx/udc.txt
+@@ -0,0 +1,16 @@
++How to test remote wakeup (Make sure connecting to usb host and gadget is loaded)
++1. Prepare a usb host which featured with remote wakeup
++alternatively, You can use another i.mx board (like mx50 rdp, or mx6q)
++2. Boot up both boards, and connect two boards with usb cable
++3. At device side, do below commands:
++- modprobe g_file_storage file=/dev/mmcblk0p1 (other gadgets are also ok)
++- echo 1 > /sys/devices/platform/fsl-usb2-udc/gadget/remote_wakeup
++4. At host side, do below command:
++- echo enabled > /sys/devices/platform/fsl-ehci.1/power/wakeup
++- echo standby > /sys/power/state
++5. Send Remote wakeup to wake up host
++At device side, do below command:
++echo 1 > /sys/devices/platform/fsl-usb2-udc/gadget/start_remote_wakeup
++6. The expected behaviour is: host is waked up, and there is
++not re-enumeration happens.
++
+-- 
+1.7.7.4
+

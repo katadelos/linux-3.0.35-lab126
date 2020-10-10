@@ -1,0 +1,47 @@
+From 1b5adc4cffc787b2154f4689f15bdb4a1b1545b7 Mon Sep 17 00:00:00 2001
+From: Yi Li <r80015@freescale.com>
+Date: Mon, 2 Jan 2012 14:02:19 -0600
+Subject: [PATCH 0857/2463] ENGR00169489-2 Add OV5642 csi camera support for
+ i.mx6 sabre-lite board.
+
+Add OV5642 csi camera support for i.mx6 sabre-lite board
+
+Signed-off-by: Yi Li <R80015@freescale.com>
+---
+ drivers/media/video/mxc/capture/sensor_clock.c |    8 ++++++--
+ 1 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/sensor_clock.c b/drivers/media/video/mxc/capture/sensor_clock.c
+index 357c01f..2159836 100644
+--- a/drivers/media/video/mxc/capture/sensor_clock.c
++++ b/drivers/media/video/mxc/capture/sensor_clock.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -24,6 +24,7 @@
+ #include <linux/device.h>
+ #include <linux/clk.h>
+ #include <mach/hardware.h>
++#include <asm/mach-types.h>
+ 
+ #if defined(CONFIG_MXC_IPU_V1) || defined(CONFIG_VIDEO_MXC_EMMA_CAMERA) \
+ 			       || defined(CONFIG_VIDEO_MXC_CSI_CAMERA_MODULE) \
+@@ -72,7 +73,10 @@ void set_mclk_rate(uint32_t *p_mclk_freq, uint32_t csi)
+ 		}
+ 	} else if (cpu_is_mx6q()) {
+ 		if (csi == 0) {
+-			mclk = "cko1_clk0";
++			if (machine_is_mx6q_sabrelite())
++				mclk = "clko2_clk";
++			else
++				mclk = "cko1_clk0";
+ 		} else {
+ 			pr_err("invalid csi num %d\n", csi);
+ 			return;
+-- 
+1.7.7.4
+

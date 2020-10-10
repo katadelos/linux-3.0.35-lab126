@@ -1,0 +1,80 @@
+From 11fc35eb6355ce57098afc68e74f0018b78ad390 Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Mon, 20 Aug 2012 19:24:28 +0800
+Subject: [PATCH 1940/2463] ENGR00220776 mx6dl_arm2: ECSPI pin config
+ overlaped by epdc
+
+ECSPI pin MX6DL_PAD_EIM_D17__ECSPI1_MISO is configured overlap by epdc
+MX6DL_PAD_EIM_D17__GPIO_3_17, so that SPI-NOR flash can't work normally.
+From schematic of ARM2 board, epdc and spi share this pin if plug epdc
+daughter board. But SPI-NOR is on ARM2 mother board, so it should be config
+well firstly. So we make sure SPI-NOR work successfully by default. But if
+enable epdc , SPI-NOR on ARM2 will work fail.
+
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6dl_arm2.h |    4 +++-
+ arch/arm/mach-mx6/board-mx6q_arm2.c  |    6 ++++++
+ 2 files changed, 9 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6dl_arm2.h b/arch/arm/mach-mx6/board-mx6dl_arm2.h
+index 6ed3e65..429febb 100644
+--- a/arch/arm/mach-mx6/board-mx6dl_arm2.h
++++ b/arch/arm/mach-mx6/board-mx6dl_arm2.h
+@@ -188,7 +188,9 @@ static iomux_v3_cfg_t mx6dl_arm2_pads[] = {
+ 	MX6DL_PAD_GPIO_6__MLB_MLBSIG,
+ 	MX6DL_PAD_GPIO_2__MLB_MLBDAT,
+ 
+-	/* EPDC pins */
++};
++
++static iomux_v3_cfg_t mx6dl_arm2_epdc_pads[] = {
+ 	MX6DL_PAD_EIM_A17__GPIO_2_21,
+ 	MX6DL_PAD_EIM_D17__GPIO_3_17,
+ 	MX6DL_PAD_EIM_A18__GPIO_2_20,
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 4b0d5c2..29911a2 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -1993,12 +1993,14 @@ static void __init mx6_arm2_init(void)
+ 	iomux_v3_cfg_t *spdif_pads = NULL;
+ 	iomux_v3_cfg_t *flexcan_pads = NULL;
+ 	iomux_v3_cfg_t *i2c3_pads = NULL;
++	iomux_v3_cfg_t *epdc_pads = NULL;
+ 
+ 	int common_pads_cnt;
+ 	int esai_rec_pads_cnt;
+ 	int spdif_pads_cnt;
+ 	int flexcan_pads_cnt;
+ 	int i2c3_pads_cnt;
++	int epdc_pads_cnt;
+ 
+ 
+ 	/*
+@@ -2024,12 +2026,14 @@ static void __init mx6_arm2_init(void)
+ 		spdif_pads = mx6dl_arm2_spdif_pads;
+ 		flexcan_pads = mx6dl_arm2_can_pads;
+ 		i2c3_pads = mx6dl_arm2_i2c3_pads;
++		epdc_pads = mx6dl_arm2_epdc_pads;
+ 
+ 		common_pads_cnt = ARRAY_SIZE(mx6dl_arm2_pads);
+ 		esai_rec_pads_cnt = ARRAY_SIZE(mx6dl_arm2_esai_record_pads);
+ 		spdif_pads_cnt =  ARRAY_SIZE(mx6dl_arm2_spdif_pads);
+ 		flexcan_pads_cnt = ARRAY_SIZE(mx6dl_arm2_can_pads);
+ 		i2c3_pads_cnt = ARRAY_SIZE(mx6dl_arm2_i2c3_pads);
++		epdc_pads_cnt = ARRAY_SIZE(mx6dl_arm2_epdc_pads);
+ 	}
+ 
+ 	BUG_ON(!common_pads);
+@@ -2207,6 +2211,8 @@ static void __init mx6_arm2_init(void)
+ 	imx6q_add_mlb150(&mx6_arm2_mlb150_data);
+ 
+ 	if (cpu_is_mx6dl() && epdc_enabled) {
++		BUG_ON(!epdc_pads);
++		mxc_iomux_v3_setup_multiple_pads(epdc_pads, epdc_pads_cnt);
+ 		imx6dl_add_imx_pxp();
+ 		imx6dl_add_imx_pxp_client();
+ 		mxc_register_device(&max17135_sensor_device, NULL);
+-- 
+1.7.7.4
+

@@ -1,0 +1,89 @@
+From b0af671c8edaccc586d63e0af93ef9a142dc5859 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Fri, 10 Aug 2012 18:08:42 +0800
+Subject: [PATCH 1904/2463] ENGR00219859 MXC V4L2 capture:Pwr down/on opened
+ cam
+
+Currently, we support 2 cameras, which are relevant to
+2 video devices respectively. This patch checks if video
+device is opened to determine whether we need to power
+down/on relevant camera when doing suspend/resume.
+Also, this patch protects capture resources with busy
+lock semaphore.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit 874198b89a89aa6e792754a0a51c46084ed93d1a)
+---
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |   16 ++++++++++++++--
+ 1 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index 880f97b..14b73b8 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -1732,6 +1732,8 @@ static int mxc_v4l_close(struct file *file)
+ 		return -EBADF;
+ 	}
+ 
++	down(&cam->busy_lock);
++
+ 	/* for the case somebody hit the ctrl C */
+ 	if (cam->overlay_pid == current->pid && cam->overlay_on) {
+ 		err = stop_preview(cam);
+@@ -1772,6 +1774,8 @@ static int mxc_v4l_close(struct file *file)
+ 		cam->enc_counter++;
+ 	}
+ 
++	up(&cam->busy_lock);
++
+ 	return err;
+ }
+ 
+@@ -2793,6 +2797,8 @@ static int mxc_v4l2_suspend(struct platform_device *pdev, pm_message_t state)
+ 		return -1;
+ 	}
+ 
++	down(&cam->busy_lock);
++
+ 	cam->low_power = true;
+ 
+ 	if (cam->overlay_on == true)
+@@ -2801,9 +2807,11 @@ static int mxc_v4l2_suspend(struct platform_device *pdev, pm_message_t state)
+ 		cam->enc_disable(cam);
+ 	}
+ 
+-	if (cam->sensor)
++	if (cam->sensor && cam->open_count)
+ 		vidioc_int_s_power(cam->sensor, 0);
+ 
++	up(&cam->busy_lock);
++
+ 	return 0;
+ }
+ 
+@@ -2826,10 +2834,12 @@ static int mxc_v4l2_resume(struct platform_device *pdev)
+ 		return -1;
+ 	}
+ 
++	down(&cam->busy_lock);
++
+ 	cam->low_power = false;
+ 	wake_up_interruptible(&cam->power_queue);
+ 
+-	if (cam->sensor)
++	if (cam->sensor && cam->open_count)
+ 		vidioc_int_s_power(cam->sensor, 1);
+ 
+ 	if (cam->overlay_on == true)
+@@ -2837,6 +2847,8 @@ static int mxc_v4l2_resume(struct platform_device *pdev)
+ 	if (cam->capture_on == true)
+ 		mxc_streamon(cam);
+ 
++	up(&cam->busy_lock);
++
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

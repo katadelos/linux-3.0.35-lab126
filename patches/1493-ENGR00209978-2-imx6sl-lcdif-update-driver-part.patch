@@ -1,0 +1,121 @@
+From c414cdef98a74af4c9fdf1ba4d21e7731ec394c4 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Fri, 18 May 2012 18:11:16 +0800
+Subject: [PATCH 1493/2463] ENGR00209978-2: imx6sl: lcdif: update driver part
+
+- use new console lock/unlock
+
+Board Rework Needed:
+ - remove R572, R569, R611 to eliminate conflict with FEC modules.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ drivers/video/mxc/mxc_elcdif_fb.c    |   16 +++++++++-------
+ drivers/video/mxc/mxcfb_seiko_wvga.c |    4 ++--
+ include/linux/fsl_devices.h          |    7 +++++++
+ 3 files changed, 18 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_elcdif_fb.c b/drivers/video/mxc/mxc_elcdif_fb.c
+index 7a5fa6d..2c96eec 100644
+--- a/drivers/video/mxc/mxc_elcdif_fb.c
++++ b/drivers/video/mxc/mxc_elcdif_fb.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2010-2012 Freescale Semiconductor, Inc.
+  */
+ 
+ /*
+@@ -128,8 +128,10 @@ static inline void setup_dotclk_panel(u32 pixel_clk,
+ 	__raw_writel(BM_ELCDIF_CTRL_SHIFT_NUM_BITS,
+ 		     elcdif_base + HW_ELCDIF_CTRL_CLR);
+ 
++	__raw_writel(BM_ELCDIF_CTRL2_OUTSTANDING_REQS,
++		     elcdif_base + HW_ELCDIF_CTRL2_CLR);
+ 	__raw_writel(BF_ELCDIF_CTRL2_OUTSTANDING_REQS
+-		    (BV_ELCDIF_CTRL2_OUTSTANDING_REQS__REQ_8),
++		    (BV_ELCDIF_CTRL2_OUTSTANDING_REQS__REQ_16),
+ 		     elcdif_base + HW_ELCDIF_CTRL2_SET);
+ 
+ 	/* Recover on underflow */
+@@ -824,7 +826,7 @@ static int mxc_elcdif_fb_set_par(struct fb_info *fbi)
+ 	mxc_init_elcdif();
+ 	mxc_elcdif_init_panel();
+ 
+-	dev_dbg(fbi->device, "pixclock = %ul Hz\n",
++	dev_dbg(fbi->device, "pixclock = %lu Hz\n",
+ 		(u32) (PICOS2KHZ(fbi->var.pixclock) * 1000UL));
+ 
+ 	memset(&sig_cfg, 0, sizeof(sig_cfg));
+@@ -1369,7 +1371,7 @@ static int mxc_elcdif_fb_suspend(struct platform_device *pdev,
+ 	struct mxc_elcdif_fb_data *data = (struct mxc_elcdif_fb_data *)fbi->par;
+ 	int saved_blank;
+ 
+-	acquire_console_sem();
++	console_lock();
+ 	fb_set_suspend(fbi, 1);
+ 	saved_blank = data->cur_blank;
+ 	mxc_elcdif_fb_blank(FB_BLANK_POWERDOWN, fbi);
+@@ -1388,7 +1390,7 @@ static int mxc_elcdif_fb_suspend(struct platform_device *pdev,
+ 		clk_disable(g_elcdif_axi_clk);
+ 		g_elcdif_axi_clk_enable = false;
+ 	}
+-	release_console_sem();
++	console_unlock();
+ 	return 0;
+ }
+ 
+@@ -1397,10 +1399,10 @@ static int mxc_elcdif_fb_resume(struct platform_device *pdev)
+ 	struct fb_info *fbi = platform_get_drvdata(pdev);
+ 	struct mxc_elcdif_fb_data *data = (struct mxc_elcdif_fb_data *)fbi->par;
+ 
+-	acquire_console_sem();
++	console_lock();
+ 	mxc_elcdif_fb_blank(data->next_blank, fbi);
+ 	fb_set_suspend(fbi, 0);
+-	release_console_sem();
++	console_unlock();
+ 
+ 	return 0;
+ }
+diff --git a/drivers/video/mxc/mxcfb_seiko_wvga.c b/drivers/video/mxc/mxcfb_seiko_wvga.c
+index 0ba4d9e..c96238d 100644
+--- a/drivers/video/mxc/mxcfb_seiko_wvga.c
++++ b/drivers/video/mxc/mxcfb_seiko_wvga.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -122,7 +122,7 @@ static struct notifier_block nb = {
+ static int __devinit lcd_probe(struct platform_device *pdev)
+ {
+ 	int i;
+-	struct mxc_lcd_platform_data *plat = pdev->dev.platform_data;
++	struct fsl_mxc_lcd_platform_data *plat = pdev->dev.platform_data;
+ 
+ 	if (plat) {
+ 		if (plat->reset)
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index bec8fe9..b476173 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -238,6 +238,13 @@ struct fsl_mxc_ldb_platform_data {
+ 	int sec_disp_id;
+ };
+ 
++struct mxc_fb_platform_data {
++	struct fb_videomode *mode;
++	int num_modes;
++	char *mode_str;
++	u32 interface_pix_fmt;
++};
++
+ struct fsl_mxc_lcd_platform_data {
+ 	char *io_reg;
+ 	char *core_reg;
+-- 
+1.7.7.4
+

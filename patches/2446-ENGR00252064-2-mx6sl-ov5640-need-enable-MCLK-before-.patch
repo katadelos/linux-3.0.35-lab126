@@ -1,0 +1,50 @@
+From 9a81c8ba0c24f07263d989bd41399b71936454e1 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Thu, 14 Mar 2013 16:51:00 +0800
+Subject: [PATCH 2446/2463] ENGR00252064-2 mx6sl: ov5640: need enable MCLK
+ before read sensor ID
+
+After the patch of auto-detection for sensor pushed, there's a need to
+read sensor ID in probe function. But on MX6SL, MCLK is not enabled at
+that time. So need to enable it before read sensor ID.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+(cherry picked from commit 78ad8b6f9d18cf5595cb532b7e08804aff158815)
+---
+ drivers/media/video/mxc/capture/ov5640.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov5640.c b/drivers/media/video/mxc/capture/ov5640.c
+index 2a1bc98..3195377 100644
+--- a/drivers/media/video/mxc/capture/ov5640.c
++++ b/drivers/media/video/mxc/capture/ov5640.c
+@@ -31,6 +31,7 @@
+ #include <media/v4l2-chip-ident.h>
+ #include <media/v4l2-int-device.h>
+ #include "mxc_v4l2_capture.h"
++#include "fsl_csi.h"
+ 
+ #define OV5640_VOLTAGE_ANALOG               2800000
+ #define OV5640_VOLTAGE_DIGITAL_CORE         1500000
+@@ -1821,6 +1822,8 @@ static int ov5640_probe(struct i2c_client *client,
+ 	if (plat_data->pwdn)
+ 		plat_data->pwdn(0);
+ 
++	if (cpu_is_mx6sl())
++		csi_enable_mclk(CSI_MCLK_I2C, true, true);
+ 	retval = ov5640_read_reg(OV5640_CHIP_ID_HIGH_BYTE, &chip_id_high);
+ 	if (retval < 0 || chip_id_high != 0x56) {
+ 		pr_warning("camera ov5640 is not found\n");
+@@ -1837,6 +1840,9 @@ static int ov5640_probe(struct i2c_client *client,
+ 	if (plat_data->pwdn)
+ 		plat_data->pwdn(1);
+ 
++	if (cpu_is_mx6sl())
++		csi_enable_mclk(CSI_MCLK_I2C, false, false);
++
+ 	camera_plat = plat_data;
+ 
+ 	ov5640_int_device.priv = &ov5640_data;
+-- 
+1.7.7.4
+

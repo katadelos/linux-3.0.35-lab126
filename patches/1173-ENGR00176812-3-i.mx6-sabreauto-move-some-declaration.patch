@@ -1,0 +1,62 @@
+From 57a618571a2cd17485e2c22fa363a69c7c87e81a Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Thu, 8 Mar 2012 17:22:51 +0800
+Subject: [PATCH 1173/2463] ENGR00176812-3 i.mx6: sabreauto: move some
+ declarations to common.h
+
+Need move some declarations to common.h to avoid each user
+individully declare it in their own .c file. This can make
+the code clean and also avoid the duplication.
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    7 -------
+ arch/arm/plat-mxc/include/mach/common.h  |    4 ++++
+ 2 files changed, 4 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 427b82a..fe5ec44 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -127,18 +127,11 @@
+ #define SABREAUTO_USB_HOST1_PWR		SABREAUTO_IO_EXP_GPIO2(7)
+ #define SABREAUTO_USB_OTG_PWR		SABREAUTO_IO_EXP_GPIO3(2)
+ 
+-void __init early_console_setup(unsigned long base, struct clk *clk);
+ static struct clk *sata_clk;
+ static int mipi_sensor;
+ static int uart2_en;
+ static int can0_enable;
+ 
+-extern struct regulator *(*get_cpu_regulator)(void);
+-extern void (*put_cpu_regulator)(void);
+-extern char *gp_reg_id;
+-extern void mx6_cpu_regulator_init(void);
+-extern int __init mx6q_sabreauto_init_pfuze100(u32 int_gpio);
+-
+ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 
+ 	/* UART4 for debug */
+diff --git a/arch/arm/plat-mxc/include/mach/common.h b/arch/arm/plat-mxc/include/mach/common.h
+index 6248969..b2cacfb 100755
+--- a/arch/arm/plat-mxc/include/mach/common.h
++++ b/arch/arm/plat-mxc/include/mach/common.h
+@@ -23,6 +23,7 @@ struct fec_platform_data;
+ struct platform_device;
+ struct clk;
+ 
++extern char *gp_reg_id;
+ extern void mx1_map_io(void);
+ extern void mx21_map_io(void);
+ extern void mx25_map_io(void);
+@@ -88,4 +89,7 @@ extern int mx50_revision(void);
+ extern int mx53_display_revision(void);
+ extern unsigned long mx6_timer_rate(void);
+ extern int mxs_reset_block(void __iomem *);
++extern void early_console_setup(unsigned long base, struct clk *clk);
++extern void mx6_cpu_regulator_init(void);
++extern int mx6q_sabreauto_init_pfuze100(u32 int_gpio);
+ #endif
+-- 
+1.7.7.4
+

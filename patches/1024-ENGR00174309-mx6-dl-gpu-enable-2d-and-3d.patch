@@ -1,0 +1,50 @@
+From 44c9c99701bca7c969022306fb0dbb6df938153c Mon Sep 17 00:00:00 2001
+From: Wu Guoxing <b39297@freescale.com>
+Date: Mon, 13 Feb 2012 12:16:32 +0800
+Subject: [PATCH 1024/2463] ENGR00174309:mx6/dl: gpu:enable 2d and 3d
+
+mx6dl do not have 3d shader core,
+and 2d core clk is using 3d shader clock.
+
+Signed-off-by: Wu Guoxing <b39297@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |   16 ++++++++++++----
+ 1 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 0be2167..d9531ef 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4337,10 +4337,13 @@ static int _clk_gpu2d_core_set_parent(struct clk *clk, struct clk *parent)
+ 	u32 reg = __raw_readl(MXC_CCM_CBCMR) &
+ 				~MXC_CCM_CBCMR_GPU2D_CLK_SEL_MASK;
+ 
+-	mux = _get_mux6(parent, &axi_clk, &pll3_usb_otg_main_clk,
+-		&pll2_pfd_352M, &pll2_pfd_400M, NULL, NULL);
+-	reg |= (mux << MXC_CCM_CBCMR_GPU2D_CLK_SEL_OFFSET);
+-	__raw_writel(reg, MXC_CCM_CBCMR);
++	/*on mx6dl, 2d core clock sources from 3d shader core clock*/
++	if (!cpu_is_mx6dl()) {
++		mux = _get_mux6(parent, &axi_clk, &pll3_usb_otg_main_clk,
++			&pll2_pfd_352M, &pll2_pfd_400M, NULL, NULL);
++		reg |= (mux << MXC_CCM_CBCMR_GPU2D_CLK_SEL_OFFSET);
++		__raw_writel(reg, MXC_CCM_CBCMR);
++	}
+ 
+ 	return 0;
+ }
+@@ -5199,6 +5202,11 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	clk_set_rate(&gpu3d_shader_clk, 594000000);
+ 	clk_set_parent(&gpu3d_core_clk[0], &mmdc_ch0_axi_clk[0]);
+ 	clk_set_rate(&gpu3d_core_clk[0], 528000000);
++	if (cpu_is_mx6dl()) {
++		/*on mx6dl, 2d core clock sources from 3d shader core clock*/
++		clk_set_parent(&gpu2d_core_clk[0], &gpu3d_shader_clk);
++		gpu2d_axi_clk.secondary = NULL;
++	}
+ 
+ 	/* PCLK camera - J5 */
+ 	clk_set_parent(&clko2_clk, &osc_clk);
+-- 
+1.7.7.4
+

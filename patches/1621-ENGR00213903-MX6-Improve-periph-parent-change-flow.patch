@@ -1,0 +1,133 @@
+From f0523b4a017a326c8f9e2ba9a4b686c500d61b63 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Mon, 18 Jun 2012 10:58:22 +0800
+Subject: [PATCH 1621/2463] ENGR00213903 [MX6]Improve periph parent change
+ flow
+
+When bus freq is changed, we need to update periph
+clk's parent, better to use clk_set_parent API instead
+of changing the parent directly.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/bus_freq.c    |   18 ++++--------------
+ arch/arm/mach-mx6/clock_mx6sl.c |    4 ++++
+ arch/arm/plat-mxc/clock.c       |   31 -------------------------------
+ 3 files changed, 8 insertions(+), 45 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index b573f09..9420283 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -100,16 +100,7 @@ static struct clk *periph_clk;
+ static struct clk *osc;
+ 
+ static struct delayed_work low_bus_freq_handler;
+-extern void update_usecount(struct clk *clk, bool flag);
+ 
+-static inline void update_periph_clk_parent(struct clk *new_parent)
+-{
+-	update_usecount(periph_clk->parent, false);
+-
+-	periph_clk->parent = new_parent;
+-
+-	update_usecount(periph_clk->parent, true);
+-}
+ static void reduce_bus_freq_handler(struct work_struct *work)
+ {
+ 	unsigned long reg;
+@@ -142,14 +133,13 @@ static void reduce_bus_freq_handler(struct work_struct *work)
+ 		clk_enable(pll2_400);
+ 		update_ddr_freq(50000000);
+ 		/* Make sure periph clk's parent also got updated */
+-		update_periph_clk_parent(pll2_200);
+-
++		clk_set_parent(periph_clk, pll2_200);
+ 		audio_bus_freq_mode = 1;
+ 		low_bus_freq_mode = 0;
+ 	} else {
+ 		update_ddr_freq(24000000);
+ 		/* Make sure periph clk's parent also got updated */
+-		update_periph_clk_parent(osc);
++		clk_set_parent(periph_clk, osc);
+ 		if (audio_bus_freq_mode)
+ 			clk_disable(pll2_400);
+ 		low_bus_freq_mode = 1;
+@@ -277,7 +267,7 @@ int set_high_bus_freq(int high_bus_freq)
+ 	if (high_bus_freq) {
+ 		update_ddr_freq(ddr_normal_rate);
+ 		/* Make sure periph clk's parent also got updated */
+-		update_periph_clk_parent(pll2);
++		clk_set_parent(periph_clk, pll2);
+ 		if (med_bus_freq_mode)
+ 			clk_disable(pll2_400);
+ 		high_bus_freq_mode = 1;
+@@ -286,7 +276,7 @@ int set_high_bus_freq(int high_bus_freq)
+ 		clk_enable(pll2_400);
+ 		update_ddr_freq(ddr_med_rate);
+ 		/* Make sure periph clk's parent also got updated */
+-		update_periph_clk_parent(pll2_400);
++		clk_set_parent(periph_clk, pll2_400);
+ 		high_bus_freq_mode = 0;
+ 		med_bus_freq_mode = 1;
+ 	}
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index e1a4e00..a223f45 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -464,6 +464,10 @@ static void _clk_pll_disable(struct clk *clk)
+ 	unsigned int reg;
+ 	void __iomem *pllbase;
+ 
++	if ((arm_needs_pll2_400) && (clk == &pll2_528_bus_main_clk))
++		return;
++
++
+ 	pllbase = _get_pll_base(clk);
+ 
+ 	reg = __raw_readl(pllbase);
+diff --git a/arch/arm/plat-mxc/clock.c b/arch/arm/plat-mxc/clock.c
+index a55b3fb..43d3337 100755
+--- a/arch/arm/plat-mxc/clock.c
++++ b/arch/arm/plat-mxc/clock.c
+@@ -209,37 +209,6 @@ int clk_get_usecount(struct clk *clk)
+ 
+ EXPORT_SYMBOL(clk_get_usecount);
+ 
+-/*!
+- * @brief Function to update the usage count for the requested clock.
+- *
+- * This function returns none.
+- *
+- * @param clk 	clk we want to update.
+- * @param flag 	Increase or decrease usecount.
+- *
+- * @return Returns none.
+- */
+-void update_usecount(struct clk *clk, bool flag)
+-{
+-	if (!flag) {
+-		if (clk_get_usecount(clk) > 1) {
+-			mutex_lock(&clocks_mutex);
+-			clk->usecount--;
+-			mutex_unlock(&clocks_mutex);
+-		} else
+-			clk_disable(clk);
+-	} else {
+-		if (clk_get_usecount(clk) < 1)
+-			clk_enable(clk);
+-		else {
+-			mutex_lock(&clocks_mutex);
+-			clk->usecount++;
+-			mutex_unlock(&clocks_mutex);
+-		}
+-	}
+-}
+-EXPORT_SYMBOL(update_usecount);
+-
+ /* Retrieve the *current* clock rate. If the clock itself
+  * does not provide a special calculation routine, ask
+  * its parent and so on, until one is able to return
+-- 
+1.7.7.4
+

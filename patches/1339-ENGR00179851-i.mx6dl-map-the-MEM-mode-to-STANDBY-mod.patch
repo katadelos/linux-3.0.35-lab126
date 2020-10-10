@@ -1,0 +1,36 @@
+From f00fa9a4ae5c0a28d616b1f858dfb470f3aab098 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Tue, 17 Apr 2012 19:08:00 +0800
+Subject: [PATCH 1339/2463] ENGR00179851: i.mx6dl: map the MEM mode to STANDBY
+ mode
+
+Due to i.mx6dl TO1.0(TKT094231), Suspend/resume cannot work
+stable under deep sleep mode(Dormant, MEM MODE) thus we need
+map the MEM mode to STANBY mode(ARM will not power off), this
+issue will be fixed on TO1.1
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx6/pm.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index 76a2c8d..0d611e2 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -293,6 +293,12 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 	}
+ 	mx6_suspend_store();
+ 
++	/* i.MX6dl TO1.0 TKT094231: can't support ARM_POWER_OFF mode */
++	if (state == PM_SUSPEND_MEM &&
++		(mx6dl_revision() == IMX_CHIP_REVISION_1_0)) {
++		state = PM_SUSPEND_STANDBY;
++	}
++
+ 	switch (state) {
+ 	case PM_SUSPEND_MEM:
+ 		gpu_power_down();
+-- 
+1.7.7.4
+

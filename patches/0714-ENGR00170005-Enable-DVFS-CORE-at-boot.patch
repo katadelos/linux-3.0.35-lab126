@@ -1,0 +1,41 @@
+From b3ad2db9c2a103c290adcc5b66d974705f498cf6 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Sun, 11 Dec 2011 00:12:37 -0600
+Subject: [PATCH 0714/2463] ENGR00170005: Enable DVFS-CORE at boot
+
+DVFS-CORE should be enabled at boot by default.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/plat-mxc/dvfs_core.c |    8 +++++++-
+ 1 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/dvfs_core.c b/arch/arm/plat-mxc/dvfs_core.c
+index 183a6dd..7721832 100755
+--- a/arch/arm/plat-mxc/dvfs_core.c
++++ b/arch/arm/plat-mxc/dvfs_core.c
+@@ -1075,6 +1075,12 @@ static int __init dvfs_init(void)
+ 
+ 	dvfs_core_is_active = 0;
+ 	printk(KERN_INFO "DVFS driver module loaded\n");
++
++	/* Enable DVFS by default. */
++	if (start_dvfs() != 0)
++		printk(KERN_ERR "Failed to start DVFS\n");
++	printk(KERN_INFO "DVFS driver Enabled\n");
++
+ 	return 0;
+ }
+ 
+@@ -1099,7 +1105,7 @@ static void __exit dvfs_cleanup(void)
+ 
+ }
+ 
+-module_init(dvfs_init);
++late_initcall(dvfs_init);
+ module_exit(dvfs_cleanup);
+ 
+ MODULE_AUTHOR("Freescale Semiconductor, Inc.");
+-- 
+1.7.7.4
+

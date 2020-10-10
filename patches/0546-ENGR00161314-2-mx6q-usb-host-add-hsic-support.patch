@@ -1,0 +1,92 @@
+From c04f384cc86d2b0d23395ed950d6effda312bd71 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Thu, 3 Nov 2011 14:13:12 +0800
+Subject: [PATCH 0546/2463] ENGR00161314-2 mx6q usb-host: add hsic support
+
+Device part
+
+Add HSIC run and HSIC phy's definition
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/host/Kconfig    |   13 ++++++++++++-
+ drivers/usb/host/ehci-arc.c |   12 ++++++++++++
+ drivers/usb/host/ehci-fsl.h |    1 +
+ 3 files changed, 25 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/usb/host/Kconfig b/drivers/usb/host/Kconfig
+index 11ee0f5..9e99765 100755
+--- a/drivers/usb/host/Kconfig
++++ b/drivers/usb/host/Kconfig
+@@ -77,6 +77,17 @@ config USB_EHCI_ARC_OTG
+ 	---help---
+ 	  Enable support for the USB OTG port in HS/FS Host mode.
+ 
++config USB_EHCI_ARC_HSIC
++	bool "Support HSIC Host controller for Freescale SoC"
++	depends on USB_EHCI_ARC && ARCH_MX6
++	default n
++	---help---
++	   Some Freescale processors have an HSIC featured controller,
++	   which supports EHCI host mode.
++
++	   Say "y" here to add support for this controller
++	   to the EHCI HCD driver.
++
+ config USB_STATIC_IRAM
+ 	bool "Use IRAM for USB"
+ 	depends on USB_EHCI_ARC
+@@ -507,7 +518,7 @@ config USB_SL811_HCD
+ 	help
+ 	  The SL811HS is a single-port USB controller that supports either
+ 	  host side or peripheral side roles.  Enable this option if your
+-	  board has this chip, and you want to use it as a host controller. 
++	  board has this chip, and you want to use it as a host controller.
+ 	  If unsure, say N.
+ 
+ 	  To compile this driver as a module, choose M here: the
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index c7e7839..9ab9531 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -283,6 +283,14 @@ int usb_hcd_fsl_probe(const struct hc_driver *driver,
+ 
+ 	fsl_platform_set_ahb_burst(hcd);
+ 	ehci_testmode_init(hcd_to_ehci(hcd));
++	/*
++	 * Only for HSIC host controller, let HSCI controller
++	 * connect with device, call it after EHCI initialization
++	 * finishes.
++	 */
++	if (pdata->hsic_post_ops)
++		pdata->hsic_post_ops();
++
+ 	ehci = hcd_to_ehci(hcd);
+ 	pdata->pm_command = ehci->command;
+ 	return retval;
+@@ -379,6 +387,10 @@ static void fsl_setup_phy(struct ehci_hcd *ehci,
+ 	case FSL_USB2_PHY_UTMI:
+ 		portsc |= PORT_PTS_UTMI;
+ 		break;
++		/* HSIC */
++	case FSL_USB2_PHY_HSIC:
++		portsc |= PORT_PTS_HSIC;
++		break;
+ 	case FSL_USB2_PHY_NONE:
+ 		break;
+ 	}
+diff --git a/drivers/usb/host/ehci-fsl.h b/drivers/usb/host/ehci-fsl.h
+index f4282a3..137c505 100755
+--- a/drivers/usb/host/ehci-fsl.h
++++ b/drivers/usb/host/ehci-fsl.h
+@@ -28,6 +28,7 @@
+ #define PORT_PTS_UTMI		(0<<30)
+ #define PORT_PTS_ULPI		(2<<30)
+ #define	PORT_PTS_SERIAL		(3<<30)
++#define	PORT_PTS_HSIC		(1<<25)
+ #define PORT_PTS_PTW		(1<<28)
+ #define PORT_PTS_PHCD		(1<<23)
+ #define FSL_SOC_USB_PORTSC2	0x188
+-- 
+1.7.7.4
+

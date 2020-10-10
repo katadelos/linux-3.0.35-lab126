@@ -1,0 +1,157 @@
+From 5ae709c84723071800c4539d7af431441ab2094a Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Sat, 28 Apr 2012 13:24:45 +0800
+Subject: [PATCH 1396/2463] ENGR00181194 IPUv3:Correct pixel clock definition
+ and register
+
+MX6Q has 2 IPUs, each IPU has 2 DIs, so there are totally 4
+different pixel clocks. This patch adds maximal pixel clock
+number from 2 to 4. Also, the patch fixes potential build
+warning caused by the overflow on ipu_lookups structure in case
+MXC_IPU_MAX_NUM is 1.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c |    4 +-
+ drivers/mxc/ipu3/ipu_disp.c   |   68 +++++++++++++++++++++++++++-------------
+ drivers/mxc/ipu3/ipu_prv.h    |   11 ++----
+ 3 files changed, 52 insertions(+), 31 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 61687ad..8826595 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -149,8 +149,8 @@ static int __devinit ipu_clk_setup_enable(struct ipu_soc *ipu,
+ 	}
+ 	dev_dbg(ipu->dev, "ipu_clk = %lu\n", clk_get_rate(ipu->ipu_clk));
+ 
+-	ipu->pixel_clk[0] = ipu_pixel_clk[0];
+-	ipu->pixel_clk[1] = ipu_pixel_clk[1];
++	ipu->pixel_clk[0] = ipu_pixel_clk[pdev->id][0];
++	ipu->pixel_clk[1] = ipu_pixel_clk[pdev->id][1];
+ 
+ 	ipu_lookups[pdev->id][0].clk = &ipu->pixel_clk[0];
+ 	ipu_lookups[pdev->id][1].clk = &ipu->pixel_clk[1];
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index d2fa65d..4a77439 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -174,44 +174,68 @@ static int _ipu_pixel_clk_set_parent(struct clk *clk, struct clk *parent)
+ #else
+ #define __INIT_CLK_DEBUG(n)
+ #endif
+-struct clk ipu_pixel_clk[] = {
++struct clk ipu_pixel_clk[MXC_IPU_MAX_NUM][MXC_DI_NUM_PER_IPU] = {
+ 	{
+-		__INIT_CLK_DEBUG(pixel_clk_0)
+-			.id = 0,
+-		.get_rate = _ipu_pixel_clk_get_rate,
+-		.set_rate = _ipu_pixel_clk_set_rate,
+-		.round_rate = _ipu_pixel_clk_round_rate,
+-		.set_parent = _ipu_pixel_clk_set_parent,
+-		.enable = _ipu_pixel_clk_enable,
+-		.disable = _ipu_pixel_clk_disable,
++		{
++		 __INIT_CLK_DEBUG(ipu1_pixel_clk_0)
++		 .id = 0,
++		 .get_rate = _ipu_pixel_clk_get_rate,
++		 .set_rate = _ipu_pixel_clk_set_rate,
++		 .round_rate = _ipu_pixel_clk_round_rate,
++		 .set_parent = _ipu_pixel_clk_set_parent,
++		 .enable = _ipu_pixel_clk_enable,
++		 .disable = _ipu_pixel_clk_disable,
++		},
++		{
++		 __INIT_CLK_DEBUG(ipu1_pixel_clk_1)
++		 .id = 1,
++		 .get_rate = _ipu_pixel_clk_get_rate,
++		 .set_rate = _ipu_pixel_clk_set_rate,
++		 .round_rate = _ipu_pixel_clk_round_rate,
++		 .set_parent = _ipu_pixel_clk_set_parent,
++		 .enable = _ipu_pixel_clk_enable,
++		 .disable = _ipu_pixel_clk_disable,
++		},
+ 	},
+ 	{
+-		__INIT_CLK_DEBUG(pixel_clk_1)
+-			.id = 1,
+-		.get_rate = _ipu_pixel_clk_get_rate,
+-		.set_rate = _ipu_pixel_clk_set_rate,
+-		.round_rate = _ipu_pixel_clk_round_rate,
+-		.set_parent = _ipu_pixel_clk_set_parent,
+-		.enable = _ipu_pixel_clk_enable,
+-		.disable = _ipu_pixel_clk_disable,
++		{
++		 __INIT_CLK_DEBUG(ipu2_pixel_clk_0)
++		 .id = 0,
++		 .get_rate = _ipu_pixel_clk_get_rate,
++		 .set_rate = _ipu_pixel_clk_set_rate,
++		 .round_rate = _ipu_pixel_clk_round_rate,
++		 .set_parent = _ipu_pixel_clk_set_parent,
++		 .enable = _ipu_pixel_clk_enable,
++		 .disable = _ipu_pixel_clk_disable,
++		},
++		{
++		 __INIT_CLK_DEBUG(ipu2_pixel_clk_1)
++		 .id = 1,
++		 .get_rate = _ipu_pixel_clk_get_rate,
++		 .set_rate = _ipu_pixel_clk_set_rate,
++		 .round_rate = _ipu_pixel_clk_round_rate,
++		 .set_parent = _ipu_pixel_clk_set_parent,
++		 .enable = _ipu_pixel_clk_enable,
++		 .disable = _ipu_pixel_clk_disable,
++		},
+ 	},
+ };
+ 
+-struct clk_lookup ipu_lookups[MXC_IPU_MAX_NUM][2] = {
++struct clk_lookup ipu_lookups[MXC_IPU_MAX_NUM][MXC_DI_NUM_PER_IPU] = {
+ 	{
+ 		{
+-			.con_id = "pixel_clk_0",
++			.con_id = "ipu1_pixel_clk_0",
+ 		},
+ 		{
+-			.con_id = "pixel_clk_1",
++			.con_id = "ipu1_pixel_clk_1",
+ 		},
+ 	},
+ 	{
+ 		{
+-			.con_id = "pixel_clk_0",
++			.con_id = "ipu2_pixel_clk_0",
+ 		},
+ 		{
+-			.con_id = "pixel_clk_1",
++			.con_id = "ipu2_pixel_clk_1",
+ 		},
+ 	},
+ };
+diff --git a/drivers/mxc/ipu3/ipu_prv.h b/drivers/mxc/ipu3/ipu_prv.h
+index 526a2c0..aed8db8 100644
+--- a/drivers/mxc/ipu3/ipu_prv.h
++++ b/drivers/mxc/ipu3/ipu_prv.h
+@@ -20,16 +20,13 @@
+ #include <linux/interrupt.h>
+ #include <linux/fsl_devices.h>
+ 
+-#ifdef CONFIG_MXC_IPU_V3H
+-#define MXC_IPU_MAX_NUM	2
+-#else
+-#define MXC_IPU_MAX_NUM	1
+-#endif
++#define MXC_IPU_MAX_NUM		2
++#define MXC_DI_NUM_PER_IPU	2
+ 
+ /* Globals */
+ extern int dmfc_type_setup;
+-extern struct clk ipu_pixel_clk[];
+-extern struct clk_lookup ipu_lookups[MXC_IPU_MAX_NUM][2];
++extern struct clk ipu_pixel_clk[MXC_IPU_MAX_NUM][MXC_DI_NUM_PER_IPU];
++extern struct clk_lookup ipu_lookups[MXC_IPU_MAX_NUM][MXC_DI_NUM_PER_IPU];
+ 
+ #define IDMA_CHAN_INVALID	0xFF
+ #define HIGH_RESOLUTION_WIDTH	1024
+-- 
+1.7.7.4
+

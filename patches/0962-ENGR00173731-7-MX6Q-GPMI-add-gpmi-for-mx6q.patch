@@ -1,0 +1,175 @@
+From 3771173e894ff38a4ad913d97bddb66b7741ee1a Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Wed, 1 Feb 2012 16:14:55 +0800
+Subject: [PATCH 0962/2463] ENGR00173731-7 MX6Q/GPMI : add gpmi for mx6q
+
+add gpmi support to mx6q for the imx_3.0.15.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/mtd/nand/Kconfig               |    2 +-
+ drivers/mtd/nand/gpmi-nand/bch-regs.h  |   44 ++++++++++++++++++++++++--------
+ drivers/mtd/nand/gpmi-nand/gpmi-lib.c  |   11 ++++---
+ drivers/mtd/nand/gpmi-nand/gpmi-nand.c |    5 +++-
+ drivers/mtd/nand/gpmi-nand/gpmi-nand.h |    2 +
+ 5 files changed, 46 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/mtd/nand/Kconfig b/drivers/mtd/nand/Kconfig
+index 4304e7d..2202ab6 100644
+--- a/drivers/mtd/nand/Kconfig
++++ b/drivers/mtd/nand/Kconfig
+@@ -425,7 +425,7 @@ config MTD_NAND_NANDSIM
+ 
+ config MTD_NAND_GPMI_NAND
+         bool "GPMI NAND Flash Controller driver"
+-        depends on MTD_NAND && (SOC_IMX23 || SOC_IMX28)
++        depends on MTD_NAND && (SOC_IMX23 || SOC_IMX28 || SOC_IMX6Q)
+ 	select MTD_PARTITIONS
+ 	select MTD_CMDLINE_PARTS
+         help
+diff --git a/drivers/mtd/nand/gpmi-nand/bch-regs.h b/drivers/mtd/nand/gpmi-nand/bch-regs.h
+index 4effb8c..04acf64 100644
+--- a/drivers/mtd/nand/gpmi-nand/bch-regs.h
++++ b/drivers/mtd/nand/gpmi-nand/bch-regs.h
+@@ -1,7 +1,7 @@
+ /*
+  * Freescale GPMI NAND Flash Driver
+  *
+- * Copyright 2008-2011 Freescale Semiconductor, Inc.
++ * Copyright 2008-2012 Freescale Semiconductor, Inc.
+  * Copyright 2008 Embedded Alley Solutions, Inc.
+  *
+  * This program is free software; you can redistribute it and/or modify
+@@ -51,15 +51,26 @@
+ 
+ #define BP_BCH_FLASH0LAYOUT0_ECC0		12
+ #define BM_BCH_FLASH0LAYOUT0_ECC0	(0xf << BP_BCH_FLASH0LAYOUT0_ECC0)
+-#define BF_BCH_FLASH0LAYOUT0_ECC0(v)		\
+-	(((v) << BP_BCH_FLASH0LAYOUT0_ECC0) & BM_BCH_FLASH0LAYOUT0_ECC0)
++#define MX6Q_BP_BCH_FLASH0LAYOUT0_ECC0		11
++#define MX6Q_BM_BCH_FLASH0LAYOUT0_ECC0	(0x1f << MX6Q_BP_BCH_FLASH0LAYOUT0_ECC0)
++#define BF_BCH_FLASH0LAYOUT0_ECC0(v, x)				\
++	(GPMI_IS_MX6Q(x)					\
++		? (((v) << MX6Q_BP_BCH_FLASH0LAYOUT0_ECC0)	\
++			& MX6Q_BM_BCH_FLASH0LAYOUT0_ECC0)	\
++		: (((v) << BP_BCH_FLASH0LAYOUT0_ECC0)		\
++			& BM_BCH_FLASH0LAYOUT0_ECC0)		\
++	)
+ 
+ #define BP_BCH_FLASH0LAYOUT0_DATA0_SIZE		0
+ #define BM_BCH_FLASH0LAYOUT0_DATA0_SIZE		\
+ 			(0xfff << BP_BCH_FLASH0LAYOUT0_DATA0_SIZE)
+-#define BF_BCH_FLASH0LAYOUT0_DATA0_SIZE(v)	\
+-	(((v) << BP_BCH_FLASH0LAYOUT0_DATA0_SIZE)\
+-					 & BM_BCH_FLASH0LAYOUT0_DATA0_SIZE)
++#define MX6Q_BM_BCH_FLASH0LAYOUT0_DATA0_SIZE	\
++			(0x3ff << BP_BCH_FLASH0LAYOUT0_DATA0_SIZE)
++#define BF_BCH_FLASH0LAYOUT0_DATA0_SIZE(v, x)				\
++	(GPMI_IS_MX6Q(x)						\
++		? (((v) >> 2) & MX6Q_BM_BCH_FLASH0LAYOUT0_DATA0_SIZE)	\
++		: ((v) & BM_BCH_FLASH0LAYOUT0_DATA0_SIZE)		\
++	)
+ 
+ #define HW_BCH_FLASH0LAYOUT1			0x00000090
+ 
+@@ -72,13 +83,24 @@
+ 
+ #define BP_BCH_FLASH0LAYOUT1_ECCN		12
+ #define BM_BCH_FLASH0LAYOUT1_ECCN	(0xf << BP_BCH_FLASH0LAYOUT1_ECCN)
+-#define BF_BCH_FLASH0LAYOUT1_ECCN(v)		\
+-	(((v) << BP_BCH_FLASH0LAYOUT1_ECCN) & BM_BCH_FLASH0LAYOUT1_ECCN)
++#define MX6Q_BP_BCH_FLASH0LAYOUT1_ECCN		11
++#define MX6Q_BM_BCH_FLASH0LAYOUT1_ECCN	(0x1f << MX6Q_BP_BCH_FLASH0LAYOUT1_ECCN)
++#define BF_BCH_FLASH0LAYOUT1_ECCN(v, x)				\
++	(GPMI_IS_MX6Q(x)					\
++		? (((v) << MX6Q_BP_BCH_FLASH0LAYOUT1_ECCN)	\
++			& MX6Q_BM_BCH_FLASH0LAYOUT1_ECCN)	\
++		: (((v) << BP_BCH_FLASH0LAYOUT1_ECCN)		\
++			& BM_BCH_FLASH0LAYOUT1_ECCN)		\
++	)
+ 
+ #define BP_BCH_FLASH0LAYOUT1_DATAN_SIZE		0
+ #define BM_BCH_FLASH0LAYOUT1_DATAN_SIZE		\
+ 			(0xfff << BP_BCH_FLASH0LAYOUT1_DATAN_SIZE)
+-#define BF_BCH_FLASH0LAYOUT1_DATAN_SIZE(v)	\
+-	(((v) << BP_BCH_FLASH0LAYOUT1_DATAN_SIZE) \
+-					 & BM_BCH_FLASH0LAYOUT1_DATAN_SIZE)
++#define MX6Q_BM_BCH_FLASH0LAYOUT1_DATAN_SIZE	\
++			(0x3ff << BP_BCH_FLASH0LAYOUT1_DATAN_SIZE)
++#define BF_BCH_FLASH0LAYOUT1_DATAN_SIZE(v, x)				\
++	(GPMI_IS_MX6Q(x)						\
++		? (((v) >> 2) & MX6Q_BM_BCH_FLASH0LAYOUT1_DATAN_SIZE)	\
++		: ((v) & BM_BCH_FLASH0LAYOUT1_DATAN_SIZE)		\
++	)
+ #endif
+diff --git a/drivers/mtd/nand/gpmi-nand/gpmi-lib.c b/drivers/mtd/nand/gpmi-nand/gpmi-lib.c
+index a3897a3..6985357 100644
+--- a/drivers/mtd/nand/gpmi-nand/gpmi-lib.c
++++ b/drivers/mtd/nand/gpmi-nand/gpmi-lib.c
+@@ -223,13 +223,13 @@ int bch_set_geometry(struct gpmi_nand_data *this)
+ 	/* Configure layout 0. */
+ 	writel(BF_BCH_FLASH0LAYOUT0_NBLOCKS(block_count)
+ 			| BF_BCH_FLASH0LAYOUT0_META_SIZE(metadata_size)
+-			| BF_BCH_FLASH0LAYOUT0_ECC0(ecc_strength)
+-			| BF_BCH_FLASH0LAYOUT0_DATA0_SIZE(block_size),
++			| BF_BCH_FLASH0LAYOUT0_ECC0(ecc_strength, this)
++			| BF_BCH_FLASH0LAYOUT0_DATA0_SIZE(block_size, this),
+ 			r->bch_regs + HW_BCH_FLASH0LAYOUT0);
+ 
+ 	writel(BF_BCH_FLASH0LAYOUT1_PAGE_SIZE(page_size)
+-			| BF_BCH_FLASH0LAYOUT1_ECCN(ecc_strength)
+-			| BF_BCH_FLASH0LAYOUT1_DATAN_SIZE(block_size),
++			| BF_BCH_FLASH0LAYOUT1_ECCN(ecc_strength, this)
++			| BF_BCH_FLASH0LAYOUT1_DATAN_SIZE(block_size, this),
+ 			r->bch_regs + HW_BCH_FLASH0LAYOUT1);
+ 
+ 	/* Set *all* chip selects to use layout 0. */
+@@ -803,7 +803,8 @@ int gpmi_is_ready(struct gpmi_nand_data *this, unsigned chip)
+ 	if (GPMI_IS_MX23(this)) {
+ 		mask = MX23_BM_GPMI_DEBUG_READY0 << chip;
+ 		reg = readl(r->gpmi_regs + HW_GPMI_DEBUG);
+-	} else if (GPMI_IS_MX28(this)) {
++	} else if (GPMI_IS_MX28(this) || GPMI_IS_MX6Q(this)) {
++		/* MX28 shares the same R/B register as MX6Q. */
+ 		mask = MX28_BF_GPMI_STAT_READY_BUSY(1 << chip);
+ 		reg = readl(r->gpmi_regs + HW_GPMI_STAT);
+ 	} else
+diff --git a/drivers/mtd/nand/gpmi-nand/gpmi-nand.c b/drivers/mtd/nand/gpmi-nand/gpmi-nand.c
+index ff61e35..e7edca6 100644
+--- a/drivers/mtd/nand/gpmi-nand/gpmi-nand.c
++++ b/drivers/mtd/nand/gpmi-nand/gpmi-nand.c
+@@ -1,7 +1,7 @@
+ /*
+  * Freescale GPMI NAND Flash Driver
+  *
+- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2010-2012 Freescale Semiconductor, Inc.
+  * Copyright (C) 2008 Embedded Alley Solutions, Inc.
+  *
+  * This program is free software; you can redistribute it and/or modify
+@@ -1582,6 +1582,9 @@ static const struct platform_device_id gpmi_ids[] = {
+ 	}, {
+ 		.name = "imx28-gpmi-nand",
+ 		.driver_data = IS_MX28,
++	}, {
++		.name = "imx6q-gpmi-nand",
++		.driver_data = IS_MX6Q,
+ 	}, {},
+ };
+ 
+diff --git a/drivers/mtd/nand/gpmi-nand/gpmi-nand.h b/drivers/mtd/nand/gpmi-nand/gpmi-nand.h
+index b4a426a..06a072bf 100644
+--- a/drivers/mtd/nand/gpmi-nand/gpmi-nand.h
++++ b/drivers/mtd/nand/gpmi-nand/gpmi-nand.h
+@@ -268,6 +268,8 @@ extern int gpmi_read_page(struct gpmi_nand_data *,
+ /* Use the platform_id to distinguish different Archs. */
+ #define IS_MX23			0x1
+ #define IS_MX28			0x2
++#define IS_MX6Q			0x8
+ #define GPMI_IS_MX23(x)		((x)->pdev->id_entry->driver_data == IS_MX23)
+ #define GPMI_IS_MX28(x)		((x)->pdev->id_entry->driver_data == IS_MX28)
++#define GPMI_IS_MX6Q(x)		((x)->pdev->id_entry->driver_data == IS_MX6Q)
+ #endif
+-- 
+1.7.7.4
+

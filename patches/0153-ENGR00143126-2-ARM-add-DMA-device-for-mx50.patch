@@ -1,0 +1,137 @@
+From f4be829edcbcf71bba558c27f983917c960c98e7 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Wed, 27 Apr 2011 10:29:31 +0800
+Subject: [PATCH 0153/2463] ENGR00143126-2 ARM: add DMA device for mx50
+
+add dma device for mx50.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx50_rdp.c              |    1 +
+ arch/arm/mach-mx5/clock_mx50.c                  |    2 +-
+ arch/arm/mach-mx5/devices-imx50.h               |    3 ++
+ arch/arm/plat-mxc/devices/Kconfig               |    3 ++
+ arch/arm/plat-mxc/devices/Makefile              |    1 +
+ arch/arm/plat-mxc/devices/platform-dma.c        |   35 +++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h |    5 +++
+ 7 files changed, 49 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx50_rdp.c b/arch/arm/mach-mx5/board-mx50_rdp.c
+index bbaeef7..759b128 100755
+--- a/arch/arm/mach-mx5/board-mx50_rdp.c
++++ b/arch/arm/mach-mx5/board-mx50_rdp.c
+@@ -259,6 +259,7 @@ static void __init mx50_rdp_board_init(void)
+ 
+ 	imx50_add_cspi(3, &mx50_rdp_spi_pdata);
+ 
++	imx50_add_dma();
+ 	imx50_add_imx_uart(0, NULL);
+ 	imx50_add_imx_uart(1, NULL);
+ 	imx50_add_srtc();
+diff --git a/arch/arm/mach-mx5/clock_mx50.c b/arch/arm/mach-mx5/clock_mx50.c
+index 48f9de5..ff3b0eb 100755
+--- a/arch/arm/mach-mx5/clock_mx50.c
++++ b/arch/arm/mach-mx5/clock_mx50.c
+@@ -3332,7 +3332,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "dcp_clk", dcp_clk),
+ 	_REGISTER_CLOCK(NULL, "ocotp_ctrl_apb", ocotp_clk),
+ 	_REGISTER_CLOCK(NULL, "ocram_clk", ocram_clk),
+-	_REGISTER_CLOCK(NULL, "apbh_dma_clk", apbh_dma_clk),
++	_REGISTER_CLOCK("mxs-dma-apbh",	NULL, apbh_dma_clk),
+ 	_REGISTER_CLOCK(NULL, "sys_clk", sys_clk),
+ 	_REGISTER_CLOCK(NULL, "elcdif_pix", elcdif_pix_clk),
+ 	_REGISTER_CLOCK(NULL, "display_axi", display_axi_clk),
+diff --git a/arch/arm/mach-mx5/devices-imx50.h b/arch/arm/mach-mx5/devices-imx50.h
+index 18c9609..cf8af0e 100755
+--- a/arch/arm/mach-mx5/devices-imx50.h
++++ b/arch/arm/mach-mx5/devices-imx50.h
+@@ -29,6 +29,9 @@ extern const struct imx_srtc_data imx50_imx_srtc_data __initconst;
+ #define imx50_add_srtc()	\
+ 	imx_add_srtc(&imx50_imx_srtc_data)
+ 
++extern const struct imx_dma_data imx50_dma_data __initconst;
++#define imx50_add_dma()	imx_add_dma(&imx50_dma_data);
++
+ extern const struct imx_fec_data imx50_fec_data;
+ #define imx50_add_fec(pdata)	\
+ 	imx_add_fec(&imx50_fec_data, pdata)
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index d3b1350..b146fc1 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -1,3 +1,6 @@
++config IMX_HAVE_PLATFORM_DMA
++	bool
++
+ config IMX_HAVE_PLATFORM_FEC
+ 	bool
+ 	default y if ARCH_MX25 || SOC_IMX27 || SOC_IMX35 || SOC_IMX51 || SOC_IMX53
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index e3dd8d8..149b673 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -1,3 +1,4 @@
++obj-$(CONFIG_IMX_HAVE_PLATFORM_DMA) += platform-dma.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_FEC) += platform-fec.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_FLEXCAN) += platform-flexcan.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_FSL_USB2_UDC) += platform-fsl-usb2-udc.o
+diff --git a/arch/arm/plat-mxc/devices/platform-dma.c b/arch/arm/plat-mxc/devices/platform-dma.c
+new file mode 100644
+index 0000000..7a73c23
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-dma.c
+@@ -0,0 +1,35 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it under
++ * the terms of the GNU General Public License version 2 as published by the
++ * Free Software Foundation.
++ */
++#include <linux/compiler.h>
++#include <linux/err.h>
++#include <linux/init.h>
++
++#include <mach/mx50.h>
++#include <mach/devices-common.h>
++
++#ifdef CONFIG_SOC_IMX50
++const struct imx_dma_data imx50_dma_data __initconst = {
++	.iobase = MX50_APBHDMA_BASE_ADDR,
++};
++#endif
++
++struct platform_device *__init imx_add_dma(
++			const struct imx_dma_data *data)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + SZ_8K - 1,
++			.flags = IORESOURCE_MEM,
++		},
++	};
++
++	return imx_add_platform_device_dmamask("mxs-dma-apbh", -1,
++				res, ARRAY_SIZE(res), NULL, 0,
++				DMA_BIT_MASK(32));
++}
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 56f26ac..c62f7b7 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -24,6 +24,11 @@ static inline struct platform_device *imx_add_platform_device(
+ 			name, id, res, num_resources, data, size_data, 0);
+ }
+ 
++struct imx_dma_data {
++	resource_size_t iobase;
++};
++struct platform_device *__init imx_add_dma(const struct imx_dma_data *data);
++
+ #include <linux/fec.h>
+ struct imx_fec_data {
+ 	resource_size_t iobase;
+-- 
+1.7.7.4
+

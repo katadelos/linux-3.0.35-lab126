@@ -1,0 +1,69 @@
+From 517bf457e37bcfc55962ffce4adc61533477c799 Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Tue, 10 Jul 2012 16:24:34 +0800
+Subject: [PATCH 1764/2463] ENGR00216270-1 MXC EDID add HDMI VSDB variable
+
+Define more variable in struct mxc_edid_cfg for HDMI VSDB.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ arch/arm/plat-mxc/include/mach/mxc_edid.h |   26 +++++++++++++++++++++++++-
+ 1 files changed, 25 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/include/mach/mxc_edid.h b/arch/arm/plat-mxc/include/mach/mxc_edid.h
+index 3aa1cc2..38bad6b 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc_edid.h
++++ b/arch/arm/plat-mxc/include/mach/mxc_edid.h
+@@ -51,6 +51,13 @@ enum cea_audio_coding_types {
+ 	AUDIO_CODING_TYPE_RESERVED		= 15,
+ };
+ 
++struct mxc_hdmi_3d_format {
++	unsigned char vic_order_2d;
++	unsigned char struct_3d;
++	unsigned char detail_3d;
++	unsigned char reserved;
++};
++
+ struct mxc_edid_cfg {
+ 	bool cea_underscan;
+ 	bool cea_basicaudio;
+@@ -59,17 +66,34 @@ struct mxc_edid_cfg {
+ 	bool hdmi_cap;
+ 
+ 	/*VSD*/
++	bool vsd_support_ai;
+ 	bool vsd_dc_48bit;
+ 	bool vsd_dc_36bit;
+ 	bool vsd_dc_30bit;
+ 	bool vsd_dc_y444;
+ 	bool vsd_dvi_dual;
+ 
++	bool vsd_cnc0;
++	bool vsd_cnc1;
++	bool vsd_cnc2;
++	bool vsd_cnc3;
++
++	u8 vsd_video_latency;
++	u8 vsd_audio_latency;
++	u8 vsd_I_video_latency;
++	u8 vsd_I_audio_latency;
++
++	u8 physical_address[4];
++	u8 hdmi_vic[64];
++	struct mxc_hdmi_3d_format hdmi_3d_format[64];
++	u16 hdmi_3d_mask_all;
++	u16 hdmi_3d_struct_all;
++	u32 vsd_max_tmdsclk_rate;
++
+ 	u8 max_channels;
+ 	u8 sample_sizes;
+ 	u8 sample_rates;
+ 	u8 speaker_alloc;
+-	u8 physical_address[4];
+ };
+ 
+ int mxc_edid_var_to_vic(struct fb_var_screeninfo *var);
+-- 
+1.7.7.4
+

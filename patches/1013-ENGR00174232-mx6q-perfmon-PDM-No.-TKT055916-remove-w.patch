@@ -1,0 +1,56 @@
+From a5ab0ea019aed35b62b5b12c14e9f629e572a6ba Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Fri, 10 Feb 2012 17:06:21 +0800
+Subject: [PATCH 1013/2463] ENGR00174232 [mx6q perfmon]PDM No. TKT055916:
+ remove workaround for TO1.1
+
+remove the workaround
+For TO1.0: bit16 of GPR11 must be set to enable perfmon
+For TO1.1 and later: bit0 of GPR11 is enable bit for perfmon.
+                     set 1/0 to enable/disable perfmon
+
+add workaround for mx6dl
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ arch/arm/plat-mxc/devices/platform-imx-perfmon.c |   12 +++++++-----
+ 1 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-perfmon.c b/arch/arm/plat-mxc/devices/platform-imx-perfmon.c
+index 25d1bf5..518322a 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-perfmon.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-perfmon.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -86,8 +86,11 @@ static void platform_perfmon_init(void)
+ 	if (init)
+ 		return;
+ 
+-	/* GPR11 bit[16] is the clock enable bit for perfmon */
+-	mxc_iomux_set_gpr_register(11, 16, 1, 1);
++	if (mx6q_revision() == IMX_CHIP_REVISION_1_0)
++		/* GPR11 bit[16] must be set for TO1.0, it's a bug */
++		mxc_iomux_set_gpr_register(11, 16, 1, 1);
++
++	mxc_iomux_set_gpr_register(11, 0, 1, 1);
+ 	init = true;
+ }
+ 
+@@ -96,8 +99,7 @@ static void platform_perfmon_exit(void)
+ 	if (!init)
+ 		return;
+ 
+-	/* GPR11 bit[16] is the clock enable bit for perfmon */
+-	mxc_iomux_set_gpr_register(11, 16, 1, 0);
++	mxc_iomux_set_gpr_register(11, 0, 1, 0);
+ 	init = false;
+ }
+ 
+-- 
+1.7.7.4
+

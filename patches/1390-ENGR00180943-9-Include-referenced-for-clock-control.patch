@@ -1,0 +1,75 @@
+From 0837cf8e604268aac247b565c0787d1185dbd56e Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Wed, 18 Apr 2012 13:50:46 -0700
+Subject: [PATCH 1390/2463] ENGR00180943-9: Include referenced for clock
+ control
+
+Include referenced for clock control,
+and define "empty" IRQ function that's not provided on ARM platforms.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+---
+ drivers/crypto/caam/intern.h |   28 +++++++++++++++++++++++++---
+ 1 files changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/crypto/caam/intern.h b/drivers/crypto/caam/intern.h
+index a34be01..19e4f25 100644
+--- a/drivers/crypto/caam/intern.h
++++ b/drivers/crypto/caam/intern.h
+@@ -2,7 +2,7 @@
+  * CAAM/SEC 4.x driver backend
+  * Private/internal definitions between modules
+  *
+- * Copyright 2008-2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2008-2012 Freescale Semiconductor, Inc.
+  *
+  */
+ 
+@@ -26,6 +26,23 @@
+ #define JOBR_INTC_COUNT_THLD 0
+ #endif
+ 
++#ifndef CONFIG_OF
++#define JR_IRQRES_NAME_ROOT "irq_jr"
++#define JR_MEMRES_NAME_ROOT "offset_jr"
++#endif
++
++#ifdef CONFIG_ARM
++/*
++ * FIXME: ARM tree doesn't seem to provide this, ergo it seems to be
++ * in "platform limbo". Find a better place, perhaps.
++ */
++static inline void irq_dispose_mapping(unsigned int virq)
++{
++	return;
++}
++#endif
++
++
+ /*
+  * Storage for tracking each in-process entry moving across a ring
+  * Each entry on an output ring needs one of these
+@@ -91,6 +108,10 @@ struct caam_drv_private {
+ 	/* list of registered crypto algorithms (mk generic context handle?) */
+ 	struct list_head alg_list;
+ 
++#ifdef CONFIG_ARM
++	struct clk *caam_clk;
++#endif
++
+ 	/*
+ 	 * debugfs entries for developer view into driver/device
+ 	 * variables at runtime.
+@@ -108,6 +129,7 @@ struct caam_drv_private {
+ #endif
+ };
+ 
+-void caam_jr_algapi_init(struct device *dev);
+-void caam_jr_algapi_remove(struct device *dev);
++void caam_algapi_shutdown(struct platform_device *pdev);
++int caam_algapi_startup(struct platform_device *pdev);
++
+ #endif /* INTERN_H */
+-- 
+1.7.7.4
+

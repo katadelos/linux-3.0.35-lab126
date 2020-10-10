@@ -1,0 +1,32 @@
+From 4b12bfea5b8df8b1b3d8155246989ab9fd6e91f5 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Thu, 1 Sep 2011 09:55:11 +0800
+Subject: [PATCH 0382/2463] ENGR00155718 [MX6]CPUs hotplug sometimes fail
+
+Sometimes when system very busy,hotplug may fail
+because CPU0 has no chance to kill secondary CPUs
+from hardware,secondary CPUs keep enter/exit wfi
+,and we have a printk after wfi,that makes CPU0
+has no chance to kill secondary CPUs,we should
+remove this printk.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/plat_hotplug.c |    1 -
+ 1 files changed, 0 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/plat_hotplug.c b/arch/arm/mach-mx6/plat_hotplug.c
+index 67e8196..4ae4676 100644
+--- a/arch/arm/mach-mx6/plat_hotplug.c
++++ b/arch/arm/mach-mx6/plat_hotplug.c
+@@ -84,7 +84,6 @@ void platform_cpu_die(unsigned int cpu)
+ 		 * Execute WFI
+ 		 */
+ 		cpu_do_idle();
+-		printk(KERN_INFO "CPU%u: spurious wakeup call\n", cpu);
+ 	}
+ }
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,37 @@
+From 54fb546b938d0549a1e39c303c48ab1f8369c19d Mon Sep 17 00:00:00 2001
+From: Alan Tull <alan.tull@freescale.com>
+Date: Thu, 20 Oct 2011 10:51:55 -0500
+Subject: [PATCH 0476/2463] ENGR00139265-1 spdif capture gets clock from spdif
+ stream
+
+The S/PDIF block's DPLL recovers the clock from the input
+bitstream.  So S/PDIF capture rate is not dependent on
+transmit clocks available.
+
+Signed-off-by: Alan Tull <alan.tull@freescale.com>
+---
+ sound/soc/codecs/mxc_spdif.c |    8 +++-----
+ 1 files changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/sound/soc/codecs/mxc_spdif.c b/sound/soc/codecs/mxc_spdif.c
+index fbcd754..3369e3b 100644
+--- a/sound/soc/codecs/mxc_spdif.c
++++ b/sound/soc/codecs/mxc_spdif.c
+@@ -1167,11 +1167,9 @@ static int __devinit mxc_spdif_probe(struct platform_device *pdev)
+ 		mxc_spdif_codec_dai.capture.channels_min = 2;
+ 		mxc_spdif_codec_dai.capture.channels_max = 2;
+ 
+-		if (plat_data->spdif_clk_44100 >= 0)
+-			mxc_spdif_codec_dai.capture.rates |= SNDRV_PCM_RATE_44100;
+-		if (plat_data->spdif_clk_48000 >= 0)
+-			mxc_spdif_codec_dai.capture.rates |= SNDRV_PCM_RATE_32000 |
+-							     SNDRV_PCM_RATE_48000;
++		/* rx clock is recovered from audio stream, so it is not
++		   dependent on tx clocks available */
++		mxc_spdif_codec_dai.capture.rates = MXC_SPDIF_RATES_CAPTURE;
+ 
+ 		mxc_spdif_codec_dai.capture.formats = MXC_SPDIF_FORMATS_CAPTURE;
+ 	}
+-- 
+1.7.7.4
+

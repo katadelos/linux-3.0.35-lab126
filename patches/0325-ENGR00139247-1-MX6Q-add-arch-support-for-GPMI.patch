@@ -1,0 +1,470 @@
+From 7e470e37891ba86fcdb2aa01d8da926746dd15ed Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Thu, 21 Jul 2011 17:24:29 +0800
+Subject: [PATCH 0325/2463] ENGR00139247-1 MX6Q: add arch support for GPMI
+
+add the arch code for GPMI.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c                         |   14 ++-
+ arch/arm/mach-mx6/devices-imx6q.h                 |    2 +
+ arch/arm/mach-mx6/system.c                        |   92 +++++++++++++++++++++
+ arch/arm/plat-mxc/devices/platform-imx-gpmi-nfc.c |   43 ++++++++++
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h       |   42 +++++----
+ arch/arm/plat-mxc/include/mach/mx6.h              |   12 +++
+ 6 files changed, 181 insertions(+), 24 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index aaf61b1..74aa0fb 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -3786,10 +3786,11 @@ static struct clk gpu3d_shader_clk = {
+ 	.round_rate = _clk_gpu3d_shader_round_rate,
+ };
+ 
++/* set the parent by the ipcg table */
+ static struct clk gpmi_nfc_clk[] = {
+ 	{	/* gpmi_io_clk */
+ 	__INIT_CLK_DEBUG(gpmi_io_clk)
+-	.parent = &osc_clk,
++	.parent = &enfc_clk,
+ 	.secondary = &gpmi_nfc_clk[1],
+ 	.enable = _clk_enable,
+ 	.enable_reg = MXC_CCM_CCGR4,
+@@ -3798,7 +3799,7 @@ static struct clk gpmi_nfc_clk[] = {
+ 	},
+ 	{	/* gpmi_apb_clk */
+ 	__INIT_CLK_DEBUG(gpmi_apb_clk)
+-	.parent = &apbh_dma_clk,
++	.parent = &usdhc3_clk,
+ 	.secondary = &gpmi_nfc_clk[2],
+ 	.enable = _clk_enable,
+ 	.enable_reg = MXC_CCM_CCGR4,
+@@ -3807,7 +3808,7 @@ static struct clk gpmi_nfc_clk[] = {
+ 	},
+ 	{	/* bch_clk */
+ 	__INIT_CLK_DEBUG(gpmi_bch_clk)
+-	.parent = &osc_clk,
++	.parent = &usdhc4_clk,
+ 	.secondary = &gpmi_nfc_clk[3],
+ 	.enable = _clk_enable,
+ 	.enable_reg = MXC_CCM_CCGR4,
+@@ -3816,7 +3817,7 @@ static struct clk gpmi_nfc_clk[] = {
+ 	},
+ 	{	/* bch_apb_clk */
+ 	__INIT_CLK_DEBUG(gpmi_bch_apb_clk)
+-	.parent = &apbh_dma_clk,
++	.parent = &usdhc3_clk,
+ 	.enable = _clk_enable,
+ 	.enable_reg = MXC_CCM_CCGR4,
+ 	.enable_shift = MXC_CCM_CCGRx_CG12_OFFSET,
+@@ -4057,7 +4058,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "gpu2d_clk", gpu2d_core_clk),
+ 	_REGISTER_CLOCK(NULL, "gpu3d_shader_clk", gpu3d_shader_clk),
+ 	_REGISTER_CLOCK(NULL, "gpt", gpt_clk[0]),
+-	_REGISTER_CLOCK(NULL, "gpmi-nfc", gpmi_nfc_clk[0]),
++	_REGISTER_CLOCK("imx6q-gpmi-nfc.0", NULL, gpmi_nfc_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "gpmi-apb", gpmi_nfc_clk[1]),
+ 	_REGISTER_CLOCK(NULL, "bch", gpmi_nfc_clk[2]),
+ 	_REGISTER_CLOCK(NULL, "bch-apb", gpmi_nfc_clk[3]),
+@@ -4128,6 +4129,9 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	clk_set_parent(&spdif1_clk[0], &pll3_sw_clk);
+ 	clk_set_rate(&spdif1_clk[0], 1500000);
+ 
++	/* set the NAND to 11MHz. Too fast will cause dma timeout. */
++	clk_set_rate(&enfc_clk, enfc_clk.round_rate(&enfc_clk, 11000000));
++
+ 	/* Make sure all clocks are ON initially */
+ 	__raw_writel(0xFFFFFFFF, MXC_CCM_CCGR0);
+ 	__raw_writel(0xFFFFFFFF, MXC_CCM_CCGR1);
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 57f12dc..94cfd0c 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -32,6 +32,8 @@ imx6q_anatop_thermal_imx_data __initconst;
+ #define imx6q_add_anatop_thermal_imx(id, pdata)	\
+ 	imx_add_anatop_thermal_imx(&imx6q_anatop_thermal_imx_data, pdata)
+ 
++#define imx6q_add_gpmi(platform_data)	imx_add_gpmi(platform_data);
++
+ extern const struct imx_fec_data imx6q_fec_data __initconst;
+ #define imx6q_add_fec(pdata)	\
+ 	imx_add_fec(&imx6q_fec_data, pdata)
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 0737207..64a9311 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -37,6 +37,9 @@
+ #define GPC_PGC_CPU_PUPSCR_OFFSET	0x2a4
+ #define GPC_PGC_CPU_PDNSCR_OFFSET	0x2a8
+ 
++#define MODULE_CLKGATE		(1 << 30)
++#define MODULE_SFTRST		(1 << 31)
++
+ extern unsigned int gpc_wake_irq[4];
+ 
+ void gpc_set_wakeup(unsigned int irq[4])
+@@ -121,3 +124,92 @@ void arch_idle(void)
+ {
+ 	cpu_do_idle();
+ }
++
++static int __mxs_reset_block(void __iomem *hwreg, int just_enable)
++{
++	u32 c;
++	int timeout;
++
++	/* the process of software reset of IP block is done
++	   in several steps:
++
++	   - clear SFTRST and wait for block is enabled;
++	   - clear clock gating (CLKGATE bit);
++	   - set the SFTRST again and wait for block is in reset;
++	   - clear SFTRST and wait for reset completion.
++	 */
++	c = __raw_readl(hwreg);
++	c &= ~MODULE_SFTRST;	/* clear SFTRST */
++	__raw_writel(c, hwreg);
++	for (timeout = 1000000; timeout > 0; timeout--)
++		/* still in SFTRST state ? */
++		if ((__raw_readl(hwreg) & MODULE_SFTRST) == 0)
++			break;
++	if (timeout <= 0) {
++		printk(KERN_ERR "%s(%p): timeout when enabling\n",
++		       __func__, hwreg);
++		return -ETIME;
++	}
++
++	c = __raw_readl(hwreg);
++	c &= ~MODULE_CLKGATE;	/* clear CLKGATE */
++	__raw_writel(c, hwreg);
++
++	if (!just_enable) {
++		c = __raw_readl(hwreg);
++		c |= MODULE_SFTRST;	/* now again set SFTRST */
++		__raw_writel(c, hwreg);
++		for (timeout = 1000000; timeout > 0; timeout--)
++			/* poll until CLKGATE set */
++			if (__raw_readl(hwreg) & MODULE_CLKGATE)
++				break;
++		if (timeout <= 0) {
++			printk(KERN_ERR "%s(%p): timeout when resetting\n",
++			       __func__, hwreg);
++			return -ETIME;
++		}
++
++		c = __raw_readl(hwreg);
++		c &= ~MODULE_SFTRST;	/* clear SFTRST */
++		__raw_writel(c, hwreg);
++		for (timeout = 1000000; timeout > 0; timeout--)
++			/* still in SFTRST state ? */
++			if ((__raw_readl(hwreg) & MODULE_SFTRST) == 0)
++				break;
++		if (timeout <= 0) {
++			printk(KERN_ERR "%s(%p): timeout when enabling "
++			       "after reset\n", __func__, hwreg);
++			return -ETIME;
++		}
++
++		c = __raw_readl(hwreg);
++		c &= ~MODULE_CLKGATE;	/* clear CLKGATE */
++		__raw_writel(c, hwreg);
++	}
++	for (timeout = 1000000; timeout > 0; timeout--)
++		/* still in SFTRST state ? */
++		if ((__raw_readl(hwreg) & MODULE_CLKGATE) == 0)
++			break;
++
++	if (timeout <= 0) {
++		printk(KERN_ERR "%s(%p): timeout when unclockgating\n",
++		       __func__, hwreg);
++		return -ETIME;
++	}
++
++	return 0;
++}
++
++int mxs_reset_block(void __iomem *hwreg, int just_enable)
++{
++	int try = 10;
++	int r;
++
++	while (try--) {
++		r = __mxs_reset_block(hwreg, just_enable);
++		if (!r)
++			break;
++		pr_debug("%s: try %d failed\n", __func__, 10 - try);
++	}
++	return r;
++}
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-gpmi-nfc.c b/arch/arm/plat-mxc/devices/platform-imx-gpmi-nfc.c
+index 0d5ffeb..bc0c6ab 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-gpmi-nfc.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-gpmi-nfc.c
+@@ -64,3 +64,46 @@ imx_add_gpmi(const struct gpmi_nfc_platform_data *platform_data)
+ 			sizeof(*platform_data), DMA_BIT_MASK(32));
+ }
+ #endif /* ifdef CONFIG_SOC_IMX50 */
++
++#ifdef CONFIG_SOC_IMX6Q
++struct platform_device *__init
++imx_add_gpmi(const struct gpmi_nfc_platform_data *platform_data)
++{
++	struct resource res[] = {
++	{ /* GPMI */
++		 .name  = GPMI_NFC_GPMI_REGS_ADDR_RES_NAME,
++		 .flags = IORESOURCE_MEM,
++		 .start = MX6Q_GPMI_BASE_ADDR,
++		 .end   = MX6Q_GPMI_BASE_ADDR + SZ_8K - 1,
++	}, {
++		 .name  = GPMI_NFC_GPMI_INTERRUPT_RES_NAME,
++		 .flags = IORESOURCE_IRQ,
++		 .start	= MXC_INT_RAWNAND_GPMI,
++		 .end	= MXC_INT_RAWNAND_GPMI,
++	}, { /* BCH */
++		 .name  = GPMI_NFC_BCH_REGS_ADDR_RES_NAME,
++		 .flags = IORESOURCE_MEM,
++		 .start = MX6Q_BCH_BASE_ADDR,
++		 .end   = MX6Q_BCH_BASE_ADDR + SZ_8K - 1,
++	}, {
++		 .name  = GPMI_NFC_BCH_INTERRUPT_RES_NAME,
++		 .flags = IORESOURCE_IRQ,
++		 .start	= MXC_INT_RAWNAND_BCH,
++		 .end	= MXC_INT_RAWNAND_BCH,
++	}, { /* DMA */
++		 .name  = GPMI_NFC_DMA_CHANNELS_RES_NAME,
++		 .flags = IORESOURCE_DMA,
++		 .start	= MX6Q_DMA_CHANNEL_AHB_APBH_GPMI0,
++		 .end	= MX6Q_DMA_CHANNEL_AHB_APBH_GPMI7,
++	}, {
++		 .name  = GPMI_NFC_DMA_INTERRUPT_RES_NAME,
++		 .flags = IORESOURCE_IRQ,
++		 .start	= MXC_INT_APBHDMA_DMA,
++		 .end	= MXC_INT_APBHDMA_DMA,
++	}, };
++
++	return imx_add_platform_device_dmamask("imx6q-gpmi-nfc", 0,
++			res, ARRAY_SIZE(res), platform_data,
++			sizeof(*platform_data), DMA_BIT_MASK(32));
++}
++#endif
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index ea31aa0..55bc053 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -63,6 +63,10 @@ typedef enum iomux_config {
+ #define MX6Q_ESAI_PAD_CTRL	(PAD_CTL_DSE_40ohm | PAD_CTL_HYS | \
+ 		PAD_CTL_PKE | PAD_CTL_PUE | PAD_CTL_PUS_100K_UP)
+ 
++#define MX6Q_GPMI_PAD_CTRL0 (PAD_CTL_PKE | PAD_CTL_PUE | PAD_CTL_PUS_100K_UP)
++#define MX6Q_GPMI_PAD_CTRL1 (PAD_CTL_DSE_40ohm | PAD_CTL_SPEED_MED | PAD_CTL_SRE_FAST)
++#define MX6Q_GPMI_PAD_CTRL2 (MX6Q_GPMI_PAD_CTRL0 | MX6Q_GPMI_PAD_CTRL1)
++
+ #define _MX6Q_PAD_SD2_DAT1__USDHC2_DAT1				\
+ 		IOMUX_PAD(0x0360, 0x004C, 0, 0x0000, 0, 0)
+ #define _MX6Q_PAD_SD2_DAT1__ECSPI5_SS0				\
+@@ -6672,7 +6676,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_SD3_RST__ANATOP_ANATOP_TESTI_3 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_CLE__RAWNAND_CLE		\
+-		(_MX6Q_PAD_NANDF_CLE__RAWNAND_CLE | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_CLE__RAWNAND_CLE | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_CLE__IPU2_SISG_4		\
+ 		(_MX6Q_PAD_NANDF_CLE__IPU2_SISG_4 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_CLE__PCIE_CTRL_DIAG_STATUS_BUS_MUX_31		\
+@@ -6689,7 +6693,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_NANDF_CLE__TPSMP_HTRANS_0 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_ALE__RAWNAND_ALE		\
+-		(_MX6Q_PAD_NANDF_ALE__RAWNAND_ALE | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_ALE__RAWNAND_ALE | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_ALE__USDHC4_RST		\
+ 		(_MX6Q_PAD_NANDF_ALE__USDHC4_RST | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_ALE__PCIE_CTRL_DIAG_STATUS_BUS_MUX_0		\
+@@ -6706,7 +6710,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_NANDF_ALE__TPSMP_HTRANS_1 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_WP_B__RAWNAND_RESETN		\
+-		(_MX6Q_PAD_NANDF_WP_B__RAWNAND_RESETN | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_WP_B__RAWNAND_RESETN | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_WP_B__IPU2_SISG_5		\
+ 		(_MX6Q_PAD_NANDF_WP_B__IPU2_SISG_5 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_WP_B__PCIE_CTRL_DIAG_STATUS_BUS_MUX_1		\
+@@ -6723,7 +6727,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_NANDF_WP_B__PL301_MX6QPER1_HSIZE_0 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_RB0__RAWNAND_READY0		\
+-		(_MX6Q_PAD_NANDF_RB0__RAWNAND_READY0 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_RB0__RAWNAND_READY0 | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL0))
+ #define  MX6Q_PAD_NANDF_RB0__IPU2_DI0_PIN1		\
+ 		(_MX6Q_PAD_NANDF_RB0__IPU2_DI0_PIN1 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_RB0__PCIE_CTRL_DIAG_STATUS_BUS_MUX_2		\
+@@ -6740,7 +6744,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_NANDF_RB0__PL301_MX6QPER1_HSIZE_1 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_CS0__RAWNAND_CE0N		\
+-		(_MX6Q_PAD_NANDF_CS0__RAWNAND_CE0N | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_CS0__RAWNAND_CE0N | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_CS0__USBOH3_UH3_DFD_OUT_15		\
+ 		(_MX6Q_PAD_NANDF_CS0__USBOH3_UH3_DFD_OUT_15 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_CS0__USBOH3_UH2_DFD_OUT_15		\
+@@ -6751,7 +6755,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_NANDF_CS0__PL301_MX6QPER1_HSIZE_2 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_CS1__RAWNAND_CE1N		\
+-		(_MX6Q_PAD_NANDF_CS1__RAWNAND_CE1N | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_CS1__RAWNAND_CE1N | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_CS1__USDHC4_VSELECT		\
+ 		(_MX6Q_PAD_NANDF_CS1__USDHC4_VSELECT | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_CS1__USDHC3_VSELECT		\
+@@ -6764,7 +6768,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_NANDF_CS1__PL301_MX6QPER1_HREADYOUT | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_CS2__RAWNAND_CE2N		\
+-		(_MX6Q_PAD_NANDF_CS2__RAWNAND_CE2N | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_CS2__RAWNAND_CE2N | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_CS2__IPU1_SISG_0		\
+ 		(_MX6Q_PAD_NANDF_CS2__IPU1_SISG_0 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_CS2__ESAI1_TX0		\
+@@ -6779,7 +6783,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_NANDF_CS2__IPU2_SISG_0 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_CS3__RAWNAND_CE3N		\
+-		(_MX6Q_PAD_NANDF_CS3__RAWNAND_CE3N | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_CS3__RAWNAND_CE3N | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_CS3__IPU1_SISG_1		\
+ 		(_MX6Q_PAD_NANDF_CS3__IPU1_SISG_1 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_CS3__ESAI1_TX1		\
+@@ -6798,7 +6802,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_SD4_CMD__USDHC4_CMD		\
+ 		(_MX6Q_PAD_SD4_CMD__USDHC4_CMD | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_SD4_CMD__RAWNAND_RDN		\
+-		(_MX6Q_PAD_SD4_CMD__RAWNAND_RDN | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_SD4_CMD__RAWNAND_RDN | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_SD4_CMD__UART3_TXD		\
+ 		(_MX6Q_PAD_SD4_CMD__UART3_TXD | MUX_PAD_CTRL(MX6Q_UART_PAD_CTRL))
+ #define  MX6Q_PAD_SD4_CMD__UART3_RXD		\
+@@ -6813,7 +6817,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_SD4_CLK__USDHC4_CLK		\
+ 		(_MX6Q_PAD_SD4_CLK__USDHC4_CLK | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_SD4_CLK__RAWNAND_WRN		\
+-		(_MX6Q_PAD_SD4_CLK__RAWNAND_WRN | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_SD4_CLK__RAWNAND_WRN | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_SD4_CLK__UART3_TXD		\
+ 		(_MX6Q_PAD_SD4_CLK__UART3_TXD | MUX_PAD_CTRL(MX6Q_UART_PAD_CTRL))
+ #define  MX6Q_PAD_SD4_CLK__UART3_RXD		\
+@@ -6824,7 +6828,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_SD4_CLK__GPIO_7_10 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_D0__RAWNAND_D0		\
+-		(_MX6Q_PAD_NANDF_D0__RAWNAND_D0 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_D0__RAWNAND_D0 | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_D0__USDHC1_DAT4		\
+ 		(_MX6Q_PAD_NANDF_D0__USDHC1_DAT4 | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_D0__GPU3D_GPU_DEBUG_OUT_0		\
+@@ -6841,7 +6845,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_NANDF_D0__IPU2_IPU_DIAG_BUS_0 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_D1__RAWNAND_D1		\
+-		(_MX6Q_PAD_NANDF_D1__RAWNAND_D1 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_D1__RAWNAND_D1 | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_D1__USDHC1_DAT5		\
+ 		(_MX6Q_PAD_NANDF_D1__USDHC1_DAT5 | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_D1__GPU3D_GPU_DEBUG_OUT_1		\
+@@ -6858,7 +6862,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_NANDF_D1__IPU2_IPU_DIAG_BUS_1 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_D2__RAWNAND_D2		\
+-		(_MX6Q_PAD_NANDF_D2__RAWNAND_D2 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_D2__RAWNAND_D2 | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_D2__USDHC1_DAT6		\
+ 		(_MX6Q_PAD_NANDF_D2__USDHC1_DAT6 | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_D2__GPU3D_GPU_DEBUG_OUT_2		\
+@@ -6875,7 +6879,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_NANDF_D2__IPU2_IPU_DIAG_BUS_2 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_D3__RAWNAND_D3		\
+-		(_MX6Q_PAD_NANDF_D3__RAWNAND_D3 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_D3__RAWNAND_D3 | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_D3__USDHC1_DAT7		\
+ 		(_MX6Q_PAD_NANDF_D3__USDHC1_DAT7 | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_D3__GPU3D_GPU_DEBUG_OUT_3		\
+@@ -6892,7 +6896,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_NANDF_D3__IPU2_IPU_DIAG_BUS_3 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_D4__RAWNAND_D4		\
+-		(_MX6Q_PAD_NANDF_D4__RAWNAND_D4 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_D4__RAWNAND_D4 | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_D4__USDHC2_DAT4		\
+ 		(_MX6Q_PAD_NANDF_D4__USDHC2_DAT4 | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_D4__GPU3D_GPU_DEBUG_OUT_4		\
+@@ -6909,7 +6913,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_NANDF_D4__IPU2_IPU_DIAG_BUS_4 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_D5__RAWNAND_D5		\
+-		(_MX6Q_PAD_NANDF_D5__RAWNAND_D5 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_D5__RAWNAND_D5 | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_D5__USDHC2_DAT5		\
+ 		(_MX6Q_PAD_NANDF_D5__USDHC2_DAT5 | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_D5__GPU3D_GPU_DEBUG_OUT_5		\
+@@ -6926,7 +6930,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_NANDF_D5__IPU2_IPU_DIAG_BUS_5 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_D6__RAWNAND_D6		\
+-		(_MX6Q_PAD_NANDF_D6__RAWNAND_D6 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_D6__RAWNAND_D6 | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_D6__USDHC2_DAT6		\
+ 		(_MX6Q_PAD_NANDF_D6__USDHC2_DAT6 | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_D6__GPU3D_GPU_DEBUG_OUT_6		\
+@@ -6943,7 +6947,7 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_NANDF_D6__IPU2_IPU_DIAG_BUS_6 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_NANDF_D7__RAWNAND_D7		\
+-		(_MX6Q_PAD_NANDF_D7__RAWNAND_D7 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_D7__RAWNAND_D7 | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL2))
+ #define  MX6Q_PAD_NANDF_D7__USDHC2_DAT7		\
+ 		(_MX6Q_PAD_NANDF_D7__USDHC2_DAT7 | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_D7__GPU3D_GPU_DEBUG_OUT_7		\
+@@ -6964,7 +6968,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_SD4_DAT0__USDHC4_DAT0		\
+ 		(_MX6Q_PAD_SD4_DAT0__USDHC4_DAT0 | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_SD4_DAT0__RAWNAND_DQS		\
+-		(_MX6Q_PAD_SD4_DAT0__RAWNAND_DQS | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_SD4_DAT0__RAWNAND_DQS | MUX_PAD_CTRL(MX6Q_GPMI_PAD_CTRL1))
+ #define  MX6Q_PAD_SD4_DAT0__USBOH3_UH2_DFD_OUT_24		\
+ 		(_MX6Q_PAD_SD4_DAT0__USBOH3_UH2_DFD_OUT_24 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_SD4_DAT0__USBOH3_UH3_DFD_OUT_24		\
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 7aa3b2b..7bcc04a 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -122,6 +122,8 @@
+ #define CSD1_DDR_BASE_ADDR              MMDC1_ARB_BASE_ADDR
+ #define CS0_BASE_ADDR                   WEIM_ARB_BASE_ADDR
+ #define NAND_FLASH_BASE_ADDR            APBH_DMA_ARB_BASE_ADDR
++#define MX6Q_GPMI_BASE_ADDR		(APBH_DMA_ARB_BASE_ADDR + 0x02000)
++#define MX6Q_BCH_BASE_ADDR		(APBH_DMA_ARB_BASE_ADDR + 0x04000)
+ 
+ /* Defines for Blocks connected via AIPS (SkyBlue) */
+ #define ATZ1_BASE_ADDR              AIPS1_ARB_BASE_ADDR
+@@ -407,6 +409,16 @@
+ 
+ #define IRQ_LOCALTIMER				29
+ 
++/* APBH-DMA */
++#define MX6Q_DMA_CHANNEL_AHB_APBH_GPMI0	0
++#define MX6Q_DMA_CHANNEL_AHB_APBH_GPMI1	1
++#define MX6Q_DMA_CHANNEL_AHB_APBH_GPMI2	2
++#define MX6Q_DMA_CHANNEL_AHB_APBH_GPMI3	3
++#define MX6Q_DMA_CHANNEL_AHB_APBH_GPMI4	4
++#define MX6Q_DMA_CHANNEL_AHB_APBH_GPMI5	5
++#define MX6Q_DMA_CHANNEL_AHB_APBH_GPMI6	6
++#define MX6Q_DMA_CHANNEL_AHB_APBH_GPMI7	7
++
+ /*
+  * DMA request assignments
+  */
+-- 
+1.7.7.4
+

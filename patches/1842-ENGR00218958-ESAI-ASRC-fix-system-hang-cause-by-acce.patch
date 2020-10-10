@@ -1,0 +1,41 @@
+From edafa36df5a0f16586aea50a404e9cb83ae570ea Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Wed, 1 Aug 2012 10:42:44 +0800
+Subject: [PATCH 1842/2463] ENGR00218958 ESAI ASRC: fix system hang cause by
+ accessing ASRC with no clock
+
+In ESAI_ASRC, to use ASRC for p2p playback, ESAI driver would maintain
+an variable to keep track of ASRC pair number allocated. So every time
+ESAI driver want to use ASRC, he would first init the variable to a value
+(0 in ESAI driver)stand for unvalid pair number and then request an valid
+pair number. At last, open the ASRC clock for ASRC register access.
+
+However, ASRC driver treat 0 as an valid pair number. Thus, if an ESAI ASRC
+playback is failed, ESAI driver would check whether the pair number is valid.
+If the pair number is valid, ESAI driver would access ASRC register to do some
+clean work. Thus, the init 0 value would be treat as an valid pair number and
+ASRC register would be access without ASRC clock. In the case, an system
+hang happens.
+
+In this patch, init pair number variable to -1 after its allocation.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ sound/soc/imx/imx-pcm-dma-mx2.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/imx/imx-pcm-dma-mx2.c b/sound/soc/imx/imx-pcm-dma-mx2.c
+index 712bf7d..b36b281 100644
+--- a/sound/soc/imx/imx-pcm-dma-mx2.c
++++ b/sound/soc/imx/imx-pcm-dma-mx2.c
+@@ -426,6 +426,7 @@ static int snd_imx_open(struct snd_pcm_substream *substream)
+ 		iprtd->asrc_enable = true;
+ 		iprtd->p2p =
+ 			(struct asrc_p2p_params *)snd_soc_pcm_get_drvdata(rtd);
++		iprtd->asrc_index = -1;
+ 	}
+ 
+ 	runtime->private_data = iprtd;
+-- 
+1.7.7.4
+

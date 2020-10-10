@@ -1,0 +1,84 @@
+From 5e275a69a4023c09a026acd89690ea7e2419fb8a Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Tue, 17 Jul 2012 16:35:16 +0800
+Subject: [PATCH 1796/2463] ENGR00182271-2 V4L2 OVERLAY: Add IPU2 overlay
+ support of back ground
+
+Get the ipu device which the display frame buffer is on before start
+preview, then request the correspondding display channel irq.
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ .../media/video/mxc/capture/ipu_prp_vf_sdc_bg.c    |   20 ++++++++++++++------
+ 1 files changed, 14 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
+index e6bf791..ed99d95 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
+@@ -27,6 +27,15 @@
+ 
+ static int buffer_num;
+ static int buffer_ready;
++static struct ipu_soc *disp_ipu;
++
++static void get_disp_ipu(cam_data *cam)
++{
++	if (cam->output > 2)
++		disp_ipu = ipu_get_soc(1); /* using DISP4 */
++	else
++		disp_ipu = ipu_get_soc(0);
++}
+ 
+ /*
+  * Function definitions
+@@ -43,7 +52,6 @@ static int buffer_ready;
+ static irqreturn_t prpvf_sdc_vsync_callback(int irq, void *dev_id)
+ {
+ 	cam_data *cam = dev_id;
+-	pr_debug("buffer_ready %d buffer_num %d\n", buffer_ready, buffer_num);
+ 	if (buffer_ready > 0) {
+ 		ipu_select_buffer(cam->ipu, MEM_ROT_VF_MEM, IPU_OUTPUT_BUFFER, 0);
+ 		buffer_ready--;
+@@ -66,9 +74,7 @@ static irqreturn_t prpvf_vf_eof_callback(int irq, void *dev_id)
+ 	pr_debug("buffer_ready %d buffer_num %d\n", buffer_ready, buffer_num);
+ 
+ 	ipu_select_buffer(cam->ipu, MEM_ROT_VF_MEM, IPU_INPUT_BUFFER, buffer_num);
+-
+ 	buffer_num = (buffer_num == 0) ? 1 : 0;
+-
+ 	ipu_select_buffer(cam->ipu, CSI_PRP_VF_MEM, IPU_OUTPUT_BUFFER, buffer_num);
+ 	buffer_ready++;
+ 	return IRQ_HANDLED;
+@@ -104,6 +110,8 @@ static int prpvf_start(void *private)
+ 		return 0;
+ 	}
+ 
++	get_disp_ipu(cam);
++
+ 	format = cam->v4l2_fb.fmt.pixelformat;
+ 	if (cam->v4l2_fb.fmt.pixelformat == IPU_PIX_FMT_BGR24) {
+ 		bpp = 3, size = 3;
+@@ -280,8 +288,8 @@ static int prpvf_start(void *private)
+ 		goto out_2;
+ 	}
+ 
+-	ipu_clear_irq(cam->ipu, IPU_IRQ_BG_SF_END);
+-	err = ipu_request_irq(cam->ipu, IPU_IRQ_BG_SF_END, prpvf_sdc_vsync_callback,
++	ipu_clear_irq(disp_ipu, IPU_IRQ_BG_SF_END);
++	err = ipu_request_irq(disp_ipu, IPU_IRQ_BG_SF_END, prpvf_sdc_vsync_callback,
+ 			      0, "Mxc Camera", cam);
+ 	if (err != 0) {
+ 		printk(KERN_ERR "Error registering IPU_IRQ_BG_SF_END irq.\n");
+@@ -352,7 +360,7 @@ static int prpvf_stop(void *private)
+ 	if (cam->overlay_active == false)
+ 		return 0;
+ 
+-	ipu_free_irq(cam->ipu, IPU_IRQ_BG_SF_END, cam);
++	ipu_free_irq(disp_ipu, IPU_IRQ_BG_SF_END, cam);
+ 
+ 	ipu_free_irq(cam->ipu, IPU_IRQ_PRP_VF_OUT_EOF, cam);
+ 
+-- 
+1.7.7.4
+

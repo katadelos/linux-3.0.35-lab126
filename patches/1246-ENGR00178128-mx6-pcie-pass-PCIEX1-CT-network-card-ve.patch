@@ -1,0 +1,579 @@
+From 2250023ab0aa5cf983b064d4e80c003c6c3abbff Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Wed, 15 Feb 2012 10:42:49 +0800
+Subject: [PATCH 1246/2463] ENGR00178128 mx6 pcie: pass PCIEX1 CT network card
+ verifications
+
+what're done:
+* PCIE topology, RC should be on bus 0, EP should be on bus 1.
+	Root Cause: The CLASS_REV of RC CFG header, specified
+	by SPEC to be RO, should be set to PCI_CLASS_BRIDGE_PCIclass
+* Added PCIE PWR EN and RESET
+* iATU wrong configurations.
+	Root Cause: The outbounds excepted the CFG region0
+	should be removed. Otherwise, the memory ATU wouldn't
+	work correctly.
+* CT DHCP hang
+	Root Cause: PLL8 is set to bypass mode when linux close fec,
+	and the PCIe ref clk would be broken by PLL8 bypass mode.
+	The parent clk of pcie ref clk is disabled by FEC, since
+	linux would try to disable the none-addressed NIC after DHCP.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |  176 ++++++++++++++++----------------------------
+ arch/arm/mach-mx6/pcie.c  |  161 +++++++++++++++++------------------------
+ 2 files changed, 131 insertions(+), 206 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index a6a1715..d48856b 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -3467,33 +3467,6 @@ static struct clk esai_clk = {
+ 	 .round_rate = _clk_esai_round_rate,
+ };
+ 
+-static int _clk_enet_enable(struct clk *clk)
+-{
+-	unsigned int reg;
+-
+-	/* Enable ENET ref clock */
+-	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+-	reg &= ~ANADIG_PLL_BYPASS;
+-	reg |= ANADIG_PLL_ENABLE;
+-	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
+-
+-	_clk_enable(clk);
+-	return 0;
+-}
+-
+-static void _clk_enet_disable(struct clk *clk)
+-{
+-	unsigned int reg;
+-
+-	_clk_disable(clk);
+-
+-	/* Enable ENET ref clock */
+-	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+-	reg |= ANADIG_PLL_BYPASS;
+-	reg &= ~ANADIG_PLL_ENABLE;
+-	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
+-}
+-
+ static int _clk_enet_set_rate(struct clk *clk, unsigned long rate)
+ {
+ 	unsigned int reg, div = 1;
+@@ -3554,8 +3527,8 @@ static struct clk enet_clk[] = {
+ 	 .parent = &pll8_enet_main_clk,
+ 	 .enable_reg = MXC_CCM_CCGR1,
+ 	 .enable_shift = MXC_CCM_CCGRx_CG5_OFFSET,
+-	 .enable = _clk_enet_enable,
+-	 .disable = _clk_enet_disable,
++	 .enable = _clk_enable,
++	 .disable = _clk_disable,
+ 	 .set_rate = _clk_enet_set_rate,
+ 	 .get_rate = _clk_enet_get_rate,
+ 	.secondary = &enet_clk[1],
+@@ -4549,37 +4522,56 @@ static struct clk pwm_clk[] = {
+ 	 },
+ };
+ 
+-static int _clk_pcie_enable(struct clk *clk)
++static int _clk_sata_enable(struct clk *clk)
+ {
+ 	unsigned int reg;
+ 
+-	/* Clear Power Down and Enable PLLs */
++	/* Enable SATA ref clock */
+ 	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+-	reg &= ~ANADIG_PLL_ENET_POWER_DOWN;
++	reg |= ANADIG_PLL_ENET_EN_SATA;
+ 	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
+ 
+-	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+-	reg |= ANADIG_PLL_ENET_EN;
+-	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
++	_clk_enable(clk);
+ 
+-	/* Waiting for the PLL is locked */
+-	if (!WAIT(ANADIG_PLL_ENET_LOCK & __raw_readl(PLL8_ENET_BASE_ADDR),
+-				SPIN_DELAY))
+-		panic("pll8 lock failed\n");
++	return 0;
++}
+ 
+-	/* Disable the bypass */
+-	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+-	reg &= ~ANADIG_PLL_ENET_BYPASS;
+-	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
++static void _clk_sata_disable(struct clk *clk)
++{
++	unsigned int reg;
+ 
+-	/*
+-	 * Enable SATA ref clock.
+-	 * PCIe needs both sides to have the same source of refernce clock,
+-	 * The SATA reference clock is taken out on clk out
+-	 */
++	_clk_disable(clk);
++
++	/* Disable SATA ref clock */
+ 	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+-	reg |= ANADIG_PLL_ENET_EN_SATA;
++	reg &= ~ANADIG_PLL_ENET_EN_SATA;
+ 	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
++}
++
++static struct clk sata_clk[] = {
++	{
++	__INIT_CLK_DEBUG(sata_clk)
++	.parent = &pll8_enet_main_clk,
++	.enable = _clk_sata_enable,
++	.enable_reg = MXC_CCM_CCGR5,
++	.enable_shift = MXC_CCM_CCGRx_CG2_OFFSET,
++	.disable = _clk_sata_disable,
++	.secondary = &sata_clk[1],
++	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
++	},
++	{
++	.parent = &ipg_clk,
++	.secondary = &sata_clk[2],
++	},
++	{
++	.parent = &mmdc_ch0_axi_clk[0],
++	.secondary = &mx6per1_clk,
++	},
++};
++
++static int _clk_pcie_enable(struct clk *clk)
++{
++	unsigned int reg;
+ 
+ 	/* Activate LVDS CLK1 (the MiniPCIe slot clock input) */
+ 	reg = __raw_readl(ANADIG_MISC1_REG);
+@@ -4610,7 +4602,20 @@ static void _clk_pcie_disable(struct clk *clk)
+ 
+ 	_clk_disable(clk);
+ 
+-	/* Disable SATA ref clock */
++	/* De-activate LVDS CLK1 (the MiniPCIe slot clock input) */
++	reg = __raw_readl(ANADIG_MISC1_REG);
++	reg &= ~ANATOP_LVDS_CLK1_IBEN_MASK;
++	__raw_writel(reg, ANADIG_MISC1_REG);
++
++	reg = __raw_readl(ANADIG_MISC1_REG);
++	reg &= ~ANATOP_LVDS_CLK1_SRC_SATA;
++	__raw_writel(reg, ANADIG_MISC1_REG);
++
++	reg = __raw_readl(ANADIG_MISC1_REG);
++	reg &= ~ANATOP_LVDS_CLK1_OBEN_MASK;
++	__raw_writel(reg, ANADIG_MISC1_REG);
++
++	/* Disable PCIE ref clock */
+ 	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+ 	reg &= ~ANADIG_PLL_ENET_EN_PCIE;
+ 	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
+@@ -4628,71 +4633,18 @@ static struct clk pcie_clk[] = {
+ 	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ 	},
+ 	{
+-	.parent = &mmdc_ch0_axi_clk[0],
+-	.secondary = &mx6fast1_clk,
+-	},
+-};
+-
+-static int _clk_sata_enable(struct clk *clk)
+-{
+-	unsigned int reg;
+-
+-	/* Clear Power Down and Enable PLLs */
+-	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+-	reg &= ~ANADIG_PLL_ENET_POWER_DOWN;
+-	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
+-
+-	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+-	reg |= ANADIG_PLL_ENET_EN;
+-	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
+-
+-	/* Waiting for the PLL is locked */
+-	if (!WAIT(ANADIG_PLL_ENET_LOCK & __raw_readl(PLL8_ENET_BASE_ADDR),
+-				SPIN_DELAY))
+-		panic("pll8 lock failed\n");
+-
+-	/* Disable the bypass */
+-	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+-	reg &= ~ANADIG_PLL_ENET_BYPASS;
+-	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
+-
+-	/* Enable SATA ref clock */
+-	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+-	reg |= ANADIG_PLL_ENET_EN_SATA;
+-	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
+-
+-	_clk_enable(clk);
+-
+-	return 0;
+-}
+-
+-static void _clk_sata_disable(struct clk *clk)
+-{
+-	unsigned int reg;
+-
+-	_clk_disable(clk);
+-
+-	/* Disable SATA ref clock */
+-	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+-	reg &= ~ANADIG_PLL_ENET_EN_SATA;
+-	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
+-}
+-
+-static struct clk sata_clk[] = {
+-	{
+-	__INIT_CLK_DEBUG(sata_clk)
+-	.parent = &ipg_clk,
+-	.enable = _clk_sata_enable,
+-	.enable_reg = MXC_CCM_CCGR5,
+-	.enable_shift = MXC_CCM_CCGRx_CG2_OFFSET,
+-	.disable = _clk_sata_disable,
+-	.secondary = &sata_clk[1],
+-	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
++	/*
++	 * Enable SATA ref clock.
++	 * PCIe needs both sides to have the same source of refernce clock,
++	 * The SATA reference clock is taken out to link partner.
++	 */
++	.parent = &sata_clk[0],
++	.secondary = &pcie_clk[2],
+ 	},
+ 	{
+ 	.parent = &mmdc_ch0_axi_clk[0],
+-	.secondary = &mx6per1_clk,
+-	}
++	.secondary = &mx6fast1_clk,
++	},
+ };
+ 
+ static struct clk usboh3_clk[] = {
+diff --git a/arch/arm/mach-mx6/pcie.c b/arch/arm/mach-mx6/pcie.c
+index 9959bbc..985e625 100644
+--- a/arch/arm/mach-mx6/pcie.c
++++ b/arch/arm/mach-mx6/pcie.c
+@@ -93,6 +93,13 @@
+ #define  PCIE_CONF_BUS(b)		(((b) & 0xFF) << 16)
+ #define  PCIE_CONF_DEV(d)		(((d) & 0x1F) << 11)
+ #define  PCIE_CONF_FUNC(f)		(((f) & 0x7) << 8)
++#define  PCIE_CONF_REG(r)		((r) & ~0x3)
++
++#define MX6_ARM2_PCIE_PWR_EN		(IMX_GPIO_NR(8, 0) + 2)
++#define MX6_ARM2_PCIE_RESET		(IMX_GPIO_NR(8, 8) + 2)
++
++static void __iomem *base;
++static void __iomem *dbi_base;
+ 
+ enum {
+ 	MemRdWr = 0,
+@@ -130,7 +137,7 @@ static struct imx_pcie_port *bus_to_port(int bus)
+ 
+ 	for (i = num_pcie_ports - 1; i >= 0; i--) {
+ 		int rbus = imx_pcie_port[i].root_bus_nr;
+-		if (rbus != -1 && rbus <= bus)
++		if (rbus != -1 && rbus == bus)
+ 			break;
+ 	}
+ 
+@@ -156,7 +163,7 @@ static int __init imx_pcie_setup(int nr, struct pci_sys_data *sys)
+ 	pp->res[0].name = pp->io_space_name;
+ 	if (pp->index == 0) {
+ 		pp->res[0].start = PCIE_ARB_BASE_ADDR;
+-		pp->res[0].end = pp->res[0].start + SZ_64K - 1;
++		pp->res[0].end = pp->res[0].start + SZ_1M - 1;
+ 	}
+ 	pp->res[0].flags = IORESOURCE_IO;
+ 	if (request_resource(&ioport_resource, &pp->res[0]))
+@@ -171,8 +178,8 @@ static int __init imx_pcie_setup(int nr, struct pci_sys_data *sys)
+ 	pp->mem_space_name[sizeof(pp->mem_space_name) - 1] = 0;
+ 	pp->res[1].name = pp->mem_space_name;
+ 	if (pp->index == 0) {
+-		pp->res[1].start = PCIE_ARB_BASE_ADDR + SZ_64K;
+-		pp->res[1].end = pp->res[1].start + SZ_16M - SZ_128K - 1;
++		pp->res[1].start = PCIE_ARB_BASE_ADDR + SZ_1M;
++		pp->res[1].end = pp->res[1].start + SZ_16M - SZ_2M - 1;
+ 	}
+ 	pp->res[1].flags = IORESOURCE_MEM;
+ 	if (request_resource(&iomem_resource, &pp->res[1]))
+@@ -184,11 +191,6 @@ static int __init imx_pcie_setup(int nr, struct pci_sys_data *sys)
+ 	return 1;
+ }
+ 
+-static void __init imx_pcie_preinit(void)
+-{
+-	pcibios_setup("debug");
+-}
+-
+ static int imx_pcie_link_up(void __iomem *dbi_base)
+ {
+ 	/* Check the pcie link up or link down */
+@@ -199,7 +201,9 @@ static int imx_pcie_link_up(void __iomem *dbi_base)
+ 		rc = readl(dbi_base + DB_R1) & (0x1 << (36-32)) ;
+ 		iterations--;
+ 		if ((iterations % 0x100000) == 0)
+-			pr_info("link up failed!\n");
++			pr_info("link up failed, DB_R0:0x%08x, DB_R1:0x%08x!\n"
++					, readl(dbi_base + DB_R0)
++					, readl(dbi_base + DB_R1));
+ 	} while (!rc && iterations);
+ 
+ 	if (!rc)
+@@ -207,25 +211,6 @@ static int imx_pcie_link_up(void __iomem *dbi_base)
+ 	return 1;
+ }
+ 
+-static int pcie_valid_config(struct imx_pcie_port *pp, int bus_num, int dev)
+-{
+-	/*If there is no link, then there is no device*/
+-	if (bus_num != pp->root_bus_nr) {
+-		if (!imx_pcie_link_up(pp->dbi_base))
+-			return 0;
+-	}
+-
+-	/*
+-	 * Don't go out when trying to access nonexisting devices
+-	 * on the local bus.
+-	 * We have only one slot on the root port.
+-	 */
+-	if (bus_num == pp->root_bus_nr && dev > 0)
+-		return 0;
+-
+-	return 1;
+-}
+-
+ static void imx_pcie_regions_setup(void __iomem *dbi_base)
+ {
+ 	/*
+@@ -235,9 +220,9 @@ static void imx_pcie_regions_setup(void __iomem *dbi_base)
+ 	 * split and defined into different regions by iATU,
+ 	 * with sizes and offsets as follows:
+ 	 *
+-	 * 0x0100_0000 --- 0x0100_FFFF 64KB IORESOURCE_IO
+-	 * 0x0101_0000 --- 0x01FE_FFFF 16MB - 128KB IORESOURCE_MEM
+-	 * 0x01FF_0000 --- 0x01FF_FFFF 64KB Cfg + Registers
++	 * 0x0100_0000 --- 0x010F_FFFF 1MB IORESOURCE_IO
++	 * 0x0110_0000 --- 0x01EF_FFFF 14MB IORESOURCE_MEM
++	 * 0x01F0_0000 --- 0x01FF_FFFF 1MB Cfg + Registers
+ 	 */
+ 
+ 	/* CMD reg:I/O space, MEM space, and Bus Master Enable */
+@@ -246,40 +231,23 @@ static void imx_pcie_regions_setup(void __iomem *dbi_base)
+ 			| PCI_COMMAND_MEMORY
+ 			| PCI_COMMAND_MASTER,
+ 			dbi_base + PCI_COMMAND);
++
++	/* Set the CLASS_REV of RC CFG header to PCI_CLASS_BRIDGE_PCI */
++	writel(readl(dbi_base + PCI_CLASS_REVISION)
++			| (PCI_CLASS_BRIDGE_PCI << 16),
++			dbi_base + PCI_CLASS_REVISION);
++
+ 	/*
+ 	 * region0 outbound used to access target cfg
+ 	 */
+ 	writel(0, dbi_base + ATU_VIEWPORT_R);
+-	writel(PCIE_ARB_END_ADDR - SZ_64K + 1, dbi_base + ATU_REGION_LOWBASE_R);
+-	writel(0, dbi_base + ATU_REGION_UPBASE_R);
++	writel(PCIE_ARB_END_ADDR - SZ_1M + 1, dbi_base + ATU_REGION_LOWBASE_R);
+ 	writel(PCIE_ARB_END_ADDR, dbi_base + ATU_REGION_LIMIT_ADDR_R);
+-	writel(0, dbi_base + ATU_REGION_LOW_TRGT_ADDR_R);
+-	writel(0, dbi_base + ATU_REGION_UP_TRGT_ADDR_R);
+-	writel(CfgRdWr0, dbi_base + ATU_REGION_CTRL1_R);
+-	writel((1<<31), dbi_base + ATU_REGION_CTRL2_R);
+-
+-	/*
+-	 * region1 outbound used to as IORESOURCE_IO
+-	 */
+-	writel(1, dbi_base + ATU_VIEWPORT_R);
+-	writel(0, dbi_base + ATU_REGION_LOWBASE_R);
+ 	writel(0, dbi_base + ATU_REGION_UPBASE_R);
+-	writel(SZ_64K - 1, dbi_base + ATU_REGION_LIMIT_ADDR_R);
+-	writel(0, dbi_base + ATU_REGION_LOW_TRGT_ADDR_R);
+-	writel(0, dbi_base + ATU_REGION_UP_TRGT_ADDR_R);
+-	writel(IORdWr, dbi_base + ATU_REGION_CTRL1_R);
+-	writel((1<<31), dbi_base + ATU_REGION_CTRL2_R);
+ 
+-	/*
+-	 * region2 outbound used to as IORESOURCE_MEM
+-	 */
+-	writel(2, dbi_base + ATU_VIEWPORT_R);
+-	writel(0, dbi_base + ATU_REGION_LOWBASE_R);
+-	writel(0, dbi_base + ATU_REGION_UPBASE_R);
+-	writel(SZ_16M - SZ_128K - 1, dbi_base + ATU_REGION_LIMIT_ADDR_R);
+ 	writel(0, dbi_base + ATU_REGION_LOW_TRGT_ADDR_R);
+ 	writel(0, dbi_base + ATU_REGION_UP_TRGT_ADDR_R);
+-	writel(MemRdWr, dbi_base + ATU_REGION_CTRL1_R);
++	writel(CfgRdWr0, dbi_base + ATU_REGION_CTRL1_R);
+ 	writel((1<<31), dbi_base + ATU_REGION_CTRL2_R);
+ }
+ 
+@@ -287,22 +255,20 @@ static int imx_pcie_rd_conf(struct pci_bus *bus, u32 devfn, int where,
+ 			int size, u32 *val)
+ {
+ 	struct imx_pcie_port *pp = bus_to_port(bus->number);
+-	unsigned long flags;
+ 	u32 va_address;
+ 
+-	if (pcie_valid_config(pp, bus->number, PCI_SLOT(devfn)) == 0) {
+-		*val = 0xFFFFFFFF;
+-		return PCIBIOS_DEVICE_NOT_FOUND;
+-	}
++	if (pp) {
++		if (devfn != 0) {
++			*val = 0xffffffff;
++			return PCIBIOS_DEVICE_NOT_FOUND;
++		}
+ 
+-
+-	spin_lock_irqsave(&pp->conf_lock, flags);
+-
+-	va_address = (u32)pp->base +
+-		PCIE_CONF_BUS(bus->number) +
+-		PCIE_CONF_DEV(PCI_SLOT(devfn)) +
+-		PCIE_CONF_FUNC(PCI_FUNC(devfn)) +
+-		(where & ~0x3);
++		va_address = (u32)dbi_base + (where & ~0x3);
++	} else
++		va_address = (u32)base + (PCIE_CONF_BUS(bus->number - 1) +
++					  PCIE_CONF_DEV(PCI_SLOT(devfn)) +
++					  PCIE_CONF_FUNC(PCI_FUNC(devfn)) +
++					  PCIE_CONF_REG(where));
+ 
+ 	*val = readl(va_address);
+ 
+@@ -311,8 +277,6 @@ static int imx_pcie_rd_conf(struct pci_bus *bus, u32 devfn, int where,
+ 	else if (size == 2)
+ 		*val = (*val >> (8 * (where & 3))) & 0xFFFF;
+ 
+-	spin_unlock_irqrestore(&pp->conf_lock, flags);
+-
+ 	return PCIBIOS_SUCCESSFUL;
+ }
+ 
+@@ -320,20 +284,19 @@ static int imx_pcie_wr_conf(struct pci_bus *bus, u32 devfn,
+ 			int where, int size, u32 val)
+ {
+ 	struct imx_pcie_port *pp = bus_to_port(bus->number);
+-	unsigned long flags;
+ 	u32 va_address = 0, mask = 0, tmp = 0;
+ 	int ret = PCIBIOS_SUCCESSFUL;
+ 
+-	if (pcie_valid_config(pp, bus->number, PCI_SLOT(devfn)) == 0)
+-		return PCIBIOS_DEVICE_NOT_FOUND;
+-
+-	spin_lock_irqsave(&pp->conf_lock, flags);
++	if (pp) {
++		if (devfn != 0)
++			return PCIBIOS_DEVICE_NOT_FOUND;
+ 
+-	va_address = (u32)pp->base +
+-		PCIE_CONF_BUS(bus->number) +
+-		PCIE_CONF_DEV(PCI_SLOT(devfn)) +
+-		PCIE_CONF_FUNC(PCI_FUNC(devfn)) +
+-		(where & ~0x3);
++		va_address = (u32)dbi_base + (where & ~0x3);
++	} else
++		va_address = (u32)base + (PCIE_CONF_BUS(bus->number - 1) +
++					  PCIE_CONF_DEV(PCI_SLOT(devfn)) +
++					  PCIE_CONF_FUNC(PCI_FUNC(devfn)) +
++					  PCIE_CONF_REG(where));
+ 
+ 	if (size == 4) {
+ 		writel(val, va_address);
+@@ -351,7 +314,6 @@ static int imx_pcie_wr_conf(struct pci_bus *bus, u32 devfn,
+ 	tmp |= val << ((where & 0x3) * 8);
+ 	writel(tmp, va_address);
+ exit:
+-	spin_unlock_irqrestore(&pp->conf_lock, flags);
+ 
+ 	return ret;
+ }
+@@ -378,14 +340,13 @@ imx_pcie_scan_bus(int nr, struct pci_sys_data *sys)
+ 
+ static int __init imx_pcie_map_irq(struct pci_dev *dev, u8 slot, u8 pin)
+ {
+-	return MXC_INT_PCIE_0;
++	return MXC_INT_PCIE_3;
+ }
+ 
+ static struct hw_pci imx_pci __initdata = {
+ 	.nr_controllers	= 1,
+ 	.swizzle	= pci_std_swizzle,
+ 	.setup		= imx_pcie_setup,
+-	.preinit	= imx_pcie_preinit,
+ 	.scan		= imx_pcie_scan_bus,
+ 	.map_irq	= imx_pcie_map_irq,
+ };
+@@ -394,6 +355,11 @@ static void imx_pcie_enable_controller(void)
+ {
+ 	struct clk *pcie_clk;
+ 
++	/* PCIE PWR_EN: EXP_IO2 of MAX7310_1 */
++	gpio_request(MX6_ARM2_PCIE_PWR_EN, "PCIE POWER_EN");
++
++	/* activate PCIE_PWR_EN CTRL_2 */
++	gpio_direction_output(MX6_ARM2_PCIE_PWR_EN, 1);
+ 	imx_pcie_clrset(iomuxc_gpr1_test_powerdown, 0 << 18, IOMUXC_GPR1);
+ 
+ 	/* enable the clks */
+@@ -409,7 +375,17 @@ static void imx_pcie_enable_controller(void)
+ 
+ static void card_reset(void)
+ {
++	/* PCIE RESET: EXP_IO2 of MAX7310_2 */
++	gpio_request(MX6_ARM2_PCIE_RESET, "PCIE RESET");
++
++	/* activate PERST_B */
++	gpio_direction_output(MX6_ARM2_PCIE_RESET, 0);
++
+ 	/* Add one reset to the pcie external device */
++	msleep(100);
++
++	/* deactive PERST_B */
++	gpio_direction_output(MX6_ARM2_PCIE_RESET, 1);
+ }
+ 
+ static void __init add_pcie_port(void __iomem *base, void __iomem *dbi_base)
+@@ -431,9 +407,7 @@ static void __init add_pcie_port(void __iomem *base, void __iomem *dbi_base)
+ 
+ static int __init imx_pcie_init(void)
+ {
+-	void __iomem *base, *dbi_base;
+-
+-	base = ioremap_nocache(PCIE_ARB_END_ADDR - SZ_64K + 1, SZ_32K);
++	base = ioremap_nocache(PCIE_ARB_END_ADDR - SZ_1M + 1, SZ_1M - SZ_16K);
+ 	if (!base) {
+ 		pr_err("error with ioremap in function %s\n", __func__);
+ 		return -EIO;
+@@ -467,18 +441,17 @@ static int __init imx_pcie_init(void)
+ 	/* togle the external card's reset */
+ 	card_reset() ;
+ 
+-	usleep_range(3000, 4000);
+-	imx_pcie_regions_setup(dbi_base);
+-	usleep_range(3000, 4000);
+-
+ 	/* start link up */
+ 	imx_pcie_clrset(iomuxc_gpr12_app_ltssm_enable, 1 << 10, IOMUXC_GPR12);
+ 
+ 	/* add the pcie port */
+ 	add_pcie_port(base, dbi_base);
+ 
++	usleep_range(3000, 4000);
++	imx_pcie_regions_setup(dbi_base);
++	usleep_range(3000, 4000);
++
+ 	pci_common_init(&imx_pci);
+-	pr_info("pcie init successful\n");
+ 	return 0;
+ }
+-subsys_initcall(imx_pcie_init);
++device_initcall(imx_pcie_init);
+-- 
+1.7.7.4
+

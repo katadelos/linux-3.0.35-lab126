@@ -1,0 +1,33 @@
+From 59530a47d2690f4762646c127a7a751bf47b6ff6 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <b38611@freescale.com>
+Date: Thu, 29 Nov 2012 08:55:12 +0000
+Subject: [PATCH 2303/2463] ENGR00235626 FEC: Enable phy pause frame feature
+
+Since some ethernet MAC flow control is relied on phy pause
+status, both link partners exchange information via auto neg to
+determine if both parties are capable of flow control.
+Advertise phy pause frame to avoid pause frame is not responsed
+by the other net node.
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ drivers/net/fec.c |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index 6fafd91..4b5818e 100755
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -1045,6 +1045,9 @@ static int fec_enet_mii_probe(struct net_device *ndev)
+ 	else
+ 		phy_dev->supported &= PHY_BASIC_FEATURES;
+ 
++	/* enable phy pause frame for any platform */
++	phy_dev->supported |= ADVERTISED_Pause;
++
+ 	phy_dev->advertising = phy_dev->supported;
+ 
+ 	fep->phy_dev = phy_dev;
+-- 
+1.7.7.4
+

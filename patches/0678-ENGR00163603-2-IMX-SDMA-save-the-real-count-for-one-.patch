@@ -1,0 +1,92 @@
+From 50d7324662ab6b08ffc09ec8951f0796ea375f17 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Wed, 23 Nov 2011 16:45:17 +0800
+Subject: [PATCH 0678/2463] ENGR00163603-2 IMX/SDMA : save the real count for
+ one DMA transaction.
+
+When we use the SDMA in the UART driver(such as imx6q), we will
+meet one situation:
+  Assume we set 64 bytes for the RX DMA buffer.
+  The receiving DMA buffer has received some data, but not full.
+  An Aging DMA request will be received by the SDMA controller if we enable the
+  IDDMAEN(UCR4[6]) in this case.
+
+So the UART driver needs to know the count of the real received bytes,
+and push them to upper layer.
+
+Add two new fields to sdmac, and update the `residue` in sdma_tx_status().
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/dma/imx-sdma.c |   11 +++++++++--
+ 1 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/dma/imx-sdma.c b/drivers/dma/imx-sdma.c
+index 7dd48b1..881969c 100644
+--- a/drivers/dma/imx-sdma.c
++++ b/drivers/dma/imx-sdma.c
+@@ -264,6 +264,8 @@ struct sdma_channel {
+ 	struct dma_async_tx_descriptor	desc;
+ 	dma_cookie_t			last_completed;
+ 	enum dma_status			status;
++	unsigned int			chn_count;
++	unsigned int			chn_real_count;
+ };
+ 
+ #define IMX_DMA_SG_LOOP		(1 << 0)
+@@ -467,6 +469,7 @@ static void mxc_sdma_handle_channel_normal(struct sdma_channel *sdmac)
+ 	struct sdma_buffer_descriptor *bd;
+ 	int i, error = 0;
+ 
++	sdmac->chn_real_count = 0;
+ 	/*
+ 	 * non loop mode. Iterate over all descriptors, collect
+ 	 * errors and call callback function
+@@ -476,6 +479,7 @@ static void mxc_sdma_handle_channel_normal(struct sdma_channel *sdmac)
+ 
+ 		 if (bd->mode.status & (BD_DONE | BD_RROR))
+ 			error = -EIO;
++		 sdmac->chn_real_count += bd->mode.count;
+ 	}
+ 
+ 	if (error)
+@@ -483,9 +487,9 @@ static void mxc_sdma_handle_channel_normal(struct sdma_channel *sdmac)
+ 	else
+ 		sdmac->status = DMA_SUCCESS;
+ 
++	sdmac->last_completed = sdmac->desc.cookie;
+ 	if (sdmac->desc.callback)
+ 		sdmac->desc.callback(sdmac->desc.callback_param);
+-	sdmac->last_completed = sdmac->desc.cookie;
+ }
+ 
+ static void mxc_sdma_handle_channel(struct sdma_channel *sdmac)
+@@ -903,6 +907,7 @@ static struct dma_async_tx_descriptor *sdma_prep_slave_sg(
+ 		goto err_out;
+ 	}
+ 
++	sdmac->chn_count = 0;
+ 	for_each_sg(sgl, sg, sg_len, i) {
+ 		struct sdma_buffer_descriptor *bd = &sdmac->bd[i];
+ 		int param;
+@@ -919,6 +924,7 @@ static struct dma_async_tx_descriptor *sdma_prep_slave_sg(
+ 		}
+ 
+ 		bd->mode.count = count;
++		sdmac->chn_count += count;
+ 
+ 		if (sdmac->word_size > DMA_SLAVE_BUSWIDTH_4_BYTES) {
+ 			ret =  -EINVAL;
+@@ -1081,7 +1087,8 @@ static enum dma_status sdma_tx_status(struct dma_chan *chan,
+ 
+ 	last_used = chan->cookie;
+ 
+-	dma_set_tx_state(txstate, sdmac->last_completed, last_used, 0);
++	dma_set_tx_state(txstate, sdmac->last_completed, last_used,
++			sdmac->chn_count - sdmac->chn_real_count);
+ 
+ 	return sdmac->status;
+ }
+-- 
+1.7.7.4
+

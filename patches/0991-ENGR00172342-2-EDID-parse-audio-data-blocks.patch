@@ -1,0 +1,462 @@
+From c1584c7a75f8e342d1d3ebe080f662d92a50cefd Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Wed, 8 Feb 2012 16:40:31 -0600
+Subject: [PATCH 0991/2463] ENGR00172342-2 EDID parse audio data blocks
+
+Add functionality to parse Audio Data Blocks from EDID data to
+find out what modes of LPCM are suppored by the HDMI sink device.
+
+The parsed settings are saved in the hdmi mfd.  The HDMI audio driver
+will check the settings when the audio stream is opened and will
+then apply appropriate constraints.
+
+If we are unable to read from the EDID, then we default to supporting
+Basic Audio as defined by the HDMI specification (stereo, 16 bit,
+32KHz, 44.1KHz, 48KHz PCM).
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ drivers/mfd/mxc-hdmi-core.c       |   42 ++++++++---
+ drivers/video/mxc/mxc_edid.c      |   38 ++++++++++-
+ drivers/video/mxc_hdmi.c          |    3 +
+ include/linux/mfd/mxc-hdmi-core.h |    7 ++-
+ sound/soc/codecs/mxc_hdmi.c       |  143 ++++++++++++++++++++++++++++++++----
+ sound/soc/imx/imx-hdmi-dma.c      |   14 ----
+ sound/soc/imx/imx-hdmi.h          |   10 ++-
+ 7 files changed, 213 insertions(+), 44 deletions(-)
+
+diff --git a/drivers/mfd/mxc-hdmi-core.c b/drivers/mfd/mxc-hdmi-core.c
+index 5f86788..1aa92a0 100644
+--- a/drivers/mfd/mxc-hdmi-core.c
++++ b/drivers/mfd/mxc-hdmi-core.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -36,6 +36,7 @@
+ #include <mach/clock.h>
+ #include <mach/mxc_hdmi.h>
+ #include <mach/ipu-v3.h>
++#include <mach/mxc_edid.h>
+ #include "../mxc/ipu3/ipu_prv.h"
+ #include <linux/mfd/mxc-hdmi-core.h>
+ #include <linux/fsl_devices.h>
+@@ -48,18 +49,20 @@ struct mxc_hdmi_data {
+ };
+ 
+ static unsigned long hdmi_base;
+-struct clk *isfr_clk;
+-struct clk *iahb_clk;
++static struct clk *isfr_clk;
++static struct clk *iahb_clk;
+ static unsigned int irq_enable_cnt;
+-spinlock_t irq_spinlock;
+-bool irq_initialized;
+-bool irq_enabled;
+-unsigned int sample_rate;
+-unsigned long pixel_clk_rate;
+-struct clk *pixel_clk;
+-int hdmi_ratio;
++static spinlock_t irq_spinlock;
++static spinlock_t edid_spinlock;
++static bool irq_initialized;
++static bool irq_enabled;
++static unsigned int sample_rate;
++static unsigned long pixel_clk_rate;
++static struct clk *pixel_clk;
++static int hdmi_ratio;
+ int mxc_hdmi_ipu_id;
+ int mxc_hdmi_disp_id;
++static struct mxc_edid_cfg hdmi_core_edid_cfg;
+ 
+ u8 hdmi_readb(unsigned int reg)
+ {
+@@ -466,6 +469,24 @@ void hdmi_set_sample_rate(unsigned int rate)
+ 	hdmi_set_clk_regenerator();
+ }
+ 
++void hdmi_set_edid_cfg(struct mxc_edid_cfg *cfg)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&edid_spinlock, flags);
++	memcpy(&hdmi_core_edid_cfg, cfg, sizeof(struct mxc_edid_cfg));
++	spin_unlock_irqrestore(&edid_spinlock, flags);
++}
++
++void hdmi_get_edid_cfg(struct mxc_edid_cfg *cfg)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&edid_spinlock, flags);
++	memcpy(cfg, &hdmi_core_edid_cfg, sizeof(struct mxc_edid_cfg));
++	spin_unlock_irqrestore(&edid_spinlock, flags);
++}
++
+ static int mxc_hdmi_core_probe(struct platform_device *pdev)
+ {
+ 	struct fsl_mxc_hdmi_core_platform_data *pdata = pdev->dev.platform_data;
+@@ -497,6 +518,7 @@ static int mxc_hdmi_core_probe(struct platform_device *pdev)
+ 	irq_initialized = false;
+ 	irq_enabled = true;
+ 	spin_lock_init(&irq_spinlock);
++	spin_lock_init(&edid_spinlock);
+ 
+ 	isfr_clk = clk_get(&hdmi_data->pdev->dev, "hdmi_isfr_clk");
+ 	if (IS_ERR(isfr_clk)) {
+diff --git a/drivers/video/mxc/mxc_edid.c b/drivers/video/mxc/mxc_edid.c
+index 2fa655d..e8a2b97 100644
+--- a/drivers/video/mxc/mxc_edid.c
++++ b/drivers/video/mxc/mxc_edid.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2009-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2009-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -313,6 +313,42 @@ int mxc_edid_parse_ext_blk(unsigned char *edid,
+ 					break;
+ 				}
+ 			case 0x1: /*Audio data block*/
++				{
++					u8 audio_format, max_ch, byte1, byte2, byte3;
++
++					i = 0;
++					cfg->max_channels = 0;
++					cfg->sample_rates = 0;
++					cfg->sample_sizes = 0;
++
++					while (i < blklen) {
++						byte1 = edid[index + 1];
++						byte2 = edid[index + 2];
++						byte3 = edid[index + 3];
++						index += 3;
++						i += 3;
++
++						audio_format = byte1 >> 3;
++						max_ch = (byte1 & 0x07) + 1;
++
++						DPRINTK("Audio Format Descriptor : %2d\n", audio_format);
++						DPRINTK("Max Number of Channels  : %2d\n", max_ch);
++						DPRINTK("Sample Rates            : %02x\n", byte2);
++
++						/* ALSA can't specify specific compressed
++						 * formats, so only care about PCM for now. */
++						if (audio_format == AUDIO_CODING_TYPE_LPCM) {
++							if (max_ch > cfg->max_channels)
++								cfg->max_channels = max_ch;
++
++							cfg->sample_rates |= byte2;
++							cfg->sample_sizes |= byte3 & 0x7;
++							DPRINTK("Sample Sizes            : %02x\n",
++								byte3 & 0x7);
++						}
++					}
++					break;
++				}
+ 			case 0x4: /*Speaker allocation block*/
+ 			case 0x7: /*User extended block*/
+ 			default:
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index 35df3d9..0462f09 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -1364,6 +1364,9 @@ static int mxc_hdmi_read_edid(struct mxc_hdmi *hdmi)
+ 	if (ret < 0)
+ 		return HDMI_EDID_FAIL;
+ 
++	/* Save edid cfg for audio driver */
++	hdmi_set_edid_cfg(&hdmi->edid_cfg);
++
+ 	if (!memcmp(edid_old, hdmi->edid, HDMI_EDID_LEN)) {
+ 		dev_info(&hdmi->pdev->dev, "same edid\n");
+ 		return HDMI_EDID_SAME;
+diff --git a/include/linux/mfd/mxc-hdmi-core.h b/include/linux/mfd/mxc-hdmi-core.h
+index 8c6ce45..b607fee 100644
+--- a/include/linux/mfd/mxc-hdmi-core.h
++++ b/include/linux/mfd/mxc-hdmi-core.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -19,6 +19,8 @@
+ #ifndef __LINUX_MXC_HDMI_CORE_H_
+ #define __LINUX_MXC_HDMI_CORE_H_
+ 
++#include <mach/mxc_edid.h>
++
+ #define IRQ_DISABLE_SUCCEED	0
+ #define IRQ_DISABLE_FAIL	1
+ 
+@@ -38,6 +40,9 @@ void hdmi_set_sample_rate(unsigned int rate);
+ void hdmi_init_clk_regenerator(void);
+ void hdmi_clk_regenerator_update_pixel_clock(void);
+ 
++void hdmi_set_edid_cfg(struct mxc_edid_cfg *cfg);
++void hdmi_get_edid_cfg(struct mxc_edid_cfg *cfg);
++
+ extern int mxc_hdmi_ipu_id;
+ extern int mxc_hdmi_disp_id;
+ 
+diff --git a/sound/soc/codecs/mxc_hdmi.c b/sound/soc/codecs/mxc_hdmi.c
+index c6a6bcb..70c9b8c 100644
+--- a/sound/soc/codecs/mxc_hdmi.c
++++ b/sound/soc/codecs/mxc_hdmi.c
+@@ -1,7 +1,7 @@
+ /*
+  * MXC HDMI ALSA Soc Codec Driver
+  *
+- * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+  */
+ 
+ /*
+@@ -42,6 +42,7 @@
+ #include <mach/hardware.h>
+ 
+ #include <linux/mfd/mxc-hdmi-core.h>
++#include <mach/mxc_edid.h>
+ #include <mach/mxc_hdmi.h>
+ #include "../imx/imx-hdmi.h"
+ 
+@@ -53,6 +54,16 @@ struct mxc_hdmi_priv {
+ 	struct clk *iahb_clk;
+ };
+ 
++static struct mxc_edid_cfg edid_cfg;
++
++static unsigned int playback_rates[HDMI_MAX_RATES];
++static unsigned int playback_sample_size[HDMI_MAX_SAMPLE_SIZE];
++static unsigned int playback_channels[HDMI_MAX_CHANNEL_CONSTRAINTS];
++
++static struct snd_pcm_hw_constraint_list playback_constraint_rates;
++static struct snd_pcm_hw_constraint_list playback_constraint_bits;
++static struct snd_pcm_hw_constraint_list playback_constraint_channels;
++
+ #ifdef DEBUG
+ static void dumpregs(void)
+ {
+@@ -100,19 +111,126 @@ static void hdmi_set_audio_infoframe(void)
+ 	hdmi_writeb(0x00, HDMI_FC_AUDICONF2);
+ }
+ 
+-static unsigned int hdmi_playback_rates[] = { 32000, 44100, 48000, 88200, 96000 };
+-
+-static struct snd_pcm_hw_constraint_list playback_rate_constraints = {
+-	.count = ARRAY_SIZE(hdmi_playback_rates),
+-	.list = hdmi_playback_rates,
+-	.mask = 0,
++static int cea_audio_rates[HDMI_MAX_RATES] = {
++	32000,
++	44100,
++	48000,
++	88200,
++	96000,
++	176400,
++	192000,
+ };
+ 
++static void mxc_hdmi_get_playback_rates(void)
++{
++	int i, count = 0;
++	u8 rates;
++
++	/* always assume basic audio support */
++	rates = edid_cfg.sample_rates | 0x7;
++
++	for (i = 0 ; i < HDMI_MAX_RATES ; i++)
++		if ((rates & (1 << i)) != 0)
++			playback_rates[count++] = cea_audio_rates[i];
++
++	playback_constraint_rates.list = playback_rates;
++	playback_constraint_rates.count = count;
++
++#ifdef DEBUG
++	for (i = 0 ; i < playback_constraint_rates.count ; i++)
++		pr_debug("%s: constraint = %d Hz\n", __func__,
++			 playback_rates[i]);
++#endif
++}
++
++static void mxc_hdmi_get_playback_sample_size(void)
++{
++	int i = 0;
++
++	/* always assume basic audio support */
++	playback_sample_size[i++] = 16;
++
++	if (edid_cfg.sample_sizes & 0x2)
++		playback_sample_size[i++] = 20;
++
++	if (edid_cfg.sample_sizes & 0x4)
++		playback_sample_size[i++] = 24;
++
++	playback_constraint_bits.list = playback_sample_size;
++	playback_constraint_bits.count = i;
++
++#ifdef DEBUG
++	for (i = 0 ; i < playback_constraint_bits.count ; i++)
++		pr_debug("%s: constraint = %d bits\n", __func__,
++			 playback_sample_size[i]);
++#endif
++}
++
++static void mxc_hdmi_get_playback_channels(void)
++{
++	int channels = 2, i = 0;
++
++	/* always assume basic audio support */
++	playback_channels[i++] = channels;
++	channels += 2;
++
++	while ((i < HDMI_MAX_CHANNEL_CONSTRAINTS) &&
++		(channels <= edid_cfg.max_channels)) {
++		playback_channels[i++] = channels;
++		channels += 2;
++	}
++
++	playback_constraint_channels.list = playback_channels;
++	playback_constraint_channels.count = i;
++
++#ifdef DEBUG
++	for (i = 0 ; i < playback_constraint_channels.count ; i++)
++		pr_debug("%s: constraint = %d channels\n", __func__,
++			 playback_channels[i]);
++#endif
++}
++
++static int mxc_hdmi_update_constraints(struct mxc_hdmi_priv *priv,
++				       struct snd_pcm_substream *substream)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	int ret;
++
++	hdmi_get_edid_cfg(&edid_cfg);
++
++	mxc_hdmi_get_playback_rates();
++	ret = snd_pcm_hw_constraint_list(substream->runtime, 0,
++					SNDRV_PCM_HW_PARAM_RATE,
++					&playback_constraint_rates);
++	if (ret < 0)
++		return ret;
++
++	mxc_hdmi_get_playback_sample_size();
++	ret = snd_pcm_hw_constraint_list(substream->runtime, 0,
++					SNDRV_PCM_HW_PARAM_SAMPLE_BITS,
++					&playback_constraint_bits);
++	if (ret < 0)
++		return ret;
++
++	mxc_hdmi_get_playback_channels();
++	ret = snd_pcm_hw_constraint_list(runtime, 0,
++					SNDRV_PCM_HW_PARAM_CHANNELS,
++					&playback_constraint_channels);
++	if (ret < 0)
++		return ret;
++
++	ret = snd_pcm_hw_constraint_integer(substream->runtime,
++			SNDRV_PCM_HW_PARAM_PERIODS);
++	if (ret < 0)
++		return ret;
++
++	return 0;
++}
++
+ static int mxc_hdmi_codec_startup(struct snd_pcm_substream *substream,
+ 				  struct snd_soc_dai *dai)
+ {
+ 	struct mxc_hdmi_priv *hdmi_priv = snd_soc_dai_get_drvdata(dai);
+-	struct snd_pcm_runtime *runtime = substream->runtime;
+ 	int ret;
+ 
+ 	clk_enable(hdmi_priv->isfr_clk);
+@@ -122,14 +240,7 @@ static int mxc_hdmi_codec_startup(struct snd_pcm_substream *substream,
+ 		(int)clk_get_rate(hdmi_priv->isfr_clk),
+ 		(int)clk_get_rate(hdmi_priv->iahb_clk));
+ 
+-	ret = snd_pcm_hw_constraint_list(runtime, 0,
+-					 SNDRV_PCM_HW_PARAM_RATE,
+-					 &playback_rate_constraints);
+-	if (ret < 0)
+-		return ret;
+-
+-	ret = snd_pcm_hw_constraint_integer(runtime,
+-					SNDRV_PCM_HW_PARAM_PERIODS);
++	ret = mxc_hdmi_update_constraints(hdmi_priv, substream);
+ 	if (ret < 0)
+ 		return ret;
+ 
+diff --git a/sound/soc/imx/imx-hdmi-dma.c b/sound/soc/imx/imx-hdmi-dma.c
+index 9ce99ef..d0c4d52 100644
+--- a/sound/soc/imx/imx-hdmi-dma.c
++++ b/sound/soc/imx/imx-hdmi-dma.c
+@@ -649,14 +649,6 @@ static struct snd_pcm_hardware snd_imx_hardware = {
+ 	.fifo_size = 0,
+ };
+ 
+-static unsigned int hw_channels[] = {2, 4, 6, 8};
+-
+-static struct snd_pcm_hw_constraint_list hw_constraint_channels = {
+-	.count = ARRAY_SIZE(hw_channels),
+-	.list = hw_channels,
+-	.mask = 0,
+-};
+-
+ static void hdmi_dma_irq_enable(struct imx_hdmi_dma_runtime_data *rtd)
+ {
+ 	unsigned long flags;
+@@ -712,12 +704,6 @@ static int hdmi_dma_open(struct snd_pcm_substream *substream)
+ 	if (ret < 0)
+ 		return ret;
+ 
+-	ret = snd_pcm_hw_constraint_list(runtime, 0,
+-					SNDRV_PCM_HW_PARAM_CHANNELS,
+-					&hw_constraint_channels);
+-	if (ret < 0)
+-		return ret;
+-
+ 	snd_soc_set_runtime_hwparams(substream, &snd_imx_hardware);
+ 
+ 	hdmi_dma_irq_enable(hdmi_dma_priv);
+diff --git a/sound/soc/imx/imx-hdmi.h b/sound/soc/imx/imx-hdmi.h
+index 52c58dd..1173757 100644
+--- a/sound/soc/imx/imx-hdmi.h
++++ b/sound/soc/imx/imx-hdmi.h
+@@ -1,7 +1,7 @@
+ /*
+  * MXC HDMI ALSA Soc Codec Driver
+  *
+- * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+  */
+ 
+ /*
+@@ -31,11 +31,17 @@ struct imx_hdmi {
+ 	struct platform_device *soc_platform_pdev;
+ };
+ 
++#define HDMI_MAX_RATES 7
++#define HDMI_MAX_SAMPLE_SIZE 3
++#define HDMI_MAX_CHANNEL_CONSTRAINTS 4
++
+ #define MXC_HDMI_RATES_PLAYBACK			(SNDRV_PCM_RATE_32000 | \
+ 						 SNDRV_PCM_RATE_44100 | \
+ 						 SNDRV_PCM_RATE_48000 | \
+ 						 SNDRV_PCM_RATE_88200 | \
+-						 SNDRV_PCM_RATE_96000)
++						 SNDRV_PCM_RATE_96000 | \
++						 SNDRV_PCM_RATE_176400 | \
++						 SNDRV_PCM_RATE_192000)
+ 
+ #define MXC_HDMI_FORMATS_PLAYBACK		(SNDRV_PCM_FMTBIT_S16_LE | \
+ 						 SNDRV_PCM_FMTBIT_S24_LE)
+-- 
+1.7.7.4
+

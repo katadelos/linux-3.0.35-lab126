@@ -1,0 +1,53 @@
+From b822cf62c41f7ee2b5920e9838666539b21c23b0 Mon Sep 17 00:00:00 2001
+From: Matthieu CASTET <matthieu.castet@parrot.com>
+Date: Sun, 26 Jun 2011 18:26:55 +0200
+Subject: [PATCH 2204/2463] mtd: nand_flash_detect_onfi propagate busw info
+
+there is a bug in nand_flash_detect_onfi, busw need to be passed
+by pointer to return it.
+
+Signed-off-by: Matthieu CASTET <matthieu.castet@parrot.com>
+Acked-by: Brian Norris <computersforpeace@gmail.com>
+Signed-off-by: Artem Bityutskiy <dedekind1@gmail.com>
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/mtd/nand/nand_base.c |    8 ++++----
+ 1 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mtd/nand/nand_base.c b/drivers/mtd/nand/nand_base.c
+index f016d0f..ccad911 100644
+--- a/drivers/mtd/nand/nand_base.c
++++ b/drivers/mtd/nand/nand_base.c
+@@ -2855,7 +2855,7 @@ static u16 onfi_crc16(u16 crc, u8 const *p, size_t len)
+  * Check if the NAND chip is ONFI compliant, returns 1 if it is, 0 otherwise
+  */
+ static int nand_flash_detect_onfi(struct mtd_info *mtd, struct nand_chip *chip,
+-					int busw)
++					int *busw)
+ {
+ 	struct nand_onfi_params *p = &chip->onfi_params;
+ 	int i;
+@@ -2910,9 +2910,9 @@ static int nand_flash_detect_onfi(struct mtd_info *mtd, struct nand_chip *chip,
+ 	mtd->erasesize = le32_to_cpu(p->pages_per_block) * mtd->writesize;
+ 	mtd->oobsize = le16_to_cpu(p->spare_bytes_per_page);
+ 	chip->chipsize = (uint64_t)le32_to_cpu(p->blocks_per_lun) * mtd->erasesize;
+-	busw = 0;
++	*busw = 0;
+ 	if (le16_to_cpu(p->features) & 1)
+-		busw = NAND_BUSWIDTH_16;
++		*busw = NAND_BUSWIDTH_16;
+ 
+ 	chip->options &= ~NAND_CHIPOPTIONS_MSK;
+ 	chip->options |= (NAND_NO_READRDY |
+@@ -2978,7 +2978,7 @@ static struct nand_flash_dev *nand_get_flash_type(struct mtd_info *mtd,
+ 	chip->onfi_version = 0;
+ 	if (!type->name || !type->pagesize) {
+ 		/* Check is chip is ONFI compliant */
+-		ret = nand_flash_detect_onfi(mtd, chip, busw);
++		ret = nand_flash_detect_onfi(mtd, chip, &busw);
+ 		if (ret)
+ 			goto ident_done;
+ 	}
+-- 
+1.7.7.4
+

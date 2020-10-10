@@ -1,0 +1,142 @@
+From 634ce4b337f4e3f5e215d676446fce815ff2562b Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Fri, 30 Dec 2011 14:07:18 +0800
+Subject: [PATCH 0823/2463] ENGR00171027-1 [USB_HOST]after plug in/out on the
+ hub,host can't work
+
+This issue will happen only when suspend bit is set but phcd is not set
+The root cause of this issue is the IC defect.
+- If the suspend bit is set without phcd bit set, host controller
+  can't resume normally
+- The workaround is after set suspend bit, we need set the following
+  bit in USB PHY at once:
+  HW_USBPHY_PWD_RXPWDRX
+  HW_USBPHY_PWD_RXPWDDIFF
+  HW_USBPHY_PWD_RXPWD1PT1
+  HW_USBPHY_PWD_RXPWDENV
+  HW_USBPHY_PWD_TXPWDv2I
+  HW_USBPHY_PWD_TXPWDIBIAS
+  HW_USBPHY_PWD_TXPWDFS
+- Furthermore, after resume, we must clear these bits during the K state
+- IC has no plan to fix this issue
+- This issue only happen on MX6Q/MX28
+
+MSL part
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ arch/arm/mach-mx6/usb_dr.c |   34 ++++++++++++++++++++++++++++++++++
+ arch/arm/mach-mx6/usb_h1.c |   32 ++++++++++++++++++++++++++++++++
+ 2 files changed, 66 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index de84a4d..fb241f5 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -310,6 +310,36 @@ static void usbotg_wakeup_event_clear(void)
+ 
+ #ifdef CONFIG_USB_EHCI_ARC_OTG
+ /* Beginning of host related operation for DR port */
++static void _host_platform_suspend(struct fsl_usb2_platform_data *pdata)
++{
++	void __iomem *phy_reg = MX6_IO_ADDRESS(USB_PHY0_BASE_ADDR);
++	u32 tmp;
++
++	tmp = (BM_USBPHY_PWD_TXPWDFS
++		| BM_USBPHY_PWD_TXPWDIBIAS
++		| BM_USBPHY_PWD_TXPWDV2I
++		| BM_USBPHY_PWD_RXPWDENV
++		| BM_USBPHY_PWD_RXPWD1PT1
++		| BM_USBPHY_PWD_RXPWDDIFF
++		| BM_USBPHY_PWD_RXPWDRX);
++	__raw_writel(tmp, phy_reg + HW_USBPHY_PWD_SET);
++}
++
++static void _host_platform_resume(struct fsl_usb2_platform_data *pdata)
++{
++	void __iomem *phy_reg = MX6_IO_ADDRESS(USB_PHY0_BASE_ADDR);
++	u32 tmp;
++
++	tmp = (BM_USBPHY_PWD_TXPWDFS
++		| BM_USBPHY_PWD_TXPWDIBIAS
++		| BM_USBPHY_PWD_TXPWDV2I
++		| BM_USBPHY_PWD_RXPWDENV
++		| BM_USBPHY_PWD_RXPWD1PT1
++		| BM_USBPHY_PWD_RXPWDDIFF
++		| BM_USBPHY_PWD_RXPWDRX);
++	__raw_writel(tmp, phy_reg + HW_USBPHY_PWD_CLR);
++}
++
+ static void _host_phy_lowpower_suspend(struct fsl_usb2_platform_data *pdata, bool enable)
+ {
+ 	__phy_lowpower_suspend(pdata, enable, ENABLED_BY_HOST);
+@@ -438,6 +468,8 @@ void __init mx6_usb_dr_init(void)
+ #ifdef CONFIG_USB_EHCI_ARC_OTG
+ 	dr_utmi_config.operating_mode = DR_HOST_MODE;
+ 	dr_utmi_config.wake_up_enable = _host_wakeup_enable;
++	dr_utmi_config.platform_suspend = _host_platform_suspend;
++	dr_utmi_config.platform_resume  = _host_platform_resume;
+ 	dr_utmi_config.phy_lowpower_suspend = _host_phy_lowpower_suspend;
+ 	dr_utmi_config.is_wakeup_event = _is_host_wakeup;
+ 	dr_utmi_config.wakeup_pdata = &dr_wakeup_config;
+@@ -448,6 +480,8 @@ void __init mx6_usb_dr_init(void)
+ #ifdef CONFIG_USB_GADGET_ARC
+ 	dr_utmi_config.operating_mode = DR_UDC_MODE;
+ 	dr_utmi_config.wake_up_enable = _device_wakeup_enable;
++	dr_utmi_config.platform_suspend = NULL;
++	dr_utmi_config.platform_resume  = NULL;
+ 	dr_utmi_config.phy_lowpower_suspend = _device_phy_lowpower_suspend;
+ 	dr_utmi_config.is_wakeup_event = _is_device_wakeup;
+ 	dr_utmi_config.wakeup_pdata = &dr_wakeup_config;
+diff --git a/arch/arm/mach-mx6/usb_h1.c b/arch/arm/mach-mx6/usb_h1.c
+index 9c247d5..f4b84df 100644
+--- a/arch/arm/mach-mx6/usb_h1.c
++++ b/arch/arm/mach-mx6/usb_h1.c
+@@ -148,6 +148,36 @@ static void _wake_up_enable(struct fsl_usb2_platform_data *pdata, bool enable)
+ 	}
+ }
+ 
++static void usbh1_platform_suspend(struct fsl_usb2_platform_data *pdata)
++{
++	void __iomem *phy_reg = MX6_IO_ADDRESS(USB_PHY1_BASE_ADDR);
++	u32 tmp;
++
++	tmp = (BM_USBPHY_PWD_TXPWDFS
++		| BM_USBPHY_PWD_TXPWDIBIAS
++		| BM_USBPHY_PWD_TXPWDV2I
++		| BM_USBPHY_PWD_RXPWDENV
++		| BM_USBPHY_PWD_RXPWD1PT1
++		| BM_USBPHY_PWD_RXPWDDIFF
++		| BM_USBPHY_PWD_RXPWDRX);
++	__raw_writel(tmp, phy_reg + HW_USBPHY_PWD_SET);
++}
++
++static void usbh1_platform_resume(struct fsl_usb2_platform_data *pdata)
++{
++	void __iomem *phy_reg = MX6_IO_ADDRESS(USB_PHY1_BASE_ADDR);
++	u32 tmp;
++
++	tmp = (BM_USBPHY_PWD_TXPWDFS
++		| BM_USBPHY_PWD_TXPWDIBIAS
++		| BM_USBPHY_PWD_TXPWDV2I
++		| BM_USBPHY_PWD_RXPWDENV
++		| BM_USBPHY_PWD_RXPWD1PT1
++		| BM_USBPHY_PWD_RXPWDDIFF
++		| BM_USBPHY_PWD_RXPWDRX);
++	__raw_writel(tmp, phy_reg + HW_USBPHY_PWD_CLR);
++}
++
+ static void _phy_lowpower_suspend(struct fsl_usb2_platform_data *pdata, bool enable)
+ {
+ 	u32 tmp;
+@@ -224,6 +254,8 @@ static struct fsl_usb2_platform_data usbh1_config = {
+ 	.power_budget = 500,	/* 500 mA max power */
+ 	.wake_up_enable = _wake_up_enable,
+ 	.usb_clock_for_pm  = usbh1_clock_gate,
++	.platform_suspend  = usbh1_platform_suspend,
++	.platform_resume   = usbh1_platform_resume,
+ 	.phy_lowpower_suspend = _phy_lowpower_suspend,
+ 	.is_wakeup_event = _is_usbh1_wakeup,
+ 	.wakeup_handler = h1_wakeup_handler,
+-- 
+1.7.7.4
+

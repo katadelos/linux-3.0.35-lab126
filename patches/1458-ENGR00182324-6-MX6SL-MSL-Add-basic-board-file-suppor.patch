@@ -1,0 +1,271 @@
+From 59e8e438bed9721c4e4abb824d17ca8803499e00 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Mon, 14 May 2012 22:36:16 +0800
+Subject: [PATCH 1458/2463] ENGR00182324-6 - MX6SL MSL: Add basic board file
+ support
+
+Add basic board file support for the i.MX 6SoloLite ARM2-based
+Validation board.
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+Signed-off-by: Robby Cai <r63905@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig            |   40 +++++++++++
+ arch/arm/mach-mx6/Makefile           |    1 +
+ arch/arm/mach-mx6/board-mx6sl_arm2.c |  123 ++++++++++++++++++++++++++++++++++
+ arch/arm/mach-mx6/board-mx6sl_arm2.h |   29 ++++++++
+ arch/arm/tools/mach-types            |    1 +
+ 5 files changed, 194 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index c202f0c..e1ede87 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -23,6 +23,9 @@ config FORCE_MAX_ZONEORDER
+ config	SOC_IMX6Q
+ 	bool
+ 
++config	SOC_IMX6SL
++	bool
++
+ config MACH_MX6Q_ARM2
+ 	bool "Support i.MX 6Quad Armadillo2 platform"
+ 	select ARCH_MX6Q
+@@ -65,6 +68,38 @@ config MACH_MX6Q_ARM2
+ 	  Include support for i.MX 6Quad Armadillo2 platform. This includes specific
+ 	  configurations for the board and its peripherals.
+ 
++config MACH_MX6SL_ARM2
++	bool "Support i.MX 6SoloLite Armadillo2 platform"
++	select ARCH_MX6Q
++	select SOC_IMX6SL
++	select IMX_HAVE_PLATFORM_IMX_UART
++	select IMX_HAVE_PLATFORM_DMA
++	select IMX_HAVE_PLATFORM_FEC
++	select IMX_HAVE_PLATFORM_SDHCI_ESDHC_IMX
++	select IMX_HAVE_PLATFORM_SPI_IMX
++	select IMX_HAVE_PLATFORM_IMX_I2C
++	select IMX_HAVE_PLATFORM_VIV_GPU
++	select IMX_HAVE_PLATFORM_IMX_DVFS
++	select IMX_HAVE_PLATFORM_IMX_SSI
++	select IMX_HAVE_PLATFORM_IMX_ANATOP_THERMAL
++	select IMX_HAVE_PLATFORM_FSL_USB2_UDC
++	select IMX_HAVE_PLATFORM_MXC_EHCI
++	select IMX_HAVE_PLATFORM_FSL_OTG
++	select IMX_HAVE_PLATFORM_FSL_USB_WAKEUP
++	select IMX_HAVE_PLATFORM_AHCI
++	select IMX_HAVE_PLATFORM_IMX_OCOTP
++	select IMX_HAVE_PLATFORM_IMX_VIIM
++	select IMX_HAVE_PLATFORM_IMX2_WDT
++	select IMX_HAVE_PLATFORM_IMX_SNVS_RTC
++	select IMX_HAVE_PLATFORM_IMX_PM
++	select IMX_HAVE_PLATFORM_IMX_SPDIF
++	select IMX_HAVE_PLATFORM_PERFMON
++	select IMX_HAVE_PLATFORM_IMX_EPDC
++	select IMX_HAVE_PLATFORM_IMX_PXP
++	help
++	  Include support for i.MX 6Sololite Armadillo2 platform. This includes specific
++	  configurations for the board and its peripherals.
++
+ config MACH_MX6Q_SABRELITE
+ 	bool "Support i.MX 6Quad SABRE Lite platform"
+ 	select ARCH_MX6Q
+@@ -181,4 +216,9 @@ config MX6_INTER_LDO_BYPASS
+ 	 LDO will replaced by external pmic regulator(e.g. pfuze100), VDDCORE
+ 	 can be adjust automatically adjust by cpu frequency.
+ 
++comment "MX6 Solo-lite Options:"
++
++config FEC_CLOCK_FROM_ANATOP
++	bool "Use ANATOP clock to get 50MHz FEC Ref clock"
++
+ endif
+diff --git a/arch/arm/mach-mx6/Makefile b/arch/arm/mach-mx6/Makefile
+index 90e10c0..469181d 100644
+--- a/arch/arm/mach-mx6/Makefile
++++ b/arch/arm/mach-mx6/Makefile
+@@ -9,6 +9,7 @@ mx6_mmdc.o mx6_ddr_freq.o
+ 
+ obj-$(CONFIG_ARCH_MX6) += clock.o mx6q_suspend.o clock_mx6sl.o
+ obj-$(CONFIG_MACH_MX6Q_ARM2) += board-mx6q_arm2.o
++obj-$(CONFIG_MACH_MX6SL_ARM2) += board-mx6sl_arm2.o
+ obj-$(CONFIG_MACH_MX6Q_SABRELITE) += board-mx6q_sabrelite.o
+ obj-$(CONFIG_MACH_MX6Q_SABRESD) += board-mx6q_sabresd.o mx6q_sabresd_pmic_pfuze100.o
+ obj-$(CONFIG_MACH_MX6Q_SABREAUTO) += board-mx6q_sabreauto.o mx6q_sabreauto_pmic_pfuze100.o
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+new file mode 100755
+index 0000000..2fa33af
+--- /dev/null
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -0,0 +1,123 @@
++/*
++ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <linux/types.h>
++#include <linux/sched.h>
++#include <linux/delay.h>
++#include <linux/pm.h>
++#include <linux/interrupt.h>
++#include <linux/irq.h>
++#include <linux/init.h>
++#include <linux/input.h>
++#include <linux/nodemask.h>
++#include <linux/clk.h>
++#include <linux/platform_device.h>
++#include <linux/fsl_devices.h>
++#include <linux/smsc911x.h>
++#include <linux/spi/spi.h>
++#include <linux/spi/flash.h>
++#include <linux/i2c.h>
++#include <linux/i2c/pca953x.h>
++#include <linux/ata.h>
++#include <linux/mtd/mtd.h>
++#include <linux/mtd/map.h>
++#include <linux/mtd/partitions.h>
++#include <linux/pmic_external.h>
++#include <linux/pmic_status.h>
++#include <linux/mxcfb.h>
++#include <linux/pwm_backlight.h>
++#include <linux/fec.h>
++#include <linux/memblock.h>
++#include <linux/gpio.h>
++#include <linux/etherdevice.h>
++#include <linux/regulator/anatop-regulator.h>
++#include <linux/regulator/consumer.h>
++#include <linux/regulator/machine.h>
++#include <linux/regulator/fixed.h>
++#include <linux/mfd/max17135.h>
++#include <sound/wm8962.h>
++#include <sound/pcm.h>
++
++#include <mach/common.h>
++#include <mach/hardware.h>
++#include <mach/mxc_dvfs.h>
++#include <mach/memory.h>
++#include <mach/iomux-mx6sl.h>
++#include <mach/imx-uart.h>
++#include <mach/viv_gpu.h>
++
++#include <asm/irq.h>
++#include <asm/setup.h>
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include <asm/mach/time.h>
++
++#include "usb.h"
++#include "devices-imx6q.h"
++#include "crm_regs.h"
++#include "cpu_op-mx6.h"
++#include "board-mx6sl_arm2.h"
++
++void __init early_console_setup(unsigned long base, struct clk *clk);
++
++static inline void mx6_arm2_init_uart(void)
++{
++	imx6q_add_imx_uart(0, NULL); /* DEBUG UART1 */
++}
++
++/*!
++ * Board specific initialization.
++ */
++static void __init mx6_arm2_init(void)
++{
++	mxc_iomux_v3_setup_multiple_pads(mx6sl_arm2_pads, ARRAY_SIZE(mx6sl_arm2_pads));
++
++	mx6_arm2_init_uart();
++}
++
++extern void __iomem *twd_base;
++static void __init mx6_timer_init(void)
++{
++	struct clk *uart_clk;
++#ifdef CONFIG_LOCAL_TIMERS
++	twd_base = ioremap(LOCAL_TWD_ADDR, SZ_256);
++	BUG_ON(!twd_base);
++#endif
++	mx6sl_clocks_init(32768, 24000000, 0, 0);
++
++	uart_clk = clk_get_sys("imx-uart.0", NULL);
++	early_console_setup(UART1_BASE_ADDR, uart_clk);
++}
++
++static struct sys_timer mxc_timer = {
++	.init   = mx6_timer_init,
++};
++
++static void __init mx6_arm2_reserve(void)
++{
++
++}
++
++MACHINE_START(MX6SL_ARM2, "Freescale i.MX 6SoloLite Armadillo2 Board")
++	.boot_params	= MX6SL_PHYS_OFFSET + 0x100,
++	.map_io		= mx6_map_io,
++	.init_irq	= mx6_init_irq,
++	.init_machine	= mx6_arm2_init,
++	.timer		= &mxc_timer,
++	.reserve	= mx6_arm2_reserve,
++MACHINE_END
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.h b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+new file mode 100755
+index 0000000..8426885
+--- /dev/null
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+@@ -0,0 +1,29 @@
++/*
++ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#ifndef _BOARD_MX6SL_ARM2_H
++#define _BOARD_MX6SL_ARM2_H
++#include <mach/iomux-mx6sl.h>
++
++static iomux_v3_cfg_t mx6sl_arm2_pads[] = {
++	/* UART1 */
++	MX6SL_PAD_UART1_RXD__UART1_RXD,
++	MX6SL_PAD_UART1_TXD__UART1_TXD,
++};
++
++#endif
+diff --git a/arch/arm/tools/mach-types b/arch/arm/tools/mach-types
+index 4a344c2..5b48a6b 100644
+--- a/arch/arm/tools/mach-types
++++ b/arch/arm/tools/mach-types
+@@ -1117,4 +1117,5 @@ mx6q_sabreauto		MACH_MX6Q_SABREAUTO	MX6Q_SABREAUTO		3529
+ mx6q_sabrelite		MACH_MX6Q_SABRELITE	MX6Q_SABRELITE		3769
+ mx6q_sabresd		MACH_MX6Q_SABRESD	MX6Q_SABRESD		3980
+ mx6q_arm2		MACH_MX6Q_ARM2		MX6Q_ARM2		3837
++mx6sl_arm2		MACH_MX6SL_ARM2		MX6SL_ARM2		4091
+ 
+-- 
+1.7.7.4
+

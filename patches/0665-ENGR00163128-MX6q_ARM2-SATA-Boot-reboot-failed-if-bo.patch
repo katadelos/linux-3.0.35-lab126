@@ -1,0 +1,76 @@
+From 5303740314e98f284d5a737726b9cd4a54149a36 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Mon, 28 Nov 2011 13:02:51 +0800
+Subject: [PATCH 0665/2463] ENGR00163128 [MX6q_ARM2]SATA Boot: reboot failed
+ if boot from SATA
+
+The root cause is that the sata power is not enabled after reboot
+the system when boot from sata.
+Built in the sata driver would fix this issue.
+In this way, the sata power would be enabled defautly
+when there is a sata device is plugged into the slot, otherwise,
+the power would be disabled.
+NOTE:
+Pls don't plug the sata disk after the system is booted up.
+System wouldn't recognized it, since there are no any power and
+clocks on the sata slot.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig     |    4 ++--
+ arch/arm/mach-mx6/board-mx6q_arm2.c |   11 +++++++++++
+ 2 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 6620851..0f2c0e8 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -817,7 +817,7 @@ CONFIG_SCSI_LOWLEVEL=y
+ # CONFIG_SCSI_DEBUG is not set
+ # CONFIG_SCSI_DH is not set
+ # CONFIG_SCSI_OSD_INITIATOR is not set
+-CONFIG_ATA=m
++CONFIG_ATA=y
+ # CONFIG_ATA_NONSTANDARD is not set
+ CONFIG_ATA_VERBOSE_ERROR=y
+ # CONFIG_SATA_PMP is not set
+@@ -825,7 +825,7 @@ CONFIG_ATA_VERBOSE_ERROR=y
+ #
+ # Controllers with non-SFF native interface
+ #
+-CONFIG_SATA_AHCI_PLATFORM=m
++CONFIG_SATA_AHCI_PLATFORM=y
+ CONFIG_ATA_SFF=y
+ 
+ #
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 053d357..6af5dc3 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -826,12 +826,23 @@ static int mx6q_arm2_sata_init(struct device *dev, void __iomem *addr)
+ 
+ 	sata_init(addr, tmpdata);
+ 
++	/* Release resources when there is no device on the port */
++	msleep(200);
++	if ((readl(addr + PORT_SATA_SR) & 0xF) == 0) {
++		dev_info(dev, "NO sata disk.\n");
++		ret = -ENODEV;
++		goto release_sata_clk;
++	}
++
+ 	return ret;
+ 
+ release_sata_clk:
+ 	clk_disable(sata_clk);
+ put_sata_clk:
+ 	clk_put(sata_clk);
++	/* Disable SATA PWR CTRL_0 of MAX7310 */
++	gpio_request(MX6Q_ARM2_MAX7310_1_BASE_ADDR, "SATA_PWR_EN");
++	gpio_direction_output(MX6Q_ARM2_MAX7310_1_BASE_ADDR, 0);
+ 
+ 	return ret;
+ }
+-- 
+1.7.7.4
+

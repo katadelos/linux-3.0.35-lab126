@@ -1,0 +1,215 @@
+From 75f67ccf2f34934de12ae83941608cfc850f9411 Mon Sep 17 00:00:00 2001
+From: Danny Nold <dannynold@freescale.com>
+Date: Mon, 25 Jul 2011 21:39:50 -0500
+Subject: [PATCH 0288/2463] ENGR00153670-2 - mach-mx6: Add support for MXC
+ HDMI
+
+- Add MXC HDMI initialization structures and calls to SABRE board file.
+- Add HDMI clock definitions and functions for PLL5 (main video clock
+used by HDMI).
+
+Signed-off-by: Danny Nold <dannynold@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig                |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   19 +++++++++++++
+ arch/arm/mach-mx6/clock.c                |   42 ++++++++++++++++++++++++++---
+ arch/arm/mach-mx6/devices-imx6q.h        |    4 +++
+ 4 files changed, 61 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index e0c247b..604a029 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -41,6 +41,7 @@ config MACH_MX6Q_SABREAUTO
+ 	select IMX_HAVE_PLATFORM_IMX2_WDT
+ 	select IMX_HAVE_PLATFORM_IMX_SNVS_RTC
+ 	select IMX_HAVE_PLATFORM_IMX_PM
++	select IMX_HAVE_PLATFORM_MXC_HDMI
+ 	help
+ 	  Include support for i.MX 6Quad SABRE Automotive Infotainment platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 3e8f9d0..043623f 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -59,6 +59,7 @@
+ #include <mach/viv_gpu.h>
+ #include <mach/ahci_sata.h>
+ #include <mach/ipu-v3.h>
++#include <mach/mxc_hdmi.h>
+ #include <linux/gpio.h>
+ #include <linux/etherdevice.h>
+ 
+@@ -226,6 +227,13 @@ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 	/* I2C3 */
+ 	MX6Q_PAD_GPIO_5__I2C3_SCL,
+ 	MX6Q_PAD_GPIO_16__I2C3_SDA,
++
++	/* HDMI */
++	MX6Q_PAD_EIM_A25__HDMI_TX_CEC_LINE,
++	MX6Q_PAD_SD1_DAT1__HDMI_TX_OPHYDTB_0,
++	MX6Q_PAD_SD1_DAT0__HDMI_TX_OPHYDTB_1,
++
++	/* USBOTG ID pin */
+ 	MX6Q_PAD_GPIO_1__USBOTG_ID,
+ };
+ static const struct esdhc_platform_data mx6q_sabreauto_sd3_data __initconst = {
+@@ -404,6 +412,9 @@ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+ 		.irq = gpio_to_irq(MX6Q_SABREAUTO_CAP_TCH_INT),
+ 		.platform_data = &p1003_ts_data,
+ 	},
++	{
++		I2C_BOARD_INFO("mxc_hdmi_i2c", 0x50),
++	},
+ };
+ 
+ static void imx6q_sabreauto_usbotg_vbus(bool on)
+@@ -534,6 +545,12 @@ static struct ipuv3_fb_platform_data sabr_fb_data[] = {
+ 	},
+ };
+ 
++static struct fsl_mxc_lcd_platform_data hdmi_data = {
++	.ipu_id = 0,
++	.disp_id = 0,
++	.default_ifmt = IPU_PIX_FMT_RGB24,
++};
++
+ static struct fsl_mxc_lcd_platform_data lcdif_data = {
+ 	.ipu_id = 0,
+ 	.disp_id = 0,
+@@ -633,6 +650,8 @@ static void __init mx6_board_init(void)
+ 	i2c_register_board_info(2, mxc_i2c2_board_info,
+ 			ARRAY_SIZE(mxc_i2c2_board_info));
+ 
++	imx6q_add_mxc_hdmi(&hdmi_data);
++
+ 	imx6q_add_anatop_thermal_imx(1, &mx6q_sabreauto_anatop_thermal_data);
+ 	imx6q_init_fec();
+ 
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index e035bd3..0335058 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -49,6 +49,9 @@ static struct clk apbh_dma_clk;
+ 
+ #define SPIN_DELAY	1000000 /* in nanoseconds */
+ 
++#define AUDIO_VIDEO_MIN_CLK_FREQ	650000000
++#define AUDIO_VIDEO_MAX_CLK_FREQ	1300000000
++
+ #define WAIT(exp, timeout) \
+ ({ \
+ 	struct timespec nstimeofday; \
+@@ -610,7 +613,6 @@ static struct clk pll3_pfd_508M = {
+ 	.enable = _clk_pfd_enable,
+ 	.disable = _clk_pfd_disable,
+ 	.set_rate = pfd_set_rate,
+-	.get_rate = pfd_get_rate,
+ 	.round_rate = pfd_round_rate,
+ };
+ 
+@@ -748,6 +750,19 @@ static int _clk_audio_video_set_rate(struct clk *clk, unsigned long rate)
+ 	return 0;
+ }
+ 
++static unsigned long _clk_audio_video_round_rate(struct clk *clk,
++						unsigned long rate)
++{
++	if (rate < AUDIO_VIDEO_MIN_CLK_FREQ)
++		return AUDIO_VIDEO_MIN_CLK_FREQ;
++
++	if (rate > AUDIO_VIDEO_MAX_CLK_FREQ)
++		return AUDIO_VIDEO_MAX_CLK_FREQ;
++
++	return rate;
++}
++
++
+ static struct clk pll4_audio_main_clk = {
+ 	__INIT_CLK_DEBUG(pll4_audio_main_clk)
+ 	.parent = &osc_clk,
+@@ -755,6 +770,7 @@ static struct clk pll4_audio_main_clk = {
+ 	.disable = _clk_pll_disable,
+ 	.set_rate = _clk_audio_video_set_rate,
+ 	.get_rate = _clk_audio_video_get_rate,
++	.round_rate = _clk_audio_video_round_rate,
+ };
+ 
+ 
+@@ -765,6 +781,7 @@ static struct clk pll5_video_main_clk = {
+ 	.disable = _clk_pll_disable,
+ 	.set_rate = _clk_audio_video_set_rate,
+ 	.get_rate = _clk_audio_video_get_rate,
++	.round_rate = _clk_audio_video_round_rate,
+ };
+ 
+ static struct clk pll6_MLB_main_clk = {
+@@ -3424,14 +3441,26 @@ static struct clk hsi_tx_clk = {
+ 	.get_rate = _clk_hsi_tx_get_rate,
+ };
+ 
+-static struct clk video_27M_clk = {
+-	 __INIT_CLK_DEBUG(video_27M_clk)
++static struct clk hdmi_clk[] = {
++	{
++	 __INIT_CLK_DEBUG(hdmi_isfr_clk)
+ 	.id = 0,
+-	 .parent = &pll2_pfd_400M,
++	.parent = &pll3_pfd_540M,
++	.secondary = &hdmi_clk[1],
+ 	.enable_reg = MXC_CCM_CCGR2,
+ 	.enable_shift = MXC_CCM_CCGRx_CG2_OFFSET,
+ 	.enable = _clk_enable,
+ 	.disable = _clk_disable,
++	},
++	{
++	 __INIT_CLK_DEBUG(hdmi_iahb_clk)
++	.id = 1,
++	 .parent = &ahb_clk,
++	.enable_reg = MXC_CCM_CCGR2,
++	.enable_shift = MXC_CCM_CCGRx_CG0_OFFSET,
++	.enable = _clk_enable,
++	.disable = _clk_disable,
++	},
+ };
+ 
+ static struct clk caam_clk[] = {
+@@ -4024,9 +4053,10 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "imx_sata_clk", sata_clk),
+ 	_REGISTER_CLOCK(NULL, "usboh3_clk", usboh3_clk),
+ 	_REGISTER_CLOCK(NULL, "usb_phy1_clk", usb_phy1_clk),
+-	_REGISTER_CLOCK(NULL, "video_27M_clk", video_27M_clk),
+ 	_REGISTER_CLOCK("imx2-wdt.0", NULL, dummy_clk),
+ 	_REGISTER_CLOCK("imx2-wdt.1", NULL, dummy_clk),
++	_REGISTER_CLOCK(NULL, "hdmi_isfr_clk", hdmi_clk[0]),
++	_REGISTER_CLOCK(NULL, "hdmi_iahb_clk", hdmi_clk[1]),
+ };
+ 
+ 
+@@ -4063,6 +4093,8 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	clk_set_rate(&pll4_audio_main_clk, 650000000);
+ 	clk_set_rate(&pll5_video_main_clk, 650000000);
+ 
++	clk_set_parent(&ipu1_di_clk[0], &pll5_video_main_clk);
++
+ 	clk_set_parent(&gpu3d_shader_clk, &pll2_pfd_594M);
+ 	clk_set_rate(&gpu3d_shader_clk, 594000000);
+ 	clk_set_parent(&gpu3d_core_clk, &mmdc_ch0_axi_clk);
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index e605468..6753e7f 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -105,6 +105,10 @@ extern const struct imx_ldb_data imx6q_ldb_data __initconst;
+ 	platform_device_register_resndata(NULL, "mxc_v4l2_capture",\
+ 			id, NULL, 0, NULL, 0);
+ 
++extern const struct fsl_mxc_lcd_platform_data imx6q_mxc_hdmi_data __initconst;
++#define imx6q_add_mxc_hdmi(pdata)	\
++	imx_add_mxc_hdmi(&imx6q_mxc_hdmi_data, pdata)
++
+ extern const struct imx_vpu_data imx6q_vpu_data __initconst;
+ #define imx6q_add_vpu() imx_add_vpu(&imx6q_vpu_data)
+ 
+-- 
+1.7.7.4
+

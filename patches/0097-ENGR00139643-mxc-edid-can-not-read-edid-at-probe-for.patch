@@ -1,0 +1,59 @@
+From 1710ae6389641c36deb8181ec51dcbdd78cd806b Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Fri, 15 Apr 2011 16:09:59 +0800
+Subject: [PATCH 0097/2463] ENGR00139643 mxc edid: can not read edid at probe
+ for first power on
+
+Need enable analog regulator.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+(cherry picked from commit ff2c76f8204555ae789dfc12e8e06f6ba188e7fe)
+---
+ drivers/video/mxc/mxc_edid.c |   10 ++++++++++
+ 1 files changed, 10 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_edid.c b/drivers/video/mxc/mxc_edid.c
+index 1102a64..4ed9ab6 100644
+--- a/drivers/video/mxc/mxc_edid.c
++++ b/drivers/video/mxc/mxc_edid.c
+@@ -35,6 +35,7 @@
+ #include <linux/fsl_devices.h>
+ #include <linux/interrupt.h>
+ #include <linux/irq.h>
++#include <linux/regulator/consumer.h>
+ #include <mach/mxc_edid.h>
+ #include "../edid.h"
+ 
+@@ -60,6 +61,7 @@ struct mxc_ddc_data {
+ 	u32 di;
+ 	void (*init)(void);
+ 	int (*update)(void);
++	struct regulator *analog_reg;
+ } mxc_ddc;
+ 
+ static bool g_enable_ddc;
+@@ -288,6 +290,12 @@ static int __devinit mxc_ddc_probe(struct i2c_client *client,
+ 	if (!mxc_ddc.update)
+ 		return -EINVAL;
+ 
++	mxc_ddc.analog_reg = regulator_get(&mxc_ddc.pdev->dev, plat->analog_regulator);
++	if (!IS_ERR(mxc_ddc.analog_reg)) {
++		regulator_set_voltage(mxc_ddc.analog_reg, 2775000, 2775000);
++		regulator_enable(mxc_ddc.analog_reg);
++	}
++
+ 	if (mxc_ddc.init)
+ 		mxc_ddc.init();
+ 
+@@ -336,6 +344,8 @@ err:
+ static int __devexit mxc_ddc_remove(struct i2c_client *client)
+ {
+ 	fb_unregister_client(&nb);
++	if (!IS_ERR(mxc_ddc.analog_reg))
++		regulator_disable(mxc_ddc.analog_reg);
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

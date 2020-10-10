@@ -1,0 +1,40 @@
+From 78b315e4615ab22ea2a20eb516253fc3ebf9fadb Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Fri, 13 Apr 2012 18:10:14 +0800
+Subject: [PATCH 1328/2463] ENGR00179647 MX6 clock:Correct LDB DI pclk for
+ MX6Q TO1.1
+
+This patch corrects LDB DI clock's parent clock to
+be pll2_pfd_352M for both MX6Q TO1.1 and MX6Q TO1.0
+according to ticket TKT071080(0b011 for ldb_dix_clk_sel
+field in CCM_CS2CDR is changed from pll3_pfd_540M to
+mmdc_ch1 when we change from MX6Q TO1.0 to MX6Q TO1.1).
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index bd90ba8..47ee9b7 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5208,12 +5208,13 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 
+ 		/* on mx6dl, max ipu clock is 274M */
+ 		clk_set_parent(&ipu1_clk, &pll3_pfd_540M);
+-		clk_set_parent(&ldb_di0_clk, &pll2_pfd_352M);
+-		clk_set_parent(&ldb_di1_clk, &pll2_pfd_352M);
+ 	}
+ 	if (cpu_is_mx6q())
+ 		clk_set_parent(&gpu2d_core_clk[0], &pll3_usb_otg_main_clk);
+ 
++	clk_set_parent(&ldb_di0_clk, &pll2_pfd_352M);
++	clk_set_parent(&ldb_di1_clk, &pll2_pfd_352M);
++
+ 	/* PCLK camera - J5 */
+ 	clk_set_parent(&clko2_clk, &osc_clk);
+ 	clk_set_rate(&clko2_clk, 2400000);
+-- 
+1.7.7.4
+

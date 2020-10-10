@@ -1,0 +1,335 @@
+From 3a62d791042379d54bec69d2dfab7ac1c1b885b8 Mon Sep 17 00:00:00 2001
+From: Zhang Jiejing <jiejing.zhang@freescale.com>
+Date: Mon, 6 Dec 2010 20:03:35 +0800
+Subject: [PATCH 0069/2463] ENGR00137669 rfkill: mx53: ath3k rfkill interface.
+
+MX53 SMD board use ath3k Bluetooth Chip.
+Add rfkill interface to control AR3K BT's power and reset.
+when power on bt, it require to reset BT chip.
+
+Signed-off-by: Zhang Jiejing <jiejing.zhang@freescale.com>
+---
+ arch/arm/mach-mx5/Kconfig                   |    5 +
+ arch/arm/mach-mx5/Makefile                  |    1 +
+ arch/arm/mach-mx5/board-mx53_smd.c          |   42 +++++++
+ arch/arm/mach-mx5/imx_bt_rfkill.c           |  169 +++++++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/imx_rfkill.h |   27 +++++
+ 5 files changed, 244 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/Kconfig b/arch/arm/mach-mx5/Kconfig
+index 5828b3d..8af83c3 100755
+--- a/arch/arm/mach-mx5/Kconfig
++++ b/arch/arm/mach-mx5/Kconfig
+@@ -243,4 +243,9 @@ config MACH_MX53_ARD
+ 	  configurations for the board and its peripherals.
+ endif # ARCH_MX53_SUPPORTED
+ 
++config MACH_IMX_BLUETOOTH_RFKILL
++       tristate "i.MX Bluetooth rfkill interface support"
++       depends on RFKILL
++       ---help---
++	Say Y to get the standard rfkill interface of Bluetooth
+ endif
+diff --git a/arch/arm/mach-mx5/Makefile b/arch/arm/mach-mx5/Makefile
+index 6ea56fe..bb91845 100755
+--- a/arch/arm/mach-mx5/Makefile
++++ b/arch/arm/mach-mx5/Makefile
+@@ -15,6 +15,7 @@ obj-$(CONFIG_MACH_MX51_BABBAGE) += board-mx51_babbage.o
+ obj-$(CONFIG_MACH_MX51_3DS) += board-mx51_3ds.o
+ obj-$(CONFIG_MACH_MX53_EVK) += board-mx53_evk.o
+ obj-$(CONFIG_MACH_MX53_SMD) += board-mx53_smd.o mx53_smd_pmic_da9053.o
++obj-$(CONFIG_MACH_IMX_BLUETOOTH_RFKILL) += imx_bt_rfkill.o
+ obj-$(CONFIG_MACH_MX53_LOCO) += board-mx53_loco.o mx53_loco_pmic_da9053.o
+ obj-$(CONFIG_MACH_MX53_ARD) += board-mx53_ard.o
+ obj-$(CONFIG_MACH_EUKREA_CPUIMX51) += board-cpuimx51.o
+diff --git a/arch/arm/mach-mx5/board-mx53_smd.c b/arch/arm/mach-mx5/board-mx53_smd.c
+index 9ca2023..eb2357e 100755
+--- a/arch/arm/mach-mx5/board-mx53_smd.c
++++ b/arch/arm/mach-mx5/board-mx53_smd.c
+@@ -27,12 +27,14 @@
+ #include <linux/i2c/mpr.h>
+ #include <linux/fsl_devices.h>
+ #include <linux/ahci_platform.h>
++#include <linux/regulator/consumer.h>
+ 
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+ #include <mach/imx-uart.h>
+ #include <mach/iomux-mx53.h>
+ #include <mach/ahci_sata.h>
++#include <mach/imx_rfkill.h>
+ 
+ #include <asm/mach-types.h>
+ #include <asm/mach/arch.h>
+@@ -61,6 +63,7 @@
+ #define MX53_SMD_DCDC1V8_EN	IMX_GPIO_NR(3, 1)
+ #define MX53_SMD_DCDC5V_BB_EN	IMX_GPIO_NR(4, 14)
+ #define MX53_SMD_ALS_INT 	IMX_GPIO_NR(3, 22)
++#define MX53_SMD_BT_RESET	IMX_GPIO_NR(3, 28)
+ 
+ extern int mx53_smd_init_da9052(void);
+ 
+@@ -511,6 +514,44 @@ static void __init mx53_smd_init_usb(void)
+ 	mx5_usbh1_init();
+ }
+ 
++static void mx53_smd_bt_reset(void)
++{
++	gpio_request(MX53_SMD_BT_RESET, "bt-reset");
++	gpio_direction_output(MX53_SMD_BT_RESET, 0);
++	/* pull down reset pin at least >5ms */
++	mdelay(6);
++	/* pull up after power supply BT */
++	gpio_set_value(MX53_SMD_BT_RESET, 1);
++	gpio_free(MX53_SMD_BT_RESET);
++}
++
++static int mx53_smd_bt_power_change(int status)
++{
++	struct regulator *wifi_bt_pwren;
++
++	wifi_bt_pwren = regulator_get(NULL, "wifi_bt");
++	if (IS_ERR(wifi_bt_pwren)) {
++		printk(KERN_ERR "%s: regulator_get error\n", __func__);
++		return -1;
++	}
++
++	if (status) {
++		regulator_enable(wifi_bt_pwren);
++		mx53_smd_bt_reset();
++	} else
++		regulator_disable(wifi_bt_pwren);
++
++	return 0;
++}
++
++static struct platform_device imx_bt_rfkill = {
++	.name = "imx_bt_rfkill",
++};
++
++static struct imx_bt_rfkill_platform_data imx_bt_rfkill_data = {
++	.power_change = mx53_smd_bt_power_change,
++};
++
+ static struct mxc_audio_platform_data smd_audio_data;
+ 
+ static int smd_sgtl5000_init(void)
+@@ -581,6 +622,7 @@ static void __init mx53_smd_board_init(void)
+ 	gpio_direction_input(MX53_SMD_ALS_INT);
+ 
+ 	mxc_register_device(&smd_audio_device, &smd_audio_data);
++	mxc_register_device(&imx_bt_rfkill, &imx_bt_rfkill_data);
+ 	imx53_add_imx_ssi(1, &smd_ssi_pdata);
+ }
+ 
+diff --git a/arch/arm/mach-mx5/imx_bt_rfkill.c b/arch/arm/mach-mx5/imx_bt_rfkill.c
+new file mode 100755
+index 0000000..372ba0f
+--- /dev/null
++++ b/arch/arm/mach-mx5/imx_bt_rfkill.c
+@@ -0,0 +1,169 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++/*!
++ * @file imx_bt_rfkill.c
++ *
++ * @brief This driver is implement a rfkill control interface of bluetooth
++ * chip on i.MX serial boards. Register the power regulator function and
++ * reset function in platform data.
++ */
++
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/device.h>
++#include <linux/kernel.h>
++#include <linux/suspend.h>
++#include <linux/init.h>
++#include <linux/rfkill.h>
++#include <mach/hardware.h>
++#include <mach/imx_rfkill.h>
++
++static int system_in_suspend;
++
++static int imx_bt_set_block(void *rfkdata, bool blocked)
++{
++	struct imx_bt_rfkill_platform_data *data = rfkdata;
++	int ret;
++
++	/* Bluetooth stack will reset the bluetooth chip during
++	 * resume, since we keep bluetooth's power during suspend,
++	 * don't let rfkill to actually reset the chip. */
++	if (system_in_suspend)
++		return 0;
++
++	pr_info("rfkill: Bluetooth RF turn %s\n", blocked ? "off" : "on");
++	if (!blocked)
++		ret = data->power_change(1);
++	else
++		ret = data->power_change(0);
++
++	return ret;
++}
++
++static const struct rfkill_ops imx_bt_rfkill_ops = {
++	.set_block = imx_bt_set_block,
++};
++
++static int imx_bt_power_event(struct notifier_block *this,
++			      unsigned long event, void *dummy)
++{
++	switch (event) {
++	case PM_SUSPEND_PREPARE:
++		system_in_suspend = 1;
++		/* going to suspend, don't reset chip */
++		break;
++	case PM_POST_SUSPEND:
++		system_in_suspend = 0;
++		/* System is resume, can reset chip */
++		break;
++	default:
++		break;
++	}
++	return NOTIFY_DONE;
++}
++
++static struct notifier_block imx_bt_power_notifier = {
++	.notifier_call = imx_bt_power_event,
++};
++
++static int imx_bt_rfkill_probe(struct platform_device *dev)
++{
++	int rc;
++	struct rfkill *rfk;
++
++	struct imx_bt_rfkill_platform_data *data = dev->dev.platform_data;
++
++	if (data->power_change == NULL) {
++		rc = -EINVAL;
++		dev_err(&dev->dev, "no power_change function\n");
++		goto error_check_func;
++	}
++
++	rc = register_pm_notifier(&imx_bt_power_notifier);
++	if (rc)
++		goto error_check_func;
++
++	rfk = rfkill_alloc("imx-bt", &dev->dev, RFKILL_TYPE_BLUETOOTH,
++			   &imx_bt_rfkill_ops, data);
++
++	if (!rfk) {
++		rc = -ENOMEM;
++		goto error_rfk_alloc;
++	}
++
++	rc = rfkill_register(rfk);
++	if (rc)
++		goto error_rfkill;
++
++	platform_set_drvdata(dev, rfk);
++	printk(KERN_INFO "imx_bt_rfkill driver success loaded\n");
++	return 0;
++
++error_rfkill:
++	rfkill_destroy(rfk);
++error_rfk_alloc:
++error_check_func:
++	return rc;
++}
++
++static int __devexit imx_bt_rfkill_remove(struct platform_device *dev)
++{
++	struct imx_bt_rfkill_platform_data *data = dev->dev.platform_data;
++	struct rfkill *rfk = platform_get_drvdata(dev);
++
++	platform_set_drvdata(dev, NULL);
++
++	if (rfk) {
++		rfkill_unregister(rfk);
++		rfkill_destroy(rfk);
++	}
++
++	data->power_change(0);
++
++	return 0;
++}
++
++static struct platform_driver imx_bt_rfkill_drv = {
++	.driver = {
++		.name = "imx_bt_rfkill",
++	},
++
++	.probe	= imx_bt_rfkill_probe,
++	.remove = __devexit_p(imx_bt_rfkill_remove),
++};
++
++static int __init imx_bt_rfkill_init(void)
++{
++	return platform_driver_register(&imx_bt_rfkill_drv);
++}
++
++module_init(imx_bt_rfkill_init);
++
++static void __exit imx_bt_rfkill_exit(void)
++{
++	platform_driver_unregister(&imx_bt_rfkill_drv);
++}
++
++module_exit(imx_bt_rfkill_exit);
++
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("RFKill control interface of BT on MX53 SMD");
+diff --git a/arch/arm/plat-mxc/include/mach/imx_rfkill.h b/arch/arm/plat-mxc/include/mach/imx_rfkill.h
+new file mode 100755
+index 0000000..d7263f5
+--- /dev/null
++++ b/arch/arm/plat-mxc/include/mach/imx_rfkill.h
+@@ -0,0 +1,27 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#ifndef IMX_RFKILL_H
++#define IMX_RFKILL_H
++struct imx_bt_rfkill_platform_data {
++	int (*power_change) (int status);
++};
++
++#endif
+-- 
+1.7.7.4
+

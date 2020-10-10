@@ -1,0 +1,100 @@
+From 7c92123eecd584f53e220d263083c73d01377b12 Mon Sep 17 00:00:00 2001
+From: Ge Lei <b42127@freescale.com>
+Date: Fri, 23 Nov 2012 14:36:04 +0800
+Subject: [PATCH 2286/2463] ENGR00233569 SDMA: Add support for SDMA M2M copy
+
+Our SDMA code did not support SDMA M2M copy function before, we add
+SDMA M2M copy function in this patch, you can use 'sg' to use this
+function, you can refer to 'linux-test/module_test/mxc_sdma_memcopy_test.c'
+for how to use this function.
+
+Signed-off-by: Ge Lei <b42127@freescale.com>
+---
+ drivers/dma/imx-sdma.c |   29 +++++++++++++++++++++++++++--
+ 1 files changed, 27 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/dma/imx-sdma.c b/drivers/dma/imx-sdma.c
+index 68cacbf..6b7af2c 100644
+--- a/drivers/dma/imx-sdma.c
++++ b/drivers/dma/imx-sdma.c
+@@ -266,6 +266,7 @@ struct sdma_channel {
+ 	unsigned int			pc_to_device;
+ 	unsigned int			device_to_device;
+ 	unsigned int			other_script;
++	unsigned int                    pc_to_pc;
+ 	enum sdma_mode			mode;
+ 	dma_addr_t			per_address, per_address2;
+ 	u32				event_mask0, event_mask1;
+@@ -591,6 +592,7 @@ static void sdma_get_pc(struct sdma_channel *sdmac,
+ 	sdmac->pc_to_device = 0;
+ 	sdmac->device_to_device = 0;
+ 	sdmac->other_script = 0;
++	sdmac->pc_to_pc = 0;
+ 
+ 	switch (peripheral_type) {
+ 	case IMX_DMATYPE_MEMORY:
+@@ -663,6 +665,7 @@ static void sdma_get_pc(struct sdma_channel *sdmac,
+ 	sdmac->pc_to_device = emi_2_per;
+ 	sdmac->device_to_device = per_2_per;
+ 	sdmac->other_script = other;
++	sdmac->pc_to_pc = emi_2_emi;
+ }
+ 
+ static int sdma_set_context_reg(struct sdma_channel *sdmac,
+@@ -701,6 +704,8 @@ static int sdma_load_context(struct sdma_channel *sdmac)
+ 		load_address = sdmac->device_to_device;
+ 	else if (sdmac->direction == DMA_MEM_TO_DEV)
+ 		load_address = sdmac->pc_to_device;
++	else if (sdmac->direction == DMA_MEM_TO_MEM)
++		load_address = sdmac->pc_to_pc;
+ 	else
+ 		load_address = sdmac->other_script;
+ 
+@@ -1056,8 +1061,20 @@ static struct dma_async_tx_descriptor *sdma_prep_slave_sg(
+ 	int channel = sdmac->channel;
+ 	struct scatterlist *sg;
+ 
+-	if (sdmac->status == DMA_IN_PROGRESS)
+-		return NULL;
++	/*
++	 * For SDMA M2M use, we need 2 scatterlists, the src addresses are
++	 * stored in the first sg, and the dst addresses are stored in the
++	 * second sg. In the former code, when the first sg entered 'sdma_
++	 * prep_slave_sg', 'sdmac->status' would be set to 'DMA_IN_PROGRESS',
++	 * and the second sg would return 'NULL' when entered 'sdma_prep_slave
++	 * _sg'. To avoid this error, in the code, we check if for M2M use,
++	 * the second sg will not return 'NULL' when enters 'sdma_prep_slave
++	 * _sg'.
++	 */
++	if (!((direction == DMA_MEM_TO_MEM) && (flags == 0))) {
++		if (sdmac->status == DMA_IN_PROGRESS)
++			return NULL;
++	}
+ 	sdmac->status = DMA_IN_PROGRESS;
+ 
+ 	sdmac->mode = SDMA_MODE_NORMAL;
+@@ -1082,6 +1099,12 @@ static struct dma_async_tx_descriptor *sdma_prep_slave_sg(
+ 		struct sdma_buffer_descriptor *bd = &sdmac->bd[i];
+ 		int param;
+ 
++		if (sdmac->direction == DMA_MEM_TO_MEM) {
++			if (flags == 1)
++				bd->buffer_addr = sg->dma_address;
++			if (flags == 0)
++				bd->ext_buffer_addr = sg->dma_address;
++		} else
+ 		bd->buffer_addr = sg->dma_address;
+ 
+ 		count = sg->length;
+@@ -1268,6 +1291,8 @@ static int sdma_control(struct dma_chan *chan, enum dma_ctrl_cmd cmd,
+ 			sdmac->per_address = dmaengine_cfg->dst_addr;
+ 			sdmac->watermark_level = dmaengine_cfg->dst_maxburst;
+ 			sdmac->word_size = dmaengine_cfg->dst_addr_width;
++		} else if (dmaengine_cfg->direction == DMA_MEM_TO_MEM) {
++			sdmac->word_size = dmaengine_cfg->dst_addr_width;
+ 		}
+ 		sdmac->direction = dmaengine_cfg->direction;
+ 		return sdma_config_channel(sdmac);
+-- 
+1.7.7.4
+

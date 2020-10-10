@@ -1,0 +1,38 @@
+From 4531ff53c7f98d8aeb4cbbff1989056204ab00aa Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Mon, 14 May 2012 21:41:05 +0800
+Subject: [PATCH 1456/2463] ENGR00182324-4 - MX6SL MSL: Enable L2 cache as
+ OCRAM functionality
+
+L2 cache can be configured to serve as OCRAM.  This patch adds
+code to check this configuration, and reset it to L2 cache function
+before enabling the L2 cache.
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx6/mm.c |    9 +++++++++
+ 1 files changed, 9 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mm.c b/arch/arm/mach-mx6/mm.c
+index 2671020..3cf6b22 100644
+--- a/arch/arm/mach-mx6/mm.c
++++ b/arch/arm/mach-mx6/mm.c
+@@ -99,6 +99,15 @@ int mxc_init_l2x0(void)
+ {
+ 	unsigned int val;
+ 
++	#define IOMUXC_GPR11_L2CACHE_AS_OCRAM 0x00000002
++
++	val = readl(IOMUXC_GPR11);
++	if (cpu_is_mx6sl() && (val & IOMUXC_GPR11_L2CACHE_AS_OCRAM)) {
++		/* L2 cache configured as OCRAM, reset it */
++		val &= ~IOMUXC_GPR11_L2CACHE_AS_OCRAM;
++		writel(val, IOMUXC_GPR11);
++	}
++
+ 	writel(0x132, IO_ADDRESS(L2_BASE_ADDR + L2X0_TAG_LATENCY_CTRL));
+ 	writel(0x132, IO_ADDRESS(L2_BASE_ADDR + L2X0_DATA_LATENCY_CTRL));
+ 
+-- 
+1.7.7.4
+

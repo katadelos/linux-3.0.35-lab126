@@ -1,0 +1,58 @@
+From e479b903c8f0c788427163cb68bd8a43fdf02d8d Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 9 Oct 2012 15:30:20 -0400
+Subject: [PATCH 2123/2463] ENGR00227477 mx6qdl: system resume fail due to DDR
+ not accessable
+
+For DQ and DL, we must make sure DDR can be accessed after resume,
+our code did NOT get a valid base address for MMDC to exit from
+DVFS mode, need to fix it.
+
+According to ARM, we only need to save r0-r3 and r12 before calling
+C function.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/mx6_suspend.S |    9 +++++++--
+ 1 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mx6_suspend.S b/arch/arm/mach-mx6/mx6_suspend.S
+index e8fd2b2..1987581 100644
+--- a/arch/arm/mach-mx6/mx6_suspend.S
++++ b/arch/arm/mach-mx6/mx6_suspend.S
+@@ -1262,6 +1262,9 @@ fifo_reset2_wait:
+ 	bne	fifo_reset2_wait
+ 
+ ddr_io_restore_done:
++	ldr	r1, =MMDC_P0_BASE_ADDR
++	add	r1, r1, #PERIPBASE_VIRT
++
+ 	/* Ensure DDR exits self-refresh. */
+ 	ldr	r6, [r1, #0x404]
+ 	bic	r6, r6, #0x200000
+@@ -1402,6 +1405,8 @@ dsm_fifo_reset2_wait:
+ 	bne	dsm_fifo_reset2_wait
+ 
+ ddr_io_restore_dsm_done:
++	ldr	r1, =MMDC_P0_BASE_ADDR
++
+ 	/* Ensure DDR exits self-refresh. */
+ 	ldr	r6, [r1, #0x404]
+ 	bic	r6, r6, #0x200000
+@@ -1531,11 +1536,11 @@ restore control register to enable cache
+ #endif
+ 
+ 	mov	r8, lr
+-	push	{r0-r12}
++	push	{r0-r3, r12}
+ 
+ 	/* Set up the per-CPU stacks */
+ 	bl	cpu_init
+-	pop	{r0-r12}
++	pop	{r0-r3, r12}
+ 
+ 	/*
+ 	 * Restore the MMU table entry that was modified for
+-- 
+1.7.7.4
+

@@ -1,0 +1,43 @@
+
+ifdef BUILD_DIAGS_ONLY
+define do-sed
+sed -i -e 's:root=/dev/mmcblk0p1:root=/dev/mmcblk0p2:' $(BUILD_DIR)/.config
+endef
+endif
+
+$(BUILD_DIR)/.config: arch/$(ARCH)/configs/$(USE_CONFIG)
+	$(MAKE) ARCH=$(ARCH) $(USE_CONFIG)
+	$(do-sed)
+	$(MAKE) ARCH=$(ARCH) archprepare
+
+configure: $(BUILD_DIR)/.config
+
+headers_install: configure
+	$(MAKE) ARCH=$(ARCH) headers_install
+
+modules: configure
+	$(MAKE) ARCH=$(ARCH) modules
+
+modules_install: modules
+	$(MAKE) ARCH=$(ARCH) modules_install
+
+$(IMAGE):  configure
+	$(MAKE) ARCH=$(ARCH) $(USE_CONFIG)
+	$(do-sed)
+	$(MAKE) $(VERBOSE) ARCH=$(ARCH) $@
+
+install: $(IMAGE)
+	mkdir -p $(INSTALL_PATH)/$(KERNEL_SUBDIR)
+	cp $(BUILD_DIR)/.config $(INSTALL_PATH)/$(KERNEL_SUBDIR)/$(IMAGE).config
+	cp $(BUILD_DIR)/arch/$(ARCH)/boot/$(IMAGE) $(BUILD_DIR)/System.map $(INSTALL_PATH)/$(KERNEL_SUBDIR)
+
+menuconfig: configure
+	$(MAKE) ARCH=$(ARCH) menuconfig
+
+oldconfig:
+	$(MAKE) ARCH=$(ARCH) oldconfig
+
+all: configure $(IMAGE)
+
+.PHONY: configure headers_install modules modules_install $(IMAGE) install menuconfig oldconfig all
+

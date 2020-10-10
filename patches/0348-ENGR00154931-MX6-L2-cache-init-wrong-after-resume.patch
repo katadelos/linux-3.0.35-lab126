@@ -1,0 +1,86 @@
+From 5cd658fa3f8b08d07613a61e24f2486ba6191fc9 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Wed, 17 Aug 2011 14:42:11 +0800
+Subject: [PATCH 0348/2463] ENGR00154931 [MX6]L2 cache init wrong after resume
+
+1.Need to add condition check after resum, or if we
+didn't config L2 cache, build will fail.
+2.Need to call the mxc_init_l2x0 instead of l2x0_init.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/mm.c |    2 +-
+ arch/arm/mach-mx6/pm.c |   10 ++++++----
+ 2 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mm.c b/arch/arm/mach-mx6/mm.c
+index f1d6d6d..bbaa6ae 100644
+--- a/arch/arm/mach-mx6/mm.c
++++ b/arch/arm/mach-mx6/mm.c
+@@ -64,7 +64,7 @@ void __init mx6_map_io(void)
+ 	mxc_arch_reset_init(IO_ADDRESS(MX6Q_WDOG1_BASE_ADDR));
+ }
+ #ifdef CONFIG_CACHE_L2X0
+-static int mxc_init_l2x0(void)
++int mxc_init_l2x0(void)
+ {
+ 	unsigned int val;
+ 
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index 420eb92..7fcfaaa 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -62,6 +62,7 @@ extern int set_cpu_freq(int wp);
+ #endif
+ extern void mx6q_suspend(suspend_state_t state);
+ extern void mx6_init_irq(void);
++extern int mxc_init_l2x0(void);
+ static struct device *pm_dev;
+ struct clk *gpc_dvfs_clk;
+ 
+@@ -69,7 +70,6 @@ static void __iomem *scu_base;
+ static void __iomem *gpc_base;
+ static void __iomem *src_base;
+ static void __iomem *local_twd_base;
+-static void __iomem *pl310_base;
+ static void __iomem *gic_dist_base;
+ static void __iomem *gic_cpu_base;
+ 
+@@ -143,12 +143,13 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 
+ 		local_flush_tlb_all();
+ 		flush_cache_all();
++#ifdef CONFIG_CACHE_L2X0
+ 		outer_cache.flush_all();
+ 
+ 		/* for dormant mode, we need to disable l2 cache */
+ 		if (state == PM_SUSPEND_MEM)
+ 			outer_cache.disable();
+-
++#endif
+ 		suspend_in_iram(state, (unsigned long)iram_paddr,
+ 			(unsigned long)suspend_iram_base);
+ 
+@@ -168,8 +169,10 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 					(MXC_INT_GPT / 32) * 4);
+ 
+ 			flush_cache_all();
++#ifdef CONFIG_CACHE_L2X0
+ 			/* init l2 cache, pl310 */
+-			l2x0_init(pl310_base, 0x0, ~0x00000000);
++			mxc_init_l2x0();
++#endif
+ 		}
+ 
+ 		mx6_suspend_restore();
+@@ -253,7 +256,6 @@ static int __init pm_init(void)
+ 	scu_base = IO_ADDRESS(SCU_BASE_ADDR);
+ 	gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ 	src_base = IO_ADDRESS(SRC_BASE_ADDR);
+-	pl310_base = IO_ADDRESS(L2_BASE_ADDR);
+ 	gic_dist_base = IO_ADDRESS(IC_DISTRIBUTOR_BASE_ADDR);
+ 	gic_cpu_base = IO_ADDRESS(IC_INTERFACES_BASE_ADDR);
+ 	local_twd_base = IO_ADDRESS(LOCAL_TWD_ADDR);
+-- 
+1.7.7.4
+

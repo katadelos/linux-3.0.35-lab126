@@ -1,0 +1,40 @@
+From ad511c069a75dc1f7e36655106fc59552f0f8a10 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Fri, 28 Oct 2011 10:33:07 +0800
+Subject: [PATCH 0502/2463] ENGR00160936 GPMI : disable the DDR code
+
+We do not support any ONFI or TOGGLE nand now.
+So disable the DDR code.
+
+If keep it enabled, the ECC chunk will be 1K for ONFI nand,
+this is not compatible with the kobs-ng which uses 512bytes for ECC chunk size.
+
+So disable it now. change it in future.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/mtd/nand/gpmi-nfc/gpmi-nfc.c |    8 --------
+ 1 files changed, 0 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/mtd/nand/gpmi-nfc/gpmi-nfc.c b/drivers/mtd/nand/gpmi-nfc/gpmi-nfc.c
+index 2be4036..7decdc0 100644
+--- a/drivers/mtd/nand/gpmi-nfc/gpmi-nfc.c
++++ b/drivers/mtd/nand/gpmi-nfc/gpmi-nfc.c
+@@ -133,14 +133,6 @@ static inline int get_ecc_strength(struct gpmi_nfc_data *this)
+ 
+ bool is_ddr_nand(struct gpmi_nfc_data *this)
+ {
+-	struct nand_chip *chip = &this->mil.nand;
+-
+-	/* ONFI nand */
+-	if (chip->onfi_version != 0)
+-		return true;
+-
+-	/* TOGGLE nand */
+-
+ 	return false;
+ }
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,33 @@
+From c346dbe8ad7b46abfb013520ecdef9c73ad7cced Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Wed, 13 Jun 2012 19:18:43 +0800
+Subject: [PATCH 1598/2463] ENGR00180937 IPU: Change IPU error message to IPU
+ warning
+
+IPU driver will print unexpect interrupt state in ipu_irq_handler function,
+It is for IPU debug and state check, not a IPU error.
+So change print function from dev_error to dev_warn.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index ef13592..7682b47 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -2563,8 +2563,8 @@ static irqreturn_t ipu_irq_handler(int irq, void *desc)
+ 		int_stat &= ipu_cm_read(ipu, IPU_INT_CTRL(err_reg[i]));
+ 		if (int_stat) {
+ 			ipu_cm_write(ipu, int_stat, IPU_INT_STAT(err_reg[i]));
+-			dev_err(ipu->dev,
+-				"IPU Error - IPU_INT_STAT_%d = 0x%08X\n",
++			dev_warn(ipu->dev,
++				"IPU Warning - IPU_INT_STAT_%d = 0x%08X\n",
+ 				err_reg[i], int_stat);
+ 			/* Disable interrupts so we only get error once */
+ 			int_stat =
+-- 
+1.7.7.4
+

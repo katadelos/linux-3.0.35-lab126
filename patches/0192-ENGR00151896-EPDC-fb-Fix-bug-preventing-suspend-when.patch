@@ -1,0 +1,56 @@
+From 027c603a4ac3250257b471670b741972af5f45ef Mon Sep 17 00:00:00 2001
+From: Danny Nold <dannynold@freescale.com>
+Date: Tue, 21 Jun 2011 16:10:46 -0500
+Subject: [PATCH 0192/2463] ENGR00151896 - EPDC fb: Fix bug preventing suspend
+ when powerdown disabled
+
+- With FB_POWERDOWN_DISABLE is set as the powerdown delay (disabling the EPDC
+driver from powering down), the EPDC driver was having problems going into
+suspend.  Any request to blank the EPDC driver would result in a timeout
+and an error status.  And subsequent attempts to send updates to the driver
+would fail, as the driver's power state was incorrect.  This patch prompts
+the EPDC driver to be disabled when the blanking state is changed to
+FB_BLANK_POWERDOWN and FB_POWERDOWN_DISABLE is set.  Resultingly, the correct
+driver power state is maintained and suspend/resume works correctly.
+
+Signed-off-by: Danny Nold <dannynold@freescale.com>
+---
+ drivers/video/mxc/mxc_epdc_fb.c |   22 +++++++++++++++++++++-
+ 1 files changed, 21 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_epdc_fb.c b/drivers/video/mxc/mxc_epdc_fb.c
+index 35b028e..ab8dd25 100644
+--- a/drivers/video/mxc/mxc_epdc_fb.c
++++ b/drivers/video/mxc/mxc_epdc_fb.c
+@@ -2748,7 +2748,27 @@ static int mxc_epdc_fb_blank(int blank, struct fb_info *info)
+ 		mxc_epdc_fb_flush_updates(fb_data);
+ 		/* Wait for powerdown */
+ 		mutex_lock(&fb_data->power_mutex);
+-		if (fb_data->power_state != POWER_STATE_OFF) {
++		if ((fb_data->power_state == POWER_STATE_ON) &&
++			(fb_data->pwrdown_delay == FB_POWERDOWN_DISABLE)) {
++
++			/* Powerdown disabled, so we disable EPDC manually */
++			int count = 0;
++			int sleep_ms = 10;
++
++			mutex_unlock(&fb_data->power_mutex);
++
++			/* If any active updates, wait for them to complete */
++			while (fb_data->updates_active) {
++				/* Timeout after 1 sec */
++				if ((count * sleep_ms) > 1000)
++					break;
++				msleep(sleep_ms);
++				count++;
++			}
++
++			fb_data->powering_down = true;
++			epdc_powerdown(fb_data);
++		} else if (fb_data->power_state != POWER_STATE_OFF) {
+ 			fb_data->wait_for_powerdown = true;
+ 			init_completion(&fb_data->powerdown_compl);
+ 			mutex_unlock(&fb_data->power_mutex);
+-- 
+1.7.7.4
+

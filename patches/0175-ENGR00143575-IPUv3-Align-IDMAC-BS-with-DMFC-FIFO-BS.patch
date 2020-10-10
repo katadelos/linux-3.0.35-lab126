@@ -1,0 +1,140 @@
+From d2d8c9bc3a155dcfd19bb5c8dea0c9cf5ff6ea66 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Tue, 24 May 2011 09:57:46 +0800
+Subject: [PATCH 0175/2463] ENGR00143575 IPUv3:Align IDMAC BS with DMFC FIFO
+ BS
+
+This patch aligns IDMAC burst size and DMFC FIFO burst
+size to get better performance and workarounds black
+flash issue when playing video on DP-FG with full
+screen mode at 1024x768M@60.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit 0e81c738566c2c97541dd92a5978c756b5c22e76)
+---
+ drivers/mxc/ipu3/ipu_common.c |    2 +
+ drivers/mxc/ipu3/ipu_disp.c   |   52 +++++++++++++++++++++++++++++++++++-----
+ drivers/mxc/ipu3/ipu_prv.h    |    1 +
+ 3 files changed, 48 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 1fbdc18..c78c0e9 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -1136,8 +1136,10 @@ int32_t ipu_init_channel_buffer(ipu_channel_t channel, ipu_buffer_t type,
+ 		_ipu_ch_param_set_burst_size(dma_chan, 8);
+ 		_ipu_ch_param_set_block_mode(dma_chan);
+ 	} else if (_ipu_is_dmfc_chan(dma_chan)) {
++		burst_size = _ipu_ch_param_get_burst_size(dma_chan);
+ 		spin_lock_irqsave(&ipu_lock, lock_flags);
+ 		_ipu_dmfc_set_wait4eot(dma_chan, width);
++		_ipu_dmfc_set_burst_size(dma_chan, burst_size);
+ 		spin_unlock_irqrestore(&ipu_lock, lock_flags);
+ 	}
+ 
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index ca42bc5..e3994fa 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -81,8 +81,8 @@ void _ipu_dmfc_init(int dmfc_type, int first)
+ 		 * 1C, 2C and 6B, 6F unused;
+ 		 */
+ 		printk(KERN_INFO "IPU DMFC DC HIGH RESOLUTION: 1(0~3), 5B(4,5), 5F(6,7)\n");
+-		dmfc_wr_chan = 0x00000008;
+-		dmfc_dp_chan = 0x00001614;
++		dmfc_wr_chan = 0x00000088;
++		dmfc_dp_chan = 0x00009694;
+ 		dmfc_size_28 = 256*4;
+ 		dmfc_size_29 = 0;
+ 		dmfc_size_24 = 0;
+@@ -95,8 +95,8 @@ void _ipu_dmfc_init(int dmfc_type, int first)
+ 		 * 1C, 2C and 6B, 6F unused;
+ 		 */
+ 		printk(KERN_INFO "IPU DMFC DP HIGH RESOLUTION: 1(0,1), 5B(2~5), 5F(6,7)\n");
+-		dmfc_wr_chan = 0x00000010;
+-		dmfc_dp_chan = 0x0000160a;
++		dmfc_wr_chan = 0x00000090;
++		dmfc_dp_chan = 0x0000968a;
+ 		dmfc_size_28 = 128*4;
+ 		dmfc_size_29 = 0;
+ 		dmfc_size_24 = 0;
+@@ -109,7 +109,7 @@ void _ipu_dmfc_init(int dmfc_type, int first)
+ 		 */
+ 		printk(KERN_INFO "IPU DMFC ONLY-DP HIGH RESOLUTION: 5B(0~3), 5F(4~7)\n");
+ 		dmfc_wr_chan = 0x00000000;
+-		dmfc_dp_chan = 0x00000c08;
++		dmfc_dp_chan = 0x00008c88;
+ 		dmfc_size_28 = 0;
+ 		dmfc_size_29 = 0;
+ 		dmfc_size_24 = 0;
+@@ -122,8 +122,8 @@ void _ipu_dmfc_init(int dmfc_type, int first)
+ 		 * 1C, 2C and 6B, 6F unused;
+ 		 */
+ 		printk(KERN_INFO "IPU DMFC NORMAL mode: 1(0~1), 5B(4,5), 5F(6,7)\n");
+-		dmfc_wr_chan = 0x00000010;
+-		dmfc_dp_chan = 0x00001614;
++		dmfc_wr_chan = 0x00000090;
++		dmfc_dp_chan = 0x00009694;
+ 		dmfc_size_28 = 128*4;
+ 		dmfc_size_29 = 0;
+ 		dmfc_size_24 = 0;
+@@ -187,6 +187,44 @@ void _ipu_dmfc_set_wait4eot(int dma_chan, int width)
+ 	__raw_writel(dmfc_gen1, DMFC_GENERAL1);
+ }
+ 
++void _ipu_dmfc_set_burst_size(int dma_chan, int burst_size)
++{
++	u32 dmfc_wr_chan = __raw_readl(DMFC_WR_CHAN);
++	u32 dmfc_dp_chan = __raw_readl(DMFC_DP_CHAN);
++	int dmfc_bs = 0;
++
++	switch (burst_size) {
++	case 64:
++		dmfc_bs = 0x40;
++		break;
++	case 32:
++	case 20:
++		dmfc_bs = 0x80;
++		break;
++	case 16:
++		dmfc_bs = 0xc0;
++		break;
++	default:
++		dev_err(g_ipu_dev, "Unsupported burst size %d\n",
++			burst_size);
++		return;
++	}
++
++	if (dma_chan == 23) { /*5B*/
++		dmfc_dp_chan &= ~(0xc0);
++		dmfc_dp_chan |= dmfc_bs;
++	} else if (dma_chan == 27) { /*5F*/
++		dmfc_dp_chan &= ~(0xc000);
++		dmfc_dp_chan |= (dmfc_bs << 8);
++	} else if (dma_chan == 28) { /*1*/
++		dmfc_wr_chan &= ~(0xc0);
++		dmfc_wr_chan |= dmfc_bs;
++	}
++
++	__raw_writel(dmfc_wr_chan, DMFC_WR_CHAN);
++	__raw_writel(dmfc_dp_chan, DMFC_DP_CHAN);
++}
++
+ static void _ipu_di_data_wave_config(int di,
+ 				     int wave_gen,
+ 				     int access_size, int component_size)
+diff --git a/drivers/mxc/ipu3/ipu_prv.h b/drivers/mxc/ipu3/ipu_prv.h
+index 794163ac..ec27264 100644
+--- a/drivers/mxc/ipu3/ipu_prv.h
++++ b/drivers/mxc/ipu3/ipu_prv.h
+@@ -66,6 +66,7 @@ void _ipu_dp_dc_enable(ipu_channel_t channel);
+ void _ipu_dp_dc_disable(ipu_channel_t channel, bool swap);
+ void _ipu_dmfc_init(int dmfc_type, int first);
+ void _ipu_dmfc_set_wait4eot(int dma_chan, int width);
++void _ipu_dmfc_set_burst_size(int dma_chan, int burst_size);
+ int _ipu_disp_chan_is_interlaced(ipu_channel_t channel);
+ 
+ void _ipu_ic_enable_task(ipu_channel_t channel);
+-- 
+1.7.7.4
+

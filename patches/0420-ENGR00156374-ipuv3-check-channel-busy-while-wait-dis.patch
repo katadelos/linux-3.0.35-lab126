@@ -1,0 +1,111 @@
+From 958f6fcfe64643e93dfd48dfbfcf67b41ff741c1 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Fri, 9 Sep 2011 17:53:24 +0800
+Subject: [PATCH 0420/2463] ENGR00156374 ipuv3: check channel busy while wait
+ disable irq
+
+there is chance channel already quit busy before wait disable
+irq in ipu_disable_channel, so add check during irq wait.
+
+this patch also comments f_calc and m_calc fix build warning.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_calc_stripes_sizes.c |    6 +++---
+ drivers/mxc/ipu3/ipu_common.c             |   14 ++++++++------
+ drivers/mxc/ipu3/ipu_disp.c               |   18 ++++++++++--------
+ 3 files changed, 21 insertions(+), 17 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c b/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c
+index 8c13a36..9a50794 100644
+--- a/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c
++++ b/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c
+@@ -52,8 +52,8 @@ static u32 truncate(u32 up, /* 0: down; else: up */
+ 		return d;
+ }
+ 
+-static unsigned int f_calc(unsigned int pfs, unsigned int bpp, unsigned int *write)
+-{/* return input_f */
++/*static unsigned int f_calc(unsigned int pfs, unsigned int bpp, unsigned int *write)
++{[> return input_f <]
+ 	unsigned int f_calculated = 0;
+ 	switch (pfs) {
+ 	case IPU_PIX_FMT_YVU422P:
+@@ -129,7 +129,7 @@ static unsigned int m_calc(unsigned int pfs)
+ 
+ 	}
+ 	return m_calculated;
+-}
++}*/
+ 
+ 
+ /* Stripe parameters calculator */
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 8159076..c8a6136 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -2161,7 +2161,7 @@ int32_t ipu_disable_channel(struct ipu_soc *ipu, ipu_channel_t channel, bool wai
+ 		 * wait for BG channel EOF then disable FG-IDMAC,
+ 		 * it avoid FG NFB4EOF error.
+ 		 */
+-		if (channel == MEM_FG_SYNC) {
++		if ((channel == MEM_FG_SYNC) && (ipu_is_channel_busy(ipu, MEM_BG_SYNC))) {
+ 			int timeout = 50;
+ 
+ 			ipu_cm_write(ipu, IPUIRQ_2_MASK(IPU_IRQ_BG_SYNC_EOF),
+@@ -2198,16 +2198,18 @@ int32_t ipu_disable_channel(struct ipu_soc *ipu, ipu_channel_t channel, bool wai
+ 				irq = in_dma;
+ 
+ 			if (irq == 0xffffffff) {
+-				dev_err(ipu->dev, "warning: no channel busy, break\n");
++				dev_dbg(ipu->dev, "warning: no channel busy, break\n");
+ 				break;
+ 			}
+ 
+-			dev_err(ipu->dev, "warning: channel %d busy, need wait\n", irq);
+-
+ 			ipu_cm_write(ipu, IPUIRQ_2_MASK(irq),
+ 					IPUIRQ_2_STATREG(irq));
+-			while ((ipu_cm_read(ipu, IPUIRQ_2_STATREG(irq)) &
+-						IPUIRQ_2_MASK(irq)) == 0) {
++
++			dev_dbg(ipu->dev, "warning: channel %d busy, need wait\n", irq);
++
++			while (((ipu_cm_read(ipu, IPUIRQ_2_STATREG(irq))
++				& IPUIRQ_2_MASK(irq)) == 0) &&
++				(idma_is_set(ipu, IDMAC_CHA_BUSY, irq))) {
+ 				msleep(10);
+ 				timeout -= 10;
+ 				if (timeout <= 0) {
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index 25d17ca..498a329 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -935,14 +935,16 @@ void _ipu_dp_dc_disable(struct ipu_soc *ipu, ipu_channel_t channel, bool swap)
+ 		reg = ipu_cm_read(ipu, IPU_SRM_PRI2) | 0x8;
+ 		ipu_cm_write(ipu, reg, IPU_SRM_PRI2);
+ 
+-		ipu_cm_write(ipu, IPUIRQ_2_MASK(IPU_IRQ_DP_SF_END),
+-			     IPUIRQ_2_STATREG(IPU_IRQ_DP_SF_END));
+-		while ((ipu_cm_read(ipu, IPUIRQ_2_STATREG(IPU_IRQ_DP_SF_END)) &
+-			IPUIRQ_2_MASK(IPU_IRQ_DP_SF_END)) == 0) {
+-			msleep(2);
+-			timeout -= 2;
+-			if (timeout <= 0)
+-				break;
++		if (ipu_is_channel_busy(ipu, MEM_BG_SYNC)) {
++			ipu_cm_write(ipu, IPUIRQ_2_MASK(IPU_IRQ_DP_SF_END),
++					IPUIRQ_2_STATREG(IPU_IRQ_DP_SF_END));
++			while ((ipu_cm_read(ipu, IPUIRQ_2_STATREG(IPU_IRQ_DP_SF_END)) &
++						IPUIRQ_2_MASK(IPU_IRQ_DP_SF_END)) == 0) {
++				msleep(2);
++				timeout -= 2;
++				if (timeout <= 0)
++					break;
++			}
+ 		}
+ 		return;
+ 	} else {
+-- 
+1.7.7.4
+

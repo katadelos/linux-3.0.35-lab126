@@ -1,0 +1,42 @@
+From a086b570b75cf4d38586789d830335eb98f9e44c Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <b42378@freescale.com>
+Date: Tue, 23 Apr 2013 20:06:29 +0800
+Subject: [PATCH 2463/2463] ENGR00260082 mx6sl_evk: Change wm8962's MCLK to
+ 24MHz
+
+The clock, output from wm8962's FLL, is sometimes inaccurate.
+This's because 26MHz is not quite stable for wm8962's internal FLL,
+So change to 24MHz, the value recommended by Wolfson,
+which has been used on SabreSD for quite a long time.
+
+Acked-by: Wang Shengjiu <b02247@freescale.com>
+Signed-off-by: Nicolin Chen <b42378@freescale.com>
+(cherry picked from commit ff8d1e71b22575cd3cd598045a34bb072ef560a2)
+---
+ arch/arm/mach-mx6/board-mx6sl_evk.c |   10 +---------
+ 1 files changed, 1 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_evk.c b/arch/arm/mach-mx6/board-mx6sl_evk.c
+index 205caa6..a2dfd41 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_evk.c
++++ b/arch/arm/mach-mx6/board-mx6sl_evk.c
+@@ -539,15 +539,7 @@ static int mxc_wm8962_init(void)
+ 		return PTR_ERR(extern_audio_root);
+ 	}
+ 
+-	pll4 = clk_get(NULL, "pll4");
+-	if (IS_ERR(pll4)) {
+-		pr_err("can't get pll4 clock.\n");
+-		return PTR_ERR(pll4);
+-	}
+-
+-	clk_set_parent(extern_audio_root, pll4);
+-
+-	rate = clk_round_rate(extern_audio_root, 26000000);
++	rate = clk_round_rate(extern_audio_root, 24000000);
+ 	clk_set_rate(extern_audio_root, rate);
+ 
+ 	wm8962_data.sysclk = rate;
+-- 
+1.7.7.4
+

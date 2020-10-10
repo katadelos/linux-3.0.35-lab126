@@ -1,0 +1,50 @@
+From 59143c85ef03b527af6cd04cef0ef6d58a94927e Mon Sep 17 00:00:00 2001
+From: Lin Fuzhen <fuzhen.lin@freescale.com>
+Date: Thu, 1 Mar 2012 18:52:09 +0800
+Subject: [PATCH 1184/2463] ENGR00175884 System resume failed when the power
+ key was pressed shortly
+
+Some platform like Android needs to get the power key event to
+reume the other devcies such as FB, TS. System resume failed when
+the gpio power key was pressed shortly sometime, but can resume the
+by long press the power key.
+
+The root cause of this issue is that the GPIO IRQ is registered as device
+IRQ, but device IRQs will just be enabled after early resume finished,
+so when the power key press shortly, the gpio-irq may still disabled in that
+time, and the ISR will be ignored and could not detect the key down event.
+
+To fix this bug, add the IRQF_EARLY_RESUME flag to the irq if platform
+has specified that the button can wake up the system , in this way, this
+irq will be enabled during syscore resume, so that the power key press
+can be handled and reported as early as possible.
+
+Signed-off-by: Lin Fuzhen <fuzhen.lin@freescale.com>
+---
+ drivers/input/keyboard/gpio_keys.c |   10 ++++++++++
+ 1 files changed, 10 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/input/keyboard/gpio_keys.c b/drivers/input/keyboard/gpio_keys.c
+index 6e6145b..711b67d 100644
+--- a/drivers/input/keyboard/gpio_keys.c
++++ b/drivers/input/keyboard/gpio_keys.c
+@@ -414,6 +414,16 @@ static int __devinit gpio_keys_setup_key(struct platform_device *pdev,
+ 	 */
+ 	if (!button->can_disable)
+ 		irqflags |= IRQF_SHARED;
++	/*
++	 * If platform has specified that the button can wake up the system,
++	 * for example, the power key which usually use to wake up the system
++	 * from suspend, we add the IRQF_EARLY_RESUME flag to this irq, so
++	 * that the power key press can be handled and reported as early as
++	 * possible. Some platform like Android need to get the power key
++	 * event early to reume some devcies like framebuffer and etc.
++	 */
++	if (button->wakeup)
++		irqflags |= IRQF_EARLY_RESUME;
+ 
+ 	error = request_any_context_irq(irq, gpio_keys_isr, irqflags, desc, bdata);
+ 	if (error < 0) {
+-- 
+1.7.7.4
+

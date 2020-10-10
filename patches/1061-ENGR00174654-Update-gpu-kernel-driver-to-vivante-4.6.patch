@@ -1,0 +1,3683 @@
+From 5145beaad56e044a0b2e667e299be088f6eea998 Mon Sep 17 00:00:00 2001
+From: b02279 <b02279@b02279-Ubuntu64.(none)>
+Date: Fri, 17 Feb 2012 16:17:30 +0800
+Subject: [PATCH 1061/2463] ENGR00174654 Update gpu kernel driver to vivante
+ 4.6.5 release
+
+Signed-off-by: Loren Huang <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ drivers/mxc/gpu-viv/Kbuild                         |    2 +-
+ .../hal/kernel/gc_hal_kernel_hardware_command_vg.c |    2 +-
+ .../hal/kernel/gc_hal_kernel_hardware_command_vg.h |    2 +-
+ .../GC350/hal/kernel/gc_hal_kernel_hardware_vg.c   |   44 +--
+ .../GC350/hal/kernel/gc_hal_kernel_hardware_vg.h   |    2 +-
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_context.c   |  179 +++++++----
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_context.h   |    2 +-
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c  |  111 ++++---
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h  |    2 +-
+ drivers/mxc/gpu-viv/config                         |    2 +-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c     |   14 +-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h     |    6 +-
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c |   55 +++-
+ .../gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c  |    2 +-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_db.c  |    8 +-
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c   |    2 +-
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c   |    2 +-
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_heap.c    |    2 +-
+ .../hal/kernel/gc_hal_kernel_interrupt_vg.c        |    2 +-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c |  201 +++++++++++-
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu_vg.c  |    2 +-
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_precomp.h |    2 +-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c  |    2 +-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.h  |    2 +-
+ .../hal/kernel/gc_hal_kernel_video_memory.c        |  208 +++++++-----
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h        |   22 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h   |   14 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_cl.h     |  301 -----------------
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h   |   54 ++--
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h |    4 +-
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h  |    2 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_dump.h   |    2 +-
+ .../gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h    |    7 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h |    2 +-
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_engine_vg.h  |    2 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h   |   21 ++-
+ .../gpu-viv/hal/kernel/inc/gc_hal_kernel_buffer.h  |    2 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_md5.h    |  112 +++++++
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_mem.h    |    2 +-
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h    |   55 +++-
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h   |    2 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_raster.h |    8 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_rename.h |    2 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_types.h  |    2 +-
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h    |    6 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h     |    2 +-
+ .../hal/os/linux/kernel/gc_hal_kernel_debug.h      |    2 +-
+ .../hal/os/linux/kernel/gc_hal_kernel_device.c     |   22 +-
+ .../hal/os/linux/kernel/gc_hal_kernel_device.h     |    5 +-
+ .../hal/os/linux/kernel/gc_hal_kernel_driver.c     |   71 ++++-
+ .../hal/os/linux/kernel/gc_hal_kernel_linux.c      |    2 +-
+ .../hal/os/linux/kernel/gc_hal_kernel_linux.h      |    2 +-
+ .../hal/os/linux/kernel/gc_hal_kernel_math.c       |    2 +-
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |  339 ++++++++++----------
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.h |    2 +-
+ 55 files changed, 1098 insertions(+), 831 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/Kbuild b/drivers/mxc/gpu-viv/Kbuild
+index aa1ec7b..aede20b 100644
+--- a/drivers/mxc/gpu-viv/Kbuild
++++ b/drivers/mxc/gpu-viv/Kbuild
+@@ -1,6 +1,6 @@
+ ##############################################################################
+ #
+-#    Copyright (C) 2005 - 2011 by Vivante Corp.
++#    Copyright (C) 2005 - 2012 by Vivante Corp.
+ #
+ #    This program is free software; you can redistribute it and/or modify
+ #    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.c b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.c
+index 96ea0f1..a7149f2 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.c
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.h b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.h
+index 37d8d58..a60bead 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.h
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+index b43e8af..73ac387 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -1158,7 +1158,7 @@ gceSTATUS gckVGHARDWARE_FlushMMU(
+ 
+         /* Allocate command buffer space. */
+         gcmkERR_BREAK(gckVGCOMMAND_Allocate(
+-            Hardware->kernel->command, 8, &commandBuffer, (gctPOINTER *) &buffer
++            command, 8, &commandBuffer, (gctPOINTER *) &buffer
+             ));
+ 
+         buffer[0]
+@@ -1175,20 +1175,20 @@ gceSTATUS gckVGHARDWARE_FlushMMU(
+ #if gcdPOWER_MANAGEMENT
+         /* Acquire the power management semaphore. */
+         gcmkERR_BREAK(gckOS_AcquireSemaphore(Hardware->os,
+-                               Hardware->kernel->command->powerSemaphore));
++                               command->powerSemaphore));
+ 
+         status = gckVGCOMMAND_Execute(
+-                            Hardware->kernel->command,
++                            command,
+                             commandBuffer
+                             );
+         /* Acquire the power management semaphore. */
+         gcmkVERIFY_OK(gckOS_ReleaseSemaphore(Hardware->os,
+-                               Hardware->kernel->command->powerSemaphore));
++                               command->powerSemaphore));
+ 
+         gcmkERR_BREAK(status);
+ #else
+         gcmkERR_BREAK(gckVGCOMMAND_Execute(
+-            Hardware->kernel->command,
++            command,
+             commandBuffer
+             ));
+ #endif
+@@ -1408,7 +1408,7 @@ gckVGHARDWARE_SetPowerManagementState(
+     gceSTATUS status;
+     gckVGCOMMAND command = gcvNULL;
+     gckOS os;
+-    gctUINT flag, clock;
++    gctUINT flag/*, clock*/;
+ 
+     gctBOOL acquired        = gcvFALSE;
+     gctBOOL stall           = gcvTRUE;
+@@ -1485,34 +1485,6 @@ gckVGHARDWARE_SetPowerManagementState(
+         },
+     };
+ 
+-    /* Clocks. */
+-    static const gctUINT clocks[4] =
+-    {
+-        /* gcvPOWER_ON */
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (64) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
+-
+-        /* gcvPOWER_OFF */
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
+-
+-        /* gcvPOWER_IDLE */
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
+-
+-        /* gcvPOWER_SUSPEND */
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
+-    };
+-
+     gcmkHEADER_ARG("Hardware=0x%x State=%d", Hardware, State);
+ #if gcmIS_DEBUG(gcdDEBUG_TRACE)
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+@@ -1644,7 +1616,7 @@ gckVGHARDWARE_SetPowerManagementState(
+ 
+     /* Grab control flags and clock. */
+     flag  = flags[Hardware->chipPowerState][State];
+-    clock = clocks[State];
++    /*clock = clocks[State];*/
+ 
+     if (flag == 0)
+     {
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
+index cff634f..0b2742d 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
+index f1b4dd0..1e06a0b 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -67,11 +67,11 @@
+         gcvFALSE, gcvFALSE                                                     \
+         )
+ 
+-#define _STATE_MIRROR(reg, mirror)                                             \
++#define _STATE_MIRROR_COUNT(reg, mirror, count)                                \
+     _StateMirror(\
+         Context, \
+         reg ## _Address >> 2, \
+-        reg ## _Count, \
++        count, \
+         mirror ## _Address >> 2                                                \
+         )
+ 
+@@ -124,7 +124,7 @@
+ \******************************************************************************/
+ 
+ #define gcdSTATE_MASK \
+-    (((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))) | (((gctUINT32) (0x03 & ((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))) | 0xC0FFEE)
++    (((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))) | (((gctUINT32) (0x03) | 0xC0FFEE & ((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27)))
+ 
+ #if !defined(VIVANTE_NO_3D)
+ static gctSIZE_T
+@@ -398,7 +398,7 @@ _InitializeContextBuffer(
+     gctSIZE_T index;
+ 
+ #if !defined(VIVANTE_NO_3D)
+-    gctINT i;
++    gctUINT i;
+     gctUINT vertexUniforms, fragmentUniforms;
+     gctUINT fe2vsCount;
+ #endif
+@@ -448,6 +448,9 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x03820 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x03828 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x0382C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x03834 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x03838 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x0384C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+ 
+     /* Front End states. */
+ 	fe2vsCount = 12;
+@@ -465,6 +468,12 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x00680 >> 2, 0x00000000, 8, gcvFALSE, gcvTRUE);
+     index += _State(Context, index, 0x006A0 >> 2, 0x00000000, 8, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x00670 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x00678 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x0067C >> 2, 0xFFFFFFFF, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x006C0 >> 2, 0x00000000, 16, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x00700 >> 2, 0x00000000, 16, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x00740 >> 2, 0x00000000, 16, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x00780 >> 2, 0x3F800000, 16, gcvFALSE, gcvFALSE);
+ 
+     /* Vertex Shader states. */
+     index += _State(Context, index, 0x00800 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+@@ -475,14 +484,14 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x00820 >> 2, 0x00000000, 4, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x00830 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x00838 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+-    index += _State(Context, index, 0x04000 >> 2, 0x00000000, 1024, gcvFALSE, gcvFALSE);
++    if (Context->hardware->identity.instructionCount <= 256)
++    {
++        index += _State(Context, index, 0x04000 >> 2, 0x00000000, 1024, gcvFALSE, gcvFALSE);
++    }
+ 
+     index += _CLOSE_RANGE();
+     index += _State(Context, index, 0x05000 >> 2, 0x00000000, vertexUniforms * 4, gcvFALSE, gcvFALSE);
+ 
+-    index += _State(Context, index, 0x00850 >> 2, 0x000003E8, 1, gcvFALSE, gcvFALSE);
+-    index += _State(Context, index, 0x00854 >> 2, 0x00000100, 1, gcvFALSE, gcvFALSE);
+-
+     /* Primitive Assembly states. */
+     index += _State(Context, index, 0x00A00 >> 2, 0x00000000, 1, gcvTRUE, gcvFALSE);
+     index += _State(Context, index, 0x00A04 >> 2, 0x00000000, 1, gcvTRUE, gcvFALSE);
+@@ -497,6 +506,10 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x00A30 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x00A40 >> 2, 0x00000000, 10, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x00A34 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x00A38 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x00A3C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x00A80 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x00A84 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+ 
+     /* Setup states. */
+     index += _State(Context, index, 0x00C00 >> 2, 0x00000000, 1, gcvTRUE, gcvFALSE);
+@@ -506,6 +519,9 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x00C10 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x00C14 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x00C18 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x00C1C >> 2, 0x42000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x00C20 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x00C24 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+ 
+     /* Raster states. */
+     index += _State(Context, index, 0x00E00 >> 2, 0x00000001, 1, gcvFALSE, gcvFALSE);
+@@ -521,36 +537,45 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x0100C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x01010 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x01018 >> 2, 0x01000000, 1, gcvFALSE, gcvFALSE);
+-    index += _State(Context, index, 0x06000 >> 2, 0x00000000, 1024, gcvFALSE, gcvFALSE);
++    if (Context->hardware->identity.instructionCount <= 256)
++    {
++        index += _State(Context, index, 0x06000 >> 2, 0x00000000, 1024, gcvFALSE, gcvFALSE);
++    }
+ 
+     index += _CLOSE_RANGE();
+     index += _State(Context, index, 0x07000 >> 2, 0x00000000, fragmentUniforms * 4, gcvFALSE, gcvFALSE);
+ 
+     /* Texture states. */
+-    index += _State(Context, index, 0x02000 >> 2, 0x00000000, 16, gcvFALSE, gcvFALSE);
+-    index += _State(Context, index, 0x02040 >> 2, 0x00000000, 16, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x02000 >> 2, 0x00000000, 12, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x02040 >> 2, 0x00000000, 12, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x02080 >> 2, 0x00000000, 12, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x020C0 >> 2, 0x00000000, 12, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x02100 >> 2, 0x00000000, 12, gcvFALSE, gcvFALSE);
+-    index += _State(Context, index, 0x02140 >> 2, 0x00000000, 16, gcvFALSE, gcvFALSE);
+-    index += _State(Context, index, 0x02400 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x02440 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x02480 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x024C0 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x02500 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x02540 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x02580 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x025C0 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x02600 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x02640 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x02680 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x026C0 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x02700 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x02740 >> 2, 0x00000000, 12, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, 0x02140 >> 2, 0x00000000, 12, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x02180 >> 2, 0x00000000, 12, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x021C0 >> 2, 0x00321000, 12, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x02200 >> 2, 0x00000000, 12, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x02240 >> 2, 0x00000000, 12, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, ((0x02400 >> 2) + (0 << 4)), 0x00000000, 12, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, ((0x02440 >> 2) + (0 << 4)), 0x00000000, 12, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, ((0x02480 >> 2) + (0 << 4)), 0x00000000, 12, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, ((0x024C0 >> 2) + (0 << 4)), 0x00000000, 12, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, ((0x02500 >> 2) + (0 << 4)), 0x00000000, 12, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, ((0x02540 >> 2) + (0 << 4)), 0x00000000, 12, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, ((0x02580 >> 2) + (0 << 4)), 0x00000000, 12, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, ((0x025C0 >> 2) + (0 << 4)), 0x00000000, 12, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, ((0x02600 >> 2) + (0 << 4)), 0x00000000, 12, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, ((0x02640 >> 2) + (0 << 4)), 0x00000000, 12, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, ((0x02680 >> 2) + (0 << 4)), 0x00000000, 12, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, ((0x026C0 >> 2) + (0 << 4)), 0x00000000, 12, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, ((0x02700 >> 2) + (0 << 4)), 0x00000000, 12, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, ((0x02740 >> 2) + (0 << 4)), 0x00000000, 12, gcvFALSE, gcvTRUE);
+     index += _CLOSE_RANGE();
+ 
+     if ((((((gctUINT32) (Context->hardware->identity.chipMinorFeatures2)) >> (0 ? 11:11)) & ((gctUINT32) ((((1 ? 11:11) - (0 ? 11:11) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 11:11) - (0 ? 11:11) + 1)))))) ))
+     {
++        gctUINT texBlockCount;
++
+         /* New texture block. */
+         index += _State(Context, index, 0x10000 >> 2, 0x00000000, 32, gcvFALSE, gcvFALSE);
+         index += _State(Context, index, 0x10080 >> 2, 0x00000000, 32, gcvFALSE, gcvFALSE);
+@@ -562,10 +587,23 @@ _InitializeContextBuffer(
+         index += _State(Context, index, 0x10380 >> 2, 0x00321000, 32, gcvFALSE, gcvFALSE);
+         index += _State(Context, index, 0x10400 >> 2, 0x00000000, 32, gcvFALSE, gcvFALSE);
+         index += _State(Context, index, 0x10480 >> 2, 0x00000000, 32, gcvFALSE, gcvFALSE);
+-        index += _State(Context, index, 0x12000 >> 2, 0x00000000, 256, gcvFALSE, gcvFALSE);
+-        index += _State(Context, index, 0x12400 >> 2, 0x00000000, 256, gcvFALSE, gcvFALSE);
+ 
+-        for (i = 0; i < (512 >> (4)); i += 1)
++        if ((((((gctUINT32) (Context->hardware->identity.chipMinorFeatures2)) >> (0 ? 15:15)) & ((gctUINT32) ((((1 ? 15:15) - (0 ? 15:15) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:15) - (0 ? 15:15) + 1)))))) ))
++        {
++            index += _State(Context, index, 0x12000 >> 2, 0x00000000, 256, gcvFALSE, gcvFALSE);
++            index += _State(Context, index, 0x12400 >> 2, 0x00000000, 256, gcvFALSE, gcvFALSE);
++        }
++
++        if ((Context->hardware->identity.chipModel == gcv2000)
++         && (Context->hardware->identity.chipRevision == 0x5108))
++        {
++            texBlockCount = 12;
++        }
++        else
++        {
++            texBlockCount = (512 >> (4));
++        }
++        for (i = 0; i < texBlockCount; i += 1)
+         {
+             index += _State(Context, index, ((0x10800 >> 2) + (i << 4)), 0x00000000, 14, gcvFALSE, gcvTRUE);
+         }
+@@ -584,10 +622,6 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x0169C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _CLOSE_RANGE();
+ 
+-    index += _State(Context, index, 0x016A4 >> 2, 0x00000000, 1, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x016A8 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+-    index += _CLOSE_RANGE();
+-
+     /* Thread walker states. */
+     index += _State(Context, index, 0x00900 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x00904 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+@@ -607,22 +641,28 @@ _InitializeContextBuffer(
+ 		index += _State(Context, index, 0x00860 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+ 		index += _CLOSE_RANGE();
+ 
+-		for (i = 0; i < 8192; i += 1024)
++		for (i = 0;
++		     i < Context->hardware->identity.instructionCount << 2;
++		     i += 256 << 2
++		     )
+ 		{
+-			index += _State(Context, index, (0x20000 >> 2) + i, 0x00000000, 1024, gcvFALSE, gcvFALSE);
++			index += _State(Context, index, (0x20000 >> 2) + i, 0x00000000, 256 << 2, gcvFALSE, gcvFALSE);
+ 			index += _CLOSE_RANGE();
+ 		}
+ 	}
+ 	else if (Context->hardware->identity.instructionCount > 256)
+ 	{
+ 		/* VX instruction memory. */
+-		for (i = 0; i < 4096; i += 1024)
++		for (i = 0;
++		     i < Context->hardware->identity.instructionCount << 2;
++		     i += 256 << 2
++		     )
+ 		{
+-			index += _State(Context, index, (0x0C000 >> 2) + i, 0x00000000, 1024, gcvFALSE, gcvFALSE);
++			index += _State(Context, index, (0x0C000 >> 2) + i, 0x00000000, 256 << 2, gcvFALSE, gcvFALSE);
+ 			index += _CLOSE_RANGE();
+ 		}
+ 
+-		index += _StateMirror(Context, (0x08000 >> 2), 4096, 0x0C000 >> 2);
++		_StateMirror(Context, (0x08000 >> 2), Context->hardware->identity.instructionCount << 2 , 0x0C000 >> 2);
+ 	}
+ 
+     /* Store the index of the "XD" entry. */
+@@ -635,7 +675,6 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x01404 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x01408 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x0140C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+-
+     index += _State(Context, index, 0x01414 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x01418 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x0141C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+@@ -643,6 +682,17 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x01424 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x01428 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x0142C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x01434 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x01454 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x01458 >> 2, 0x00000000, 1, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, 0x0145C >> 2, 0x00000010, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x014A0 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x014A8 >> 2, 0xFFFFFFFF, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x014AC >> 2, 0xFFFFFFFF, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x014B0 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x014B4 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x014A4 >> 2, 0x000E400C, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x01580 >> 2, 0x00000000, 3, gcvFALSE, gcvFALSE);
+ 
+     /* Composition states. */
+     index += _State(Context, index, 0x03008 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+@@ -654,17 +704,15 @@ _InitializeContextBuffer(
+     }
+     else
+     {
+-        index += _State(Context, index, ((0x01460 >> 2) + (0 << 3)), 0x00000000, Context->hardware->identity.pixelPipes , gcvFALSE, gcvTRUE);
++        index += _State(Context, index, ((0x01460 >> 2) + (0 << 3)), 0x00000000, Context->hardware->identity.pixelPipes, gcvFALSE, gcvTRUE);
+ 
+-        index += _State(Context, index, ((0x01480 >> 2) + (0 << 3)), 0x00000000, Context->hardware->identity.pixelPipes , gcvFALSE, gcvTRUE);
+-    }
++        index += _State(Context, index, ((0x01480 >> 2) + (0 << 3)), 0x00000000, Context->hardware->identity.pixelPipes, gcvFALSE, gcvTRUE);
+ 
+-    index += _State(Context, index, 0x01434 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+-    index += _State(Context, index, 0x01454 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+-    index += _State(Context, index, 0x01458 >> 2, 0x00000000, 1, gcvFALSE, gcvTRUE);
+-    index += _State(Context, index, 0x0145C >> 2, 0x00000010, 1, gcvFALSE, gcvFALSE);
+-    index += _State(Context, index, 0x014A8 >> 2, 0xFFFFFFFF, 1, gcvFALSE, gcvFALSE);
+-    index += _State(Context, index, 0x014AC >> 2, 0xFFFFFFFF, 1, gcvFALSE, gcvFALSE);
++        for (i = 0; i < 2; i++)
++        {
++            index += _State(Context, index, ((0x01500 >> 2) + (i << 3)), 0x00000000, Context->hardware->identity.pixelPipes, gcvFALSE, gcvTRUE);
++        }
++    }
+ 
+     /* Resolve states. */
+     index += _State(Context, index, 0x01604 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+@@ -677,24 +725,33 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x01640 >> 2, 0x00000000, 4, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x0163C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x016A0 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x016B4 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _CLOSE_RANGE();
+ 
++    if (Context->hardware->identity.pixelPipes > 1)
++    {
++        index += _State(Context, index, ((0x016C0 >> 2) + (0 << 3)), 0x00000000, Context->hardware->identity.pixelPipes, gcvFALSE, gcvTRUE);
++
++        index += _State(Context, index, ((0x016E0 >> 2) + (0 << 3)), 0x00000000, Context->hardware->identity.pixelPipes, gcvFALSE, gcvTRUE);
++
++        index += _State(Context, index, 0x01700 >> 2, 0x00000000, Context->hardware->identity.pixelPipes, gcvFALSE, gcvFALSE);
++    }
++
+     /* Tile status. */
+     index += _State(Context, index, 0x01654 >> 2, 0x00200000, 1, gcvFALSE, gcvFALSE);
+ 
+     index += _CLOSE_RANGE();
+     index += _State(Context, index, 0x01658 >> 2, 0x00000000, 1, gcvFALSE, gcvTRUE);
+-
+-    index += _CLOSE_RANGE();
+     index += _State(Context, index, 0x0165C >> 2, 0x00000000, 1, gcvFALSE, gcvTRUE);
+     index += _State(Context, index, 0x01660 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+-
+-    index += _CLOSE_RANGE();
+     index += _State(Context, index, 0x01664 >> 2, 0x00000000, 1, gcvFALSE, gcvTRUE);
+-
+-    index += _CLOSE_RANGE();
+     index += _State(Context, index, 0x01668 >> 2, 0x00000000, 1, gcvFALSE, gcvTRUE);
+     index += _State(Context, index, 0x0166C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x016A4 >> 2, 0x00000000, 1, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, 0x016A8 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x01720 >> 2, 0x00000000, 8, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x01740 >> 2, 0x00000000, 8, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, 0x01760 >> 2, 0x00000000, 8, gcvFALSE, gcvFALSE);
+     index += _CLOSE_RANGE();
+ #endif
+ 
+@@ -922,7 +979,7 @@ gckCONTEXT_Construct(
+     context->exitPipe  = gcvPIPE_3D;
+ #else
+     context->entryPipe
+-        = (((((gctUINT32) (context->hardware->chipFeatures)) >> (0 ? 9:9)) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1)))))) )
++        = (((((gctUINT32) (context->hardware->identity.chipFeatures)) >> (0 ? 9:9)) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1)))))) )
+             ? gcvPIPE_2D
+             : gcvPIPE_3D;
+     context->exitPipe = gcvPIPE_3D;
+@@ -1316,6 +1373,11 @@ gckCONTEXT_Update(
+             /* Merge all pending states. */
+             for (j = 0; j < kDelta->recordCount; j += 1)
+             {
++                if (j >= Context->stateCount)
++                {
++                    break;
++                }
++
+                 /* Get the current state record. */
+                 record = &recordArray[j];
+ 
+@@ -1454,6 +1516,11 @@ gckCONTEXT_Update(
+             /* Fill the unused space with NOPs. */
+             for (i = 0; i < nopCount; i += 1)
+             {
++                if (nop >= buffer->logical + Context->totalSize)
++                {
++                    break;
++                }
++
+                 /* Generate a NOP command. */
+                 *nop = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))) | (((gctUINT32) (0x03 & ((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27)));
+ 
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.h b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.h
+index a1b189a..a5030de 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.h
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+index f7c2387..6363b4d 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -206,7 +206,16 @@ _IdentifyHardware(
+     Identity->chipMinorFeatures
+         = ((((gctUINT32) (Identity->chipMinorFeatures)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1))))))) << (0 ? 27:27))) | (((gctUINT32) (0x0 & ((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1))))))) << (0 ? 27:27)));
+ 
+-#if gcdSUPPORT_SWAP_RECTANGLE
++    if (Identity->chipModel == gcv2000 && Identity->chipRevision == 0x5108)
++    {
++        /* Disable DXT. */
++        Identity->chipFeatures = ((((gctUINT32) (Identity->chipFeatures)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 3:3) - (0 ? 3:3) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 3:3) - (0 ? 3:3) + 1))))))) << (0 ? 3:3))) | (((gctUINT32) (0x0 & ((gctUINT32) ((((1 ? 3:3) - (0 ? 3:3) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 3:3) - (0 ? 3:3) + 1))))))) << (0 ? 3:3)));
++
++        /* Disable ETC1. */
++        Identity->chipFeatures = ((((gctUINT32) (Identity->chipFeatures)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 10:10) - (0 ? 10:10) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 10:10) - (0 ? 10:10) + 1))))))) << (0 ? 10:10))) | (((gctUINT32) (0x0 & ((gctUINT32) ((((1 ? 10:10) - (0 ? 10:10) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 10:10) - (0 ? 10:10) + 1))))))) << (0 ? 10:10)));
++    }
++
++#if 0//gcdSUPPORT_SWAP_RECTANGLE
+     Identity->chipMinorFeatures = Identity->chipMinorFeatures & (~(1 << 12));
+ #endif
+ 
+@@ -794,54 +803,6 @@ gckHARDWARE_InitializeHardware(
+                                       data));
+         }
+ 
+-        /* Disable SE clock gating on imx6 (bug #3383). */
+-        if ((Hardware->identity.chipModel == gcv2000)
+-        &&  (Hardware->identity.chipRevision  == 0x5108))
+-        {
+-            gcmkONERROR(
+-                gckOS_ReadRegisterEx(Hardware->os,
+-                                     Hardware->core,
+-                                     Hardware->powerBaseAddress
+-                                     + 0x00104,
+-                                     &data));
+-
+-            /* Disable RA clock gating. */
+-            data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 6:6) - (0 ? 6:6) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 6:6) - (0 ? 6:6) + 1))))))) << (0 ? 6:6))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 6:6) - (0 ? 6:6) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 6:6) - (0 ? 6:6) + 1))))))) << (0 ? 6:6)));
+-
+-            /* Disable PE clock gating. */
+-           data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 2:2) - (0 ? 2:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 2:2) - (0 ? 2:2) + 1))))))) << (0 ? 2:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 2:2) - (0 ? 2:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 2:2) - (0 ? 2:2) + 1))))))) << (0 ? 2:2)));
+-
+-            /* Disable TX clock gating. */
+-            data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 7:7) - (0 ? 7:7) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 7:7) - (0 ? 7:7) + 1))))))) << (0 ? 7:7))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 7:7) - (0 ? 7:7) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 7:7) - (0 ? 7:7) + 1))))))) << (0 ? 7:7)));
+-
+-            gcmkONERROR(
+-                gckOS_WriteRegisterEx(Hardware->os,
+-                                      Hardware->core,
+-                                      Hardware->powerBaseAddress
+-                                      + 0x00104,
+-                                      data));
+-
+-            gcmkONERROR(
+-                gckOS_ReadRegisterEx(Hardware->os,
+-                                     Hardware->core,
+-                                     Hardware->powerBaseAddress
+-                                     + 0x00100,
+-                                     &data));
+-
+-            /* change turnon counter value to 1. */
+-            data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 7:4) - (0 ? 7:4) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 7:4) - (0 ? 7:4) + 1))))))) << (0 ? 7:4))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 7:4) - (0 ? 7:4) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 7:4) - (0 ? 7:4) + 1))))))) << (0 ? 7:4)));
+-
+-            /* change turnoff counter value to 1. */
+-            data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:16) - (0 ? 31:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:16) - (0 ? 31:16) + 1))))))) << (0 ? 31:16))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 31:16) - (0 ? 31:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:16) - (0 ? 31:16) + 1))))))) << (0 ? 31:16)));
+-
+-            gcmkONERROR(
+-                gckOS_WriteRegisterEx(Hardware->os,
+-                                      Hardware->core,
+-                                      Hardware->powerBaseAddress
+-                                      + 0x00100,
+-                                      data));
+-
+-        }
+ #endif
+     }
+ #endif
+@@ -2164,6 +2125,7 @@ gckHARDWARE_Link(
+     gceSTATUS status;
+     gctSIZE_T bytes;
+     gctUINT32 address;
++    gctUINT32 link;
+     gctUINT32_PTR logical = (gctUINT32_PTR) Logical;
+ 
+     gcmkHEADER_ARG("Hardware=0x%x Logical=0x%x FetchAddress=0x%x FetchSize=%lu "
+@@ -2187,7 +2149,8 @@ gckHARDWARE_Link(
+         gcmkONERROR(
+             gckHARDWARE_ConvertLogical(Hardware, FetchAddress, &address));
+ 
+-        logical[1] = address;
++        gcmkONERROR(
++            gckOS_WriteMemory(Hardware->os, logical + 1, address));
+ 
+         /* Make sure the address got written before the LINK command. */
+         gcmkONERROR(
+@@ -2197,9 +2160,12 @@ gckHARDWARE_Link(
+         bytes = gcmALIGN(address + FetchSize, 64) - address;
+ 
+         /* Append LINK(bytes / 8), FetchAddress. */
+-        logical[0] = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))) | (((gctUINT32) (0x08 & ((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27)))
++        link = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))) | (((gctUINT32) (0x08 & ((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27)))
+                    | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 15:0) - (0 ? 15:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:0) - (0 ? 15:0) + 1))))))) << (0 ? 15:0))) | (((gctUINT32) ((gctUINT32) (bytes >> 3) & ((gctUINT32) ((((1 ? 15:0) - (0 ? 15:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:0) - (0 ? 15:0) + 1))))))) << (0 ? 15:0)));
+ 
++        gcmkONERROR(
++            gckOS_WriteMemory(Hardware->os, logical, link));
++
+         /* Memory barrier. */
+         gcmkONERROR(
+             gckOS_MemoryBarrier(Hardware->os, logical));
+@@ -2928,6 +2894,8 @@ gckHARDWARE_FlushMMU(
+     gcmkONERROR(gckCOMMAND_ExitCommit(command, gcvFALSE));
+     commitEntered = gcvFALSE;
+ 
++    gcmkONERROR(gckEVENT_Submit(Hardware->kernel->eventObj, gcvTRUE, gcvFALSE));
++
+     /* Success. */
+     gcmkFOOTER_NO();
+     return gcvSTATUS_OK;
+@@ -3929,7 +3897,7 @@ gckHARDWARE_SetPowerManagementState(
+     if (flag & gcvPOWER_FLAG_STOP)
+     {
+         /* Stop the command parser. */
+-        gcmkONERROR(gckCOMMAND_Stop(command));
++        gcmkONERROR(gckCOMMAND_Stop(command, gcvFALSE));
+ 
+         /* Stop the Isr. */
+         gcmkONERROR(Hardware->stopIsr(Hardware->isrContext));
+@@ -4654,7 +4622,42 @@ gckHARDWARE_Reset(
+     )
+     {
+         /* Stop the command processor. */
+-        gcmkONERROR(gckCOMMAND_Stop(command));
++        gcmkONERROR(gckCOMMAND_Stop(command, gcvTRUE));
++    }
++
++    /* Stop isr, we will start it again when power on GPU. */
++    gcmkONERROR(Hardware->stopIsr(Hardware->isrContext));
++
++    if (Hardware->identity.chipModel == gcv4000
++    && Hardware->identity.chipRevision == 0x5208)
++    {
++        gctUINT32 control;
++        control = ((((gctUINT32) (0x01590880)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 17:17) - (0 ? 17:17) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 17:17) - (0 ? 17:17) + 1))))))) << (0 ? 17:17))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 17:17) - (0 ? 17:17) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 17:17) - (0 ? 17:17) + 1))))))) << (0 ? 17:17)));
++
++        gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os,
++                    Hardware->core,
++                    0x0010C,
++                    control));
++
++        gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os,
++                    Hardware->core,
++                    0x0010C,
++                    ((((gctUINT32) (control)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0)))));
++
++        gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os,
++                    Hardware->core,
++                    0x0010C,
++                    control));
++
++        gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os,
++                    Hardware->core,
++                    0x00000,
++                    ((((gctUINT32) (0x00000100)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9)))));
++
++        gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os,
++                    Hardware->core,
++                    0x00000,
++                    0x00000100));
+     }
+ 
+     gcmkONERROR(_ResetGPU(Hardware->os, Hardware->core));
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h
+index cd74c07..a3ad86d 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/config b/drivers/mxc/gpu-viv/config
+index 68a43ad..15f1b75 100644
+--- a/drivers/mxc/gpu-viv/config
++++ b/drivers/mxc/gpu-viv/config
+@@ -1,6 +1,6 @@
+ ##############################################################################
+ #
+-#    Copyright (C) 2005 - 2011 by Vivante Corp.
++#    Copyright (C) 2005 - 2012 by Vivante Corp.
+ #
+ #    This program is free software; you can redistribute it and/or modify
+ #    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
+index 4aeb53c..dc43959 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -1308,8 +1308,7 @@ gckKERNEL_Dispatch(
+ 
+     case gcvHAL_RESET:
+         /* Reset the hardware. */
+-        gcmkONERROR(
+-            gckHARDWARE_Reset(Kernel->hardware));
++        gckKERNEL_Recovery(Kernel);
+         break;
+ 
+     case gcvHAL_DEBUG:
+@@ -1352,6 +1351,7 @@ gckKERNEL_Dispatch(
+         {
+             /* Video memory has no physical handles. */
+             physical = gcvNULL;
++            paddr = Interface->u.Cache.physical;
+         }
+         else
+         {
+@@ -2501,11 +2501,19 @@ gckKERNEL_Recovery(
+     gcmkVERIFY_OBJECT(hardware, gcvOBJ_HARDWARE);
+ 
+     /* Handle all outstanding events now. */
++#if gcdSMP
++    gcmkONERROR(gckOS_AtomSet(Kernel->os, eventObj->pending, ~0U));
++#else
+     eventObj->pending = ~0U;
++#endif
+     gcmkONERROR(gckEVENT_Notify(eventObj, 1));
+ 
+     /* Again in case more events got submitted. */
++#if gcdSMP
++    gcmkONERROR(gckOS_AtomSet(Kernel->os, eventObj->pending, ~0U));
++#else
+     eventObj->pending = ~0U;
++#endif
+     gcmkONERROR(gckEVENT_Notify(eventObj, 2));
+ 
+ #if gcdSECURE_USER
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
+index b3228d7..a331e24 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -339,10 +339,6 @@ struct _gckKERNEL
+ #if gcdENABLE_VG
+     gckVGKERNEL                 vg;
+ #endif
+-
+-#if gcdMULTICORE_MAPPING
+-    gckKERNEL                   anotherKernel;
+-#endif
+ };
+ 
+ /* gckCOMMAND object. */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
+index ec9c8ee..35deaf3 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -534,7 +534,7 @@ gckCOMMAND_Destroy(
+     gcmkVERIFY_OBJECT(Command, gcvOBJ_COMMAND);
+ 
+     /* Stop the command queue. */
+-    gcmkVERIFY_OK(gckCOMMAND_Stop(Command));
++    gcmkVERIFY_OK(gckCOMMAND_Stop(Command, gcvFALSE));
+ 
+     for (i = 0; i < gcdCOMMAND_QUEUES; ++i)
+     {
+@@ -858,7 +858,8 @@ OnError:
+ */
+ gceSTATUS
+ gckCOMMAND_Stop(
+-    IN gckCOMMAND Command
++    IN gckCOMMAND Command,
++    IN gctBOOL FromRecovery
+     )
+ {
+     gckHARDWARE hardware;
+@@ -925,7 +926,7 @@ gckCOMMAND_Stop(
+ #endif
+ 
+         /* Wait for idle. */
+-        gcmkONERROR(gckHARDWARE_GetIdle(hardware, gcvTRUE, &idle));
++        gcmkONERROR(gckHARDWARE_GetIdle(hardware, !FromRecovery, &idle));
+     }
+ 
+     /* Command queue is no longer running. */
+@@ -1001,10 +1002,14 @@ gckCOMMAND_Commit(
+     gctSIZE_T linkBytes;
+     gctSIZE_T bytes;
+     gctUINT32 offset;
++#if gcdNONPAGED_MEMORY_CACHEABLE
+     gctPHYS_ADDR entryPhysical;
++#endif
+     gctPOINTER entryLogical;
+     gctSIZE_T entryBytes;
++#if gcdNONPAGED_MEMORY_CACHEABLE
+     gctPHYS_ADDR exitPhysical;
++#endif
+     gctPOINTER exitLogical;
+     gctSIZE_T exitBytes;
+     gctPHYS_ADDR waitLinkPhysical;
+@@ -1144,7 +1149,9 @@ gckCOMMAND_Commit(
+         }
+ 
+         /* Compute the entry. */
++#if gcdNONPAGED_MEMORY_CACHEABLE
+         entryPhysical = (gctUINT8_PTR) commandBufferPhysical + offset;
++#endif
+         entryLogical  =                commandBufferLogical  + offset;
+         entryBytes    =                commandBufferSize     - offset;
+     }
+@@ -1177,13 +1184,17 @@ gckCOMMAND_Commit(
+                 /* Compute the entry. */
+                 if (Command->pipeSelect == gcvPIPE_2D)
+                 {
++#if gcdNONPAGED_MEMORY_CACHEABLE
+                     entryPhysical = (gctUINT8_PTR) contextBuffer->physical + pipeBytes;
++#endif
+                     entryLogical  = (gctUINT8_PTR) contextBuffer->logical  + pipeBytes;
+                     entryBytes    =                Context->bufferSize     - pipeBytes;
+                 }
+                 else
+                 {
++#if gcdNONPAGED_MEMORY_CACHEABLE
+                     entryPhysical = (gctUINT8_PTR) contextBuffer->physical;
++#endif
+                     entryLogical  = (gctUINT8_PTR) contextBuffer->logical;
+                     entryBytes    =                Context->bufferSize;
+                 }
+@@ -1243,13 +1254,17 @@ gckCOMMAND_Commit(
+                 /* Compute the entry. */
+                 if (Command->pipeSelect == gcvPIPE_2D)
+                 {
++#if gcdNONPAGED_MEMORY_CACHEABLE
+                     entryPhysical = (gctUINT8_PTR) contextBuffer->physical + pipeBytes;
++#endif
+                     entryLogical  = (gctUINT8_PTR) contextBuffer->logical  + pipeBytes;
+                     entryBytes    =                Context->entryOffset3D  - pipeBytes;
+                 }
+                 else
+                 {
++#if gcdNONPAGED_MEMORY_CACHEABLE
+                     entryPhysical = (gctUINT8_PTR) contextBuffer->physical;
++#endif
+                     entryLogical  = (gctUINT8_PTR) contextBuffer->logical;
+                     entryBytes    =                Context->entryOffset3D;
+                 }
+@@ -1319,7 +1334,9 @@ gckCOMMAND_Commit(
+                     : Context->entryOffset3D;
+ 
+                 /* Compute the entry. */
++#if gcdNONPAGED_MEMORY_CACHEABLE
+                 entryPhysical = (gctUINT8_PTR) contextBuffer->physical + offset;
++#endif
+                 entryLogical  = (gctUINT8_PTR) contextBuffer->logical  + offset;
+                 entryBytes    =                Context->bufferSize     - offset;
+ 
+@@ -1367,10 +1384,11 @@ gckCOMMAND_Commit(
+                 /* Compute the entry. */
+                 if (Command->pipeSelect == gcvPIPE_3D)
+                 {
++#if gcdNONPAGED_MEMORY_CACHEABLE
+                     entryPhysical
+                         = (gctUINT8_PTR) contextBuffer->physical
+                         + Context->entryOffsetXDFrom3D;
+-
++#endif
+                     entryLogical
+                         = (gctUINT8_PTR) contextBuffer->logical
+                         + Context->entryOffsetXDFrom3D;
+@@ -1381,10 +1399,11 @@ gckCOMMAND_Commit(
+                 }
+                 else
+                 {
++#if gcdNONPAGED_MEMORY_CACHEABLE
+                     entryPhysical
+                         = (gctUINT8_PTR) contextBuffer->physical
+                         + Context->entryOffsetXDFrom2D;
+-
++#endif
+                     entryLogical
+                         = (gctUINT8_PTR) contextBuffer->logical
+                         + Context->entryOffsetXDFrom2D;
+@@ -1469,13 +1488,17 @@ gckCOMMAND_Commit(
+                 /* Compute the entry. */
+                 if (Command->pipeSelect == gcvPIPE_2D)
+                 {
++#if gcdNONPAGED_MEMORY_CACHEABLE
+                     entryPhysical = (gctUINT8_PTR) contextBuffer->physical + pipeBytes;
++#endif
+                     entryLogical  = (gctUINT8_PTR) contextBuffer->logical  + pipeBytes;
+                     entryBytes    =                Context->bufferSize     - pipeBytes;
+                 }
+                 else
+                 {
++#if gcdNONPAGED_MEMORY_CACHEABLE
+                     entryPhysical = (gctUINT8_PTR) contextBuffer->physical;
++#endif
+                     entryLogical  = (gctUINT8_PTR) contextBuffer->logical;
+                     entryBytes    =                Context->bufferSize;
+                 }
+@@ -1525,13 +1548,17 @@ gckCOMMAND_Commit(
+                 /* Compute the entry. */
+                 if (Command->pipeSelect == gcvPIPE_2D)
+                 {
++#if gcdNONPAGED_MEMORY_CACHEABLE
+                     entryPhysical = (gctUINT8_PTR) contextBuffer->physical + pipeBytes;
++#endif
+                     entryLogical  = (gctUINT8_PTR) contextBuffer->logical  + pipeBytes;
+                     entryBytes    =                Context->entryOffset3D  - pipeBytes;
+                 }
+                 else
+                 {
++#if gcdNONPAGED_MEMORY_CACHEABLE
+                     entryPhysical = (gctUINT8_PTR) contextBuffer->physical;
++#endif
+                     entryLogical  = (gctUINT8_PTR) contextBuffer->logical;
+                     entryBytes    =                Context->entryOffset3D;
+                 }
+@@ -1589,7 +1616,9 @@ gckCOMMAND_Commit(
+                     : Context->entryOffset3D;
+ 
+                 /* Compute the entry. */
++#if gcdNONPAGED_MEMORY_CACHEABLE
+                 entryPhysical = (gctUINT8_PTR) contextBuffer->physical + offset;
++#endif
+                 entryLogical  = (gctUINT8_PTR) contextBuffer->logical  + offset;
+                 entryBytes    =                Context->bufferSize     - offset;
+ 
+@@ -1649,7 +1678,9 @@ gckCOMMAND_Commit(
+                 }
+ 
+                 /* Compute the entry. */
++#if gcdNONPAGED_MEMORY_CACHEABLE
+                 entryPhysical = (gctUINT8_PTR) commandBufferPhysical + offset;
++#endif
+                 entryLogical  =                commandBufferLogical  + offset;
+                 entryBytes    =                commandBufferSize     - offset;
+             }
+@@ -1705,7 +1736,9 @@ gckCOMMAND_Commit(
+     if (Command->newQueue)
+     {
+         /* New command queue, jump to the beginning of it. */
++#if gcdNONPAGED_MEMORY_CACHEABLE
+         exitPhysical = Command->physical;
++#endif
+         exitLogical  = Command->logical;
+         exitBytes    = Command->offset + waitLinkBytes;
+     }
+@@ -1713,7 +1746,9 @@ gckCOMMAND_Commit(
+     {
+         /* Still within the preexisting command queue, jump to the new
+            WAIT/LINK command sequence. */
++#if gcdNONPAGED_MEMORY_CACHEABLE
+         exitPhysical = waitLinkPhysical;
++#endif
+         exitLogical  = waitLinkLogical;
+         exitBytes    = waitLinkBytes;
+     }
+@@ -2106,7 +2141,9 @@ gckCOMMAND_Execute(
+     gctUINT32 waitOffset;
+     gctSIZE_T waitBytes;
+ 
++#if gcdNONPAGED_MEMORY_CACHEABLE
+     gctPHYS_ADDR execPhysical;
++#endif
+     gctPOINTER execLogical;
+     gctSIZE_T execBytes;
+ 
+@@ -2144,7 +2181,9 @@ gckCOMMAND_Execute(
+     if (Command->newQueue)
+     {
+         /* New command queue, jump to the beginning of it. */
++#if gcdNONPAGED_MEMORY_CACHEABLE
+         execPhysical = Command->physical;
++#endif
+         execLogical  = Command->logical;
+         execBytes    = waitLinkOffset + waitLinkBytes;
+     }
+@@ -2152,7 +2191,9 @@ gckCOMMAND_Execute(
+     {
+         /* Still within the preexisting command queue, jump directly to the
+            reserved area. */
++#if gcdNONPAGED_MEMORY_CACHEABLE
+         execPhysical = (gctUINT8 *) Command->physical + Command->offset;
++#endif
+         execLogical  = (gctUINT8 *) Command->logical  + Command->offset;
+         execBytes    = RequestedBytes + waitLinkBytes;
+     }
+@@ -2380,7 +2421,7 @@ gckCOMMAND_Stall(
+            );
+ 
+     /* Bail out on timeout. */
+-    if (gcmIS_ERROR(status))
++    if (gcmIS_ERROR(status) && !FromPower)
+     {
+         /* Broadcast the stuck GPU. */
+         gcmkONERROR(gckOS_Broadcast(
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c
+index 7f5cd46..0f2292d 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_db.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_db.c
+index a394b8e..ca53c74 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_db.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_db.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -558,7 +558,7 @@ gckKERNEL_FindRecord(
+ {
+     gceSTATUS status;
+     gctBOOL acquired = gcvFALSE;
+-    gcsDATABASE_RECORD_PTR record, previous;
++    gcsDATABASE_RECORD_PTR record;
+ 
+     gcmkHEADER_ARG("Kernel=0x%x Database=0x%x Type=%d Data=0x%x",
+                    Kernel, Database, Type, Data);
+@@ -569,7 +569,7 @@ gckKERNEL_FindRecord(
+     acquired = gcvTRUE;
+ 
+     /* Scan the database for this record. */
+-    for (record = Database->list, previous = gcvNULL;
++    for (record = Database->list;
+          record != gcvNULL;
+          record = record->next
+     )
+@@ -581,8 +581,6 @@ gckKERNEL_FindRecord(
+             /* Found it! */
+             break;
+         }
+-
+-        previous = record;
+     }
+ 
+     if (record == gcvNULL)
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c
+index 1eba4ea..299ce14 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
+index 052be7d..3da8aa9 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_heap.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_heap.c
+index 597c979..c68e0c1 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_heap.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_heap.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_interrupt_vg.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_interrupt_vg.c
+index ec5dd4c..028b469 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_interrupt_vg.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_interrupt_vg.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
+index 2f16004..b25e2ef 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -51,6 +51,140 @@ typedef struct _gcsMMU_STLB
+ 
+ #define gcvMMU_STLB_SIZE gcmALIGN(sizeof(gcsMMU_STLB), 4)
+ 
++#if gcdSHARED_PAGETABLE
++typedef struct _gcsSharedPageTable * gcsSharedPageTable_PTR;
++typedef struct _gcsSharedPageTable
++{
++    /* Logical of shared pagetable. */
++    gctPOINTER      logical;
++
++    /* Physical of shared pagetable. */
++    gctPHYS_ADDR    physical;
++
++    /* Number of cores use this shared pagetable. */
++    gctUINT32       reference;
++
++    /* Mutex to protect this shared pagetable. */
++    gctPOINTER      mutex;
++
++    /* Hardwares which use this shared pagetable. */
++    gckHARDWARE     hardwares[gcdCORE_COUNT];
++
++    /* flat mapping flags. Only useful for new MMU. */
++    gctBOOL         flatMappingSetup;
++}
++gcsSharedPageTable;
++
++static gcsSharedPageTable_PTR sharedPageTable = gcvNULL;
++
++static gceSTATUS
++_Free(
++    IN gckMMU Mmu
++    )
++{
++    sharedPageTable->reference--;
++
++    if (sharedPageTable->reference == 0)
++    {
++        if (sharedPageTable->logical)
++        {
++            gcmkVERIFY_OK(
++                    gckOS_FreeContiguous(Mmu->os,
++                        sharedPageTable->physical,
++                        (gctPOINTER) sharedPageTable->logical,
++                        Mmu->pageTableSize));
++        }
++
++        if (sharedPageTable->mutex)
++        {
++            gcmkVERIFY_OK(gckOS_DeleteMutex(Mmu->os, sharedPageTable->mutex));
++        }
++
++        gcmkVERIFY_OK(gcmkOS_SAFE_FREE(Mmu->os, sharedPageTable));
++    }
++
++    return gcvSTATUS_OK;
++}
++
++static gceSTATUS
++_Construct(
++    IN gckMMU Mmu
++    )
++{
++    gceSTATUS status;
++    gctPOINTER pointer;
++    gctPHYS_ADDR physical;
++
++    gcmkHEADER_ARG("Mmu=%lu", Mmu);
++
++    if (sharedPageTable == gcvNULL)
++    {
++        gcmkONERROR(
++                gckOS_Allocate(Mmu->os,
++                               sizeof(struct _gcsSharedPageTable),
++                               &pointer));
++        sharedPageTable = pointer;
++
++        gcmkONERROR(
++                gckOS_ZeroMemory(sharedPageTable,
++                                 sizeof(struct _gcsSharedPageTable)));
++
++        /* Create shared page table. */
++        gcmkONERROR(
++                gckOS_AllocateContiguous(Mmu->os,
++                    gcvFALSE,
++                    &Mmu->pageTableSize,
++                    &physical,
++                    &pointer));
++
++        sharedPageTable->logical = pointer;
++        sharedPageTable->physical = physical;
++
++        /* Create the page table mutex. */
++        gcmkONERROR(gckOS_CreateMutex(Mmu->os, &sharedPageTable->mutex));
++
++        /* Invalid all the entries. */
++        gcmkONERROR(
++            gckOS_ZeroMemory(sharedPageTable->logical, Mmu->pageTableSize));
++    }
++
++    Mmu->pageTableLogical = sharedPageTable->logical;
++    Mmu->pageTablePhysical = sharedPageTable->physical;
++    Mmu->pageTableMutex = sharedPageTable->mutex;
++
++    sharedPageTable->hardwares[sharedPageTable->reference] = Mmu->hardware;
++
++    sharedPageTable->reference++;
++
++    gcmkFOOTER_ARG("sharedPageTable->reference=%lu", sharedPageTable->reference);
++    return gcvSTATUS_OK;
++
++OnError:
++    if (sharedPageTable)
++    {
++        if (sharedPageTable->logical)
++        {
++            gcmkVERIFY_OK(
++                    gckOS_FreeContiguous(Mmu->os,
++                        sharedPageTable->physical,
++                        (gctPOINTER) sharedPageTable->logical,
++                        Mmu->pageTableSize));
++        }
++
++        if (sharedPageTable->mutex)
++        {
++            gcmkVERIFY_OK(gckOS_DeleteMutex(Mmu->os, sharedPageTable->mutex));
++        }
++
++        gcmkVERIFY_OK(gcmkOS_SAFE_FREE(Mmu->os, sharedPageTable));
++    }
++
++    gcmkFOOTER();
++    return status;
++}
++
++#endif
++
+ static gceSTATUS
+ _Link(
+     IN gckMMU Mmu,
+@@ -301,6 +435,15 @@ _FillFlatMapping(
+     gctUINT32 sStart = (start & gcdMMU_STLB_64K_MASK) >> gcdMMU_STLB_64K_SHIFT;
+     gctUINT32 sEnd = (end & gcdMMU_STLB_64K_MASK) >> gcdMMU_STLB_64K_SHIFT;
+ 
++#if gcdSHARED_PAGETABLE
++    if (sharedPageTable->flatMappingSetup == gcvTRUE)
++    {
++        gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_MMU,
++                       "flat mapping has been created by another core");
++        return gcvSTATUS_OK;
++    }
++#endif
++
+     /* Grab the mutex. */
+     gcmkONERROR(gckOS_AcquireMutex(Mmu->os, Mmu->pageTableMutex, gcvINFINITE));
+     mutex = gcvTRUE;
+@@ -419,6 +562,9 @@ _FillFlatMapping(
+     /* Release the mutex. */
+     gcmkVERIFY_OK(gckOS_ReleaseMutex(Mmu->os, Mmu->pageTableMutex));
+ 
++#if gcdSHARED_PAGETABLE
++    sharedPageTable->flatMappingSetup = gcvTRUE;
++#endif
+     return gcvSTATUS_OK;
+ 
+ OnError:
+@@ -522,8 +668,10 @@ gckMMU_Construct(
+     mmu->nodeMutex        = gcvNULL;
+ #endif
+ 
++#if !gcdSHARED_PAGETABLE
+     /* Create the page table mutex. */
+     gcmkONERROR(gckOS_CreateMutex(os, &mmu->pageTableMutex));
++#endif
+ 
+ #ifdef __QNXNTO__
+     /* Create the node list mutex. */
+@@ -534,6 +682,10 @@ gckMMU_Construct(
+     {
+         /* Allocate the page table (not more than 256 kB). */
+         mmu->pageTableSize = gcmMIN(MmuSize, 256 << 10);
++
++#if gcdSHARED_PAGETABLE
++        _Construct(mmu);
++#else
+         gcmkONERROR(
+             gckOS_AllocateContiguous(os,
+                                      gcvFALSE,
+@@ -542,6 +694,7 @@ gckMMU_Construct(
+                                      &pointer));
+ 
+         mmu->pageTableLogical = pointer;
++#endif
+ 
+         /* Compute number of entries in page table. */
+         mmu->pageTableEntries = mmu->pageTableSize / sizeof(gctUINT32);
+@@ -562,6 +715,9 @@ gckMMU_Construct(
+         /* Allocate the 4K mode MTLB table. */
+         mmu->pageTableSize = gcdMMU_MTLB_SIZE + 64;
+ 
++#if gcdSHARED_PAGETABLE
++        _Construct(mmu);
++#else
+         gcmkONERROR(
+             gckOS_AllocateContiguous(os,
+                                      gcvFALSE,
+@@ -574,6 +730,7 @@ gckMMU_Construct(
+         /* Invalid all the entries. */
+         gcmkONERROR(
+             gckOS_ZeroMemory(pointer, mmu->pageTableSize));
++#endif
+     }
+ 
+     /* Return the gckMMU object pointer. */
+@@ -590,11 +747,16 @@ OnError:
+         if (mmu->pageTableLogical != gcvNULL)
+         {
+             /* Free the page table. */
++#if gcdSHARED_PAGETABLE
++            _Free(mmu);
++#else
+             gcmkVERIFY_OK(
+                 gckOS_FreeContiguous(os,
+                                      mmu->pageTablePhysical,
+                                      (gctPOINTER) mmu->pageTableLogical,
+                                      mmu->pageTableSize));
++#endif
++
+         }
+ 
+         if (mmu->pageTableMutex != gcvNULL)
+@@ -692,19 +854,25 @@ gckMMU_Destroy(
+     }
+ 
+     /* Free the page table. */
++#if gcdSHARED_PAGETABLE
++    _Free(Mmu);
++#else
+     gcmkVERIFY_OK(
+         gckOS_FreeContiguous(Mmu->os,
+                              Mmu->pageTablePhysical,
+                              (gctPOINTER) Mmu->pageTableLogical,
+                              Mmu->pageTableSize));
++#endif
+ 
+ #ifdef __QNXNTO__
+     /* Delete the node list mutex. */
+     gcmkVERIFY_OK(gckOS_DeleteMutex(Mmu->os, Mmu->nodeMutex));
+ #endif
+ 
++#if !gcdSHARED_PAGETABLE
+     /* Delete the page table mutex. */
+     gcmkVERIFY_OK(gckOS_DeleteMutex(Mmu->os, Mmu->pageTableMutex));
++#endif
+ 
+     /* Mark the gckMMU object as unknown. */
+     Mmu->object.type = gcvOBJ_UNKNOWN;
+@@ -976,9 +1144,11 @@ gckMMU_AllocatePages(
+                      | (gcvMMU_STLB_SIZE << 10);
+         }
+ 
++#if !gcdSHARED_PAGETABLE
+         /* Flush the MMU cache. */
+         gcmkONERROR(
+             gckHARDWARE_FlushMMU(Mmu->hardware));
++#endif
+ 
+         /* Success. */
+         gcmkFOOTER_ARG("*PageTable=0x%x *Address=%08x",
+@@ -1085,10 +1255,6 @@ gckMMU_FreePages(
+             gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
+         }
+ 
+-        /* Flush the MMU cache. */
+-        gcmkONERROR(
+-            gckHARDWARE_FlushMMU(Mmu->hardware));
+-
+         /* Grab the mutex. */
+         gcmkONERROR(gckOS_AcquireMutex(Mmu->os, Mmu->pageTableMutex, gcvINFINITE));
+         mutex = gcvTRUE;
+@@ -1334,6 +1500,31 @@ OnError:
+ }
+ #endif
+ 
++#if gcdSHARED_PAGETABLE
++gceSTATUS
++gckMMU_FlushAllMmuCache(
++    void
++    )
++{
++    gceSTATUS status;
++    gctINT i;
++    for (i = 0; i < gcdCORE_COUNT; i++)
++    {
++        if (sharedPageTable->hardwares[i])
++        {
++            gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_MMU,
++                           "Flush MMU Cache for hardware=0x%x",
++                           sharedPageTable->hardwares[i]);
++            gcmkONERROR(gckHARDWARE_FlushMMU(sharedPageTable->hardwares[i]));
++        }
++    }
++
++    return gcvSTATUS_OK;
++OnError:
++    return status;
++}
++#endif
++
+ /******************************************************************************
+ ****************************** T E S T   C O D E ******************************
+ ******************************************************************************/
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu_vg.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu_vg.c
+index e320627..ac74f33 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu_vg.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu_vg.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_precomp.h b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_precomp.h
+index 7366491..004e6bd 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_precomp.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_precomp.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c
+index 29d28e8..343f4f4 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.h b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.h
+index bf0f305..04fccf4 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
+index 33438b6..dac5e23 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -773,6 +773,93 @@ OnError:
+     return status;
+ }
+ 
++#if gcdENABLE_BANK_ALIGNMENT
++
++#if !gcdBANK_BIT_START
++#error gcdBANK_BIT_START not defined.
++#endif
++
++#if !gcdBANK_BIT_END
++#error gcdBANK_BIT_END not defined.
++#endif
++/*******************************************************************************
++**  _GetSurfaceBankAlignment
++**
++**  Return the required offset alignment required to the make BaseAddress
++**  aligned properly.
++**
++**  INPUT:
++**
++**      gckOS Os
++**          Pointer to gcoOS object.
++**
++**      gceSURF_TYPE Type
++**          Type of allocation.
++**
++**      gctUINT32 BaseAddress
++**          Base address of current video memory node.
++**
++**  OUTPUT:
++**
++**      gctUINT32_PTR AlignmentOffset
++**          Pointer to a variable that will hold the number of bytes to skip in
++**          the current video memory node in order to make the alignment bank
++**          aligned.
++*/
++static gceSTATUS
++_GetSurfaceBankAlignment(
++    IN gceSURF_TYPE Type,
++    IN gctUINT32 BaseAddress,
++    OUT gctUINT32_PTR AlignmentOffset
++    )
++{
++    gctUINT32 bank;
++    /* To retrieve the bank. */
++    static const gctUINT32 bankMask = (0xFFFFFFFF << gcdBANK_BIT_START)
++                                    ^ (0xFFFFFFFF << (gcdBANK_BIT_END + 1));
++
++    /* To retrieve the bank and all the lower bytes. */
++    static const gctUINT32 byteMask = ~(0xFFFFFFFF << (gcdBANK_BIT_END + 1));
++
++    gcmkHEADER_ARG("Type=%d BaseAddress=0x%x ", Type, BaseAddress);
++
++    /* Verify the arguments. */
++    gcmkVERIFY_ARGUMENT(AlignmentOffset != gcvNULL);
++
++    switch (Type)
++    {
++    case gcvSURF_RENDER_TARGET:
++        bank = (BaseAddress & bankMask) >> (gcdBANK_BIT_START);
++
++        /* Align to the first bank. */
++        *AlignmentOffset = (bank == 0) ?
++            0 :
++            ((1 << (gcdBANK_BIT_END + 1)) + 0) -  (BaseAddress & byteMask);
++        break;
++
++    case gcvSURF_DEPTH:
++        bank = (BaseAddress & bankMask) >> (gcdBANK_BIT_START);
++
++        /* Align to the third bank. */
++        *AlignmentOffset = (bank == 2) ?
++            0 :
++            ((1 << (gcdBANK_BIT_END + 1)) + (2 << gcdBANK_BIT_START)) -  (BaseAddress & byteMask);
++
++        /* Add a channel offset at the channel bit. */
++        *AlignmentOffset += (1 << gcdBANK_CHANNEL_BIT);
++        break;
++
++    default:
++        /* no alignment needed. */
++        *AlignmentOffset = 0;
++    }
++
++    /* Return the status. */
++    gcmkFOOTER_ARG("*AlignmentOffset=%u", *AlignmentOffset);
++    return gcvSTATUS_OK;
++}
++#endif
++
+ static gcuVIDMEM_NODE_PTR
+ _FindNode(
+     IN gckVIDMEM Memory,
+@@ -803,8 +890,7 @@ _FindNode(
+          node->VidMem.bytes != 0;
+          node = node->VidMem.nextFree)
+     {
+-        gcmkONERROR(gckOS_GetSurfaceBankAlignment(
+-			Memory->os,
++        gcmkONERROR(_GetSurfaceBankAlignment(
+             Type,
+             node->VidMem.memory->baseAddress + node->VidMem.offset,
+             &bankAlignment));
+@@ -1657,66 +1743,37 @@ gckVIDMEM_Lock(
+                 else
+ #endif
+                 {
+-                    if (Node->Virtual.pageTables[Kernel->core] == gcvNULL)
+-                    {
+-#if gcdMULTICORE_MAPPING
+-                        gckKERNEL anotherKernel = Kernel->anotherKernel;
+-#endif
++                    /* Allocate pages inside the MMU. */
++                    gcmkONERROR(
++                        gckMMU_AllocatePages(Kernel->mmu,
++                                             Node->Virtual.pageCount,
++                                             &Node->Virtual.pageTables[Kernel->core],
++                                             &Node->Virtual.addresses[Kernel->core]));
++                }
+ 
+-                        /* Allocate pages inside the MMU. */
+-                        gcmkONERROR(
+-                                gckMMU_AllocatePages(Kernel->mmu,
+-                                    Node->Virtual.pageCount,
+-                                    &Node->Virtual.pageTables[Kernel->core],
+-                                    &Node->Virtual.addresses[Kernel->core]));
+-
+-                        Node->Virtual.lockKernels[Kernel->core] = Kernel;
+-
+-#if gcdMULTICORE_MAPPING
+-                        if (anotherKernel)
+-                        {
+-                            gcmkONERROR(
+-                                    gckMMU_AllocatePages(anotherKernel->mmu,
+-                                        Node->Virtual.pageCount,
+-                                        &Node->Virtual.pageTables[anotherKernel->core],
+-                                        &Node->Virtual.addresses[anotherKernel->core]));
+-
+-                            Node->Virtual.lockKernels[anotherKernel->core] = Kernel;
+-                        }
+-#endif
++                Node->Virtual.lockKernels[Kernel->core] = Kernel;
+ 
+-                        /* Map the pages. */
++                /* Map the pages. */
+ #ifdef __QNXNTO__
+-                        gcmkONERROR(
+-                                gckOS_MapPagesEx(os,
++                gcmkONERROR(
++                    gckOS_MapPagesEx(os,
+                                      Kernel->core,
+                                      Node->Virtual.physical,
+                                      Node->Virtual.logical,
+                                      Node->Virtual.pageCount,
+                                      Node->Virtual.pageTables[Kernel->core]));
+ #else
+-
+-                        gcmkONERROR(
+-                                gckOS_MapPagesEx(os,
+-                                    Kernel->core,
+-                                    Node->Virtual.physical,
+-                                    Node->Virtual.pageCount,
+-                                    Node->Virtual.pageTables[Kernel->core]));
+-
+-#if gcdMULTICORE_MAPPING
+-                        if (anotherKernel)
+-                        {
+-                            gcmkONERROR(
+-                                    gckOS_MapPagesEx(os,
+-                                        anotherKernel->core,
+-                                        Node->Virtual.physical,
+-                                        Node->Virtual.pageCount,
+-                                        Node->Virtual.pageTables[anotherKernel->core]));
+-                        }
++                gcmkONERROR(
++                    gckOS_MapPagesEx(os,
++                                     Kernel->core,
++                                     Node->Virtual.physical,
++                                     Node->Virtual.pageCount,
++                                     Node->Virtual.pageTables[Kernel->core]));
+ #endif
++
++#if gcdSHARED_PAGETABLE
++                gcmkONERROR(gckMMU_FlushAllMmuCache());
+ #endif
+-                    }
+-                }
+             }
+ 
+             gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_VIDMEM,
+@@ -1941,12 +1998,18 @@ gckVIDMEM_Unlock(
+                             gckVGMMU_FreePages(Kernel->vg->mmu,
+                                              Node->Virtual.pageTables[Kernel->core],
+                                              Node->Virtual.pageCount));
+-
+-                        /* Mark page table as freed. */
+-                        Node->Virtual.pageTables[Kernel->core] = gcvNULL;
+-                        Node->Virtual.lockKernels[Kernel->core] = gcvNULL;
+                     }
++                    else
+ #endif
++                    {
++                        gcmkONERROR(
++                            gckMMU_FreePages(Kernel->mmu,
++                                             Node->Virtual.pageTables[Kernel->core],
++                                             Node->Virtual.pageCount));
++                    }
++                    /* Mark page table as freed. */
++                    Node->Virtual.pageTables[Kernel->core] = gcvNULL;
++                    Node->Virtual.lockKernels[Kernel->core] = gcvNULL;
+                 }
+ 
+ #ifdef __QNXNTO__
+@@ -1962,39 +2025,6 @@ gckVIDMEM_Unlock(
+ 
+             if (totalLocked == 0)
+             {
+-                if (Node->Virtual.pageTables[Kernel->core] != gcvNULL)
+-                {
+-#if gcdMULTICORE_MAPPING
+-                    gckKERNEL anotherKernel = Kernel->anotherKernel;
+-#endif
+-                    gcmkONERROR(
+-                        gckMMU_FreePages(Kernel->mmu,
+-                                         Node->Virtual.pageTables[Kernel->core],
+-                                         Node->Virtual.pageCount));
+-
+-#if gcdMULTICORE_MAPPING
+-                    if (anotherKernel)
+-                    {
+-                        gcmkONERROR(
+-                                gckMMU_FreePages(anotherKernel->mmu,
+-                                    Node->Virtual.pageTables[anotherKernel->core],
+-                                    Node->Virtual.pageCount));
+-                    }
+-#endif
+-
+-                    /* Mark page table as freed. */
+-                    Node->Virtual.pageTables[Kernel->core] = gcvNULL;
+-                    Node->Virtual.lockKernels[Kernel->core] = gcvNULL;
+-
+-#if gcdMULTICORE_MAPPING
+-                    if (anotherKernel)
+-                    {
+-                        Node->Virtual.pageTables[anotherKernel->core] = gcvNULL;
+-                        Node->Virtual.lockKernels[anotherKernel->core] = gcvNULL;
+-                    }
+-#endif
+-                }
+-
+                 /* Owner have already freed this node
+                 ** and we are the last one to unlock, do
+                 ** real free */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
+index 0b14176..9c47478 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -920,16 +920,6 @@ gckOS_DeviceControl(
+     IN gctSIZE_T OutputBufferSize
+     );
+ 
+-#if gcdENABLE_BANK_ALIGNMENT
+-gceSTATUS
+-gckOS_GetSurfaceBankAlignment(
+-    IN gckOS Os,
+-    IN gceSURF_TYPE Type,
+-    IN gctUINT32 BaseAddress,
+-    OUT gctUINT32_PTR Alignment
+-    );
+-#endif
+-
+ /*******************************************************************************
+ **
+ **  gckOS_GetProcessID
+@@ -2203,7 +2193,8 @@ gckCOMMAND_Start(
+ /* Stop the command queue. */
+ gceSTATUS
+ gckCOMMAND_Stop(
+-    IN gckCOMMAND Command
++    IN gckCOMMAND Command,
++    IN gctBOOL FromRecovery
+     );
+ 
+ /* Commit a buffer to the command queue. */
+@@ -2330,6 +2321,13 @@ gckMMU_FreeHandleMemory(
+     );
+ #endif
+ 
++#if gcdSHARED_PAGETABLE
++gceSTATUS
++gckMMU_FlushAllMmuCache(
++    void
++    );
++#endif
++
+ 
+ #if VIVANTE_PROFILER
+ gceSTATUS
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
+index 6137f5f..90aa35f 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -28,6 +28,7 @@
+ #include "gc_hal_types.h"
+ 
+ #include "gc_hal_dump.h"
++#include "gc_hal_md5.h"
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -692,8 +693,8 @@ gcoOS_FreeContiguous(
+ 
+ #if gcdENABLE_BANK_ALIGNMENT
+ gceSTATUS
+-gcoOS_GetBankOffsetBytes(
+-    IN gcoOS Os,
++gcoSURF_GetBankOffsetBytes(
++    IN gcoSURF Surfce,
+     IN gceSURF_TYPE Type,
+     IN gctUINT32 Stride,
+     IN gctUINT32_PTR Bytes
+@@ -1893,6 +1894,13 @@ gcoSURF_CPUCacheOperation(
+     IN gceCACHEOPERATION Operation
+     );
+ 
++
++gceSTATUS
++gcoSURF_SetLinearResolveAddress(
++    IN gcoSURF Surface,
++    IN gctUINT32 Address,
++    IN gctPOINTER Memory
++    );
+ /******************************************************************************\
+ ********************************* gcoDUMP Object ********************************
+ \******************************************************************************/
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_cl.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_cl.h
+deleted file mode 100644
+index 86982c2..0000000
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_cl.h
++++ /dev/null
+@@ -1,301 +0,0 @@
+-/****************************************************************************
+-*
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
+-*
+-*    This program is free software; you can redistribute it and/or modify
+-*    it under the terms of the GNU General Public License as published by
+-*    the Free Software Foundation; either version 2 of the license, or
+-*    (at your option) any later version.
+-*
+-*    This program is distributed in the hope that it will be useful,
+-*    but WITHOUT ANY WARRANTY; without even the implied warranty of
+-*    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+-*    GNU General Public License for more details.
+-*
+-*    You should have received a copy of the GNU General Public License
+-*    along with this program; if not write to the Free Software
+-*    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+-*
+-*****************************************************************************/
+-
+-
+-
+-
+-#ifndef __gc_hal_user_cl_h_
+-#define __gc_hal_user_cl_h_
+-
+-
+-#ifdef __cplusplus
+-extern "C" {
+-#endif
+-
+-#define     USE_NEW_MEMORY_ALLOCATION   0
+-
+-/******************************************************************************\
+-****************************** Object Declarations *****************************
+-\******************************************************************************/
+-
+-/* gcoCL_DEVICE_INFO object. */
+-typedef struct _gcoCL_DEVICE_INFO
+-{
+-	gctUINT             maxComputeUnits;
+-    gctUINT             maxWorkItemDimensions;
+-    gctUINT             maxWorkItemSizes[3];
+-    gctUINT             maxWorkGroupSize;
+-    gctUINT             maxGlobalWorkSize ;
+-	gctUINT 			clockFrequency;
+-
+-	gctUINT 			addrBits;
+-	gctUINT64			maxMemAllocSize;
+-	gctUINT64			globalMemSize;
+-	gctUINT64			localMemSize;
+-	gctUINT             localMemType;				/* cl_device_local_mem_type */
+-	gctUINT             globalMemCacheType;			/* cl_device_mem_cache_type */
+-	gctUINT				globalMemCachelineSize;
+-	gctUINT64			globalMemCacheSize;
+-	gctUINT				maxConstantArgs;
+-	gctUINT64			maxConstantBufferSize;
+-	gctUINT 			maxParameterSize;
+-	gctUINT				memBaseAddrAlign;
+-	gctUINT				minDataTypeAlignSize;
+-
+-	gctBOOL 			imageSupport;
+-	gctUINT 			maxReadImageArgs;
+-	gctUINT 			maxWriteImageArgs;
+-	gctUINT				vectorWidthChar;
+-	gctUINT				vectorWidthShort;
+-	gctUINT				vectorWidthInt;
+-	gctUINT				vectorWidthLong;
+-	gctUINT				vectorWidthFloat;
+-	gctUINT				vectorWidthDouble;
+-	gctUINT				vectorWidthHalf;
+-	gctUINT  			image2DMaxWidth;
+-	gctUINT  			image2DMaxHeight;
+-	gctUINT  			image3DMaxWidth;
+-	gctUINT  			image3DMaxHeight;
+-	gctUINT  			image3DMaxDepth;
+-	gctUINT				maxSamplers;
+-
+-	gctUINT64           queueProperties;		/* cl_command_queue_properties */
+-	gctBOOL     		hostUnifiedMemory;
+-	gctBOOL  			errorCorrectionSupport;
+-	gctUINT64           singleFpConfig;			/* cl_device_fp_config */
+-	gctUINT64           doubleFpConfig;			/* cl_device_fp_config */
+-	gctUINT				profilingTimingRes;
+-	gctBOOL				endianLittle;
+-	gctBOOL				deviceAvail;
+-	gctBOOL				compilerAvail;
+-	gctUINT64			execCapability;			/* cl_device_exec_capabilities */
+-} gcoCL_DEVICE_INFO;
+-
+-typedef gcoCL_DEVICE_INFO *  gcoCL_DEVICE_INFO_PTR;
+-
+-
+-/*******************************************************************************
+-**
+-**  gcoCL_InitializeHardware
+-**
+-**  Initialize hardware.  This is required for each thread.
+-**
+-**  INPUT:
+-**
+-**      Nothing
+-**
+-**  OUTPUT:
+-**
+-**      Nothing
+-*/
+-gceSTATUS
+-gcoCL_InitializeHardware(
+-    );
+-
+-/*******************************************************************************
+-**
+-**  gcoCL_AllocateMemory
+-**
+-**  Allocate contiguous memory from the kernel.
+-**
+-**  INPUT:
+-**
+-**      gctSIZE_T * Bytes
+-**          Pointer to the number of bytes to allocate.
+-**
+-**  OUTPUT:
+-**
+-**      gctSIZE_T * Bytes
+-**          Pointer to a variable that will receive the aligned number of bytes
+-**          allocated.
+-**
+-**      gctPHYS_ADDR * Physical
+-**          Pointer to a variable that will receive the physical addresses of
+-**          the allocated memory.
+-**
+-**      gctPOINTER * Logical
+-**          Pointer to a variable that will receive the logical address of the
+-**          allocation.
+-**
+-**      gcsSURF_NODE_PTR  * Node
+-**          Pointer to a variable that will receive the gcsSURF_NODE structure
+-**          pointer that describes the video memory to lock.
+-*/
+-gceSTATUS
+-gcoCL_AllocateMemory(
+-    IN OUT gctSIZE_T *      Bytes,
+-    OUT gctPHYS_ADDR *      Physical,
+-    OUT gctPOINTER *        Logical,
+-    OUT gcsSURF_NODE_PTR *  Node
+-    );
+-
+-/*******************************************************************************
+-**
+-**  gcoCL_FreeMemory
+-**
+-**  Free contiguous memeory to the kernel.
+-**
+-**  INPUT:
+-**
+-**      gctPHYS_ADDR Physical
+-**          The physical addresses of the allocated pages.
+-**
+-**      gctPOINTER Logical
+-**          The logical address of the allocation.
+-**
+-**      gctSIZE_T Bytes
+-**          Number of bytes allocated.
+-**
+-**      gcsSURF_NODE_PTR  Node
+-**          Pointer to a gcsSURF_NODE structure
+-**          that describes the video memory to unlock.
+-**
+-**  OUTPUT:
+-**
+-**      Nothing
+-*/
+-gceSTATUS
+-gcoCL_FreeMemory(
+-    IN gctPHYS_ADDR         Physical,
+-    IN gctPOINTER           Logical,
+-    IN gctSIZE_T            Bytes,
+-    IN gcsSURF_NODE_PTR     Node
+-    );
+-
+-/*******************************************************************************
+-**
+-**  gcoCL_CreateTexture
+-**
+-**  Create texture for image.
+-**
+-**  INPUT:
+-**
+-**      gctUINT Width
+-**          Width of the image.
+-**
+-**      gctUINT Heighth
+-**          Heighth of the image.
+-**
+-**      gctUINT Depth
+-**          Depth of the image.
+-**
+-**      gctCONST_POINTER Memory
+-**          Pointer to the data of the input image.
+-**
+-**      gctUINT Stride
+-**          Size of one row.
+-**
+-**      gctUINT Slice
+-**          Size of one plane.
+-**
+-**      gceSURF_FORMAT FORMAT
+-**          Format of the image.
+-**
+-**      gceENDIAN_HINT EndianHint
+-**          Endian needed to handle the image data.
+-**
+-**  OUTPUT:
+-**
+-**      gcoTEXTURE * Texture
+-**          Pointer to a variable that will receive the gcoTEXTURE structure.
+-**
+-**      gcoSURF * Surface
+-**          Pointer to a variable that will receive the gcoSURF structure.
+-**
+-**      gctPHYS_ADDR * Physical
+-**          Pointer to a variable that will receive the physical addresses of
+-**          the allocated memory.
+-**
+-**      gctPOINTER * Logical
+-**          Pointer to a variable that will receive the logical address of the
+-**          allocation.
+-*/
+-gceSTATUS
+-gcoCL_CreateTexture(
+-    IN gctUINT              Width,
+-    IN gctUINT              Height,
+-    IN gctUINT              Depth,
+-    IN gctCONST_POINTER     Memory,
+-    IN gctUINT              Stride,
+-    IN gctUINT              Slice,
+-    IN gceSURF_FORMAT       Format,
+-    IN gceENDIAN_HINT       EndianHint,
+-    OUT gcoTEXTURE *        Texture,
+-    OUT gcoSURF *           Surface,
+-    OUT gctPHYS_ADDR *      Physical,
+-    OUT gctPOINTER *        Logical
+-    );
+-
+-/*******************************************************************************
+-**
+-**  gcoCL_DestroyTexture
+-**
+-**  Destroy an gcoTEXTURE object.
+-**
+-**  INPUT:
+-**
+-**      gcoTEXTURE Texture
+-**          Pointer to an gcoTEXTURE object.
+-**
+-**  OUTPUT:
+-**
+-**      Nothing.
+-*/
+-gceSTATUS
+-gcoCL_DestroyTexture(
+-    IN gcoTEXTURE Texture
+-    );
+-
+-/*******************************************************************************
+-**
+-**  gcoCL_QueryDeviceInfo
+-**
+-**  Query the OpenCL capabilities of the device.
+-**
+-**  INPUT:
+-**
+-**      Nothing
+-**
+-**  OUTPUT:
+-**
+-**      gcoCL_DEVICE_INFO_PTR DeviceInfo
+-**          Pointer to the device information
+-*/
+-gceSTATUS
+-gcoCL_QueryDeviceInfo(
+-    OUT gcoCL_DEVICE_INFO_PTR	DeviceInfo
+-    );
+-
+-gceSTATUS
+-gcoCL_SubmitSignal(
+-    IN gctSIGNAL    Signal,
+-    IN gctHANDLE    Process
+-    );
+-
+-gceSTATUS
+-gcoCL_Flush(
+-    IN gctBOOL      Stall
+-    );
+-
+-#ifdef __cplusplus
+-}
+-#endif
+-
+-#endif /* __gc_hal_user_cl_h_ */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h
+index 7c2c346..996af72 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -109,32 +109,32 @@ typedef enum _gcSL_OPCODE
+ 	gcSL_STORE,							/* 0x37 */
+ 	gcSL_BARRIER,						/* 0x38 */
+ 	gcSL_STORE1,						/* 0x39 */
+-	/*gcSL_COS_CL,						 0x3A */
+-	/*gcSL_TAN_CL,						 0x3B */
+-	/*gcSL_ACOS_CL,						 0x3C */
+-	/*gcSL_ASIN_CL,						 0x3D */
+-	/*gcSL_ATAN_CL,						 0x3E */
+-	/*gcSL_SINH_CL,						 0x3F */
+-	/*gcSL_COSH_CL,						 0x40 */
+-	/*gcSL_TANH_CL,						 0x41 */
+-	/*gcSL_ASINH_CL,						 0x42 */
+-	/*gcSL_ACOSH_CL,						 0x43 */
+-	/*gcSL_ATANH_CL,						 0x44 */
+-	/*gcSL_SINPI_CL,						 0x45 */
+-	/*gcSL_COSPI_CL,						 0x46 */
+-	/*gcSL_TANPI_CL,						 0x47 */
+-	/*gcSL_ASINPI_CL,						 0x48 */
+-	/*gcSL_ACOSPI_CL,						 0x49 */
+-	/*gcSL_ATANPI_CL,						 0x4A */
+-	/*gcSL_ATAN2_CL,						 0x4B */
+-	/*gcSL_ATAN2PI_CL,					 0x4C */
+-	/*gcSL_POW_CL,						 0x4D */
+-	/*gcSL_RSQ_CL,						 0x4E */
+-	/*gcSL_LOG_CL,						 0x4F */
+-	/*gcSL_EXP_CL,						 0x50 */
+-	/*gcSL_SQRT_CL,						 0x51 */
+-	/*gcSL_CBRT_CL,						 0x52 */
+-	gcSL_ADDLO = 0x53,							/* 0x53 */  /* Float only. */
++	gcSL_ATOMADD,						/* 0x3A */
++	gcSL_ATOMSUB,						/* 0x3B */
++	gcSL_ATOMXCHG,						/* 0x3C */
++	gcSL_ATOMCMPXCHG,					/* 0x3D */
++	gcSL_ATOMMIN,						/* 0x3E */
++	gcSL_ATOMMAX,						/* 0x3F */
++	gcSL_ATOMOR,						/* 0x40 */
++	gcSL_ATOMAND,						/* 0x41 */
++	gcSL_ATOMXOR,						/* 0x42 */
++	/*gcSL_UNUSED,						 0x43 */
++	/*gcSL_UNUSED,						 0x44 */
++	/*gcSL_UNUSED,						 0x45 */
++	/*gcSL_UNUSED,						 0x46 */
++	/*gcSL_UNUSED,						 0x47 */
++	/*gcSL_UNUSED,						 0x48 */
++	/*gcSL_UNUSED,						 0x49 */
++	/*gcSL_UNUSED,						 0x4A */
++	/*gcSL_UNUSED,						 0x4B */
++	/*gcSL_UNUSED,					 	 0x4C */
++	/*gcSL_UNUSED,						 0x4D */
++	/*gcSL_UNUSED,						 0x4E */
++	/*gcSL_UNUSED,						 0x4F */
++	/*gcSL_UNUSED,						 0x50 */
++	/*gcSL_UNUSED,						 0x51 */
++	/*gcSL_UNUSED,						 0x52 */
++	gcSL_ADDLO = 0x53,					/* 0x53 */  /* Float only. */
+ 	gcSL_MULLO,							/* 0x54 */  /* Float only. */
+ 	gcSL_CONV,							/* 0x55 */
+ 	gcSL_GETEXP,						/* 0x56 */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h
+index 505a23d..a8a22e8 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -730,7 +730,7 @@ typedef struct _gcsHAL_INTERFACE
+         struct _gcsHAL_CACHE
+         {
+             IN gceCACHEOPERATION        operation;
+-            IN gctHANDLE                process;
++            IN gctPOINTER               physical;
+             IN gctPOINTER               logical;
+             IN gctSIZE_T                bytes;
+             IN gcuVIDMEM_NODE_PTR       node;
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h
+index 934c3df..fe57968 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_dump.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_dump.h
+index 340bc9b..9b2db22 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_dump.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_dump.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h
+index 6b3a6e5..994469e 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -80,6 +80,11 @@ typedef struct _halDISPLAY_INFO
+     ** if the address is not known for the specified display. */
+     unsigned long               physical;
+ 
++#ifndef __QNXNTO__
++    /* 355_FB_MULTI_BUFFER */
++    gctINT                      multiBuffer;
++    gctINT                      backBufferY;
++#endif
+     /* The color info of the display. */
+     unsigned int                alphaLength;
+     unsigned int                alphaOffset;
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
+index 86852a2..abc62e5 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine_vg.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine_vg.h
+index 2724193..571e03e 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine_vg.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine_vg.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h
+index f286754..d885c1c 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -129,6 +129,13 @@ typedef enum _gceFEATURE
+ 	gcvFEATURE_2D_ROTATION_STALL_FIX,
+     gcvFEATURE_2D_MULTI_SOURCE_BLT_EX,
+ 	gcvFEATURE_BUG_FIXES10,
++    gcvFEATURE_2D_MINOR_TILING,
++    /* Supertiled compressed textures are supported. */
++    gcvFEATURE_TEX_COMPRRESSION_SUPERTILED,
++    gcvFEATURE_FAST_MSAA,
++    gcvFEATURE_BUG_FIXED_INDEXED_TRIANGLE_STRIP,
++    gcvFEATURE_TEXTURE_TILED_READ,
++    gcvFEATURE_DEPTH_BIAS_FIX
+ }
+ gceFEATURE;
+ 
+@@ -190,6 +197,9 @@ typedef enum _gceSURF_TYPE
+     gcvSURF_NO_VIDMEM      = 0x200, /* Used to allocate surfaces with no underlying vidmem node.
+                                        In Android, vidmem node is allocated by another process. */
+     gcvSURF_CACHEABLE      = 0x400, /* Used to allocate a cacheable surface */
++#if gcdANDROID_UNALIGNED_LINEAR_COMPOSITION_ADJUST
++    gcvSURF_FLIP           = 0x800, /* The Resolve Target the will been flip resolve from RT */
++#endif
+ 
+     gcvSURF_RENDER_TARGET_NO_TILE_STATUS = gcvSURF_RENDER_TARGET
+                                          | gcvSURF_NO_TILE_STATUS,
+@@ -209,7 +219,12 @@ typedef enum _gceSURF_TYPE
+                                          | gcvSURF_CACHEABLE,
+ 
+     gcvSURF_CACHEABLE_BITMAP             = gcvSURF_BITMAP
+-                                         | gcvSURF_CACHEABLE
++                                         | gcvSURF_CACHEABLE,
++
++#if gcdANDROID_UNALIGNED_LINEAR_COMPOSITION_ADJUST
++    gcvSURF_FLIP_BITMAP                  = gcvSURF_BITMAP
++                                         | gcvSURF_FLIP,
++#endif
+ }
+ gceSURF_TYPE;
+ 
+@@ -380,6 +395,7 @@ typedef enum _gceSURF_FORMAT
+     gcvSURF_G32R32,
+     gcvSURF_X32G32R32,
+     gcvSURF_A32R32,
++    gcvSURF_RG16,
+ 
+     /* Floating point formats. */
+     gcvSURF_R16F                = 1200,
+@@ -666,6 +682,7 @@ typedef enum _gceTILING
+     gcvSUPERTILED,
+     gcvMULTI_TILED,
+     gcvMULTI_SUPERTILED,
++    gcvMINORTILED,
+ }
+ gceTILING;
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_kernel_buffer.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_kernel_buffer.h
+index c8c14f3..24edc0b 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_kernel_buffer.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_kernel_buffer.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_md5.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_md5.h
+new file mode 100644
+index 0000000..ac0f973
+--- /dev/null
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_md5.h
+@@ -0,0 +1,112 @@
++/****************************************************************************
++*
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
++*
++*    This program is free software; you can redistribute it and/or modify
++*    it under the terms of the GNU General Public License as published by
++*    the Free Software Foundation; either version 2 of the license, or
++*    (at your option) any later version.
++*
++*    This program is distributed in the hope that it will be useful,
++*    but WITHOUT ANY WARRANTY; without even the implied warranty of
++*    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++*    GNU General Public License for more details.
++*
++*    You should have received a copy of the GNU General Public License
++*    along with this program; if not write to the Free Software
++*    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++*
++*****************************************************************************/
++
++
++/*
++  Copyright (C) 1999, 2002 Aladdin Enterprises.  All rights reserved.
++
++  This software is provided 'as-is', without any express or implied
++  warranty.  In no event will the authors be held liable for any damages
++  arising from the use of this software.
++
++  Permission is granted to anyone to use this software for any purpose,
++  including commercial applications, and to alter it and redistribute it
++  freely, subject to the following restrictions:
++
++  1. The origin of this software must not be misrepresented; you must not
++     claim that you wrote the original software. If you use this software
++     in a product, an acknowledgment in the product documentation would be
++     appreciated but is not required.
++  2. Altered source versions must be plainly marked as such, and must not be
++     misrepresented as being the original software.
++  3. This notice may not be removed or altered from any source distribution.
++
++  L. Peter Deutsch
++  ghost@aladdin.com
++
++ */
++/* $Id: gc_hal_md5.h,v 1.1.6.1 2012/02/09 00:22:42 semih.demirer Exp $ */
++/*
++  Independent implementation of MD5 (RFC 1321).
++
++  This code implements the MD5 Algorithm defined in RFC 1321, whose
++  text is available at
++	http://www.ietf.org/rfc/rfc1321.txt
++  The code is derived from the text of the RFC, including the test suite
++  (section A.5) but excluding the rest of Appendix A.  It does not include
++  any code or documentation that is identified in the RFC as being
++  copyrighted.
++
++  The original and principal author of md5.h is L. Peter Deutsch
++  <ghost@aladdin.com>.  Other authors are noted in the change history
++  that follows (in reverse chronological order):
++
++  2002-04-13 lpd Removed support for non-ANSI compilers; removed
++	references to Ghostscript; clarified derivation from RFC 1321;
++	now handles byte order either statically or dynamically.
++  1999-11-04 lpd Edited comments slightly for automatic TOC extraction.
++  1999-10-18 lpd Fixed typo in header comment (ansi2knr rather than md5);
++	added conditionalization for C++ compilation from Martin
++	Purschke <purschke@bnl.gov>.
++  1999-05-03 lpd Original version.
++ */
++
++
++#ifndef __gc_hal_md5_h_
++#define __gc_hal_md5_h_
++
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++/*
++ * This package supports both compile-time and run-time determination of CPU
++ * byte order.  If ARCH_IS_BIG_ENDIAN is defined as 0, the code will be
++ * compiled to run only on little-endian CPUs; if ARCH_IS_BIG_ENDIAN is
++ * defined as non-zero, the code will be compiled to run only on big-endian
++ * CPUs; if ARCH_IS_BIG_ENDIAN is not defined, the code will be compiled to
++ * run on either big- or little-endian CPUs, but will run slightly less
++ * efficiently on either one than if ARCH_IS_BIG_ENDIAN is defined.
++ */
++
++typedef unsigned char gctMD5_Byte; /* 8-bit byte */
++typedef unsigned int gctMD5_Word; /* 32-bit word */
++
++/* Define the state of the MD5 Algorithm. */
++typedef struct _gcsMD5_State {
++    gctMD5_Word count[2];	/* message length in bits, lsw first */
++    gctMD5_Word abcd[4];		/* digest buffer */
++    gctMD5_Byte buf[64];		/* accumulate block */
++} gcsMD5_State;
++
++/* Initialize the algorithm. */
++void gcoMD5_Init(gcsMD5_State *pms);
++
++/* Append a string to the message. */
++void gcoMD5_Append(gcsMD5_State *pms, const gctMD5_Byte *data, int nbytes);
++
++/* Finish the message and return the digest. */
++void gcoMD5_Finish(gcsMD5_State *pms, gctMD5_Byte digest[16]);
++
++#ifdef __cplusplus
++}  /* end extern "C" */
++#endif
++
++#endif /* md5_INCLUDED */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_mem.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_mem.h
+index 9599388..e64f7e7 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_mem.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_mem.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+index adc020a..3c78531 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -395,7 +395,7 @@
+     gcdENABLE_BANK_ALIGNMENT
+ 
+     When enabled, video memory is allocated bank aligned. The vendor can modify
+-    gckOS_GetSurfaceBankAlignment() and gcoOS_GetBankOffsetBytes() to define how
++    _GetSurfaceBankAlignment() and gcoSURF_GetBankOffsetBytes() to define how
+     different types of allocations are bank and channel aligned.
+     When disabled (default), no bank alignment is done.
+ */
+@@ -404,6 +404,36 @@
+ #endif
+ 
+ /*
++    gcdBANK_BIT_START
++
++    Specifies the start bit of the bank (inclusive).
++*/
++#ifndef gcdBANK_BIT_START
++#   define gcdBANK_BIT_START                    12
++#endif
++
++/*
++    gcdBANK_BIT_END
++
++    Specifies the end bit of the bank (inclusive).
++*/
++#ifndef gcdBANK_BIT_END
++#   define gcdBANK_BIT_END                      14
++#endif
++
++/*
++    gcdBANK_CHANNEL_BIT
++
++    When set, video memory when allocated bank aligned is allocated such that
++    render and depth buffer addresses alternate on the channel bit specified.
++    This option has an effect only when gcdENABLE_BANK_ALIGNMENT is enabled.
++    When disabled (default), no alteration is done.
++*/
++#ifndef gcdBANK_CHANNEL_BIT
++#   define gcdBANK_CHANNEL_BIT                  7
++#endif
++
++/*
+     gcdDYNAMIC_SPEED
+ 
+         When non-zero, it informs the kernel driver to use the speed throttling
+@@ -584,7 +614,7 @@
+         This define enables the recovery code.
+ */
+ #ifndef gcdENABLE_RECOVERY
+-#   define gcdENABLE_RECOVERY                   0
++#   define gcdENABLE_RECOVERY                   1
+ #endif
+ 
+ /*
+@@ -674,13 +704,22 @@
+ #   define gcdENABLE_OUTER_CACHE_PATCH          0
+ #endif
+ 
++#ifndef gcdANDROID_UNALIGNED_LINEAR_COMPOSITION_ADJUST
++#   define  gcdANDROID_UNALIGNED_LINEAR_COMPOSITION_ADJUST    0
++#endif
++
++#ifndef gcdSHARED_PAGETABLE
++#   define gcdSHARED_PAGETABLE                  1
++#endif
++
+ /*
+-    gcdMULTICORE_MAPPING
++    gcdBLOB_CACHE_ENABLED
++        When non-zero, Android blob cache extension will be enabled.
++        Otherwise, caching will be by-passed.
++ */
+ 
+-        Make different cores own same VA
+-*/
+-#ifndef gcdMULTICORE_MAPPING
+-#   define gcdMULTICORE_MAPPING                 1
++#ifndef gcdBLOB_CACHE_ENABLED
++#   define gcdBLOB_CACHE_ENABLED                0
+ #endif
+ 
+ #endif /* __gc_hal_options_h_ */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h
+index 93fb482..3ff3f01 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_raster.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_raster.h
+index 4a52bd8..c303462 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_raster.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_raster.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -920,6 +920,12 @@ gco2D_SetROP(
+     IN gctUINT8 BgRop
+     );
+ 
++gceSTATUS
++gco2D_SetGdiStretchMode(
++    IN gco2D Engine,
++    IN gctBOOL Enable
++    );
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_rename.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_rename.h
+index 52b96d8..ed6718d 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_rename.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_rename.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_types.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_types.h
+index 8b97268..4fffc2a 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_types.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_types.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
+index 9771993..f4291df 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -28,9 +28,9 @@
+ 
+ #define gcvVERSION_MINOR        6
+ 
+-#define gcvVERSION_PATCH        4
++#define gcvVERSION_PATCH        5
+ 
+-#define gcvVERSION_BUILD        1311
++#define gcvVERSION_BUILD        1358
+ 
+ #define gcvVERSION_DATE      __DATE__
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h
+index 60c497d..47ee72a 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_debug.h b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_debug.h
+index d6ceba7..5bbc893 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_debug.h
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_debug.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+index 8b25b9f..62aac98 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -22,7 +22,7 @@
+ 
+ 
+ #include "gc_hal_kernel_linux.h"
+-#include <linux/pagemap.h>
++/*#include <linux/pagemap.h>*/
+ #include <linux/seq_file.h>
+ #include <linux/mm.h>
+ #include <linux/mman.h>
+@@ -136,9 +136,9 @@ static int threadRoutine(void *ctxt)
+ 
+     for (;;)
+     {
+-        static int down;
+-
++        int down;
+         down = down_interruptible(&device->semas[gcvCORE_MAJOR]);
++        if (down);
+         device->dataReadys[gcvCORE_MAJOR] = gcvFALSE;
+ 
+         if (device->killThread == gcvTRUE)
+@@ -188,9 +188,10 @@ static int threadRoutine2D(void *ctxt)
+ 
+     for (;;)
+     {
+-        static int down;
++        int down;
+ 
+         down = down_interruptible(&device->semas[gcvCORE_2D]);
++        if (down);
+         device->dataReadys[gcvCORE_2D] = gcvFALSE;
+ 
+         if (device->killThread == gcvTRUE)
+@@ -238,9 +239,10 @@ static int threadRoutineVG(void *ctxt)
+ 
+     for (;;)
+     {
+-        static int down;
++        int down;
+ 
+         down = down_interruptible(&device->semas[gcvCORE_VG]);
++        if (down);
+         device->dataReadys[gcvCORE_VG] = gcvFALSE;
+ 
+         if (device->killThread == gcvTRUE)
+@@ -564,20 +566,12 @@ gckGALDEVICE_Construct(
+         /* Start the command queue. */
+         gcmkONERROR(gckCOMMAND_Start(device->kernels[gcvCORE_2D]->command));
+ #endif
+-
+-#if gcdMULTICORE_MAPPING
+-        device->kernels[gcvCORE_2D]->anotherKernel = device->kernels[gcvCORE_MAJOR];
+-#endif
+     }
+     else
+     {
+         device->kernels[gcvCORE_2D] = gcvNULL;
+     }
+ 
+-#if gcdMULTICORE_MAPPING
+-    device->kernels[gcvCORE_MAJOR]->anotherKernel = device->kernels[gcvCORE_2D];
+-#endif
+-
+     if (IrqLineVG != -1)
+     {
+ #if gcdENABLE_VG
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
+index 86333ba..923978d 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -82,6 +82,9 @@ typedef struct _gckGALDEVICE
+     /* Core mapping */
+     gceCORE             coreMapping[8];
+ 
++    /* States before suspend. */
++    gceCHIPPOWERSTATE   statesStored[gcdCORE_COUNT];
++
+     /* Clock management.*/
+     struct clk         *clk_3d_core;
+     struct clk         *clk_3d_shader;
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+index b1c82e0..5db0626 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *    Copyright (C) 2011 Freescale Semiconductor, Inc.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+@@ -479,6 +479,20 @@ long drv_ioctl(
+     }
+     else
+     {
++        if (iface.command == gcvHAL_CACHE)
++        {
++            if (device->contiguousMapped
++                && iface.u.Cache.node->VidMem.memory->object.type == gcvOBJ_VIDMEM)
++            {
++                iface.u.Cache.physical = (gctPOINTER)device->contiguousVidMem->baseAddress
++                                       + (iface.u.Cache.logical - data->mappedMemory);
++            }
++            else
++            {
++                iface.u.Cache.physical = 0;
++            }
++        }
++
+         if (iface.hardwareType < 0 || iface.hardwareType > 7)
+         {
+             gcmkTRACE_ZONE(
+@@ -976,6 +990,23 @@ static int __devinit gpu_suspend(struct platform_device *dev, pm_message_t state
+     {
+         if (device->kernels[i] != gcvNULL)
+         {
++            /* Store states. */
++#if gcdENABLE_VG
++            if (i == gcvCORE_VG)
++            {
++                status = gckVGHARDWARE_QueryPowerManagementState(device->kernels[i]->vg->hardware, &device->statesStored[i]);
++            }
++            else
++#endif
++            {
++                status = gckHARDWARE_QueryPowerManagementState(device->kernels[i]->hardware, &device->statesStored[i]);
++            }
++
++            if (gcmIS_ERROR(status))
++            {
++                return -1;
++            }
++
+ #if gcdENABLE_VG
+             if (i == gcvCORE_VG)
+             {
+@@ -1004,6 +1035,7 @@ static int __devinit gpu_resume(struct platform_device *dev)
+     gceSTATUS status;
+     gckGALDEVICE device;
+     gctINT i;
++    gceCHIPPOWERSTATE   statesStored;
+ 
+     device = platform_get_drvdata(dev);
+ 
+@@ -1026,6 +1058,43 @@ static int __devinit gpu_resume(struct platform_device *dev)
+             {
+                 return -1;
+             }
++
++            /* Convert global state to crossponding internal state. */
++            switch(device->statesStored[i])
++            {
++            case gcvPOWER_OFF:
++                statesStored = gcvPOWER_OFF_BROADCAST;
++                break;
++            case gcvPOWER_IDLE:
++                statesStored = gcvPOWER_IDLE_BROADCAST;
++                break;
++            case gcvPOWER_SUSPEND:
++                statesStored = gcvPOWER_SUSPEND_BROADCAST;
++                break;
++            case gcvPOWER_ON:
++                statesStored = gcvPOWER_ON_AUTO;
++                break;
++            default:
++                statesStored = device->statesStored[i];
++                break;
++        }
++
++            /* Restore states. */
++#if gcdENABLE_VG
++            if (i == gcvCORE_VG)
++            {
++                status = gckVGHARDWARE_SetPowerManagementState(device->kernels[i]->vg->hardware, statesStored);
++    }
++            else
++#endif
++            {
++                status = gckHARDWARE_SetPowerManagementState(device->kernels[i]->hardware, statesStored);
++            }
++
++            if (gcmIS_ERROR(status))
++            {
++                return -1;
++            }
+         }
+     }
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.c
+index 497cf55..cba2040 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.h b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.h
+index 067c740..6b69f0c 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.h
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_math.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_math.c
+index 80e4495..a4cb717 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_math.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_math.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index 9a6376e..0f0d05c 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+@@ -279,7 +279,9 @@ _DumpDebugRegisters(
+     for (i = 0; i < 500; i += 1)
+     {
+         gcmkONERROR(gckOS_WriteRegister(Os, Descriptor->index, select));
++#if !gcdENABLE_RECOVERY
+         gcmkONERROR(gckOS_Delay(Os, 1000));
++#endif
+         gcmkONERROR(gckOS_ReadRegister(Os, Descriptor->data, &data));
+ 
+         if (data == Descriptor->signature)
+@@ -302,7 +304,9 @@ _DumpDebugRegisters(
+         select = i << Descriptor->shift;
+ 
+         gcmkONERROR(gckOS_WriteRegister(Os, Descriptor->index, select));
++#if !gcdENABLE_RECOVERY
+         gcmkONERROR(gckOS_Delay(Os, 1000));
++#endif
+         gcmkONERROR(gckOS_ReadRegister(Os, Descriptor->data, &data));
+ 
+         gcmkPRINT_N(12, "    [0x%02X] 0x%08X\n", i, data);
+@@ -356,16 +360,22 @@ _DumpGPUState(
+ 
+     static gcsiDEBUG_REGISTERS _dbgRegs[] =
+     {
+-        { "RA", 0x474, 16, 0x448,  4, 0x12344321 },
+-        { "TX", 0x474, 24, 0x44C,  4, 0x12211221 },
+-        { "FE", 0x470,  0, 0x450,  4, 0xBABEF00D },
+-        { "PE", 0x470, 16, 0x454,  4, 0xBABEF00D },
+-        { "DE", 0x470,  8, 0x458,  4, 0xBABEF00D },
+-        { "SH", 0x470, 24, 0x45C, 15, 0xDEADBEEF },
+-        { "PA", 0x474,  0, 0x460,  4, 0x0000AAAA },
+-        { "SE", 0x474,  8, 0x464,  4, 0x5E5E5E5E },
+-        { "MC", 0x478,  0, 0x468,  4, 0x12345678 },
+-        { "HI", 0x478,  8, 0x46C,  4, 0xAAAAAAAA }
++        { "RA", 0x474, 16, 0x448, 16, 0x12344321 },
++        { "TX", 0x474, 24, 0x44C, 16, 0x12211221 },
++        { "FE", 0x470,  0, 0x450, 16, 0xBABEF00D },
++        { "PE", 0x470, 16, 0x454, 16, 0xBABEF00D },
++        { "DE", 0x470,  8, 0x458, 16, 0xBABEF00D },
++        { "SH", 0x470, 24, 0x45C, 16, 0xDEADBEEF },
++        { "PA", 0x474,  0, 0x460, 16, 0x0000AAAA },
++        { "SE", 0x474,  8, 0x464, 16, 0x5E5E5E5E },
++        { "MC", 0x478,  0, 0x468, 16, 0x12345678 },
++        { "HI", 0x478,  8, 0x46C, 16, 0xAAAAAAAA }
++    };
++
++    static gctUINT32 _otherRegs[] =
++    {
++        0x040, 0x044, 0x04C, 0x050, 0x054, 0x058, 0x05C, 0x060,
++        0x43c, 0x440, 0x444, 0x414,
+     };
+ 
+     gceSTATUS status;
+@@ -494,6 +504,14 @@ _DumpGPUState(
+         gcmkPRINT_N(4, "  write    = 0x%08X\n", write);
+     }
+ 
++    gcmkPRINT_N(0, "  Other Registers:\n");
++    for (i = 0; i < gcmCOUNTOF(_otherRegs); i += 1)
++    {
++        gctUINT32 read;
++        gcmkONERROR(gckOS_ReadRegisterEx(Os, kernel->core, _otherRegs[i], &read));
++        gcmkPRINT_N(12, "    [0x%04X] 0x%08X\n", _otherRegs[i], read);
++    }
++
+ OnError:
+     if (acquired)
+     {
+@@ -1075,8 +1093,6 @@ gckOS_Construct(
+     /* Create debug lock mutex. */
+     gcmkONERROR(gckOS_CreateMutex(os, &os->debugLock));
+ 
+-    /* Create the gckHEAP object. */
+-    gcmkONERROR(gckHEAP_Construct(os, gcdHEAP_SIZE, &os->heap));
+ 
+     os->mdlHead = os->mdlTail = gcvNULL;
+ 
+@@ -1444,7 +1460,7 @@ gckOS_AllocateMemory(
+     }
+     else
+     {
+-        memory = (gctPOINTER) kmalloc(Bytes, GFP_KERNEL);
++        memory = (gctPOINTER) kmalloc(Bytes, GFP_KERNEL | __GFP_NOWARN);
+     }
+ 
+     if (memory == gcvNULL)
+@@ -4022,7 +4038,6 @@ gckOS_FreePagedMemory(
+     )
+ {
+     PLINUX_MDL mdl = (PLINUX_MDL) Physical;
+-    gctSTRING addr;
+     gctINT i;
+ 
+     gcmkHEADER_ARG("Os=0x%X Physical=0x%X Bytes=%lu", Os, Physical, Bytes);
+@@ -4032,7 +4047,7 @@ gckOS_FreePagedMemory(
+     gcmkVERIFY_ARGUMENT(Physical != gcvNULL);
+     gcmkVERIFY_ARGUMENT(Bytes > 0);
+ 
+-    addr = mdl->addr;
++    /*addr = mdl->addr;*/
+ 
+     MEMORY_LOCK(Os);
+ 
+@@ -4373,11 +4388,13 @@ gckOS_MapPagesEx(
+     gceSTATUS status = gcvSTATUS_OK;
+     PLINUX_MDL  mdl;
+     gctUINT32*  table;
+-    gctUINT32   bytes;
+     gctUINT32   offset;
++#if gcdNONPAGED_MEMORY_CACHEABLE
+     gckMMU      mmu;
+     PLINUX_MDL  mmuMdl;
++    gctUINT32   bytes;
+     gctPHYS_ADDR pageTablePhysical;
++#endif
+ 
+     gcmkHEADER_ARG("Os=0x%X Core=%d Physical=0x%X PageCount=%u PageTable=0x%X",
+                    Os, Core, Physical, PageCount, PageTable);
+@@ -4403,9 +4420,11 @@ gckOS_MapPagesEx(
+     MEMORY_LOCK(Os);
+ 
+     table = (gctUINT32 *)PageTable;
+-    bytes = PageCount * sizeof(*table);
++#if gcdNONPAGED_MEMORY_CACHEABLE
+     mmu = Os->device->kernels[Core]->mmu;
++    bytes = PageCount * sizeof(*table);
+     mmuMdl = (PLINUX_MDL)mmu->pageTablePhysical;
++#endif
+ 
+      /* Get all the physical addresses and store them in the page table. */
+ 
+@@ -4488,11 +4507,11 @@ gckOS_MapPagesEx(
+         }
+     }
+ 
++#if gcdNONPAGED_MEMORY_CACHEABLE
+     /* Get physical address of pageTable */
+     pageTablePhysical = (gctPHYS_ADDR)(mmuMdl->dmaHandle +
+                         ((gctUINT32 *)PageTable - mmu->pageTableLogical));
+ 
+-#if gcdNONPAGED_MEMORY_CACHEABLE
+     /* Flush the mmu page table cache. */
+     gcmkONERROR(gckOS_CacheClean(
+         Os,
+@@ -5175,17 +5194,36 @@ gckOS_WriteMemory(
+     IN gctUINT32 Data
+     )
+ {
++    gceSTATUS status;
+     gcmkHEADER_ARG("Os=0x%X Address=0x%X Data=%u", Os, Address, Data);
+ 
+     /* Verify the arguments. */
+     gcmkVERIFY_ARGUMENT(Address != gcvNULL);
+ 
+     /* Write memory. */
+-    writel(Data, (gctUINT8 *)Address);
++#if NO_USER_DIRECT_ACCESS_FROM_KERNEL
++    if (access_ok(VERIFY_WRITE, Address, 4))
++    {
++        /* User address. */
++        if(put_user(Data, (gctUINT32*)Address))
++        {
++            gcmkONERROR(gcvSTATUS_INVALID_ADDRESS);
++        }
++    }
++    else
++#endif
++    {
++        /* Kernel address. */
++        *(gctUINT32 *)Address = Data;
++    }
+ 
+     /* Success. */
+     gcmkFOOTER_NO();
+     return gcvSTATUS_OK;
++
++OnError:
++    gcmkFOOTER();
++    return status;
+ }
+ 
+ /*******************************************************************************
+@@ -5252,7 +5290,7 @@ OnError:
+ {
+     gctSIZE_T pageCount, i, j;
+     gctUINT32_PTR pageTable;
+-    gctUINT32 address;
++    gctUINT32 address = 0, physical = ~0U;
+     gctUINT32 start, end, memory;
+     gctINT result = 0;
+ 
+@@ -5333,39 +5371,60 @@ OnError:
+         {
+             struct vm_area_struct *vma;
+ 
+-            vma = find_vma(current->mm, memory);
+-
+-            if (vma && (vma->vm_flags & VM_PFNMAP) )
++            /* Free the page table. */
++            if (pages != gcvNULL)
+             {
+-                do
++                /* Release the pages if any. */
++                if (result > 0)
+                 {
+-                    pte_t       * pte;
+-                    spinlock_t  * ptl;
+-                    unsigned long pfn;
+-
+-                    pgd_t * pgd = pgd_offset(current->mm, memory);
+-                    pud_t * pud = pud_offset(pgd, memory);
+-                    if (pud)
++                    for (i = 0; i < result; i++)
+                     {
+-                        pmd_t * pmd = pmd_offset(pud, memory);
+-                        pte = pte_offset_map_lock(current->mm, pmd, memory, &ptl);
+-                        if (!pte)
++                        if (pages[i] == gcvNULL)
+                         {
+                             break;
+                         }
++
++                        page_cache_release(pages[i]);
+                     }
+-                    else
++                }
++
++                kfree(pages);
++                pages = gcvNULL;
++            }
++
++            vma = find_vma(current->mm, memory);
++
++            if (vma && (vma->vm_flags & VM_PFNMAP) )
++            {
++                pte_t       * pte;
++                spinlock_t  * ptl;
++                unsigned long pfn;
++
++                pgd_t * pgd = pgd_offset(current->mm, memory);
++                pud_t * pud = pud_offset(pgd, memory);
++                if (pud)
++                {
++                    pmd_t * pmd = pmd_offset(pud, memory);
++                    pte = pte_offset_map_lock(current->mm, pmd, memory, &ptl);
++                    if (!pte)
+                     {
+-                        break;
++                        gcmkONERROR(gcvSTATUS_OUT_OF_RESOURCES);
+                     }
++                }
++                else
++                {
++                    gcmkONERROR(gcvSTATUS_OUT_OF_RESOURCES);
++                }
+ 
+-                    pfn      = pte_pfn(*pte);
+-                    *Address = ((pfn << PAGE_SHIFT) | (((unsigned long)Memory) & ~PAGE_MASK))
+-                                - Os->device->baseAddress;
+-                    *Info    = gcvNULL;
++                pfn      = pte_pfn(*pte);
+ 
+-                    pte_unmap_unlock(pte, ptl);
++                physical = (pfn << PAGE_SHIFT) | (memory & ~PAGE_MASK);
+ 
++                pte_unmap_unlock(pte, ptl);
++
++                if ((Os->device->kernels[Core]->hardware->mmuVersion == 0)
++                    && !((physical - Os->device->baseAddress) & 0x80000000))
++                {
+                     /* Release page info struct. */
+                     if (info != gcvNULL)
+                     {
+@@ -5373,54 +5432,42 @@ OnError:
+                         kfree(info);
+                     }
+ 
+-                    /* Free the page table. */
+-                    if (pages != gcvNULL)
+-                    {
+-                        /* Release the pages if any. */
+-                        if (result > 0)
+-                        {
+-                            for (i = 0; i < result; i++)
+-                            {
+-                                if (pages[i] == gcvNULL)
+-                                {
+-                                    break;
+-                                }
+-
+-                                page_cache_release(pages[i]);
+-                            }
+-                        }
+-
+-                        kfree(pages);
+-                    }
+-
+                     MEMORY_MAP_UNLOCK(Os);
+ 
++                    *Address = physical - Os->device->baseAddress;
++                    *Info    = gcvNULL;
++
+                     gcmkFOOTER_ARG("*Info=0x%X *Address=0x%08x",
+                                    *Info, *Address);
++
+                     return gcvSTATUS_OK;
+                 }
+-                while (gcvFALSE);
+-
+-                *Address = ~0;
+-                *Info = gcvNULL;
+-
+-                status = gcvSTATUS_OUT_OF_RESOURCES;
+-                break;
+             }
+             else
+             {
+-                status = gcvSTATUS_OUT_OF_RESOURCES;
+-                break;
++                gcmkONERROR(gcvSTATUS_OUT_OF_RESOURCES);
+             }
+         }
+ 
+-        for (i = 0; i < pageCount; i++)
++        if (pages)
++        {
++            for (i = 0; i < pageCount; i++)
++            {
++                /* Flush(clean) the data cache. */
++                gcmkONERROR(gckOS_CacheFlush(Os, _GetProcessID(), gcvNULL,
++                                 (gctPOINTER)page_to_phys(pages[i]),
++                                 (gctPOINTER)(memory & PAGE_MASK) + i*PAGE_SIZE,
++                                 PAGE_SIZE));
++            }
++        }
++        else
+         {
+             /* Flush(clean) the data cache. */
+             gcmkONERROR(gckOS_CacheFlush(Os, _GetProcessID(), gcvNULL,
+-                             (gctPOINTER)page_to_phys(pages[i]),
+-                             (gctPOINTER)(memory & PAGE_MASK) + i*PAGE_SIZE,
+-                             PAGE_SIZE));
++                             (gctPOINTER)(physical & PAGE_MASK),
++                             (gctPOINTER)(memory & PAGE_MASK),
++                             PAGE_SIZE * pageCount));
++
+         }
+ 
+ #if gcdENABLE_VG
+@@ -5444,14 +5491,26 @@ OnError:
+         /* Fill the page table. */
+         for (i = 0; i < pageCount; i++)
+         {
++            gctUINT32 phys;
++            gctUINT32_PTR tab = pageTable + i * (PAGE_SIZE/4096);
++
++            if (pages)
++            {
++                phys = page_to_phys(pages[i]);
++            }
++            else
++            {
++                phys = (physical & PAGE_MASK) + i * PAGE_SIZE;
++            }
++
+ #if gcdENABLE_VG
+             if (Core == gcvCORE_VG)
+             {
+                 /* Get the physical address from page struct. */
+                 gcmkONERROR(
+                     gckVGMMU_SetPage(Os->device->kernels[Core]->vg->mmu,
+-                                   page_to_phys(pages[i]),
+-                                   pageTable + i * (PAGE_SIZE/4096)));
++                                   phys,
++                                   tab));
+             }
+             else
+ #endif
+@@ -5459,8 +5518,8 @@ OnError:
+                 /* Get the physical address from page struct. */
+                 gcmkONERROR(
+                     gckMMU_SetPage(Os->device->kernels[Core]->mmu,
+-                                   page_to_phys(pages[i]),
+-                                   pageTable + i * (PAGE_SIZE/4096)));
++                                   phys,
++                                   tab));
+             }
+ 
+             for (j = 1; j < (PAGE_SIZE/4096); j++)
+@@ -5468,12 +5527,15 @@ OnError:
+                 pageTable[i * (PAGE_SIZE/4096) + j] = pageTable[i * (PAGE_SIZE/4096)] + 4096 * j;
+             }
+ 
++#if gcdSHARED_PAGETABLE
++                gcmkONERROR(gckMMU_FlushAllMmuCache());
++#endif
++
+             gcmkTRACE_ZONE(
+                 gcvLEVEL_INFO, gcvZONE_OS,
+-                "%s(%d): pages[%d]: 0x%X, pageTable[%d]: 0x%X.",
++                "%s(%d): pageTable[%d]: 0x%X 0x%X.",
+                 __FUNCTION__, __LINE__,
+-                i, pages[i],
+-                i, pageTable[i]);
++                i, phys, pageTable[i]);
+         }
+ 
+         /* Save pointer to page table. */
+@@ -5575,6 +5637,7 @@ OnError:
+     {
+         gcmkFOOTER();
+     }
++
+     return status;
+ }
+ #endif
+@@ -5656,6 +5719,8 @@ OnError:
+ 
+     do
+     {
++        /*gctUINT32 physical = ~0U;*/
++
+         info = (gcsPageInfo_PTR) Info;
+ 
+         pages = info->pages;
+@@ -5670,7 +5735,17 @@ OnError:
+         /* Invalid page array. */
+         if (pages == gcvNULL)
+         {
+-            return gcvSTATUS_INVALID_ARGUMENT;
++            if (info->pageTable == gcvNULL)
++            {
++                kfree(info);
++
++                gcmkFOOTER_ARG("status=%d", gcvSTATUS_INVALID_ARGUMENT);
++                return gcvSTATUS_INVALID_ARGUMENT;
++            }
++            else
++            {
++                /*physical = (*info->pageTable) & PAGE_MASK;*/
++            }
+         }
+ 
+         memory = (gctUINT32) Memory;
+@@ -5681,12 +5756,14 @@ OnError:
+         /* Overflow. */
+         if ((memory + Size) < memory)
+         {
++            gcmkFOOTER_ARG("status=%d", gcvSTATUS_INVALID_ARGUMENT);
+             return gcvSTATUS_INVALID_ARGUMENT;
+         }
+ 
+         /* Invalid argument. */
+         if (pageCount == 0)
+         {
++            gcmkFOOTER_ARG("status=%d", gcvSTATUS_INVALID_ARGUMENT);
+             return gcvSTATUS_INVALID_ARGUMENT;
+         }
+ 
+@@ -5719,21 +5796,24 @@ OnError:
+         }
+ 
+         /* Release the page cache. */
+-        for (i = 0; i < pageCount; i++)
++        if (pages)
+         {
+-            gcmkTRACE_ZONE(
+-                gcvLEVEL_INFO, gcvZONE_OS,
+-                "%s(%d): pages[%d]: 0x%X.",
+-                __FUNCTION__, __LINE__,
+-                i, pages[i]
+-                );
+-
+-            if (!PageReserved(pages[i]))
++            for (i = 0; i < pageCount; i++)
+             {
+-                SetPageDirty(pages[i]);
+-            }
++                gcmkTRACE_ZONE(
++                    gcvLEVEL_INFO, gcvZONE_OS,
++                    "%s(%d): pages[%d]: 0x%X.",
++                    __FUNCTION__, __LINE__,
++                    i, pages[i]
++                    );
+ 
+-            page_cache_release(pages[i]);
++                if (!PageReserved(pages[i]))
++                {
++                     SetPageDirty(pages[i]);
++                }
++
++                page_cache_release(pages[i]);
++            }
+         }
+ 
+         /* Success. */
+@@ -6900,75 +6980,6 @@ gckOS_ProfileToMS(
+ #endif
+ }
+ 
+-#if gcdENABLE_BANK_ALIGNMENT
+-/*******************************************************************************
+-**  gckOS_GetSurfaceBankAlignment
+-**
+-**  Return the required offset alignment required to the make BaseAddress
+-**  aligned properly.
+-**
+-**  INPUT:
+-**
+-**      gckOS Os
+-**          Pointer to gcoOS object.
+-**
+-**      gceSURF_TYPE Type
+-**          Type of allocation.
+-**
+-**      gctUINT32 BaseAddress
+-**          Base address of current video memory node.
+-**
+-**  OUTPUT:
+-**
+-**      gctUINT32_PTR Alignment
+-**          Pointer to a variable thah twil hold the number of bytes to skip in
+-**          the current video memory node in order to make the alignment bank
+-**          aligned.
+-*/
+-gceSTATUS
+-gckOS_GetSurfaceBankAlignment(
+-    IN gckOS Os,
+-    IN gceSURF_TYPE Type,
+-    IN gctUINT32 BaseAddress,
+-    OUT gctUINT32_PTR Alignment
+-    )
+-{
+-    gctUINT32 alignedBaseAddress;
+-
+-    gcmkHEADER_ARG("Os=0x%x Type=%d BaseAddress=0x%x ", Os, Type, BaseAddress);
+-
+-    /* Verify the arguments. */
+-    gcmkVERIFY_ARGUMENT(Alignment != gcvNULL);
+-
+-    switch (Type)
+-    {
+-    case gcvSURF_RENDER_TARGET:
+-        /* Align to first 4kB bank. */
+-        alignedBaseAddress = (((BaseAddress >> 15) << 3) + (0x8 + 0x0)) << 12;
+-        break;
+-
+-    case gcvSURF_DEPTH:
+-        /* Align to third 4kB bank. */
+-        alignedBaseAddress = (((BaseAddress >> 15) << 3) + (0x8 + 0x2)) << 12;
+-
+-        /* Add 64-byte offset to change channel bit 6. */
+-        alignedBaseAddress += 64;
+-        break;
+-
+-    default:
+-        /* no alignment needed. */
+-        alignedBaseAddress = BaseAddress;
+-    }
+-
+-    /* Return alignment. */
+-    *Alignment = alignedBaseAddress - BaseAddress;
+-
+-    /* Return the status. */
+-    gcmkFOOTER_ARG("*Alignment=%u", *Alignment);
+-    return gcvSTATUS_OK;
+-}
+-#endif
+-
+ /******************************************************************************\
+ ******************************* Signal Management ******************************
+ \******************************************************************************/
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.h b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.h
+index ae94fcf..021e77f 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.h
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.h
+@@ -1,6 +1,6 @@
+ /****************************************************************************
+ *
+-*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
+ *
+ *    This program is free software; you can redistribute it and/or modify
+ *    it under the terms of the GNU General Public License as published by
+-- 
+1.7.7.4
+

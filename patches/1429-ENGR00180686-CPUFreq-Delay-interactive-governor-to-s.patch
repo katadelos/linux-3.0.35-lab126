@@ -1,0 +1,30 @@
+From 2c1d402e9b2f802e33ccb622f41527812cac386f Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Mon, 7 May 2012 09:48:22 +0800
+Subject: [PATCH 1429/2463] ENGR00180686 [CPUFreq]Delay interactive governor
+ to speed up kernel boot
+
+Interactive governor is too early to start, and kernel boot
+up speed is impacted, use late_initcall instead of fs_initcall.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ drivers/cpufreq/cpufreq_interactive.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/cpufreq/cpufreq_interactive.c b/drivers/cpufreq/cpufreq_interactive.c
+index 483e723..c3bc753 100644
+--- a/drivers/cpufreq/cpufreq_interactive.c
++++ b/drivers/cpufreq/cpufreq_interactive.c
+@@ -811,7 +811,7 @@ int cpufreq_gov_irq_tuner_register(struct irq_tuner dbs_irq_tuner)
+ }
+ EXPORT_SYMBOL_GPL(cpufreq_gov_irq_tuner_register);
+ #ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_INTERACTIVE
+-fs_initcall(cpufreq_interactive_init);
++late_initcall(cpufreq_interactive_init);
+ #else
+ module_init(cpufreq_interactive_init);
+ #endif
+-- 
+1.7.7.4
+

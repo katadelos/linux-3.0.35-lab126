@@ -1,0 +1,40 @@
+From 544665be8e50b2995036033ea94980baf067da23 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Wed, 11 Jan 2012 11:27:45 +0800
+Subject: [PATCH 0858/2463] ENGR00171544 usb-core: usb host will be broken
+ after system pm test
+
+At i.mx6q sabrelite, there is a usb hub on board. After several
+suspend suspend/resume iterations, the usb host will be broken.
+It is IC limitation, and similar with:
+574b9641d5846e58273dac6bf80fcf1ff312c5c9
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ drivers/usb/host/ehci-hub.c |    9 +++++++++
+ 1 files changed, 9 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/host/ehci-hub.c b/drivers/usb/host/ehci-hub.c
+index 4f3688b..d6a80d9 100644
+--- a/drivers/usb/host/ehci-hub.c
++++ b/drivers/usb/host/ehci-hub.c
+@@ -826,6 +826,15 @@ static int ehci_hub_control (
+ 				msleep(5);/* wait to leave low-power mode */
+ 				spin_lock_irqsave(&ehci->lock, flags);
+ 			}
++			#ifdef MX6_USB_HOST_HACK
++			{
++				struct fsl_usb2_platform_data *pdata;
++				pdata = hcd->self.controller->platform_data;
++				if (pdata->platform_resume)
++					pdata->platform_resume(pdata);
++			}
++			#endif
++
+ 			/* resume signaling for 20 msec */
+ 			temp &= ~(PORT_RWC_BITS | PORT_WAKE_BITS);
+ 			ehci_writel(ehci, temp | PORT_RESUME, status_reg);
+-- 
+1.7.7.4
+

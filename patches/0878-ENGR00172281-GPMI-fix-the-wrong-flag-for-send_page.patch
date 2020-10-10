@@ -1,0 +1,30 @@
+From d47771d7c96fdfbb3b92f5f334f645846fbb4bc0 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Wed, 18 Jan 2012 12:45:45 +0800
+Subject: [PATCH 0878/2463] ENGR00172281 GPMI : fix the wrong flag for
+ send_page()
+
+There is only one DMA command in the chain,
+So MXS_DMA_F_APPEND is not needed.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/mtd/nand/gpmi-nfc/hal-mx50.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mtd/nand/gpmi-nfc/hal-mx50.c b/drivers/mtd/nand/gpmi-nfc/hal-mx50.c
+index 55c4f85..dba7ed5 100644
+--- a/drivers/mtd/nand/gpmi-nfc/hal-mx50.c
++++ b/drivers/mtd/nand/gpmi-nfc/hal-mx50.c
+@@ -757,7 +757,7 @@ static int send_page(struct gpmi_nfc_data *this,
+ 	desc = channel->device->device_prep_slave_sg(channel,
+ 					(struct scatterlist *)pio,
+ 					ARRAY_SIZE(pio), DMA_NONE,
+-					MXS_DMA_F_APPEND | MXS_DMA_F_WAIT4END);
++					MXS_DMA_F_WAIT4END);
+ 	if (!desc) {
+ 		pr_info("step 2 error");
+ 		return -1;
+-- 
+1.7.7.4
+

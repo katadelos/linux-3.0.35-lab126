@@ -1,0 +1,287 @@
+From 644c82116224c3dba4724f737fade8accf076e31 Mon Sep 17 00:00:00 2001
+From: Michal Nazarewicz <m.nazarewicz@samsung.com>
+Date: Mon, 21 Jun 2010 13:57:04 +0200
+Subject: [PATCH 0756/2463] USB: gadget: section mismatch warning fixed
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+In may gadgets bind and bind like functions were in a init section
+as they were only run during initialisation.  However, being
+callback functions they were referenced from structures in “normal”
+sections.  Changing the tag from “__init” to “__ref” fixes the
+warnings.
+
+Signed-off-by: Michal Nazarewicz <m.nazarewicz@samsung.com>
+Cc: Kyungmin Park <kyungmin.park@samsung.com>
+Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+---
+ drivers/usb/gadget/audio.c        |    4 ++--
+ drivers/usb/gadget/cdc2.c         |    4 ++--
+ drivers/usb/gadget/ether.c        |    6 +++---
+ drivers/usb/gadget/f_loopback.c   |    4 ++--
+ drivers/usb/gadget/f_sourcesink.c |    2 +-
+ drivers/usb/gadget/file_storage.c |    3 ++-
+ drivers/usb/gadget/gmidi.c        |    2 +-
+ drivers/usb/gadget/hid.c          |    4 ++--
+ drivers/usb/gadget/mass_storage.c |    4 ++--
+ drivers/usb/gadget/printer.c      |    2 +-
+ drivers/usb/gadget/serial.c       |    4 ++--
+ drivers/usb/gadget/webcam.c       |    4 ++--
+ drivers/usb/gadget/zero.c         |    2 +-
+ 13 files changed, 23 insertions(+), 22 deletions(-)
+
+diff --git a/drivers/usb/gadget/audio.c b/drivers/usb/gadget/audio.c
+index 93b999e..cd9b19f 100644
+--- a/drivers/usb/gadget/audio.c
++++ b/drivers/usb/gadget/audio.c
+@@ -89,7 +89,7 @@ static const struct usb_descriptor_header *otg_desc[] = {
+ 
+ /*-------------------------------------------------------------------------*/
+ 
+-static int __init audio_do_config(struct usb_configuration *c)
++static int __ref audio_do_config(struct usb_configuration *c)
+ {
+ 	/* FIXME alloc iConfiguration string, set it in c->strings */
+ 
+@@ -112,7 +112,7 @@ static struct usb_configuration audio_config_driver = {
+ 
+ /*-------------------------------------------------------------------------*/
+ 
+-static int __init audio_bind(struct usb_composite_dev *cdev)
++static int __ref audio_bind(struct usb_composite_dev *cdev)
+ {
+ 	int			gcnum;
+ 	int			status;
+diff --git a/drivers/usb/gadget/cdc2.c b/drivers/usb/gadget/cdc2.c
+index 2720ab0..bdfdd86 100644
+--- a/drivers/usb/gadget/cdc2.c
++++ b/drivers/usb/gadget/cdc2.c
+@@ -129,7 +129,7 @@ static u8 hostaddr[ETH_ALEN];
+ /*
+  * We _always_ have both CDC ECM and CDC ACM functions.
+  */
+-static int __init cdc_do_config(struct usb_configuration *c)
++static int __ref cdc_do_config(struct usb_configuration *c)
+ {
+ 	int	status;
+ 
+@@ -158,7 +158,7 @@ static struct usb_configuration cdc_config_driver = {
+ 
+ /*-------------------------------------------------------------------------*/
+ 
+-static int __init cdc_bind(struct usb_composite_dev *cdev)
++static int __ref cdc_bind(struct usb_composite_dev *cdev)
+ {
+ 	int			gcnum;
+ 	struct usb_gadget	*gadget = cdev->gadget;
+diff --git a/drivers/usb/gadget/ether.c b/drivers/usb/gadget/ether.c
+index 1690c9d..96955b9 100644
+--- a/drivers/usb/gadget/ether.c
++++ b/drivers/usb/gadget/ether.c
+@@ -237,7 +237,7 @@ static u8 hostaddr[ETH_ALEN];
+  * the first one present.  That's to make Microsoft's drivers happy,
+  * and to follow DOCSIS 1.0 (cable modem standard).
+  */
+-static int __init rndis_do_config(struct usb_configuration *c)
++static int __ref rndis_do_config(struct usb_configuration *c)
+ {
+ 	/* FIXME alloc iConfiguration string, set it in c->strings */
+ 
+@@ -269,7 +269,7 @@ MODULE_PARM_DESC(use_eem, "use CDC EEM mode");
+ /*
+  * We _always_ have an ECM, CDC Subset, or EEM configuration.
+  */
+-static int __init eth_do_config(struct usb_configuration *c)
++static int __ref eth_do_config(struct usb_configuration *c)
+ {
+ 	/* FIXME alloc iConfiguration string, set it in c->strings */
+ 
+@@ -295,7 +295,7 @@ static struct usb_configuration eth_config_driver = {
+ 
+ /*-------------------------------------------------------------------------*/
+ 
+-static int __init eth_bind(struct usb_composite_dev *cdev)
++static int __ref eth_bind(struct usb_composite_dev *cdev)
+ {
+ 	int			gcnum;
+ 	struct usb_gadget	*gadget = cdev->gadget;
+diff --git a/drivers/usb/gadget/f_loopback.c b/drivers/usb/gadget/f_loopback.c
+index 0e64a47..b2c3f55 100644
+--- a/drivers/usb/gadget/f_loopback.c
++++ b/drivers/usb/gadget/f_loopback.c
+@@ -324,7 +324,7 @@ static void loopback_disable(struct usb_function *f)
+ 
+ /*-------------------------------------------------------------------------*/
+ 
+-static int __init loopback_bind_config(struct usb_configuration *c)
++static int __ref loopback_bind_config(struct usb_configuration *c)
+ {
+ 	struct f_loopback	*loop;
+ 	int			status;
+@@ -346,7 +346,7 @@ static int __init loopback_bind_config(struct usb_configuration *c)
+ 	return status;
+ }
+ 
+-static struct usb_configuration loopback_driver = {
++static  struct usb_configuration loopback_driver = {
+ 	.label		= "loopback",
+ 	.strings	= loopback_strings,
+ 	.bConfigurationValue = 2,
+diff --git a/drivers/usb/gadget/f_sourcesink.c b/drivers/usb/gadget/f_sourcesink.c
+index e403a53..bdec143 100644
+--- a/drivers/usb/gadget/f_sourcesink.c
++++ b/drivers/usb/gadget/f_sourcesink.c
+@@ -404,7 +404,7 @@ static void sourcesink_disable(struct usb_function *f)
+ 
+ /*-------------------------------------------------------------------------*/
+ 
+-static int __init sourcesink_bind_config(struct usb_configuration *c)
++static int __ref sourcesink_bind_config(struct usb_configuration *c)
+ {
+ 	struct f_sourcesink	*ss;
+ 	int			status;
+diff --git a/drivers/usb/gadget/file_storage.c b/drivers/usb/gadget/file_storage.c
+index a165ea5..42ded43 100644
+--- a/drivers/usb/gadget/file_storage.c
++++ b/drivers/usb/gadget/file_storage.c
+@@ -3344,7 +3344,8 @@ static int __init check_parameters(struct fsg_dev *fsg)
+ #ifdef CONFIG_FSL_UTP
+ #include "fsl_updater.c"
+ #endif
+-static int __init fsg_bind(struct usb_gadget *gadget)
++
++static int __ref fsg_bind(struct usb_gadget *gadget)
+ {
+ 	struct fsg_dev		*fsg = the_fsg;
+ 	int			rc;
+diff --git a/drivers/usb/gadget/gmidi.c b/drivers/usb/gadget/gmidi.c
+index 47b86b9..d2dcf24 100644
+--- a/drivers/usb/gadget/gmidi.c
++++ b/drivers/usb/gadget/gmidi.c
+@@ -1157,7 +1157,7 @@ fail:
+ /*
+  * Creates an output endpoint, and initializes output ports.
+  */
+-static int __init gmidi_bind(struct usb_gadget *gadget)
++static int __ref gmidi_bind(struct usb_gadget *gadget)
+ {
+ 	struct gmidi_device *dev;
+ 	struct usb_ep *in_ep, *out_ep;
+diff --git a/drivers/usb/gadget/hid.c b/drivers/usb/gadget/hid.c
+index 79afa82..643aa59 100644
+--- a/drivers/usb/gadget/hid.c
++++ b/drivers/usb/gadget/hid.c
+@@ -127,7 +127,7 @@ static struct usb_gadget_strings *dev_strings[] = {
+ 
+ /****************************** Configurations ******************************/
+ 
+-static int __init do_config(struct usb_configuration *c)
++static int __ref do_config(struct usb_configuration *c)
+ {
+ 	struct hidg_func_node *e;
+ 	int func = 0, status = 0;
+@@ -155,7 +155,7 @@ static struct usb_configuration config_driver = {
+ 
+ /****************************** Gadget Bind ******************************/
+ 
+-static int __init hid_bind(struct usb_composite_dev *cdev)
++static int __ref hid_bind(struct usb_composite_dev *cdev)
+ {
+ 	struct usb_gadget *gadget = cdev->gadget;
+ 	struct list_head *tmp;
+diff --git a/drivers/usb/gadget/mass_storage.c b/drivers/usb/gadget/mass_storage.c
+index 0182242..31642f4 100644
+--- a/drivers/usb/gadget/mass_storage.c
++++ b/drivers/usb/gadget/mass_storage.c
+@@ -111,7 +111,7 @@ static int msg_thread_exits(struct fsg_common *common)
+ 	return 0;
+ }
+ 
+-static int __init msg_do_config(struct usb_configuration *c)
++static int __ref msg_do_config(struct usb_configuration *c)
+ {
+ 	static const struct fsg_operations ops = {
+ 		.thread_exits = msg_thread_exits,
+@@ -148,7 +148,7 @@ static struct usb_configuration msg_config_driver = {
+ 
+ /****************************** Gadget Bind ******************************/
+ 
+-static int __init msg_bind(struct usb_composite_dev *cdev)
++static int __ref msg_bind(struct usb_composite_dev *cdev)
+ {
+ 	int status;
+ 
+diff --git a/drivers/usb/gadget/printer.c b/drivers/usb/gadget/printer.c
+index 88a464c..d443910 100644
+--- a/drivers/usb/gadget/printer.c
++++ b/drivers/usb/gadget/printer.c
+@@ -1350,7 +1350,7 @@ printer_unbind(struct usb_gadget *gadget)
+ 	set_gadget_data(gadget, NULL);
+ }
+ 
+-static int __init
++static int __ref
+ printer_bind(struct usb_gadget *gadget)
+ {
+ 	struct printer_dev	*dev;
+diff --git a/drivers/usb/gadget/serial.c b/drivers/usb/gadget/serial.c
+index 1ac57a9..1e349ec 100644
+--- a/drivers/usb/gadget/serial.c
++++ b/drivers/usb/gadget/serial.c
+@@ -137,7 +137,7 @@ MODULE_PARM_DESC(n_ports, "number of ports to create, default=1");
+ 
+ /*-------------------------------------------------------------------------*/
+ 
+-static int __init serial_bind_config(struct usb_configuration *c)
++static int __ref serial_bind_config(struct usb_configuration *c)
+ {
+ 	unsigned i;
+ 	int status = 0;
+@@ -160,7 +160,7 @@ static struct usb_configuration serial_config_driver = {
+ 	.bmAttributes	= USB_CONFIG_ATT_SELFPOWER,
+ };
+ 
+-static int __init gs_bind(struct usb_composite_dev *cdev)
++static int __ref gs_bind(struct usb_composite_dev *cdev)
+ {
+ 	int			gcnum;
+ 	struct usb_gadget	*gadget = cdev->gadget;
+diff --git a/drivers/usb/gadget/webcam.c b/drivers/usb/gadget/webcam.c
+index a5a0fdb..c34539a 100644
+--- a/drivers/usb/gadget/webcam.c
++++ b/drivers/usb/gadget/webcam.c
+@@ -308,7 +308,7 @@ static const struct uvc_descriptor_header * const uvc_hs_streaming_cls[] = {
+  * USB configuration
+  */
+ 
+-static int __init
++static int __ref
+ webcam_config_bind(struct usb_configuration *c)
+ {
+ 	return uvc_bind_config(c, uvc_control_cls, uvc_fs_streaming_cls,
+@@ -329,7 +329,7 @@ webcam_unbind(struct usb_composite_dev *cdev)
+ 	return 0;
+ }
+ 
+-static int __init
++static int __ref
+ webcam_bind(struct usb_composite_dev *cdev)
+ {
+ 	int ret;
+diff --git a/drivers/usb/gadget/zero.c b/drivers/usb/gadget/zero.c
+index 6d16db9..5440b0e 100644
+--- a/drivers/usb/gadget/zero.c
++++ b/drivers/usb/gadget/zero.c
+@@ -264,7 +264,7 @@ static void zero_resume(struct usb_composite_dev *cdev)
+ 
+ /*-------------------------------------------------------------------------*/
+ 
+-static int __init zero_bind(struct usb_composite_dev *cdev)
++static int __ref zero_bind(struct usb_composite_dev *cdev)
+ {
+ 	int			gcnum;
+ 	struct usb_gadget	*gadget = cdev->gadget;
+-- 
+1.7.7.4
+

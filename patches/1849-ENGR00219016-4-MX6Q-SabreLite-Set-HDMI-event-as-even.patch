@@ -1,0 +1,33 @@
+From 9cda5d9e496e73a6e3ad20715f4ce8b5a22532c2 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Wed, 1 Aug 2012 14:01:30 +0800
+Subject: [PATCH 1849/2463] ENGR00219016-4 MX6Q SabreLite: Set HDMI event as
+ event 2 of SDMA event
+
+If MX6q chip version is bigger than TO1.2, Select HDMI SDMA
+request as SDMA event 2 for MX6Q ARM2 board. SDMA event 2 can be
+configured HDMI or IPU.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index a299918..17a4cb1 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -810,6 +810,10 @@ static void hdmi_init(int ipu_id, int disp_id)
+ 
+ 	/* GPR3, bits 2-3 = HDMI_MUX_CTL */
+ 	mxc_iomux_set_gpr_register(3, 2, 2, hdmi_mux_setting);
++
++	/* Set HDMI event as SDMA event2 while Chip version later than TO1.2 */
++	if ((mx6q_revision() > IMX_CHIP_REVISION_1_1))
++		mxc_iomux_set_gpr_register(0, 0, 1, 1);
+ }
+ 
+ /* On mx6x sbarelite board i2c2 iomux with hdmi ddc,
+-- 
+1.7.7.4
+

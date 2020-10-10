@@ -1,0 +1,62 @@
+From 480670bec898de08b688a6da50c93fca08775bc9 Mon Sep 17 00:00:00 2001
+From: Zhang Jiejing <jiejing.zhang@freescale.com>
+Date: Wed, 11 Jan 2012 14:20:15 +0800
+Subject: [PATCH 1006/2463] ENGR00173857 MX6Q: add 600M work point
+
+Add a 600M work point for better suit for cpufreq driver.
+
+For current MX6Q clock tree, the most near 600M working point
+is 624M, so we use 624M as 600M working point.
+
+We found we have 200/400/800/1G working point is not very
+good for cpufreq adjustment, since we don't have a uniform
+working point distribution, since the interactive governor
+is using cpu usage to adjust frequency, eg, 60% CPU, going
+to 600M working point, if above a threshold (%85 default)
+will going to max frequency directly.
+
+From the [sheet] , you can see in game case, it will have much
+chance in 400M working point, between 400M and 800M working
+point, there is a gap, so the 400M will be most used frequency.
+we add 600 WP to fill this gap, and make game case have
+better experience.
+
+[sheet] http://wiki.freescale.net/download/attachments/
+40052424/Compare.xlsx?version=1&modificationDate=1326086907000
+
+Wiki About this:
+http://wiki.freescale.net/display/MADAndroid
+/i.MX6Q+Performance+and+Power+Optimization
+
+Signed-off-by: Zhang Jiejing <jiejing.zhang@freescale.com>
+---
+ arch/arm/mach-mx6/cpu_op-mx6.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/cpu_op-mx6.c b/arch/arm/mach-mx6/cpu_op-mx6.c
+index 653553a..d724463 100644
+--- a/arch/arm/mach-mx6/cpu_op-mx6.c
++++ b/arch/arm/mach-mx6/cpu_op-mx6.c
+@@ -23,7 +23,7 @@ extern void (*set_num_cpu_op)(int num);
+ extern u32 arm_max_freq;
+ static int num_cpu_op;
+ 
+-/* working point(wp): 0 - 1GHzMHz; 1 - 800MHz, 3 - 400MHz, 4  - 200MHz */
++/* working point(wp): 0 - 1GHzMHz; 1 - 800MHz, 2 - 624MHz 3 - 400MHz, 4  - 200MHz */
+ static struct cpu_op mx6_cpu_op_1G[] = {
+ 	{
+ 	 .pll_rate = 996000000,
+@@ -43,6 +43,10 @@ static struct cpu_op mx6_cpu_op_1G[] = {
+ 	 .mfn = 1,
+ 	 .cpu_podf = 0,
+ 	 .cpu_voltage = 1100000,},
++	{
++	 .pll_rate = 624000000,
++	 .cpu_rate = 624000000,
++	 .cpu_voltage = 11000000,},
+ 	 {
+ 	  .pll_rate = 792000000,
+ 	  .cpu_rate = 396000000,
+-- 
+1.7.7.4
+

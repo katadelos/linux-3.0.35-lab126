@@ -1,0 +1,32 @@
+From 694683e4170a9790c06890b33359006a1fec322d Mon Sep 17 00:00:00 2001
+From: Jie Zhou <b30303@freescale.com>
+Date: Wed, 4 Aug 2010 11:26:39 +0800
+Subject: [PATCH 0022/2463] ENGR00125800 UIO: clean uioinfo when uninstall uio
+ driver
+
+The uioinfo should be cleaned up when uninstall, otherwise re-install
+failure of uio_pdrv_genirq.ko will happen.
+
+Signed-off-by: Jie Zhou <b30303@freescale.com>
+---
+ drivers/uio/uio_pdrv_genirq.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/uio/uio_pdrv_genirq.c b/drivers/uio/uio_pdrv_genirq.c
+index 0f424af..e669a2c 100644
+--- a/drivers/uio/uio_pdrv_genirq.c
++++ b/drivers/uio/uio_pdrv_genirq.c
+@@ -190,8 +190,10 @@ static int uio_pdrv_genirq_remove(struct platform_device *pdev)
+ 	uio_unregister_device(priv->uioinfo);
+ 	pm_runtime_disable(&pdev->dev);
+ 
++	priv->uioinfo->irq_flags = 0;
+ 	priv->uioinfo->handler = NULL;
+ 	priv->uioinfo->irqcontrol = NULL;
++	priv->uioinfo->priv = NULL;
+ 
+ 	kfree(priv);
+ 	return 0;
+-- 
+1.7.7.4
+

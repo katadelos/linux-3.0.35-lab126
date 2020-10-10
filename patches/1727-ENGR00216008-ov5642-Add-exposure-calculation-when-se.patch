@@ -1,0 +1,73 @@
+From d0686c6ce6b6aca3e56a48ea2a61ab212315dc64 Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Fri, 6 Jul 2012 17:29:03 +0800
+Subject: [PATCH 1727/2463] ENGR00216008 ov5642: Add exposure calculation when
+ set mode
+
+Originally only QSXGA mode use exposure calculation, now we enable
+this function on every mode to fix image dark problem.
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov5642.c |   17 ++++++-----------
+ 1 files changed, 6 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov5642.c b/drivers/media/video/mxc/capture/ov5642.c
+index 52e4f3b..2488658 100644
+--- a/drivers/media/video/mxc/capture/ov5642.c
++++ b/drivers/media/video/mxc/capture/ov5642.c
+@@ -3085,7 +3085,8 @@ err:
+ }
+ static int ov5642_init_mode(enum ov5642_frame_rate frame_rate,
+ 		enum ov5642_mode mode);
+-static int ov5642_write_snapshot_para(void);
++static int ov5642_write_snapshot_para(enum ov5642_frame_rate frame_rate,
++		enum ov5642_mode mode);
+ static int ov5642_change_mode(enum ov5642_frame_rate new_frame_rate,
+ 		enum ov5642_frame_rate old_frame_rate,
+ 		enum ov5642_mode new_mode,
+@@ -3107,13 +3108,6 @@ static int ov5642_change_mode(enum ov5642_frame_rate new_frame_rate,
+ 	}
+ 
+ 	if ((new_frame_rate == old_frame_rate) &&
+-	    (new_mode == ov5642_mode_QSXGA_2592_1944) &&
+-		(orig_mode == ov5642_mode_VGA_640_480)) {
+-		ov5642_data.pix.width = 2592;
+-		ov5642_data.pix.height = 1944;
+-		retval = ov5642_write_snapshot_para();
+-		return retval;
+-	} else if ((new_frame_rate == old_frame_rate) &&
+ 	    (new_mode == ov5642_mode_VGA_640_480) &&
+ 		(orig_mode == ov5642_mode_QSXGA_2592_1944)) {
+ 		pModeSetting = ov5642_setting_QSXGA_2_VGA;
+@@ -3128,7 +3122,7 @@ static int ov5642_change_mode(enum ov5642_frame_rate new_frame_rate,
+ 		ov5642_data.pix.width = 320;
+ 		ov5642_data.pix.height = 240;
+ 	} else {
+-		retval = ov5642_init_mode(new_frame_rate, new_mode);
++		retval = ov5642_write_snapshot_para(new_frame_rate, new_mode);
+ 		goto err;
+ 	}
+ 
+@@ -3226,7 +3220,8 @@ err:
+ 	return retval;
+ }
+ 
+-static int ov5642_write_snapshot_para(void)
++static int ov5642_write_snapshot_para(enum ov5642_frame_rate frame_rate,
++       enum ov5642_mode mode)
+ {
+ 	bool m_60Hz = false;
+ 	u16 capture_frame_rate = 50;
+@@ -3255,7 +3250,7 @@ static int ov5642_write_snapshot_para(void)
+ 	gain = 0;
+ 	ov5642_read_reg(0x350b, &gain);
+ 
+-	ov5642_init_mode(ov5642_15_fps, ov5642_mode_QSXGA_2592_1944);
++	ov5642_init_mode(frame_rate, mode);
+ 	ret_h = ret_m = ret_l = 0;
+ 	ov5642_read_reg(0x380e, &ret_h);
+ 	ov5642_read_reg(0x380f, &ret_l);
+-- 
+1.7.7.4
+

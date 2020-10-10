@@ -1,0 +1,31 @@
+From 6f556a5f831059fdb389143fa112d60004216153 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Thu, 23 Aug 2012 14:54:46 +0800
+Subject: [PATCH 1960/2463] ENGR00221203-1 IPU Device: Avoid release resource
+ twice when timeout
+
+Avoid release resource twice when timeout happen.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_device.c |    4 ----
+ 1 files changed, 0 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_device.c b/drivers/mxc/ipu3/ipu_device.c
+index 308b8cb..60fb3de 100644
+--- a/drivers/mxc/ipu3/ipu_device.c
++++ b/drivers/mxc/ipu3/ipu_device.c
+@@ -2948,10 +2948,6 @@ out:
+ 		spin_unlock_irqrestore(&ipu_task_list_lock, flags);
+ 		if (!tsk->ipu)
+ 			continue;
+-		if (STATE_IN_PROGRESS == tsk->state) {
+-			do_task_release(tsk, 1);
+-			put_vdoa_ipu_res(tsk, 0);
+-		}
+ 		if (tsk->state != STATE_OK) {
+ 			dev_err(tsk->dev,
+ 				"ERR:[0x%p] no-0x%x,id:%d, sp_tsk state: %s\n",
+-- 
+1.7.7.4
+

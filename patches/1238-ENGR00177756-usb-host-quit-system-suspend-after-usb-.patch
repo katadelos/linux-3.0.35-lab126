@@ -1,0 +1,45 @@
+From 042dde648d0619b6baca55b5e7821030b5829488 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Fri, 23 Mar 2012 15:20:09 +0800
+Subject: [PATCH 1238/2463] ENGR00177756 usb-host: quit system suspend after
+ usb remote wakeup occurs
+
+If the usb remote wakeup occurs before bus(roothub) suspend, it can
+stop the system suspend process, the patch adds handle error message
+process for roothub.
+
+If the remote wakeup occurs after bus(roothub) suspend, then
+the suspend will go on suspending, and usb phy will fail to respond
+wakeup signal.
+
+This patch is suggested by: Alan Stern <stern@rowland.harvard.edu>
+see: http://www.spinics.net/lists/linux-usb/msg58774.html
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/core/driver.c |    9 +++++++--
+ 1 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/core/driver.c b/drivers/usb/core/driver.c
+index 75b4bc0..f147c62 100644
+--- a/drivers/usb/core/driver.c
++++ b/drivers/usb/core/driver.c
+@@ -1198,8 +1198,13 @@ static int usb_suspend_both(struct usb_device *udev, pm_message_t msg)
+ 	if (status == 0) {
+ 		status = usb_suspend_device(udev, msg);
+ 
+-		/* Again, ignore errors during system sleep transitions */
+-		if (!(msg.event & PM_EVENT_AUTO))
++	       /*
++		* Ignore errors from non-root-hub devices during
++		* system sleep transitions.  For the most part,
++		* these devices should go to low power anyway when
++		* the entire bus is suspended.
++		*/
++		if (udev->parent && !(msg.event & PM_EVENT_AUTO))
+ 			status = 0;
+ 	}
+ 
+-- 
+1.7.7.4
+

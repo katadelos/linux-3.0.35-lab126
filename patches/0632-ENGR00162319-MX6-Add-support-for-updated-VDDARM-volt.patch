@@ -1,0 +1,236 @@
+From 19b450106748e7bfe6ba0d4b2f226e1354a0eba1 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Tue, 15 Nov 2011 18:28:30 -0600
+Subject: [PATCH 0632/2463] ENGR00162319: MX6 - Add support for updated VDDARM
+ voltages
+
+Set the ARM LDO voltage to 1.225V to run the part at 1GHz.
+Also updated the rest of the voltages based on the latest
+available working points.
+The boards will need to be modified for this change to work
+correctly. Please ensure that the VDDARM_IN is set to 1.38V
+(using the potentiometer on the ARM2 board or choosing the correct
+resistors on the sabrelite boards).
+Also added command line option (arm_freq=800) to set the max ARM freq.
+Add:
+arm_freq=1000 -> to set the max ARM freq to 1GHz
+arm_freq=800 -> to set the max ARM freq to 800MHz.
+
+Default max ARM freq is 1GHz. No other values are currently
+supported. If your board is not modified, please add the command
+line "arm_freq=800' to avoid failures.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c      |    7 ++++
+ arch/arm/mach-mx6/cpu.c        |   18 ++++++++++
+ arch/arm/mach-mx6/cpu_op-mx6.c |   68 +++++++++++++++++++++++++++++++---------
+ arch/arm/mach-mx6/cpu_op-mx6.h |    3 ++
+ 4 files changed, 81 insertions(+), 15 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index bc15997..c554515 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -37,8 +37,11 @@
+ #define __INIT_CLK_DEBUG(n)
+ #endif
+ 
++extern u32 arm_max_freq;
+ extern int mxc_jtag_enabled;
+ extern struct cpu_op *(*get_cpu_op)(int *op);
++extern int mx6_set_cpu_voltage(u32 cpu_volt);
++
+ extern int lp_high_freq;
+ extern int lp_med_freq;
+ 
+@@ -4891,6 +4894,10 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	base = ioremap(GPT_BASE_ADDR, SZ_4K);
+ 	mxc_timer_init(&gpt_clk[0], base, MXC_INT_GPT);
+ 
++	/* Set the core to max frequency requested. */
++	mx6_set_cpu_voltage(cpu_op_tbl[0].cpu_voltage);
++	clk_set_rate(&cpu_clk, cpu_op_tbl[0].pll_rate);
++
+ 	lp_high_freq = 0;
+ 	lp_med_freq = 0;
+ 
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index f2b9345..e392a3c 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -29,6 +29,8 @@
+ #include <asm/mach/map.h>
+ 
+ #include "crm_regs.h"
++#include "cpu_op-mx6.h"
++
+ 
+ void *mx6_wait_in_iram_base;
+ void (*mx6_wait_in_iram)(void *ccm_base);
+@@ -37,6 +39,7 @@ extern void mx6_wait(void);
+ 
+ struct cpu_op *(*get_cpu_op)(int *op);
+ bool enable_wait_mode;
++u32 arm_max_freq = CPU_AT_1GHz;
+ 
+ void __iomem *gpc_base;
+ void __iomem *ccm_base;
+@@ -128,3 +131,18 @@ static int __init enable_wait(char *p)
+ }
+ early_param("enable_wait_mode", enable_wait);
+ 
++static int __init arm_core_max(char *p)
++{
++	if (memcmp(p, "1000", 4) == 0) {
++		arm_max_freq = CPU_AT_1GHz;
++		p += 4;
++	} else if (memcmp(p, "800", 3) == 0) {
++		arm_max_freq = CPU_AT_800MHz;
++		p += 3;
++	}
++	return 0;
++}
++
++early_param("arm_freq", arm_core_max);
++
++
+diff --git a/arch/arm/mach-mx6/cpu_op-mx6.c b/arch/arm/mach-mx6/cpu_op-mx6.c
+index 51bc917..30a4346 100644
+--- a/arch/arm/mach-mx6/cpu_op-mx6.c
++++ b/arch/arm/mach-mx6/cpu_op-mx6.c
+@@ -15,14 +15,16 @@
+ #include <linux/kernel.h>
+ #include <mach/hardware.h>
+ #include <mach/mxc_dvfs.h>
++#include "cpu_op-mx6.h"
+ 
+ extern struct cpu_op *(*get_cpu_op)(int *op);
+ extern struct dvfs_op *(*get_dvfs_core_op)(int *wp);
+ extern void (*set_num_cpu_op)(int num);
++extern u32 arm_max_freq;
+ static int num_cpu_op;
+ 
+ /* working point(wp): 0 - 1GHzMHz; 1 - 800MHz, 3 - 400MHz, 4  - 160MHz */
+-static struct cpu_op mx6_cpu_op[] = {
++static struct cpu_op mx6_cpu_op_1G[] = {
+ 	{
+ 	 .pll_rate = 996000000,
+ 	 .cpu_rate = 996000000,
+@@ -31,7 +33,7 @@ static struct cpu_op mx6_cpu_op[] = {
+ 	 .mfd = 11,
+ 	 .mfn = 5,
+ 	 .cpu_podf = 0,
+-	 .cpu_voltage = 1150000,},
++	 .cpu_voltage = 1225000,},
+ 	{
+ 	 .pll_rate = 792000000,
+ 	 .cpu_rate = 792000000,
+@@ -40,35 +42,72 @@ static struct cpu_op mx6_cpu_op[] = {
+ 	 .mfd = 2,
+ 	 .mfn = 1,
+ 	 .cpu_podf = 0,
+-	 .cpu_voltage = 1150000,},
++	 .cpu_voltage = 1100000,},
+ 	 {
+ 	  .pll_rate = 792000000,
+-	  .cpu_rate = 400000000,
++	  .cpu_rate = 396000000,
+ 	  .cpu_podf = 1,
+-	  .cpu_voltage = 1050000,},
++	  .cpu_voltage = 950000,},
+ 	{
+ 	 .pll_rate = 792000000,
+-	 .cpu_rate = 167000000,
+-	 .cpu_podf = 4,
+-	 .cpu_voltage = 900000,},
++	 .cpu_rate = 198000000,
++	 .cpu_podf = 3,
++	 .cpu_voltage = 850000,},
+ };
+ 
+-static struct dvfs_op dvfs_core_setpoint[] = {
++static struct cpu_op mx6_cpu_op[] = {
++	{
++	 .pll_rate = 792000000,
++	 .cpu_rate = 792000000,
++	 .pdf = 0,
++	 .mfi = 8,
++	 .mfd = 2,
++	 .mfn = 1,
++	 .cpu_podf = 0,
++	 .cpu_voltage = 1100000,},
++	 {
++	  .pll_rate = 792000000,
++	  .cpu_rate = 396000000,
++	  .cpu_podf = 1,
++	  .cpu_voltage = 950000,},
++	{
++	 .pll_rate = 792000000,
++	 .cpu_rate = 198000000,
++	 .cpu_podf = 3,
++	 .cpu_voltage = 850000,},
++};
++
++static struct dvfs_op dvfs_core_setpoint_1G[] = {
+ 	{33, 14, 33, 10, 10, 0x08}, /* 1GHz*/
+ 	{30, 12, 33, 10, 10, 0x08},   /* 800MHz */
+ 	{28, 8, 33, 10, 10, 0x08},   /* 400MHz */
+-	{20, 0, 33, 20, 10, 0x08} };   /* 167MHz*/
++	{20, 0, 33, 20, 10, 0x08} };   /* 200MHz*/
++
++static struct dvfs_op dvfs_core_setpoint[] = {
++	{33, 14, 33, 10, 10, 0x08},   /* 800MHz */
++	{26, 8, 33, 10, 10, 0x08},   /* 400MHz */
++	{20, 0, 33, 20, 10, 0x08} };   /* 200MHz*/
+ 
+ static struct dvfs_op *mx6_get_dvfs_core_table(int *wp)
+ {
+-	*wp = ARRAY_SIZE(dvfs_core_setpoint);
+-	return dvfs_core_setpoint;
++	if (arm_max_freq == CPU_AT_1GHz) {
++		*wp = ARRAY_SIZE(dvfs_core_setpoint_1G);
++		return dvfs_core_setpoint_1G;
++	} else {
++		*wp = ARRAY_SIZE(dvfs_core_setpoint);
++		return dvfs_core_setpoint;
++	}
+ }
+ 
+ struct cpu_op *mx6_get_cpu_op(int *op)
+ {
+-	*op = num_cpu_op;
+-	return mx6_cpu_op;
++	if (arm_max_freq == CPU_AT_1GHz) {
++		*op =  num_cpu_op = ARRAY_SIZE(mx6_cpu_op_1G);
++		return mx6_cpu_op_1G;
++	} else {
++		*op =  num_cpu_op = ARRAY_SIZE(mx6_cpu_op);
++		return mx6_cpu_op;
++	}
+ }
+ 
+ void mx6_set_num_cpu_op(int num)
+@@ -82,7 +121,6 @@ void mx6_cpu_op_init(void)
+ 	get_cpu_op = mx6_get_cpu_op;
+ 	set_num_cpu_op = mx6_set_num_cpu_op;
+ 
+-	num_cpu_op = ARRAY_SIZE(mx6_cpu_op);
+ 	get_dvfs_core_op = mx6_get_dvfs_core_table;
+ }
+ 
+diff --git a/arch/arm/mach-mx6/cpu_op-mx6.h b/arch/arm/mach-mx6/cpu_op-mx6.h
+index f13b269..77e8222 100644
+--- a/arch/arm/mach-mx6/cpu_op-mx6.h
++++ b/arch/arm/mach-mx6/cpu_op-mx6.h
+@@ -11,4 +11,7 @@
+  * http://www.gnu.org/copyleft/gpl.html
+  */
+ 
++#define CPU_AT_800MHz	0
++#define CPU_AT_1GHz		1
++
+ void mx6_cpu_op_init(void);
+-- 
+1.7.7.4
+

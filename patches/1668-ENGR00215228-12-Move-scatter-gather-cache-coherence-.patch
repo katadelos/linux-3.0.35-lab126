@@ -1,0 +1,114 @@
+From 274efb68574acac15e1db22a3cdfe158892f8f66 Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Thu, 28 Jun 2012 15:27:16 -0700
+Subject: [PATCH 1668/2463] ENGR00215228-12: Move scatter/gather cache
+ coherence into chained function.
+
+Last driver revisions began to incorporate optimized mapping functions
+for scatter/gather list management, and then centralized them as inlinable
+functions usable from multiple modules. Since these became more globally
+useful, moved the coupled cache-coherence functions out of the mainline code
+and into the inlined ones for simplification.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+---
+ drivers/crypto/caam/caamalg.c    |   18 ------------------
+ drivers/crypto/caam/sg_sw_sec4.h |    7 +++++++
+ 2 files changed, 7 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/crypto/caam/caamalg.c b/drivers/crypto/caam/caamalg.c
+index 50308b0..d26e25c 100644
+--- a/drivers/crypto/caam/caamalg.c
++++ b/drivers/crypto/caam/caamalg.c
+@@ -727,12 +727,9 @@ static void caam_unmap(struct device *dev, struct scatterlist *src,
+ 	if (dst != src) {
+ 		dma_unmap_sg_chained(dev, src, src_nents ? : 1, DMA_TO_DEVICE,
+ 				     src_chained);
+-		dma_sync_sg_for_cpu(dev, dst, dst_nents ? : 1, DMA_FROM_DEVICE);
+ 		dma_unmap_sg_chained(dev, dst, dst_nents ? : 1, DMA_FROM_DEVICE,
+ 				     dst_chained);
+ 	} else {
+-		dma_sync_sg_for_cpu(dev, src, src_nents ? : 1,
+-				    DMA_BIDIRECTIONAL);
+ 		dma_unmap_sg_chained(dev, src, src_nents ? : 1,
+ 				     DMA_BIDIRECTIONAL, src_chained);
+ 	}
+@@ -1174,18 +1171,12 @@ static struct aead_edesc *aead_edesc_alloc(struct aead_request *req,
+ 
+ 	sgc = dma_map_sg_chained(jrdev, req->assoc, assoc_nents ? : 1,
+ 				 DMA_BIDIRECTIONAL, assoc_chained);
+-	dma_sync_sg_for_device(jrdev, req->assoc, sgc,
+-			       DMA_BIDIRECTIONAL);
+ 	if (likely(req->src == req->dst)) {
+ 		sgc = dma_map_sg_chained(jrdev, req->src, src_nents ? : 1,
+ 					 DMA_BIDIRECTIONAL, src_chained);
+-		dma_sync_sg_for_device(jrdev, req->src, sgc,
+-				       DMA_BIDIRECTIONAL);
+ 	} else {
+ 		sgc = dma_map_sg_chained(jrdev, req->src, src_nents ? : 1,
+ 					 DMA_TO_DEVICE, src_chained);
+-		dma_sync_sg_for_device(jrdev, req->src, sgc,
+-				       DMA_TO_DEVICE);
+ 		sgc = dma_map_sg_chained(jrdev, req->dst, dst_nents ? : 1,
+ 					 DMA_FROM_DEVICE, dst_chained);
+ 	}
+@@ -1365,18 +1356,12 @@ static struct aead_edesc *aead_giv_edesc_alloc(struct aead_givcrypt_request
+ 
+ 	sgc = dma_map_sg_chained(jrdev, req->assoc, assoc_nents ? : 1,
+ 				 DMA_BIDIRECTIONAL, assoc_chained);
+-	dma_sync_sg_for_device(jrdev, req->assoc, assoc_nents ? : 1,
+-			       DMA_BIDIRECTIONAL);
+ 	if (likely(req->src == req->dst)) {
+ 		sgc = dma_map_sg_chained(jrdev, req->src, src_nents ? : 1,
+ 					 DMA_BIDIRECTIONAL, src_chained);
+-		dma_sync_sg_for_device(jrdev, req->src, src_nents ? : 1,
+-				       DMA_BIDIRECTIONAL);
+ 	} else {
+ 		sgc = dma_map_sg_chained(jrdev, req->src, src_nents ? : 1,
+ 					 DMA_TO_DEVICE, src_chained);
+-		dma_sync_sg_for_device(jrdev, req->src, src_nents ? : 1,
+-				       DMA_TO_DEVICE);
+ 		sgc = dma_map_sg_chained(jrdev, req->dst, dst_nents ? : 1,
+ 					 DMA_FROM_DEVICE, dst_chained);
+ 	}
+@@ -1531,12 +1516,9 @@ static struct ablkcipher_edesc *ablkcipher_edesc_alloc(struct ablkcipher_request
+ 	if (likely(req->src == req->dst)) {
+ 		sgc = dma_map_sg_chained(jrdev, req->src, src_nents ? : 1,
+ 					 DMA_BIDIRECTIONAL, src_chained);
+-		dma_sync_sg_for_device(jrdev, req->src, sgc,
+-				       DMA_BIDIRECTIONAL);
+ 	} else {
+ 		sgc = dma_map_sg_chained(jrdev, req->src, src_nents ? : 1,
+ 					 DMA_TO_DEVICE, src_chained);
+-		dma_sync_sg_for_device(jrdev, req->src, sgc, DMA_TO_DEVICE);
+ 		sgc = dma_map_sg_chained(jrdev, req->dst, dst_nents ? : 1,
+ 					 DMA_FROM_DEVICE, dst_chained);
+ 	}
+diff --git a/drivers/crypto/caam/sg_sw_sec4.h b/drivers/crypto/caam/sg_sw_sec4.h
+index 53499a2..b2286ec 100644
+--- a/drivers/crypto/caam/sg_sw_sec4.h
++++ b/drivers/crypto/caam/sg_sw_sec4.h
+@@ -100,6 +100,10 @@ static int dma_map_sg_chained(struct device *dev, struct scatterlist *sg,
+ 	} else {
+ 		dma_map_sg(dev, sg, nents, dir);
+ 	}
++
++	if ((dir == DMA_TO_DEVICE) || (dir == DMA_BIDIRECTIONAL))
++		dma_sync_sg_for_device(dev, sg, nents, dir);
++
+ 	return nents;
+ }
+ 
+@@ -107,6 +111,9 @@ static int dma_unmap_sg_chained(struct device *dev, struct scatterlist *sg,
+ 				unsigned int nents, enum dma_data_direction dir,
+ 				bool chained)
+ {
++	if ((dir == DMA_FROM_DEVICE) || (dir == DMA_BIDIRECTIONAL))
++		dma_sync_sg_for_cpu(dev, sg, nents, dir);
++
+ 	if (unlikely(chained)) {
+ 		int i;
+ 		for (i = 0; i < nents; i++) {
+-- 
+1.7.7.4
+

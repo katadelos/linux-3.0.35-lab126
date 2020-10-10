@@ -1,0 +1,135 @@
+From eb5172a2ac99c39da602d61c1ba5455be9d8a9f0 Mon Sep 17 00:00:00 2001
+From: Sammy He <r62914@freescale.com>
+Date: Thu, 28 Jul 2011 19:50:31 +0800
+Subject: [PATCH 0308/2463] ENGR00153830-2 vpu: Add VPU_IOC_REQ_VSHARE_MEM
+ ioctl for shared memory
+
+Add vmalloced memory for multi-instances shared memory, vpu lib
+will call mmap for accessing the memory.
+
+VPU_IOC_GET_SHARE_MEM ioctl is still reserved for some time since
+vpu lib still uses it for mx5x now. Will remove it after mx5x changes
+to this new added memory later.
+
+Signed-off-by: Sammy He <r62914@freescale.com>
+---
+ drivers/mxc/vpu/mxc_vpu.c |   62 ++++++++++++++++++++++++++++++++++++++++++---
+ 1 files changed, 58 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mxc/vpu/mxc_vpu.c b/drivers/mxc/vpu/mxc_vpu.c
+index 7944d0d..9687922 100644
+--- a/drivers/mxc/vpu/mxc_vpu.c
++++ b/drivers/mxc/vpu/mxc_vpu.c
+@@ -38,7 +38,7 @@
+ #include <linux/slab.h>
+ #include <linux/workqueue.h>
+ #include <linux/sched.h>
+-
++#include <linux/vmalloc.h>
+ #include <asm/sizes.h>
+ #include <mach/clock.h>
+ #include <mach/hardware.h>
+@@ -75,6 +75,7 @@ static struct vpu_mem_desc bitwork_mem = { 0 };
+ static struct vpu_mem_desc pic_para_mem = { 0 };
+ static struct vpu_mem_desc user_data_mem = { 0 };
+ static struct vpu_mem_desc share_mem = { 0 };
++static struct vpu_mem_desc vshare_mem = { 0 };
+ 
+ static void __iomem *vpu_base;
+ static int vpu_ipi_irq;
+@@ -415,6 +416,36 @@ static long vpu_ioctl(struct file *filp, u_int cmd,
+ 			spin_unlock(&vpu_lock);
+ 			break;
+ 		}
++	case VPU_IOC_REQ_VSHARE_MEM:
++		{
++			spin_lock(&vpu_lock);
++			if (vshare_mem.cpu_addr != 0) {
++				ret = copy_to_user((void __user *)arg,
++						   &vshare_mem,
++						   sizeof(struct vpu_mem_desc));
++				spin_unlock(&vpu_lock);
++				break;
++			} else {
++				if (copy_from_user(&vshare_mem,
++						   (struct vpu_mem_desc *)arg,
++						   sizeof(struct
++							  vpu_mem_desc))) {
++					spin_unlock(&vpu_lock);
++					return -EFAULT;
++				}
++				/* vmalloc shared memory if not allocated */
++				if (!vshare_mem.cpu_addr)
++					vshare_mem.cpu_addr =
++					    (unsigned long)
++					    vmalloc_user(vshare_mem.size);
++				if (copy_to_user
++				     ((void __user *)arg, &vshare_mem,
++				     sizeof(struct vpu_mem_desc)))
++					ret = -EFAULT;
++			}
++			spin_unlock(&vpu_lock);
++			break;
++		}
+ 	case VPU_IOC_GET_WORK_ADDR:
+ 		{
+ 			if (bitwork_mem.cpu_addr != 0) {
+@@ -472,6 +503,8 @@ static int vpu_release(struct inode *inode, struct file *filp)
+ 		/* Free shared memory when vpu device is idle */
+ 		vpu_free_dma_buffer(&share_mem);
+ 		share_mem.cpu_addr = 0;
++		vfree((void *)vshare_mem.cpu_addr);
++		vshare_mem.cpu_addr = 0;
+ 	}
+ 	spin_unlock(&vpu_lock);
+ 
+@@ -509,7 +542,7 @@ static int vpu_map_hwregs(struct file *fp, struct vm_area_struct *vm)
+  * @brief memory map function of memory for vpu file operation
+  * @return  0 on success or negative error code on error
+  */
+-static int vpu_map_mem(struct file *fp, struct vm_area_struct *vm)
++static int vpu_map_dma_mem(struct file *fp, struct vm_area_struct *vm)
+ {
+ 	int request_size;
+ 	request_size = vm->vm_end - vm->vm_start;
+@@ -526,14 +559,35 @@ static int vpu_map_mem(struct file *fp, struct vm_area_struct *vm)
+ 
+ }
+ 
++/* !
++ * @brief memory map function of vmalloced share memory
++ * @return  0 on success or negative error code on error
++ */
++static int vpu_map_vshare_mem(struct file *fp, struct vm_area_struct *vm)
++{
++	int ret = -EINVAL;
++
++	spin_lock(&vpu_lock);
++	ret = remap_vmalloc_range(vm, (void *)(vm->vm_pgoff << PAGE_SHIFT), 0);
++	vm->vm_flags |= VM_IO;
++	spin_unlock(&vpu_lock);
++
++	return ret;
++}
+ /*!
+  * @brief memory map interface for vpu file operation
+  * @return  0 on success or negative error code on error
+  */
+ static int vpu_mmap(struct file *fp, struct vm_area_struct *vm)
+ {
+-	if (vm->vm_pgoff)
+-		return vpu_map_mem(fp, vm);
++	unsigned long offset;
++
++	offset = vshare_mem.cpu_addr >> PAGE_SHIFT;
++
++	if (vm->vm_pgoff && (vm->vm_pgoff == offset))
++		return vpu_map_vshare_mem(fp, vm);
++	else if (vm->vm_pgoff)
++		return vpu_map_dma_mem(fp, vm);
+ 	else
+ 		return vpu_map_hwregs(fp, vm);
+ }
+-- 
+1.7.7.4
+

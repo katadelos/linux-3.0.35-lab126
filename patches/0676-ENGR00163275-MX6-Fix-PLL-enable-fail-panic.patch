@@ -1,0 +1,56 @@
+From 46a93aae5dff1f7a849ead672f5de1708da5f73e Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Thu, 1 Dec 2011 15:51:27 +0800
+Subject: [PATCH 0676/2463] ENGR00163275 [MX6]Fix PLL enable fail panic
+
+The root cause is irqs come between PLL register reading
+and getting system time, an interrupt handle could take
+more than 2ms, which will make the time reading and register
+reading unalignment, see below:
+
+1. pll reg read, it is still not locked;
+2. here comes an interrupt, and its handler could spent > 2ms;
+3. time reading, found current time already > expiration time(1.2ms),
+   and we treated the pll lock fail;
+
+There are two method could fix it, one is disable interrupt
+during pll lock bit and time expiration check, the other is
+to add a second time read after time expiration to make sure
+the pll didn't lock during the time we set. I choose the seconde
+choise, since it impacts kernel less than disable interrupt;
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    9 ++++++++-
+ 1 files changed, 8 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 560ed67..12a8d35 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -70,6 +70,12 @@ static int cpu_op_nr;
+ #define AUDIO_VIDEO_MIN_CLK_FREQ	650000000
+ #define AUDIO_VIDEO_MAX_CLK_FREQ	1300000000
+ 
++/* We need to check the exp status again after timer expiration,
++ * as there might be interrupt coming between the first time exp
++ * and the time reading, then the time reading may be several ms
++ * after the exp checking due to the irq handle, so we need to
++ * check it to make sure the exp return the right value after
++ * timer expiration. */
+ #define WAIT(exp, timeout) \
+ ({ \
+ 	struct timespec nstimeofday; \
+@@ -79,7 +85,8 @@ static int cpu_op_nr;
+ 	while (!(exp)) { \
+ 		getnstimeofday(&curtime); \
+ 		if ((curtime.tv_nsec - nstimeofday.tv_nsec) > (timeout)) { \
+-			result = 0; \
++			if (!(exp)) \
++				result = 0; \
+ 			break; \
+ 		} \
+ 	} \
+-- 
+1.7.7.4
+

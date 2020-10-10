@@ -1,0 +1,50 @@
+From 99bab876919f0ab75518ac295ad97702b9801c53 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Fri, 13 Apr 2012 08:19:46 +0800
+Subject: [PATCH 1322/2463] ENGR00179513-2 IPU: Add TILED_NV12_FRAME_SIZE
+ macro for consistency
+
+VPU needs 4K align buffer address for tiled format data output.
+Use this macro for IPU/V4L2/Apps to calculate the frame/field size.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_device.c |    5 +----
+ include/linux/ipu.h           |    2 ++
+ 2 files changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_device.c b/drivers/mxc/ipu3/ipu_device.c
+index c7d37df..46a9645 100644
+--- a/drivers/mxc/ipu3/ipu_device.c
++++ b/drivers/mxc/ipu3/ipu_device.c
+@@ -371,13 +371,10 @@ static bool deinterlace_3_field(struct ipu_task_entry *t)
+ 
+ static u32 tiled_filed_size(struct ipu_task_entry *t)
+ {
+-	u32 y_size;
+ 	u32 field_size;
+ 
+ 	/* note: page_align is required by VPU hw ouput buffer */
+-	y_size = t->input.width * t->input.height/2;
+-	field_size = ALIGN(y_size, SZ_4K) + ALIGN(y_size/2, SZ_4K);
+-
++	field_size = TILED_NV12_FRAME_SIZE(t->input.width, t->input.height/2);
+ 	return field_size;
+ }
+ 
+diff --git a/include/linux/ipu.h b/include/linux/ipu.h
+index 973cfe9..e0c9e90 100644
+--- a/include/linux/ipu.h
++++ b/include/linux/ipu.h
+@@ -141,6 +141,8 @@ typedef enum {
+ #define IPU_PIX_FMT_YUV422P fourcc('4', '2', '2', 'P')	/*!< 16 YUV 4:2:2 */
+ /*! @} */
+ #define IPU_PIX_FMT_TILED_NV12_MBALIGN	(16)
++#define TILED_NV12_FRAME_SIZE(w, h)	\
++		(ALIGN((w) * (h), SZ_4K) + ALIGN((w) * (h) / 2, SZ_4K))
+ /* IPU device */
+ typedef enum {
+ 	RGB_CS,
+-- 
+1.7.7.4
+

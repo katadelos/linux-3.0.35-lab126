@@ -1,0 +1,43 @@
+From 4bf430c18172b8a77d73e2d2b77ae2ec5dce0f13 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Thu, 27 Oct 2011 10:21:29 +0800
+Subject: [PATCH 0551/2463] ENGR00160876 videobuf: add timestamp for user
+ point buffer
+
+1. add timestamp for userpoint buffer
+2. use pgprot_writecombine for mmap
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/media/video/videobuf-core.c       |    1 +
+ drivers/media/video/videobuf-dma-contig.c |    2 +-
+ 2 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/videobuf-core.c b/drivers/media/video/videobuf-core.c
+index de4fa4e..2149f4d 100644
+--- a/drivers/media/video/videobuf-core.c
++++ b/drivers/media/video/videobuf-core.c
+@@ -600,6 +600,7 @@ int videobuf_qbuf(struct videobuf_queue *q, struct v4l2_buffer *b)
+ 		    buf->baddr != b->m.userptr)
+ 			q->ops->buf_release(q, buf);
+ 		buf->baddr = b->m.userptr;
++		buf->ts = b->timestamp;
+ 		break;
+ 	case V4L2_MEMORY_OVERLAY:
+ 		buf->boff = b->m.offset;
+diff --git a/drivers/media/video/videobuf-dma-contig.c b/drivers/media/video/videobuf-dma-contig.c
+index c47195b..af7ff78 100644
+--- a/drivers/media/video/videobuf-dma-contig.c
++++ b/drivers/media/video/videobuf-dma-contig.c
+@@ -298,7 +298,7 @@ static int __videobuf_mmap_mapper(struct videobuf_queue *q,
+ 	size = vma->vm_end - vma->vm_start;
+ 	size = (size < mem->size) ? size : mem->size;
+ 
+-	vma->vm_page_prot = pgprot_writethru(vma->vm_page_prot);
++	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+ 	retval = remap_pfn_range(vma, vma->vm_start,
+ 				 mem->dma_handle >> PAGE_SHIFT,
+ 				 size, vma->vm_page_prot);
+-- 
+1.7.7.4
+

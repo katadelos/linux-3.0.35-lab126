@@ -1,0 +1,84 @@
+From b6606f032a02f4ee7f665ff7398567ec5fdc6a49 Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Thu, 16 Aug 2012 15:36:36 +0800
+Subject: [PATCH 1916/2463] ENGR00220027-1 IOMUX: add api for special pad bits
+ configuration
+
+Original pad configuration does not provide enough bitfield width
+to config some bits, such as LVE bit and DDR_SEL bits.
+like gpr configuration, add a api to implement these special
+bits pad configuration, and user may call this api in board file.
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ arch/arm/plat-mxc/include/mach/iomux-v3.h |   13 +++++++++++++
+ arch/arm/plat-mxc/iomux-v3.c              |   11 ++++++++++-
+ 2 files changed, 23 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-v3.h b/arch/arm/plat-mxc/include/mach/iomux-v3.h
+index 1ff80f9..c53028f 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-v3.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-v3.h
+@@ -2,6 +2,8 @@
+  * Copyright (C) 2009 by Jan Weitzel Phytec Messtechnik GmbH,
+  *			<armlinux@phytec.de>
+  *
++ * Copyright (C) 2012 Freescale Semiconductor, Inc.
++ *
+  * This program is free software; you can redistribute it and/or
+  * modify it under the terms of the GNU General Public License
+  * as published by the Free Software Foundation; either version 2
+@@ -89,6 +91,11 @@ typedef u64 iomux_v3_cfg_t;
+ #define NO_PAD_I			0
+ #define NO_MUX_I			0
+ #ifdef CONFIG_SOC_IMX6Q
++#define PAD_CTL_LVE			(1 << 22)
++#define PAD_CTL_LVE_MASK		(1 << 22)
++#define PAD_CTL_DDR_SEL_LPDDR2		(2 << 18)
++#define PAD_CTL_DDR_SEL_DDR3		(3 << 18)
++#define PAD_CTL_DDR_SEL_MASK		(3 << 18)
+ #define PAD_CTL_HYS			(1 << 16)
+ 
+ #define PAD_CTL_PUS_100K_DOWN		(0 << 14)
+@@ -173,5 +180,11 @@ void mxc_iomux_v3_init(void __iomem *iomux_v3_base);
+  * Set bits for general purpose registers
+  */
+ void mxc_iomux_set_gpr_register(int group, int start_bit, int num_bits, int value);
++
++/*
++ * Set special bits for iomux registers, such as LVE bit, DDR_SEL bits
++ */
++void mxc_iomux_set_specialbits_register(u32 pad_addr, u32 value, u32 mask);
++
+ #endif /* __MACH_IOMUX_V3_H__*/
+ 
+diff --git a/arch/arm/plat-mxc/iomux-v3.c b/arch/arm/plat-mxc/iomux-v3.c
+index f7bc871..85b7e17 100644
+--- a/arch/arm/plat-mxc/iomux-v3.c
++++ b/arch/arm/plat-mxc/iomux-v3.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2011 Freescale Semiconductor, Inc.
++ * Copyright 2004-2012 Freescale Semiconductor, Inc.
+  * Copyright (C) 2008 by Sascha Hauer <kernel@pengutronix.de>
+  * Copyright (C) 2009 by Jan Weitzel Phytec Messtechnik GmbH,
+  *                       <armlinux@phytec.de>
+@@ -86,6 +86,15 @@ void mxc_iomux_set_gpr_register(int group, int start_bit, int num_bits, int valu
+ 	__raw_writel(reg, base + group * 4);
+ }
+ EXPORT_SYMBOL(mxc_iomux_set_gpr_register);
++void mxc_iomux_set_specialbits_register(u32 pad_addr, u32 value, u32 mask)
++{
++	u32 reg;
++	reg = __raw_readl(base + pad_addr);
++	reg &= ~mask;
++	reg |= value;
++	__raw_writel(reg, base + pad_addr);
++}
++EXPORT_SYMBOL(mxc_iomux_set_specialbits_register);
+ 
+ void mxc_iomux_v3_init(void __iomem *iomux_v3_base)
+ {
+-- 
+1.7.7.4
+

@@ -1,0 +1,117 @@
+From 7b6c0631d4392081690fa8c17f4805862bd0145a Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Wed, 16 May 2012 17:32:13 +0800
+Subject: [PATCH 1481/2463] ENGR00209529 WM8962: registry detect pin handler
+ more late
+
+move hp/mic detect pin handler from imx_wm8962_probe()
+to imx_wm8962_init().
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ sound/soc/imx/imx-wm8962.c |   74 ++++++++++++++++++++++----------------------
+ 1 files changed, 37 insertions(+), 37 deletions(-)
+
+diff --git a/sound/soc/imx/imx-wm8962.c b/sound/soc/imx/imx-wm8962.c
+index 74950ad..9eff86a 100644
+--- a/sound/soc/imx/imx-wm8962.c
++++ b/sound/soc/imx/imx-wm8962.c
+@@ -305,6 +305,7 @@ static int imx_wm8962_init(struct snd_soc_pcm_runtime *rtd)
+ 	struct imx_priv *priv = &card_priv;
+ 	struct platform_device *pdev = priv->pdev;
+ 	struct mxc_audio_platform_data *plat = pdev->dev.platform_data;
++	int ret = 0;
+ 
+ 	gcodec = rtd->codec;
+ 
+@@ -320,7 +321,43 @@ static int imx_wm8962_init(struct snd_soc_pcm_runtime *rtd)
+ 
+ 	snd_soc_dapm_sync(&codec->dapm);
+ 
++	if (plat->hp_gpio != -1) {
++			priv->hp_irq = gpio_to_irq(plat->hp_gpio);
++
++			ret = request_irq(priv->hp_irq,
++						imx_headphone_detect_handler,
++						IRQ_TYPE_EDGE_BOTH, pdev->name, priv);
++
++			if (ret < 0) {
++				ret = -EINVAL;
++				return ret;
++			}
++
++			ret = driver_create_file(pdev->dev.driver,
++							&driver_attr_headphone);
++			if (ret < 0) {
++				ret = -EINVAL;
++				return ret;
++			}
++		}
++
+ 	if (plat->mic_gpio != -1) {
++		priv->amic_irq = gpio_to_irq(plat->mic_gpio);
++
++		ret = request_irq(priv->amic_irq,
++					imx_amic_detect_handler,
++					IRQ_TYPE_EDGE_BOTH, pdev->name, priv);
++
++		if (ret < 0) {
++			ret = -EINVAL;
++			return ret;
++		}
++
++		ret = driver_create_file(pdev->dev.driver, &driver_attr_amic);
++		if (ret < 0) {
++			ret = -EINVAL;
++			return ret;
++		}
+ 
+ 		priv->amic_status = gpio_get_value(plat->mic_gpio);
+ 
+@@ -406,43 +443,6 @@ static int __devinit imx_wm8962_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	priv->sysclk = plat->sysclk;
+-	priv->hp_irq = gpio_to_irq(plat->hp_gpio);
+-	priv->amic_irq = gpio_to_irq(plat->mic_gpio);
+-
+-	if (plat->hp_gpio != -1) {
+-		ret = request_irq(priv->hp_irq,
+-					imx_headphone_detect_handler,
+-					IRQ_TYPE_EDGE_BOTH, pdev->name, priv);
+-
+-		if (ret < 0) {
+-			ret = -EINVAL;
+-			return ret;
+-		}
+-
+-		ret = driver_create_file(pdev->dev.driver,
+-						&driver_attr_headphone);
+-		if (ret < 0) {
+-			ret = -EINVAL;
+-			return ret;
+-		}
+-	}
+-
+-	if (plat->mic_gpio != -1) {
+-		ret = request_irq(priv->amic_irq,
+-					imx_amic_detect_handler,
+-					IRQ_TYPE_EDGE_BOTH, pdev->name, priv);
+-
+-		if (ret < 0) {
+-			ret = -EINVAL;
+-			return ret;
+-		}
+-
+-		ret = driver_create_file(pdev->dev.driver, &driver_attr_amic);
+-		if (ret < 0) {
+-			ret = -EINVAL;
+-			return ret;
+-		}
+-	}
+ 
+ 	return ret;
+ }
+-- 
+1.7.7.4
+

@@ -1,0 +1,40 @@
+From 4c430fc1b4681dd7688e2644cce4815bc6b3bfbb Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Wed, 22 Feb 2012 09:32:51 +0800
+Subject: [PATCH 1077/2463] ENGR00175080 [MX6] MMC: kernel failed to init eMMC
+ card, after boot from eMMC
+
+issue:
+if uboot is loaded from eMMC, the eMMC memory will be configured to DDR mode.
+on kernel startup, it will initialize the card at SDR mode, while the register
+of USDHC is still configured to DDR enable mode. Therefore, the initialization
+of eMMC memory will fail.
+
+fix:
+- clear MIX_CTRL on sdhc platform init code.
+- clear vselect bit of VENDOR_SPEC on sdhc platform init code.
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/host/sdhci-esdhc-imx.c |    5 ++++-
+ 1 files changed, 4 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index 90c4b20..89c5735 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -630,7 +630,10 @@ static int esdhc_pltfm_init(struct sdhci_host *host, struct sdhci_pltfm_data *pd
+ 		host->clk_mgr_en = true;
+ 	}
+ 
+-	reg = readl(host->ioaddr + SDHCI_MIX_CTRL);
++	writel(0, host->ioaddr + SDHCI_MIX_CTRL);
++	reg = readl(host->ioaddr + SDHCI_VENDOR_SPEC);
++	reg &= ~SDHCI_VENDOR_SPEC_VSELECT;
++	writel(reg, host->ioaddr + SDHCI_VENDOR_SPEC);
+ 	/* disable card interrupt enable bit, and clear status bit
+ 	 * the default value of this enable bit is 1, but it should
+ 	 * be 0 regarding to standard host controller spec 2.1.3.
+-- 
+1.7.7.4
+

@@ -1,0 +1,85 @@
+From 1d80bd0d43df0561cf64d062a501aabe8a9cd44f Mon Sep 17 00:00:00 2001
+From: Rong Dian <b38775@freescale.com>
+Date: Mon, 20 Aug 2012 20:23:00 +0800
+Subject: [PATCH 1933/2463] ENGR00220794 imx6 thermal: add suspend and resume
+ for thermal_sys class
+
+1.Avoiding system wrong reboot caused by error temperature without
+cancel_delayed_work before entering into suspend,so to cancel
+thermal_zone_device temperature polling temperature delayed_work
+before entering into suspend, reenable polling temperature delayed_work
+after entering into resume.
+2.In anatop_thermal_suspend, turn off alarm firstly
+
+Signed-off-by: Rong Dian <b38775@freescale.com>
+---
+ drivers/mxc/thermal/thermal.c |    7 +++----
+ drivers/thermal/thermal_sys.c |   23 +++++++++++++++++++++++
+ 2 files changed, 26 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mxc/thermal/thermal.c b/drivers/mxc/thermal/thermal.c
+index d66db05..0f4cfb8 100644
+--- a/drivers/mxc/thermal/thermal.c
++++ b/drivers/mxc/thermal/thermal.c
+@@ -959,6 +959,9 @@ static int anatop_thermal_remove(struct platform_device *pdev)
+ static int anatop_thermal_suspend(struct platform_device *pdev,
+ 		pm_message_t state)
+ {
++	/* turn off alarm */
++	anatop_update_alarm(0);
++	suspend_flag = true;
+ 	/* Power down anatop thermal sensor */
+ 	__raw_writel(BM_ANADIG_TEMPSENSE0_MEASURE_TEMP,
+ 		anatop_base + HW_ANADIG_TEMPSENSE0_CLR);
+@@ -968,10 +971,6 @@ static int anatop_thermal_suspend(struct platform_device *pdev,
+ 		anatop_base + HW_ANADIG_TEMPSENSE0_SET);
+ 	__raw_writel(BM_ANADIG_ANA_MISC0_REFTOP_SELBIASOFF,
+ 		anatop_base + HW_ANADIG_ANA_MISC0_CLR);
+-	/* turn off alarm */
+-	anatop_update_alarm(0);
+-	suspend_flag = true;
+-
+ 	return 0;
+ }
+ static int anatop_thermal_resume(struct platform_device *pdev)
+diff --git a/drivers/thermal/thermal_sys.c b/drivers/thermal/thermal_sys.c
+index 04506f6..745db5e 100644
+--- a/drivers/thermal/thermal_sys.c
++++ b/drivers/thermal/thermal_sys.c
+@@ -842,10 +842,33 @@ static void thermal_release(struct device *dev)
+ 		kfree(cdev);
+ 	}
+ }
++static int thermal_suspend(struct device *dev, pm_message_t state)
++{
++	struct thermal_zone_device *tz;
++	if (!strncmp(dev_name(dev), "thermal_zone", strlen("thermal_zone"))) {
++		tz = to_thermal_zone(dev);
++		thermal_zone_device_set_polling(tz, 0);
++	}
++	return 0;
++}
++static int themal_resume(struct device *dev)
++{
++	struct thermal_zone_device *tz;
++	if (!strncmp(dev_name(dev), "thermal_zone", strlen("thermal_zone"))) {
++		tz = to_thermal_zone(dev);
++		if (tz->passive)
++			thermal_zone_device_set_polling(tz, tz->passive_delay);
++		else if (tz->polling_delay)
++			thermal_zone_device_set_polling(tz, tz->polling_delay);
++	}
++	return 0;
++}
+ 
+ static struct class thermal_class = {
+ 	.name = "thermal",
+ 	.dev_release = thermal_release,
++	.suspend = thermal_suspend,
++	.resume = themal_resume,
+ };
+ 
+ /**
+-- 
+1.7.7.4
+

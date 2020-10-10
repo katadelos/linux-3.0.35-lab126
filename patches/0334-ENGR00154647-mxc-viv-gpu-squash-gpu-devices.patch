@@ -1,0 +1,177 @@
+From fc51963224141530380d0224bafd386a1012f7c5 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <richard.zhao@freescale.com>
+Date: Tue, 9 Aug 2011 20:00:57 +0800
+Subject: [PATCH 0334/2463] ENGR00154647 mxc: viv-gpu: squash gpu devices
+
+gpu multi-core dirver 4.4.2 needs one single gpu device.
+
+Signed-off-by: Richard Zhao <richard.zhao@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c        |   16 +++----
+ arch/arm/mach-mx6/devices-imx6q.h               |    4 +-
+ arch/arm/plat-mxc/devices/platform-viv_gpu.c    |   55 ++++++++++++++---------
+ arch/arm/plat-mxc/include/mach/devices-common.h |    9 +++-
+ 4 files changed, 48 insertions(+), 36 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 4014975..21ae399 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -482,7 +482,7 @@ static void __init imx6q_sabreauto_init_usb(void)
+ 	mx6_usb_dr_init();
+ 	mx6_usb_h1_init();
+ }
+-static struct viv_gpu_platform_data imx6q_gc2000_pdata __initdata = {
++static struct viv_gpu_platform_data imx6q_gpu_pdata __initdata = {
+ 	.reserved_mem_size = SZ_128M,
+ };
+ 
+@@ -709,9 +709,7 @@ static void __init mx6_board_init(void)
+ 	imx6q_add_pm_imx(0, &mx6q_sabreauto_pm_data);
+ 	imx6q_add_sdhci_usdhc_imx(3, &mx6q_sabreauto_sd4_data);
+ 	imx6q_add_sdhci_usdhc_imx(2, &mx6q_sabreauto_sd3_data);
+-	imx_add_viv_gpu("gc2000", &imx6_gc2000_data, &imx6q_gc2000_pdata);
+-	imx_add_viv_gpu("gc355", &imx6_gc355_data, NULL);
+-	imx_add_viv_gpu("gc320", &imx6_gc320_data, NULL);
++	imx_add_viv_gpu(&imx6_gpu_data, &imx6q_gpu_pdata);
+ 	imx6q_sabreauto_init_usb();
+ 	imx6q_add_ahci(0, &mx6q_sabreauto_sata_data);
+ 	imx6q_add_vpu();
+@@ -766,11 +764,11 @@ static void __init mx6q_reserve(void)
+ {
+ 	phys_addr_t phys;
+ 
+-	if (imx6q_gc2000_pdata.reserved_mem_size) {
+-		phys = memblock_alloc_base(imx6q_gc2000_pdata.reserved_mem_size, SZ_4K, SZ_2G);
+-		memblock_free(phys, imx6q_gc2000_pdata.reserved_mem_size);
+-		memblock_remove(phys, imx6q_gc2000_pdata.reserved_mem_size);
+-		imx6q_gc2000_pdata.reserved_mem_base = phys;
++	if (imx6q_gpu_pdata.reserved_mem_size) {
++		phys = memblock_alloc_base(imx6q_gpu_pdata.reserved_mem_size, SZ_4K, SZ_2G);
++		memblock_free(phys, imx6q_gpu_pdata.reserved_mem_size);
++		memblock_remove(phys, imx6q_gpu_pdata.reserved_mem_size);
++		imx6q_gpu_pdata.reserved_mem_base = phys;
+ 	}
+ }
+ 
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 3f6a3e0..8e790c7 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -82,9 +82,7 @@ extern const struct imx_imx_esai_data imx6q_imx_esai_data[] __initconst;
+ #define imx6q_add_imx_esai(id, pdata) \
+ 	imx_add_imx_esai(&imx6q_imx_esai_data[id], pdata)
+ 
+-extern const struct imx_viv_gpu_data imx6_gc2000_data __initconst;
+-extern const struct imx_viv_gpu_data imx6_gc320_data __initconst;
+-extern const struct imx_viv_gpu_data imx6_gc355_data __initconst;
++extern const struct imx_viv_gpu_data imx6_gpu_data __initconst;
+ 
+ extern const struct imx_ahci_data imx6q_ahci_data __initconst;
+ #define imx6q_add_ahci(id, pdata)   \
+diff --git a/arch/arm/plat-mxc/devices/platform-viv_gpu.c b/arch/arm/plat-mxc/devices/platform-viv_gpu.c
+index 82d1758..b11efe0 100644
+--- a/arch/arm/plat-mxc/devices/platform-viv_gpu.c
++++ b/arch/arm/plat-mxc/devices/platform-viv_gpu.c
+@@ -22,42 +22,55 @@
+ #include <mach/devices-common.h>
+ 
+ #ifdef CONFIG_ARCH_MX6
+-const struct imx_viv_gpu_data imx6_gc2000_data __initconst = {
+-	.iobase = GPU_3D_ARB_BASE_ADDR,
+-	.irq = MXC_INT_GPU3D_IRQ,
+-};
+-
+-const struct imx_viv_gpu_data imx6_gc320_data __initconst = {
+-	.iobase = GPU_2D_ARB_BASE_ADDR,
+-	.irq = MXC_INT_GPU2D_IRQ,
+-};
+-
+-const struct imx_viv_gpu_data imx6_gc355_data __initconst = {
+-	.iobase = OPENVG_ARB_BASE_ADDR,
+-	.irq = MXC_INT_OPENVG_XAQ2,
++const struct imx_viv_gpu_data imx6_gpu_data __initconst = {
++	.iobase_3d = GPU_3D_ARB_BASE_ADDR,
++	.irq_3d = MXC_INT_GPU3D_IRQ,
++	.iobase_2d = GPU_2D_ARB_BASE_ADDR,
++	.irq_2d = MXC_INT_GPU2D_IRQ,
++	.iobase_vg = OPENVG_ARB_BASE_ADDR,
++	.irq_vg = MXC_INT_OPENVG_XAQ2,
+ };
+ #endif
+ 
+ struct platform_device *__init imx_add_viv_gpu(
+-		const char *name,
+ 		const struct imx_viv_gpu_data *data,
+ 		const struct viv_gpu_platform_data *pdata)
+ {
+ 	struct resource res[] = {
+ 		{
+-			.name = "gpu_base",
+-			.start = data->iobase,
+-			.end = data->iobase + SZ_16K - 1,
++			.name = "iobase_3d",
++			.start = data->iobase_3d,
++			.end = data->iobase_3d + SZ_16K - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.name = "irq_3d",
++			.start = data->irq_3d,
++			.end = data->irq_3d,
++			.flags = IORESOURCE_IRQ,
++		}, {
++			.name = "iobase_2d",
++			.start = data->iobase_2d,
++			.end = data->iobase_2d + SZ_16K - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.name = "irq_2d",
++			.start = data->irq_2d,
++			.end = data->irq_2d,
++			.flags = IORESOURCE_IRQ,
++		}, {
++			.name = "iobase_vg",
++			.start = data->iobase_vg,
++			.end = data->iobase_vg + SZ_16K - 1,
+ 			.flags = IORESOURCE_MEM,
+ 		}, {
+-			.name = "gpu_irq",
+-			.start = data->irq,
+-			.end = data->irq,
++			.name = "irq_vg",
++			.start = data->irq_vg,
++			.end = data->irq_vg,
+ 			.flags = IORESOURCE_IRQ,
+ 		},
+ 	};
+ 
+-	return imx_add_platform_device_dmamask(name, 0,
++	return imx_add_platform_device_dmamask("galcore", 0,
+ 			res, ARRAY_SIZE(res),
+ 			pdata, sizeof(*pdata),
+ 			DMA_BIT_MASK(32));
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index eca6361..370e681 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -482,11 +482,14 @@ struct platform_device *__init imx_add_spdif_audio_device(void);
+ 
+ #include <mach/viv_gpu.h>
+ struct imx_viv_gpu_data {
+-	resource_size_t irq;
+-	resource_size_t iobase;
++	resource_size_t irq_3d;
++	resource_size_t iobase_3d;
++	resource_size_t irq_2d;
++	resource_size_t iobase_2d;
++	resource_size_t irq_vg;
++	resource_size_t iobase_vg;
+ };
+ struct platform_device *__init imx_add_viv_gpu(
+-		const char *name,
+ 		const struct imx_viv_gpu_data *data,
+ 		const struct viv_gpu_platform_data *pdata);
+ 
+-- 
+1.7.7.4
+

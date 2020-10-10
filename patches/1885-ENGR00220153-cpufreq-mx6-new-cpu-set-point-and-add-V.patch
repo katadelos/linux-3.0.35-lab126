@@ -1,0 +1,610 @@
+From 0dbe59545a8b2b86d7d0a966b28e4e7f99cef426 Mon Sep 17 00:00:00 2001
+From: Robin Gong <b38343@freescale.com>
+Date: Sat, 11 Aug 2012 16:36:35 +0800
+Subject: [PATCH 1885/2463] ENGR00220153 cpufreq mx6: new cpu set point and
+ add VDDSOC/PU adjust
+
+1.add new cpu setpoint: replace 498Mhz with 672Mhz,and remove 198Mhz.
+  but now 498Mhz seems not stable enough, comment now, test enough to
+  add it. Rigel kept unchange now.
+2.support adjusting VDDSOC/VDDPU when cpu frequency change.
+
+Signed-off-by: Robin Gong <b38343@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c       |    6 ++
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c  |    8 ++
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c  |    6 ++
+ arch/arm/mach-mx6/board-mx6q_sabresd.c    |    6 ++
+ arch/arm/mach-mx6/board-mx6sl_arm2.c      |   15 +++-
+ arch/arm/mach-mx6/clock.c                 |    5 +
+ arch/arm/mach-mx6/clock_mx6sl.c           |    5 +
+ arch/arm/mach-mx6/cpu_op-mx6.c            |  121 ++++++++++++++++++----------
+ arch/arm/mach-mx6/cpu_regulator-mx6.c     |   12 +++-
+ arch/arm/plat-mxc/cpufreq.c               |   40 +++++++++-
+ arch/arm/plat-mxc/include/mach/mxc.h      |    2 +
+ arch/arm/plat-mxc/include/mach/mxc_dvfs.h |    6 +-
+ 12 files changed, 184 insertions(+), 48 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 5ed2715..4b0d5c2 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -169,6 +169,8 @@ static int disable_mipi_dsi;
+ extern struct regulator *(*get_cpu_regulator)(void);
+ extern void (*put_cpu_regulator)(void);
+ extern char *gp_reg_id;
++extern char *soc_reg_id;
++extern char *pu_reg_id;
+ extern int epdc_enabled;
+ extern void mx6_cpu_regulator_init(void);
+ static int max17135_regulator_init(struct max17135 *max17135);
+@@ -1881,6 +1883,8 @@ static struct mxc_mlb_platform_data mx6_arm2_mlb150_data = {
+ 
+ static struct mxc_dvfs_platform_data arm2_dvfscore_data = {
+ 	.reg_id			= "cpu_vddgp",
++	.soc_id			= "cpu_vddsoc",
++	.pu_id			= "cpu_vddvpu",
+ 	.clk1_id		= "cpu_clk",
+ 	.clk2_id		= "gpc_dvfs_clk",
+ 	.gpc_cntr_offset	= MXC_GPC_CNTR_OFFSET,
+@@ -2075,6 +2079,8 @@ static void __init mx6_arm2_init(void)
+ 	 */
+ 
+ 	gp_reg_id = arm2_dvfscore_data.reg_id;
++	soc_reg_id = arm2_dvfscore_data.soc_id;
++	pu_reg_id = arm2_dvfscore_data.pu_id;
+ 	mx6_arm2_init_uart();
+ 
+ 
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 3adf51f..eb9fb30 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -136,6 +136,10 @@
+ #define SABREAUTO_USB_OTG_PWR		SABREAUTO_IO_EXP_GPIO3(1)
+ #define BMCR_PDOWN			0x0800 /* PHY Powerdown */
+ 
++extern char *gp_reg_id;
++extern char *soc_reg_id;
++extern char *pu_reg_id;
++
+ static int mma8451_position = 3;
+ static struct clk *sata_clk;
+ static int mipi_sensor;
+@@ -1256,6 +1260,8 @@ static struct mxc_mlb_platform_data mx6_sabreauto_mlb150_data = {
+ 
+ static struct mxc_dvfs_platform_data sabreauto_dvfscore_data = {
+ 	.reg_id			= "cpu_vddgp",
++	.soc_id			= "cpu_vddsoc",
++	.pu_id			= "cpu_vddvpu",
+ 	.clk1_id		= "cpu_clk",
+ 	.clk2_id 		= "gpc_dvfs_clk",
+ 	.gpc_cntr_offset 	= MXC_GPC_CNTR_OFFSET,
+@@ -1479,6 +1485,8 @@ static void __init mx6_board_init(void)
+ 	}
+ 
+ 	gp_reg_id = sabreauto_dvfscore_data.reg_id;
++	soc_reg_id = sabreauto_dvfscore_data.soc_id;
++	pu_reg_id = sabreauto_dvfscore_data.pu_id;
+ 	mx6q_sabreauto_init_uart();
+ 	imx6q_add_mipi_csi2(&mipi_csi2_pdata);
+ 	if (cpu_is_mx6dl()) {
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index 17a4cb1..6f14aea 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -101,6 +101,8 @@ void __init early_console_setup(unsigned long base, struct clk *clk);
+ static struct clk *sata_clk;
+ 
+ extern char *gp_reg_id;
++extern char *soc_reg_id;
++extern char *pu_reg_id;
+ 
+ extern struct regulator *(*get_cpu_regulator)(void);
+ extern void (*put_cpu_regulator)(void);
+@@ -1066,6 +1068,8 @@ static struct platform_pwm_backlight_data mx6_sabrelite_pwm_backlight_data = {
+ 
+ static struct mxc_dvfs_platform_data sabrelite_dvfscore_data = {
+ 	.reg_id = "cpu_vddgp",
++	.soc_id = "cpu_vddsoc",
++	.pu_id = "cpu_vddvpu",
+ 	.clk1_id = "cpu_clk",
+ 	.clk2_id = "gpc_dvfs_clk",
+ 	.gpc_cntr_offset = MXC_GPC_CNTR_OFFSET,
+@@ -1125,6 +1129,8 @@ static void __init mx6_sabrelite_board_init(void)
+ #endif
+ 
+ 	gp_reg_id = sabrelite_dvfscore_data.reg_id;
++	soc_reg_id = sabrelite_dvfscore_data.soc_id;
++	pu_reg_id = sabrelite_dvfscore_data.pu_id;
+ 	mx6q_sabrelite_init_uart();
+ 	imx6q_add_mxc_hdmi_core(&hdmi_core_data);
+ 
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 47d0eec..480ef18 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -207,6 +207,8 @@ static int enable_lcd_ldb;
+ 
+ 
+ extern char *gp_reg_id;
++extern char *soc_reg_id;
++extern char *pu_reg_id;
+ extern int epdc_enabled;
+ 
+ static int max17135_regulator_init(struct max17135 *max17135);
+@@ -1583,6 +1585,8 @@ static struct mxc_dvfs_platform_data sabresd_dvfscore_data = {
+ 	.reg_id = "VDDCORE",
+ 	#else
+ 	.reg_id = "cpu_vddgp",
++	.soc_id = "cpu_vddsoc",
++	.pu_id = "cpu_vddvpu",
+ 	#endif
+ 	.clk1_id = "cpu_clk",
+ 	.clk2_id = "gpc_dvfs_clk",
+@@ -1673,6 +1677,8 @@ static void __init mx6_sabresd_board_init(void)
+ #endif
+ 
+ 	gp_reg_id = sabresd_dvfscore_data.reg_id;
++	soc_reg_id = sabresd_dvfscore_data.soc_id;
++	pu_reg_id = sabresd_dvfscore_data.pu_id;
+ 	mx6q_sabresd_init_uart();
+ 
+ 	/*
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 4e827ee..0c51666 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -133,6 +133,9 @@ static int spdc_sel;
+ static int max17135_regulator_init(struct max17135 *max17135);
+ struct clk *extern_audio_root;
+ 
++extern char *gp_reg_id;
++extern char *soc_reg_id;
++extern char *pu_reg_id;
+ extern int __init mx6sl_arm2_init_pfuze100(u32 int_gpio);
+ 
+ enum sd_pad_mode {
+@@ -632,7 +635,13 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ };
+ 
+ static struct mxc_dvfs_platform_data mx6sl_arm2_dvfscore_data = {
++	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++	.reg_id			= "VDDCORE",
++	#else
+ 	.reg_id			= "cpu_vddgp",
++	.soc_id			= "cpu_vddsoc",
++	.pu_id			= "cpu_vddvpu",
++	#endif
+ 	.clk1_id		= "cpu_clk",
+ 	.clk2_id		= "gpc_dvfs_clk",
+ 	.gpc_cntr_offset	= MXC_GPC_CNTR_OFFSET,
+@@ -1228,9 +1237,11 @@ static void __init mx6_arm2_init(void)
+ 	elan_ts_init();
+ 
+ 	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+-	gp_reg_id = "VDDCORE";
++	gp_reg_id = mx6sl_arm2_dvfscore_data.reg_id;
+ 	#else
+-	gp_reg_id = "cpu_vddgp";
++	gp_reg_id = mx6sl_arm2_dvfscore_data.reg_id;
++	soc_reg_id = mx6sl_arm2_dvfscore_data.soc_id;
++	pu_reg_id = mx6sl_arm2_dvfscore_data.pu_id;
+ 	mx6_cpu_regulator_init();
+ 	#endif
+ 
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 61cf37c..5b74e2d 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -1272,6 +1272,11 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 				else
+ 					pll1_sw_clk.set_parent(&pll1_sw_clk, &osc_clk);
+ 			}
++			if (cpu_op_tbl[i].cpu_podf) {
++				__raw_writel(cpu_op_tbl[i].cpu_podf, MXC_CCM_CACRR);
++				while (__raw_readl(MXC_CCM_CDHIPR))
++							;
++			}
+ 			pll1_sys_main_clk.set_rate(&pll1_sys_main_clk, cpu_op_tbl[i].pll_rate);
+ 		}
+ 		/* Make sure pll1_sw_clk is from pll1_sys_main_clk */
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 887e6ad..6e0bcc4 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -1159,6 +1159,11 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 				else
+ 					pll1_sw_clk.set_parent(&pll1_sw_clk, &osc_clk);
+ 			}
++			if (cpu_op_tbl[i].cpu_podf) {
++				__raw_writel(cpu_op_tbl[i].cpu_podf, MXC_CCM_CACRR);
++				while (__raw_readl(MXC_CCM_CDHIPR))
++							;
++			}
+ 			pll1_sys_main_clk.set_rate(&pll1_sys_main_clk, cpu_op_tbl[i].pll_rate);
+ 		}
+ 		pll1_sw_clk.set_parent(&pll1_sw_clk, &pll1_sys_main_clk);
+diff --git a/arch/arm/mach-mx6/cpu_op-mx6.c b/arch/arm/mach-mx6/cpu_op-mx6.c
+index 6fe2fd8..98181ce 100644
+--- a/arch/arm/mach-mx6/cpu_op-mx6.c
++++ b/arch/arm/mach-mx6/cpu_op-mx6.c
+@@ -23,60 +23,68 @@ extern void (*set_num_cpu_op)(int num);
+ extern u32 arm_max_freq;
+ static int num_cpu_op;
+ 
+-/* working point(wp): 0 - 1.2GHz; 1 - 800MHz, 2 - 624MHz 3 - 400MHz, 4  - 200MHz */
++/* working point(wp): 0 - 1.2GHz; 1 - 792MHz, 2 - 498MHz 3 - 396MHz */
+ static struct cpu_op mx6_cpu_op_1_2G[] = {
+ 	{
+ 	 .pll_rate = 1200000000,
+ 	 .cpu_rate = 1200000000,
+ 	 .cpu_podf = 0,
++	 .pu_voltage = 1250000,
++	 .soc_voltage = 1250000,
+ 	 .cpu_voltage = 1275000,},
+ 	{
+ 	 .pll_rate = 792000000,
+ 	 .cpu_rate = 792000000,
+ 	 .cpu_podf = 0,
++	 .pu_voltage = 1100000,
++	 .soc_voltage = 1100000,
+ 	 .cpu_voltage = 1100000,},
+-	{
+-	 .pll_rate = 672000000,
+-	 .cpu_rate = 672000000,
+-	 .cpu_voltage = 1050000,},
++/*	{
++	 .pll_rate = 996000000,
++	 .cpu_rate = 498000000,
++	 .cpu_podf = 1,
++	 .pu_voltage = 1100000,
++	 .soc_voltage = 1100000,
++	 .cpu_voltage = 1050000,},*/
+ 	 {
+ 	  .pll_rate = 396000000,
+ 	  .cpu_rate = 396000000,
+ 	  .cpu_podf = 0,
+-	  .cpu_voltage = 950000,},
+-	{
+-	 .pll_rate = 396000000,
+-	 .cpu_rate = 198000000,
+-	 .cpu_podf = 1,
+-	 .cpu_voltage = 850000,},
++	  .pu_voltage = 1100000,
++	  .soc_voltage = 1100000,
++	  .cpu_voltage = 925000,},
+ };
+ 
+-/* working point(wp): 0 - 1GHz; 1 - 800MHz, 2 - 624MHz 3 - 400MHz, 4  - 200MHz */
++/* working point(wp): 0 - 1GHz; 1 - 792MHz, 2 - 498MHz 3 - 396MHz */
+ static struct cpu_op mx6_cpu_op_1G[] = {
+ 	{
+ 	 .pll_rate = 996000000,
+ 	 .cpu_rate = 996000000,
+ 	 .cpu_podf = 0,
++	 .pu_voltage = 1200000,
++	 .soc_voltage = 1200000,
+ 	 .cpu_voltage = 1225000,},
+ 	{
+ 	 .pll_rate = 792000000,
+ 	 .cpu_rate = 792000000,
+ 	 .cpu_podf = 0,
++	 .pu_voltage = 1100000,
++	 .soc_voltage = 1100000,
+ 	 .cpu_voltage = 1100000,},
+-	{
+-	 .pll_rate = 672000000,
+-	 .cpu_rate = 672000000,
+-	 .cpu_voltage = 1050000,},
++/*	{
++	 .pll_rate = 996000000,
++	 .cpu_rate = 498000000,
++	 .cpu_podf = 1,
++	 .pu_voltage = 1100000,
++	 .soc_voltage = 1100000,
++	 .cpu_voltage = 1050000,},*/
+ 	 {
+ 	  .pll_rate = 396000000,
+ 	  .cpu_rate = 396000000,
+ 	  .cpu_podf = 0,
+-	  .cpu_voltage = 950000,},
+-	{
+-	 .pll_rate = 396000000,
+-	 .cpu_rate = 198000000,
+-	 .cpu_podf = 1,
+-	 .cpu_voltage = 850000,},
++	  .pu_voltage = 1100000,
++	  .soc_voltage = 1100000,
++	  .cpu_voltage = 925000,},
+ };
+ 
+ static struct cpu_op mx6_cpu_op[] = {
+@@ -84,17 +92,23 @@ static struct cpu_op mx6_cpu_op[] = {
+ 	 .pll_rate = 792000000,
+ 	 .cpu_rate = 792000000,
+ 	 .cpu_podf = 0,
++	 .pu_voltage = 1100000,
++	 .soc_voltage = 1100000,
+ 	 .cpu_voltage = 1100000,},
++/*	{
++	 .pll_rate = 996000000,
++	 .cpu_rate = 498000000,
++	 .cpu_podf = 1,
++	 .pu_voltage = 1100000,
++	 .soc_voltage = 1100000,
++	 .cpu_voltage = 1050000,},*/
+ 	 {
+ 	  .pll_rate = 396000000,
+ 	  .cpu_rate = 396000000,
+ 	  .cpu_podf = 0,
+-	  .cpu_voltage = 950000,},
+-	{
+-	 .pll_rate = 396000000,
+-	 .cpu_rate = 198000000,
+-	 .cpu_podf = 1,
+-	 .cpu_voltage = 850000,},
++	  .pu_voltage = 1100000,
++	  .soc_voltage = 1100000,
++	  .cpu_voltage = 925000,},
+ };
+ 
+ /* working point(wp): 0 - 1.2GHz; 1 - 800MHz, 2 - 400MHz, 3  - 200MHz */
+@@ -103,22 +117,30 @@ static struct cpu_op mx6dl_cpu_op_1_2G[] = {
+ 	 .pll_rate = 1200000000,
+ 	 .cpu_rate = 1200000000,
+ 	 .cpu_podf = 0,
++	 .pu_voltage = 1250000,
++	 .soc_voltage = 1250000,
+ 	 .cpu_voltage = 1275000,},
+ 	{
+ 	 .pll_rate = 792000000,
+ 	 .cpu_rate = 792000000,
+ 	 .cpu_podf = 0,
+-	 .cpu_voltage = 1100000,},
++	 .pu_voltage = 1100000,
++	 .soc_voltage = 1100000,
++	 .cpu_voltage = 1125000,},
+ 	 {
+ 	  .pll_rate = 396000000,
+ 	  .cpu_rate = 396000000,
+ 	  .cpu_podf = 0,
+-	  .cpu_voltage = 1000000,},
+-	{
+-	 .pll_rate = 396000000,
+-	 .cpu_rate = 198000000,
+-	 .cpu_podf = 1,
+-	 .cpu_voltage = 1000000,},
++	  .pu_voltage = 1100000,
++	  .soc_voltage = 1100000,
++	  .cpu_voltage = 1025000,},
++	 {
++	  .pll_rate = 396000000,
++	  .cpu_rate = 198000000,
++	  .cpu_podf = 1,
++	  .pu_voltage = 1100000,
++	  .soc_voltage = 1100000,
++	  .cpu_voltage = 1025000,},
+ };
+ /* working point(wp): 0 - 1GHz; 1 - 800MHz, 2 - 400MHz, 3  - 200MHz */
+ static struct cpu_op mx6dl_cpu_op_1G[] = {
+@@ -126,39 +148,52 @@ static struct cpu_op mx6dl_cpu_op_1G[] = {
+ 	 .pll_rate = 996000000,
+ 	 .cpu_rate = 996000000,
+ 	 .cpu_podf = 0,
++	 .pu_voltage = 1200000,
++	 .soc_voltage = 1200000,
+ 	 .cpu_voltage = 1225000,},
+ 	{
+ 	 .pll_rate = 792000000,
+ 	 .cpu_rate = 792000000,
+ 	 .cpu_podf = 0,
++	 .pu_voltage = 1100000,
++	 .soc_voltage = 1100000,
+ 	 .cpu_voltage = 1125000,},
+-	 {
+-	  .pll_rate = 396000000,
+-	  .cpu_rate = 396000000,
+-	  .cpu_podf = 0,
+-	  .cpu_voltage = 1025000,},
+ 	{
+ 	 .pll_rate = 396000000,
+-	 .cpu_rate = 198000000,
+-	 .cpu_podf = 1,
++	 .cpu_rate = 396000000,
++	 .cpu_podf = 0,
++	 .pu_voltage = 1100000,
++	 .soc_voltage = 1100000,
+ 	 .cpu_voltage = 1025000,},
++	 {
++	  .pll_rate = 396000000,
++	  .cpu_rate = 198000000,
++	  .cpu_podf = 1,
++	  .pu_voltage = 1100000,
++	  .soc_voltage = 1100000,
++	  .cpu_voltage = 1025000,},
+ };
+-
+ static struct cpu_op mx6dl_cpu_op[] = {
+ 	{
+ 	 .pll_rate = 792000000,
+ 	 .cpu_rate = 792000000,
+ 	 .cpu_podf = 0,
++	 .pu_voltage = 1100000,
++	 .soc_voltage = 1100000,
+ 	 .cpu_voltage = 1100000,},
+ 	 {
+ 	  .pll_rate = 396000000,
+ 	  .cpu_rate = 396000000,
+ 	  .cpu_podf = 0,
++	  .pu_voltage = 1100000,
++	  .soc_voltage = 1100000,
+ 	  .cpu_voltage = 1000000,},
+ 	{
+ 	 .pll_rate = 396000000,
+ 	 .cpu_rate = 198000000,
+ 	 .cpu_podf = 1,
++	 .pu_voltage = 1100000,
++	 .soc_voltage = 1100000,
+ 	 .cpu_voltage = 1000000,},
+ };
+ 
+diff --git a/arch/arm/mach-mx6/cpu_regulator-mx6.c b/arch/arm/mach-mx6/cpu_regulator-mx6.c
+index 779ed62..cb08cad 100644
+--- a/arch/arm/mach-mx6/cpu_regulator-mx6.c
++++ b/arch/arm/mach-mx6/cpu_regulator-mx6.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -26,7 +26,11 @@
+ #include <mach/hardware.h>
+ 
+ struct regulator *cpu_regulator;
++struct regulator *soc_regulator;
++struct regulator *pu_regulator;
+ char *gp_reg_id;
++char *soc_reg_id;
++char *pu_reg_id;
+ static struct clk *cpu_clk;
+ static int cpu_op_nr;
+ static struct cpu_op *cpu_op_tbl;
+@@ -98,5 +102,11 @@ void mx6_cpu_regulator_init(void)
+ #endif
+ 		}
+ 	}
++	soc_regulator = regulator_get(NULL, soc_reg_id);
++	if (IS_ERR(soc_regulator))
++		printk(KERN_ERR "%s: failed to get soc regulator\n", __func__);
++	pu_regulator = regulator_get(NULL, pu_reg_id);
++	if (IS_ERR(pu_regulator))
++		printk(KERN_ERR "%s: failed to get pu regulator\n", __func__);
+ }
+ 
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index 9355707..fd285cf 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -42,6 +42,7 @@ static int cpu_freq_suspend_in;
+ static struct mutex set_cpufreq_lock;
+ #endif
+ 
++static int soc_regulator_set;
+ static int cpu_freq_khz_min;
+ static int cpu_freq_khz_max;
+ 
+@@ -53,6 +54,8 @@ static struct cpu_op *cpu_op_tbl;
+ static u32 pre_suspend_rate;
+ 
+ extern struct regulator *cpu_regulator;
++extern struct regulator *soc_regulator;
++extern struct regulator *pu_regulator;
+ extern int dvfs_core_is_active;
+ extern struct cpu_op *(*get_cpu_op)(int *op);
+ extern int low_bus_freq_mode;
+@@ -68,14 +71,19 @@ int set_cpu_freq(int freq)
+ 	int i, ret = 0;
+ 	int org_cpu_rate;
+ 	int gp_volt = 0;
++	int soc_volt = 0;
++	int pu_volt = 0;
+ 
+ 	org_cpu_rate = clk_get_rate(cpu_clk);
+ 	if (org_cpu_rate == freq)
+ 		return ret;
+ 
+ 	for (i = 0; i < cpu_op_nr; i++) {
+-		if (freq == cpu_op_tbl[i].cpu_rate)
++		if (freq == cpu_op_tbl[i].cpu_rate) {
+ 			gp_volt = cpu_op_tbl[i].cpu_voltage;
++			soc_volt = cpu_op_tbl[i].soc_voltage;
++			pu_volt = cpu_op_tbl[i].pu_voltage;
++		}
+ 	}
+ 
+ 	if (gp_volt == 0)
+@@ -91,6 +99,21 @@ int set_cpu_freq(int freq)
+ 		if (low_bus_freq_mode || audio_bus_freq_mode)
+ 			set_high_bus_freq(0);
+ 		mutex_unlock(&bus_freq_mutex);
++		if (freq == cpu_op_tbl[0].cpu_rate && soc_regulator && pu_regulator) {
++			ret = regulator_set_voltage(soc_regulator, soc_volt,
++							soc_volt);
++			if (ret < 0) {
++				printk(KERN_DEBUG "COULD NOT SET SOC VOLTAGE!!!!\n");
++				return ret;
++			}
++			ret = regulator_set_voltage(pu_regulator, pu_volt,
++							pu_volt);
++			if (ret < 0) {
++				printk(KERN_DEBUG "COULD NOT SET PU VOLTAGE!!!!\n");
++				return ret;
++			}
++			soc_regulator_set = 1;
++		}
+ 		ret = regulator_set_voltage(cpu_regulator, gp_volt,
+ 					    gp_volt);
+ 		if (ret < 0) {
+@@ -112,6 +135,21 @@ int set_cpu_freq(int freq)
+ 			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
+ 			return ret;
+ 		}
++		if (soc_regulator_set && soc_regulator && pu_regulator) {
++			ret = regulator_set_voltage(soc_regulator, soc_volt,
++							soc_volt);
++			if (ret < 0) {
++				printk(KERN_DEBUG "COULD NOT SET SOC VOLTAGE BACK!!!!\n");
++				return ret;
++			}
++			ret = regulator_set_voltage(pu_regulator, pu_volt,
++							pu_volt);
++			if (ret < 0) {
++				printk(KERN_DEBUG "COULD NOT SET PU VOLTAGE!!!!\n");
++				return ret;
++			}
++			soc_regulator_set = 0;
++		}
+ 		mutex_lock(&bus_freq_mutex);
+ 		if (low_freq_bus_used() &&
+ 			!(low_bus_freq_mode || audio_bus_freq_mode))
+diff --git a/arch/arm/plat-mxc/include/mach/mxc.h b/arch/arm/plat-mxc/include/mach/mxc.h
+index 2f23c72..8245767 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc.h
++++ b/arch/arm/plat-mxc/include/mach/mxc.h
+@@ -253,6 +253,8 @@ struct cpu_op {
+ 	u32 mfi;
+ 	u32 mfd;
+ 	u32 mfn;
++	u32 pu_voltage;
++	u32 soc_voltage;
+ 	u32 cpu_voltage;
+ 	u32 cpu_podf;
+ };
+diff --git a/arch/arm/plat-mxc/include/mach/mxc_dvfs.h b/arch/arm/plat-mxc/include/mach/mxc_dvfs.h
+index fd00395..64639ae 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc_dvfs.h
++++ b/arch/arm/plat-mxc/include/mach/mxc_dvfs.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2009-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2009-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -136,6 +136,10 @@ struct dvfs_op {
+ struct mxc_dvfs_platform_data {
+ 	/** Supply voltage regulator name string */
+ 	char *reg_id;
++	/*vdd_soc regulator name string*/
++	char *soc_id;
++	/*vdd_pu regulator name string*/
++	char *pu_id;
+ 	/* CPU clock name string */
+ 	char *clk1_id;
+ 	/* DVFS clock name string */
+-- 
+1.7.7.4
+

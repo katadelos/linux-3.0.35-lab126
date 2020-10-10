@@ -1,0 +1,107 @@
+From aa49bf1976b422a03024f238ef79dde5eeb991f7 Mon Sep 17 00:00:00 2001
+From: Zeng Zhaoming <b32542@freescale.com>
+Date: Tue, 5 Jul 2011 09:19:45 +0800
+Subject: [PATCH 0207/2463] ENGR00152528-1 MX6Q, ENET: add enet support for
+ mx6q
+
+Add enet driver support for mx6q sabreauto board.
+
+Since ENET reset lost it mac address, we have to generate
+mac address in random.
+The prefer way to set mac address is pass from kernel command line
+by "fec_mac=${ethaddr}" for sabreauto.
+
+Signed-off-by: Zeng Zhaoming <b32542@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   36 ++++++++++++++++++++++++-----
+ arch/arm/mach-mx6/clock.c                |    2 +-
+ 2 files changed, 30 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index fd33747..58de051 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -58,6 +58,7 @@
+ #include <mach/imx-uart.h>
+ #include <mach/viv_gpu.h>
+ #include <linux/gpio.h>
++#include <linux/etherdevice.h>
+ 
+ #include "devices-imx6q.h"
+ 
+@@ -75,17 +76,26 @@ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 	/* UART4 for debug */
+ 	MX6Q_PAD_KEY_COL0__UART4_TXD,
+ 	MX6Q_PAD_KEY_ROW0__UART4_RXD,
++
+ 	/* ENET */
+ 	MX6Q_PAD_KEY_COL1__ENET_MDIO,
+ 	MX6Q_PAD_KEY_COL2__ENET_MDC,
+-	MX6Q_PAD_ENET_RXD1__ENET_RDATA_1,
+-	MX6Q_PAD_ENET_RXD0__ENET_RDATA_0,
+-	MX6Q_PAD_ENET_TXD1__ENET_TDATA_1,
+-	MX6Q_PAD_ENET_TXD0__ENET_TDATA_0,
+-	MX6Q_PAD_ENET_TX_EN__ENET_TX_EN,
++	MX6Q_PAD_RGMII_TXC__ENET_RGMII_TXC,
++	MX6Q_PAD_RGMII_TD0__ENET_RGMII_TD0,
++	MX6Q_PAD_RGMII_TD1__ENET_RGMII_TD1,
++	MX6Q_PAD_RGMII_TD2__ENET_RGMII_TD2,
++	MX6Q_PAD_RGMII_TD3__ENET_RGMII_TD3,
++	MX6Q_PAD_RGMII_TX_CTL__ENET_RGMII_TX_CTL,
+ 	MX6Q_PAD_ENET_REF_CLK__ENET_TX_CLK,
+-	MX6Q_PAD_ENET_RX_ER__ENET_RX_ER,
+-	MX6Q_PAD_ENET_CRS_DV__ENET_RX_EN,
++	MX6Q_PAD_RGMII_RXC__ENET_RGMII_RXC,
++	MX6Q_PAD_RGMII_RD0__ENET_RGMII_RD0,
++	MX6Q_PAD_RGMII_RD1__ENET_RGMII_RD1,
++	MX6Q_PAD_RGMII_RD2__ENET_RGMII_RD2,
++	MX6Q_PAD_RGMII_RD3__ENET_RGMII_RD3,
++	MX6Q_PAD_RGMII_RX_CTL__ENET_RGMII_RX_CTL,
++	MX6Q_PAD_GPIO_0__CCM_CLKO,
++	MX6Q_PAD_GPIO_3__CCM_CLKO2,
++
+ 	/* SD1 */
+ 	MX6Q_PAD_SD1_CLK__USDHC1_CLK,
+ 	MX6Q_PAD_SD1_CMD__USDHC1_CMD,
+@@ -166,6 +176,16 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ {
+ }
+ 
++static struct fec_platform_data fec_data __initdata = {
++	.phy = PHY_INTERFACE_MODE_RGMII,
++};
++
++static inline void imx6q_init_fec(void)
++{
++	random_ether_addr(fec_data.mac);
++	imx6q_add_fec(&fec_data);
++}
++
+ static int mx6q_sabreauto_spi_cs[] = {
+ 	MX6Q_SABREAUTO_ECSPI1_CS0,
+ 	MX6Q_SABREAUTO_ECSPI1_CS1,
+@@ -235,6 +255,8 @@ static void __init mx6_board_init(void)
+ 			ARRAY_SIZE(mxc_i2c2_board_info));
+ 
+ 	imx6q_add_anatop_thermal_imx(1, &mx6q_sabreauto_anatop_thermal_data);
++	imx6q_init_fec();
++
+ 	imx6q_add_sdhci_usdhc_imx(3, &mx6q_sabreauto_sd4_data);
+ 	imx_add_viv_gpu("gc2000", &imx6_gc2000_data, &imx6q_gc2000_pdata);
+ }
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 1acc974..895dd9f 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -3969,7 +3969,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK("mxc_pwm.2", NULL, pwm_clk[2]),
+ 	_REGISTER_CLOCK("mxc_pwm.3", NULL, pwm_clk[3]),
+ 	_REGISTER_CLOCK(NULL, "pcie_clk", pcie_clk),
+-	_REGISTER_CLOCK(NULL, "enet_clk", enet_clk),
++	_REGISTER_CLOCK("fec.0", NULL, enet_clk),
+ 	_REGISTER_CLOCK(NULL, "imx_sata_clk", sata_clk),
+ 	_REGISTER_CLOCK(NULL, "usboh3_clk", usboh3_clk),
+ 	_REGISTER_CLOCK(NULL, "usb_phy1_clk", usb_phy1_clk),
+-- 
+1.7.7.4
+

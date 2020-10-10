@@ -1,0 +1,36 @@
+From 180cd76c012bf87fb97e9a9d3ee2d655f1b7f4b6 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 11 Sep 2012 02:41:54 +0800
+Subject: [PATCH 2026/2463] ENGR00223450 [MX6]Fix secondary cores BogoMIPs
+ error
+
+After doing some suspend/resuem test, secondary cores BogoMIPs
+will be wrong, the root cause is that when cpufreq is changed,
+we only update the online cpus' loops_per_jiffy, and when secondary
+cores back to online, we skip the loops_per_jiffy calibration. During
+suspend/resume, the cpufreq can be changed during disabling/enabling
+secondary cores, which will make secondary cores loops_per_jiffy
+wrong, so here we need to update all possible cpus' loops_per_jiffy
+when cpufreq is changed.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/plat-mxc/cpufreq.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index 7a06aae..e7278d9 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -219,7 +219,7 @@ static int mxc_set_target(struct cpufreq_policy *policy,
+ 	  * So update it for all CPUs.
+ 	  */
+ 
+-	for_each_cpu(i, policy->cpus)
++	for_each_possible_cpu(i)
+ 		per_cpu(cpu_data, i).loops_per_jiffy =
+ 		cpufreq_scale(per_cpu(cpu_data, i).loops_per_jiffy,
+ 					freqs.old, freqs.new);
+-- 
+1.7.7.4
+

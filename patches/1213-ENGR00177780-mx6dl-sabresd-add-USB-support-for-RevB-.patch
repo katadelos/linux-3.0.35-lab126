@@ -1,0 +1,52 @@
+From 5496a891c2419c91f91c020584caee75f3456336 Mon Sep 17 00:00:00 2001
+From: Lily Zhang <r58066@freescale.com>
+Date: Fri, 23 Mar 2012 18:02:40 +0800
+Subject: [PATCH 1213/2463] ENGR00177780 mx6dl sabresd: add USB support for
+ RevB board
+
+- Configure USB_OTG_PWR_EN PIN as GPIO
+- Configure GPR1 bit 13 to select "usb_otg_id" as
+ ENET_RX_ER
+- To make USBOTG work on RevB board, HW rework is required.
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6dl_sabresd.h |    3 ++-
+ arch/arm/mach-mx6/board-mx6q_sabresd.c  |    6 +++++-
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6dl_sabresd.h b/arch/arm/mach-mx6/board-mx6dl_sabresd.h
+index 07305c9..613a3ee 100644
+--- a/arch/arm/mach-mx6/board-mx6dl_sabresd.h
++++ b/arch/arm/mach-mx6/board-mx6dl_sabresd.h
+@@ -116,7 +116,8 @@ static iomux_v3_cfg_t mx6dl_sabresd_pads[] = {
+ 	/* USB */
+ 	MX6DL_PAD_ENET_RX_ER__ANATOP_USBOTG_ID,
+ 	MX6DL_PAD_EIM_D21__USBOH3_USBOTG_OC,
+-	MX6DL_PAD_EIM_D22__USBOH3_USBOTG_PWR,
++	/* USB_OTG_PWR_EN */
++	MX6DL_PAD_EIM_D22__GPIO_3_22,
+ 	MX6DL_PAD_EIM_D30__USBOH3_USBH1_OC,
+ 	/*USB_H1 PWR EN*/
+ 	MX6DL_PAD_ENET_TXD1__GPIO_1_29,
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index a851650..babe27a 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1018,7 +1018,11 @@ static void __init imx6q_sabresd_init_usb(void)
+ 		return;
+ 	}
+ 	gpio_direction_output(SABRESD_USB_OTG_PWR, 0);
+-	mxc_iomux_set_gpr_register(1, 13, 1, 1);
++
++	if (board_is_mx6_reva())
++		mxc_iomux_set_gpr_register(1, 13, 1, 1);
++	else
++		mxc_iomux_set_gpr_register(1, 13, 1, 0);
+ 
+ 	mx6_set_otghost_vbus_func(imx6q_sabresd_usbotg_vbus);
+ 	mx6_usb_dr_init();
+-- 
+1.7.7.4
+

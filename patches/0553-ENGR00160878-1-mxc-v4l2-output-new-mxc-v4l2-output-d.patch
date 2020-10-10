@@ -1,0 +1,71 @@
+From 167424f2f9d036e3be70e847c7c657a0fcd657c7 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Thu, 27 Oct 2011 10:31:51 +0800
+Subject: [PATCH 0553/2463] ENGR00160878-1 mxc v4l2 output: new mxc v4l2
+ output driver based on videobuf
+
+This new v4l2 output driver is based on videobuf, using dma contig alloc method.
+It creates video dev node for each display framebuffer begin from /dev/video16
+by default.
+If need post-processing, this driver will do it by ipu pp driver which support:
+ - resizing
+ - CSC
+ - rotate
+ - deinterlacing
+If no need post-processing, the IPU IC will be bypassed as old driver, the
+buf will be set to fb buffer directly by crack fb smem_start.
+The user should do setting before streamon like below:
+1. set output crop
+2. set ctrl like rotate/vflip/hflip/deinterlacing motion
+3. set fmt
+4. reqbuf
+
+The new features compare to old driver:
+ - support multi-instance
+ - support user point buffer
+ - runtime suspend/resume
+For suspend/resume, still has chance to meet issue on mx6q, will fix later.
+
+This patch for head file.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ include/linux/mxc_v4l2.h |   23 +----------------------
+ 1 files changed, 1 insertions(+), 22 deletions(-)
+
+diff --git a/include/linux/mxc_v4l2.h b/include/linux/mxc_v4l2.h
+index e83e592..95e8d9e 100644
+--- a/include/linux/mxc_v4l2.h
++++ b/include/linux/mxc_v4l2.h
+@@ -22,27 +22,6 @@
+ #ifndef __ASM_ARCH_MXC_V4L2_H__
+ #define __ASM_ARCH_MXC_V4L2_H__
+ 
+-/*
+- * For IPUv1 and IPUv3, V4L2_CID_MXC_ROT means encoder ioctl ID.
+- * And V4L2_CID_MXC_VF_ROT is viewfinder ioctl ID only for IPUv1 and IPUv3.
+- */
+-#define V4L2_CID_MXC_ROT		(V4L2_CID_PRIVATE_BASE + 0)
+-#define V4L2_CID_MXC_FLASH		(V4L2_CID_PRIVATE_BASE + 1)
+-#define V4L2_CID_MXC_VF_ROT		(V4L2_CID_PRIVATE_BASE + 2)
+-#define V4L2_CID_MXC_MOTION     (V4L2_CID_PRIVATE_BASE + 3)
+-
+-#define V4L2_MXC_ROTATE_NONE			0
+-#define V4L2_MXC_ROTATE_VERT_FLIP		1
+-#define V4L2_MXC_ROTATE_HORIZ_FLIP		2
+-#define V4L2_MXC_ROTATE_180			3
+-#define V4L2_MXC_ROTATE_90_RIGHT		4
+-#define V4L2_MXC_ROTATE_90_RIGHT_VFLIP		5
+-#define V4L2_MXC_ROTATE_90_RIGHT_HFLIP		6
+-#define V4L2_MXC_ROTATE_90_LEFT			7
+-
+-struct v4l2_mxc_offset {
+-	uint32_t u_offset;
+-	uint32_t v_offset;
+-};
++#define V4L2_CID_MXC_MOTION     (V4L2_CID_PRIVATE_BASE + 0)
+ 
+ #endif
+-- 
+1.7.7.4
+

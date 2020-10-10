@@ -1,0 +1,32 @@
+From dd5d33509d779d6c07d143f2b5dc33cd98deb80c Mon Sep 17 00:00:00 2001
+From: Mahesh Mahadevan <r9aadq@freescale.com>
+Date: Tue, 25 Oct 2011 10:20:14 -0500
+Subject: [PATCH 0493/2463] ENGR00160847 Update AUDMUX driver for MX6Q
+
+Add protection to ensure code runs on MX6Q only
+
+Signed-off-by: Mahesh Mahadevan <r9aadq@freescale.com>
+---
+ arch/arm/plat-mxc/audmux-v2.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/audmux-v2.c b/arch/arm/plat-mxc/audmux-v2.c
+index c0f9788..c727019 100644
+--- a/arch/arm/plat-mxc/audmux-v2.c
++++ b/arch/arm/plat-mxc/audmux-v2.c
+@@ -189,8 +189,10 @@ static int mxc_audmux_v2_init(void)
+ 	int ret;
+ 
+ #if defined(CONFIG_ARCH_MX6)
+-	audmux_base = MX6_IO_ADDRESS(MX6Q_AUDMUX_BASE_ADDR);
+-	ret = 0;
++	if (cpu_is_mx6q()) {
++		audmux_base = MX6_IO_ADDRESS(MX6Q_AUDMUX_BASE_ADDR);
++		ret = 0;
++	}
+ #endif
+ #if defined(CONFIG_ARCH_MX5)
+ 	if (cpu_is_mx51()) {
+-- 
+1.7.7.4
+

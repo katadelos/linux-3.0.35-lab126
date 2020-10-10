@@ -1,0 +1,484 @@
+From 51e5dcf9e8b61a0af97852769c4b7ae1c01951d3 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Fri, 27 Jul 2012 16:41:58 -0500
+Subject: [PATCH 1840/2463] ENGR00218747 - MX6Q/MX6DL: WAIT mode support for
+ MX6QTO1.2/MX6DLTO1.1
+
+Add the new WAIT mode workaround added for MX6Q1.2 and MX6DLTO1.1.
+A new bit is added to CCM_CGPR (bit 17). This bit needs to be
+enabled for the WAIT mode fix to be active and needs to be disabled
+before the system enters STOP mode with power gating enabled.
+Fix WAIT mode bug when system is in low power IDLE mode:
+In low power IDLE mode (AHB @ 24MHz), switch ARM to run from 24MHz
+on MX6QTO1.1 and MX6DLTO1.0 chips when ARM core enters WAIT mode.
+We still need to use the ARM:IPG_CLK ratio of 12:5. Since IPG_CLK
+is at 12MHz, we need to run ARM below 28.8MHz.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/bus_freq.c    |   12 +++-
+ arch/arm/mach-mx6/clock.c       |   19 -----
+ arch/arm/mach-mx6/clock_mx6sl.c |   13 +---
+ arch/arm/mach-mx6/cpu.c         |    8 ++
+ arch/arm/mach-mx6/crm_regs.h    |    1 +
+ arch/arm/mach-mx6/mx6_wfi.S     |   22 ++++--
+ arch/arm/mach-mx6/system.c      |  154 +++++++++++++++++++++++++++++----------
+ arch/arm/plat-mxc/cpufreq.c     |    6 +-
+ 8 files changed, 155 insertions(+), 80 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index b1a0af0..12dea14 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -78,6 +78,8 @@ void set_ddr_freq(int ddr_freq);
+ extern int init_mmdc_settings(void);
+ extern struct cpu_op *(*get_cpu_op)(int *op);
+ extern int update_ddr_freq(int ddr_rate);
++extern int chip_rev;
++extern bool arm_mem_clked_in_wait;
+ 
+ struct mutex bus_freq_mutex;
+ 
+@@ -128,7 +130,6 @@ static void reduce_bus_freq_handler(struct work_struct *work)
+ 
+ 	if (!cpu_is_mx6sl()) {
+ 		clk_enable(pll3);
+-
+ 		if (lp_audio_freq) {
+ 			/* Need to ensure that PLL2_PFD_400M is kept ON. */
+ 			clk_enable(pll2_400);
+@@ -149,6 +150,7 @@ static void reduce_bus_freq_handler(struct work_struct *work)
+ 
+ 		if (med_bus_freq_mode)
+ 			clk_disable(pll2_400);
++
+ 		clk_disable(pll3);
+ 	} else {
+ 		/* Set VDDSOC_CAP to 1.1V */
+@@ -162,6 +164,8 @@ static void reduce_bus_freq_handler(struct work_struct *work)
+ 
+ 		udelay(150);
+ 
++		arm_mem_clked_in_wait = true;
++
+ 		/* Set periph_clk to be sourced from OSC_CLK */
+ 		/* Set MMDC clk to 25MHz. */
+ 		/* First need to set the divider before changing the parent */
+@@ -305,6 +309,12 @@ int set_high_bus_freq(int high_bus_freq)
+ 
+ 	low_bus_freq_mode = 0;
+ 	audio_bus_freq_mode = 0;
++
++	/* Ensure that WAIT mode can be entered in high bus freq mode. */
++
++	if (cpu_is_mx6sl())
++		arm_mem_clked_in_wait = false;
++
+ 	mutex_unlock(&bus_freq_mutex);
+ 
+ 	return 0;
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 0f87ce4..34c26d4 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -50,8 +50,6 @@ extern int lp_med_freq;
+ extern int wait_mode_arm_podf;
+ extern int lp_audio_freq;
+ extern int cur_arm_podf;
+-extern bool arm_mem_clked_in_wait;
+-extern bool enable_wait_mode;
+ 
+ void __iomem *apll_base;
+ 
+@@ -1295,23 +1293,6 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 	ipg_clk_rate = clk_get_rate(&ipg_clk);
+ 	max_arm_wait_clk = (12 * ipg_clk_rate) / 5;
+ 	wait_mode_arm_podf = parent_rate / max_arm_wait_clk;
+-	if (wait_mode_arm_podf > 7) {
+-		/* IPG_CLK is too low and we cannot get a ARM_CLK
+-		  * that will satisfy the 12:5 ratio.
+-		  * Use the mem_ipg_stop_mask bit to ensure clocks to ARM
+-		  * memories are not gated during WAIT mode.
+-		  * This bit is NOT available on MX6DQ TO1.1/TO1.0 and
+-		  * MX6DL TO1.0.
+-		  * Else disable entry to WAIT mode.
+-		  */
+-		if ((mx6q_revision() > IMX_CHIP_REVISION_1_1) ||
+-			(mx6dl_revision() > IMX_CHIP_REVISION_1_0))
+-			arm_mem_clked_in_wait = true;
+-		else {
+-			enable_wait_mode = false;
+-			pr_info("wait mode is disabled due to ipg clock is too low\n");
+-		}
+-	}
+ 
+ 	if (div == 0)
+ 		div = 1;
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 577a522..887e6ad 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -52,7 +52,6 @@ extern int lp_high_freq;
+ extern int lp_med_freq;
+ extern int wait_mode_arm_podf;
+ extern int mx6q_revision(void);
+-extern bool arm_mem_clked_in_wait;
+ extern int cur_arm_podf;
+ 
+ static void __iomem *apll_base;
+@@ -1180,16 +1179,6 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 	ipg_clk_rate = clk_get_rate(&ipg_clk);
+ 	max_arm_wait_clk = (12 * ipg_clk_rate) / 5;
+ 	wait_mode_arm_podf = parent_rate / max_arm_wait_clk;
+-	if (wait_mode_arm_podf > 7)
+-		/* IPG_CLK is too low and we cannot get a ARM_CLK
+-		  * that will satisfy the 12:5 ratio.
+-		  * Use the mem_ipg_stop_mask bit to ensure clocks
+-		  * to ARM memories are not gated during WAIT mode.
+-		  * Else disable entry to WAIT mode.
+-		  */
+-		arm_mem_clked_in_wait = true;
+-	else
+-		arm_mem_clked_in_wait = false;
+ 
+ 	if (div == 0)
+ 		div = 1;
+@@ -3964,7 +3953,7 @@ int __init mx6sl_clocks_init(unsigned long ckil, unsigned long osc,
+ 	/* keep correct count. */
+ 	clk_enable(&cpu_clk);
+ 	clk_enable(&periph_clk);
+-	clk_enable(&mmdc_ch1_axi_clk);
++	clk_enable(&mmdc_ch1_axi_clk[0]);
+ 
+ 	clk_tree_init();
+ 
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index 5d97496..9a60d98 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -35,6 +35,7 @@ struct cpu_op *(*get_cpu_op)(int *op);
+ bool enable_wait_mode = true;
+ u32 arm_max_freq = CPU_AT_1GHz;
+ bool mem_clk_on_in_wait;
++int chip_rev;
+ 
+ void __iomem *gpc_base;
+ void __iomem *ccm_base;
+@@ -197,6 +198,13 @@ static int __init post_cpu_init(void)
+ 		(mx6dl_revision() < IMX_CHIP_REVISION_1_1))
+ 		mem_clk_on_in_wait = false;
+ 
++	if (cpu_is_mx6q())
++		chip_rev = mx6q_revision();
++	else if (cpu_is_mx6dl())
++		chip_rev = mx6dl_revision;
++	else
++		chip_rev = mx6sl_revision;
++
+ 	return 0;
+ }
+ postcore_initcall(post_cpu_init);
+diff --git a/arch/arm/mach-mx6/crm_regs.h b/arch/arm/mach-mx6/crm_regs.h
+index 2e1f3e4..5e03312 100644
+--- a/arch/arm/mach-mx6/crm_regs.h
++++ b/arch/arm/mach-mx6/crm_regs.h
+@@ -498,6 +498,7 @@
+ #define MXC_CCM_CGPR_MMDC_EXT_CLK_DIS		(1 << 2)
+ #define MXC_CCM_CGPR_PMIC_DELAY_SCALER		(1)
+ #define MXC_CCM_CGPR_MEM_IPG_STOP_MASK		(1 << 1)
++#define MXC_CCM_CGPR_WAIT_MODE_FIX			(1 << 17)
+ 
+ /* Define the bits in registers CCGRx */
+ #define MXC_CCM_CCGRx_CG_MASK			0x3
+diff --git a/arch/arm/mach-mx6/mx6_wfi.S b/arch/arm/mach-mx6/mx6_wfi.S
+index a616dab..afe7b9a 100644
+--- a/arch/arm/mach-mx6/mx6_wfi.S
++++ b/arch/arm/mach-mx6/mx6_wfi.S
+@@ -28,7 +28,7 @@
+  */
+ ENTRY(mx6_wait)
+ 
+-    push {r4, r5, r6, r7, r8}
++    push {r4, r5, r6, r7, r8, r9}
+ 
+     mov    r7, r2       /* Store the arm_podf to be used. */
+     mov   r6, r3
+@@ -69,8 +69,11 @@ ENTRY(mx6_wait)
+     /* Check to see if we need to switch to 24MHz */
+     cmp    r7, #0
+     bne    use_podf
+-    ldr     r6, =(1 << 16)
+-    str     r6, [r2, #0x04]
++    /* Switch ARM to PLL1 output. */
++    /* PLL1 should already be in bypass state. */
++    ldr    r6, [r8, #0x0C]
++    bic    r6, r6, #0x04
++    str    r6, [r8, #0x0C]
+     b      cont
+ 
+ use_podf:
+@@ -100,7 +103,9 @@ cont:
+     /* Switch to 24MHz or use ARM_PODF. */
+     cmp   r7, #0x0
+     bne    use_podf1
+-    str     r6, [r2, #0x08]
++    /* Set pll1_sw_clk to run from STEP_CLK. */
++    orr     r6, r6, #0x04
++    str     r6, [r8, #0x0C]
+     b       DO_WFI
+ use_podf1:
+     str     r6, [r8, #0x10]
+@@ -124,8 +129,11 @@ DO_WFI:
+     mov r4, #0x0
+     cmp   r7, #0x0
+     bne    use_podf2
+-    ldr     r6, =(1 << 16)
+-    str     r6, [r2, #0x08]
++    /* Set pll1_sw_clk to run from STEP_CLK. */
++    ldr     r6, [r8, #0x0C]
++    orr    r6, r6, #0x04
++    str    r6, [r8, #0x0C]
++
+     b       cont1
+ 
+ use_podf2:
+@@ -137,7 +145,7 @@ cont1:
+ 
+ DONE:
+ 
+-    pop {r4,r5, r6, r7, r8}
++    pop {r4,r5, r6, r7, r8, r9}
+ 
+     /* Restore registers */
+     mov     pc, lr
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index b9efbb6..ebc1ca1 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -57,6 +57,7 @@ volatile unsigned int num_cpu_idle_lock = 0x0;
+ int wait_mode_arm_podf;
+ int cur_arm_podf;
+ bool arm_mem_clked_in_wait;
++void arch_idle_with_workaround(int cpu);
+ 
+ extern void mx6_wait(void *num_cpu_idle_lock, void *num_cpu_idle, \
+ 				int wait_arm_podf, int cur_arm_podf);
+@@ -64,6 +65,7 @@ extern bool enable_wait_mode;
+ extern int low_bus_freq_mode;
+ extern int audio_bus_freq_mode;
+ extern bool mem_clk_on_in_wait;
++extern int chip_rev;
+ 
+ void gpc_set_wakeup(unsigned int irq[4])
+ {
+@@ -201,6 +203,14 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 			  */
+ 			reg = __raw_readl(MXC_CCM_CGPR);
+ 			reg |= MXC_CCM_CGPR_MEM_IPG_STOP_MASK;
++			if (!cpu_is_mx6sl()) {
++				/*
++				  * For MX6QTO1.2 or later and MX6DLTO1.1 or later,
++				  * ensure that the CCM_CGPR bit 17 is cleared before
++				  * dormant mode is entered.
++				  */
++				reg &= ~MXC_CCM_CGPR_WAIT_MODE_FIX;
++			}
+ 			__raw_writel(reg, MXC_CCM_CGPR);
+ 		}
+ 	}
+@@ -209,56 +219,122 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 
+ extern int tick_broadcast_oneshot_active(void);
+ 
+- void arch_idle(void)
++void arch_idle_single_core(void)
+ {
+-	if (enable_wait_mode) {
+-		u32 reg;
+-		int cpu = smp_processor_id();
+-		*((char *)(&num_cpu_idle_lock) + (char)cpu) = 0x0;
+-		mxc_cpu_lp_set(WAIT_UNCLOCKED_POWER_OFF);
+-		if (arm_mem_clked_in_wait || mem_clk_on_in_wait) {
++	u32 reg;
++
++	if (cpu_is_mx6dl() && chip_rev > IMX_CHIP_REVISION_1_0) {
++		/*
++		  * MX6DLS TO1.1 has the HW fix for the WAIT mode issue.
++		  * Ensure that the CGPR bit 17 is set to enable the fix.
++		  */
++		reg = __raw_readl(MXC_CCM_CGPR);
++		reg |= MXC_CCM_CGPR_WAIT_MODE_FIX;
++		__raw_writel(reg, MXC_CCM_CGPR);
++
++		cpu_do_idle();
++	} else {
++		/*
++		  * Implement the 12:5 ARM:IPG_CLK ratio
++		  * workaround for the WAIT mode issue.
++		  * We can directly use the divider to drop the ARM
++		  * core freq in a single core environment.
++		  *  Set the ARM_PODF to get the max freq possible
++		  * to avoid the WAIT mode issue when IPG is at 66MHz.
++		  */
++		if (cpu_is_mx6sl()) {
+ 			reg = __raw_readl(MXC_CCM_CGPR);
+-			reg &= ~MXC_CCM_CGPR_MEM_IPG_STOP_MASK;
++			reg |= MXC_CCM_CGPR_MEM_IPG_STOP_MASK;
+ 			__raw_writel(reg, MXC_CCM_CGPR);
++		}
++		__raw_writel(wait_mode_arm_podf, MXC_CCM_CACRR);
++		while (__raw_readl(MXC_CCM_CDHIPR))
++			;
++		cpu_do_idle();
+ 
+-			cpu_do_idle();
+-		} else if (num_possible_cpus() == 1) {
+-			/* We can directly use the divider to drop the ARM
+-			  * core freq in a single core environment.
+-			  */
+-			u32 podf = wait_mode_arm_podf;
+-			/* Set the ARM_PODF to get the max freq possible
+-			  * to avoid the WAIT mode issue when IPG is at 66MHz.
+-			  */
+-			if (low_bus_freq_mode)
+-				podf = 7;
++		__raw_writel(cur_arm_podf - 1, MXC_CCM_CACRR);
++	}
++}
+ 
+-			__raw_writel(podf, MXC_CCM_CACRR);
+-			while (__raw_readl(MXC_CCM_CDHIPR))
+-				;
+-			cpu_do_idle();
++void arch_idle_with_workaround(cpu)
++{
++	u32 reg;
++	u32 podf = wait_mode_arm_podf;
++
++	*((char *)(&num_cpu_idle_lock) + (char)cpu) = 0x0;
++
++	if (low_bus_freq_mode || audio_bus_freq_mode)
++		/* In case when IPG is at 12MHz, we need to ensure that
++		  * ARM is at 24MHz, as the max freq ARM can run at is
++		  *~28.8MHz.
++		  */
++		podf = 0;
++
++	mx6_wait((void *)&num_cpu_idle_lock,
++		(void *)&num_cpu_idle,
++		podf, cur_arm_podf - 1);
++
++}
++
++void arch_idle_multi_core(void)
++{
++	u32 reg;
++	int cpu = smp_processor_id();
+ 
+-			__raw_writel(cur_arm_podf - 1, MXC_CCM_CACRR);
+-		} else {
+ #ifdef CONFIG_LOCAL_TIMERS
+-			if (!tick_broadcast_oneshot_active()
+-				|| !tick_oneshot_mode_active())
+-				return;
++	if (!tick_broadcast_oneshot_active()
++		|| !tick_oneshot_mode_active())
++		return;
+ 
+-			clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_ENTER, &cpu);
++	clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_ENTER, &cpu);
+ #endif
+-			if (low_bus_freq_mode || audio_bus_freq_mode)
+-				mx6_wait((void *)&num_cpu_idle_lock,
+-							(void *)&num_cpu_idle,
+-							7, cur_arm_podf - 1);
+-			else
+-				mx6_wait((void *)&num_cpu_idle_lock,
+-					(void *)&num_cpu_idle,
+-					wait_mode_arm_podf, cur_arm_podf - 1);
++	/* iMX6Q and iMX6DL */
++	if ((cpu_is_mx6q() && chip_rev >= IMX_CHIP_REVISION_1_2) ||
++		(cpu_is_mx6dl() && chip_rev >= IMX_CHIP_REVISION_1_1)) {
++		/*
++		  * This code should only be executed on MX6QTO1.2 or later
++		  * and MX6DL TO1.1 or later.
++		  * These chips have the HW fix for the WAIT mode issue.
++		  * Ensure that the CGPR bit 17 is set to enable the fix.
++		  */
++
++		reg = __raw_readl(MXC_CCM_CGPR);
++		reg |= MXC_CCM_CGPR_WAIT_MODE_FIX;
++		__raw_writel(reg, MXC_CCM_CGPR);
++
++		cpu_do_idle();
++	} else
++		arch_idle_with_workaround(cpu);
+ #ifdef CONFIG_LOCAL_TIMERS
+-			clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_EXIT, &cpu);
++	clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_EXIT, &cpu);
+ #endif
+-		}
++
++}
++
++void arch_idle(void)
++{
++	if (enable_wait_mode) {
++		mxc_cpu_lp_set(WAIT_UNCLOCKED_POWER_OFF);
++		if ((mem_clk_on_in_wait || arm_mem_clked_in_wait)) {
++			u32 reg;
++			/*
++			  * MX6SL, MX6Q (TO1.2 or later) and
++			  * MX6DL (TO1.1 or later) have a bit in CCM_CGPR that
++			  * when cleared keeps the clocks to memories ON
++			  * when ARM is in WFI. This mode can be used when
++			  * IPG clock is very low (12MHz) and the ARM:IPG ratio
++			  * perhaps cannot be maintained.
++			  */
++			reg = __raw_readl(MXC_CCM_CGPR);
++			reg &= ~MXC_CCM_CGPR_MEM_IPG_STOP_MASK;
++			__raw_writel(reg, MXC_CCM_CGPR);
++
++			cpu_do_idle();
++		} else if (num_possible_cpus() == 1)
++			/* iMX6SL or iMX6DLS */
++			arch_idle_single_core();
++		else
++			arch_idle_multi_core();
+ 	} else {
+ 		mxc_cpu_lp_set(WAIT_CLOCKED);
+ 		cpu_do_idle();
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index b31970c..765f05e 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -56,6 +56,7 @@ extern struct regulator *cpu_regulator;
+ extern int dvfs_core_is_active;
+ extern struct cpu_op *(*get_cpu_op)(int *op);
+ extern int low_bus_freq_mode;
++extern int audio_bus_freq_mode;
+ extern int high_bus_freq_mode;
+ extern int set_low_bus_freq(void);
+ extern int set_high_bus_freq(int high_bus_speed);
+@@ -85,7 +86,7 @@ int set_cpu_freq(int freq)
+ #endif
+ 	/*Set the voltage for the GP domain. */
+ 	if (freq > org_cpu_rate) {
+-		if (low_bus_freq_mode)
++		if (low_bus_freq_mode || audio_bus_freq_mode)
+ 			set_high_bus_freq(0);
+ 		ret = regulator_set_voltage(cpu_regulator, gp_volt,
+ 					    gp_volt);
+@@ -108,7 +109,8 @@ int set_cpu_freq(int freq)
+ 			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
+ 			return ret;
+ 		}
+-		if (low_freq_bus_used() && !low_bus_freq_mode)
++		if (low_freq_bus_used() &&
++			!(low_bus_freq_mode || audio_bus_freq_mode))
+ 			set_low_bus_freq();
+ 	}
+ 
+-- 
+1.7.7.4
+

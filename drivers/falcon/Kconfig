@@ -1,0 +1,50 @@
+#
+# Falcon device driver configuration
+#
+
+menuconfig FALCON_DRV
+	bool "Falcon device driver"
+	depends on FALCON
+	default n
+	---help---
+	  Say Y here to get to see options for various different falcon wrapper drivers.
+	  This option alone does not add any kernel code.
+
+	  If you say N, all options in this submenu will be skipped and disabled;
+	  only do this if you know what you are doing.
+
+if FALCON_DRV
+
+config FALCON_WRAPPER
+	bool "Falcon wrapper drivers"
+	default n
+
+config FALCON_BLK
+	tristate "Falcon Block Storage Driver support"
+	default n
+	depends on FALCON_WRAPPER && BLK_DEV
+	help
+	  This enables the Block storage driver for Falcon.
+
+config FALCON_BLK_BOOTPART
+	bool "BootPartion support"
+	default n
+	depends on FALCON_BLK
+	help
+	  This enables BootPartion for the Block storage driver.
+
+config FALCON_BLK_MULTISEG
+	bool "Use multi segments transfer"
+	default y
+	depends on FALCON_BLK
+	help
+	  Say Y here to use Bounce Buffer capability.
+
+config FALCON_MTD_NAND
+	tristate "Falcon NAND Driver support"
+	default n
+	depends on FALCON_WRAPPER && MTD_NAND
+	help
+	  This enables the NAND storage driver for Falcon.
+
+endif # FALCON_DRV

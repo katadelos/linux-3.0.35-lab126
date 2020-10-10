@@ -1,0 +1,56 @@
+From 9731c0c833642a05a72f494c3314001368dfa913 Mon Sep 17 00:00:00 2001
+From: Lily Zhang <r58066@freescale.com>
+Date: Tue, 13 Mar 2012 18:47:50 +0800
+Subject: [PATCH 1230/2463] ENGR00177983 mx6solo sabreauto: set hdmi display
+ id before register device
+
+- Set the display ID of HDMI before registering HDMI
+ device. HDMI is verified on RevA board
+- Consolidate the codes about display devices
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   18 +++++++++---------
+ 1 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 073e5d0..1bad3d5 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -1319,12 +1319,6 @@ static void __init mx6_board_init(void)
+ 	gp_reg_id = sabreauto_dvfscore_data.reg_id;
+ 	mx6q_sabreauto_init_uart();
+ 	imx6q_add_mipi_csi2(&mipi_csi2_pdata);
+-	imx6q_add_mxc_hdmi_core(&hdmi_core_data);
+-
+-	imx6q_add_ipuv3(0, &ipu_data[0]);
+-	if (cpu_is_mx6q())
+-		imx6q_add_ipuv3(1, &ipu_data[1]);
+-
+ 	if (cpu_is_mx6dl()) {
+ 		mipi_dsi_pdata.ipu_id = 0;
+ 		mipi_dsi_pdata.disp_id = 1;
+@@ -1333,11 +1327,17 @@ static void __init mx6_board_init(void)
+ 		ldb_data.sec_ipu_id = 0;
+ 		ldb_data.sec_disp_id = 1;
+ 		hdmi_core_data.disp_id = 1;
+-		for (i = 0; i < (ARRAY_SIZE(sabr_fb_data) + 1) / 2; i++)
+-			imx6q_add_ipuv3fb(i, &sabr_fb_data[i]);
+-	} else
++	}
++	imx6q_add_mxc_hdmi_core(&hdmi_core_data);
++
++	imx6q_add_ipuv3(0, &ipu_data[0]);
++	if (cpu_is_mx6q()) {
++		imx6q_add_ipuv3(1, &ipu_data[1]);
+ 		for (i = 0; i < ARRAY_SIZE(sabr_fb_data); i++)
+ 			imx6q_add_ipuv3fb(i, &sabr_fb_data[i]);
++	} else if (cpu_is_mx6dl())
++		for (i = 0; i < (ARRAY_SIZE(sabr_fb_data) + 1) / 2; i++)
++			imx6q_add_ipuv3fb(i, &sabr_fb_data[i]);
+ 
+ 	imx6q_add_mipi_dsi(&mipi_dsi_pdata);
+ 	imx6q_add_lcdif(&lcdif_data);
+-- 
+1.7.7.4
+

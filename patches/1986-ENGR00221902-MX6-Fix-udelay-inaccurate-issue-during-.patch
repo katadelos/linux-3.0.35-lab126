@@ -1,0 +1,90 @@
+From 9f654ff1ecd99a8171dc739e8f8474d8390a0978 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Thu, 30 Aug 2012 03:10:07 +0800
+Subject: [PATCH 1986/2463] ENGR00221902 [MX6]Fix udelay inaccurate issue
+ during suspend/resume
+
+When system enter suspend, we increase CPUFreq to the highest point
+without update the global loops_per_jiffy, it will lead to udelay
+inaccurate during the last phase of suspend/resume.
+
+WB counter and RBC counter need at least two 32K cycles to finish,
+here we add 80us for safe.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/system.c  |    2 +-
+ arch/arm/plat-mxc/cpufreq.c |   20 ++++++++++++++++----
+ 2 files changed, 17 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 686c58c..800c7cc 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -195,7 +195,7 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 			__raw_writel(__raw_readl(MXC_CCM_CCR) &
+ 				(~MXC_CCM_CCR_WB_COUNT_MASK) &
+ 				(~MXC_CCM_CCR_REG_BYPASS_CNT_MASK), MXC_CCM_CCR);
+-			udelay(60);
++			udelay(80);
+ 			/* Reconfigurate WB and RBC counter */
+ 			__raw_writel(__raw_readl(MXC_CCM_CCR) |
+ 				(0x1 << MXC_CCM_CCR_WB_COUNT_OFFSET) |
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index 6e6353a..bdc89f0 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -248,8 +248,11 @@ void mxc_cpufreq_suspend(void)
+ 	pre_suspend_rate = clk_get_rate(cpu_clk);
+ 	/*set flag and raise up cpu frequency if needed*/
+ 	cpu_freq_suspend_in = 1;
+-	if (pre_suspend_rate != (imx_freq_table[0].frequency * 1000))
++	if (pre_suspend_rate != (imx_freq_table[0].frequency * 1000)) {
+ 			set_cpu_freq(imx_freq_table[0].frequency * 1000);
++			loops_per_jiffy = cpufreq_scale(loops_per_jiffy,
++				pre_suspend_rate / 1000, imx_freq_table[0].frequency);
++	}
+ 	cpu_freq_suspend_in = 2;
+ 	mutex_unlock(&set_cpufreq_lock);
+ 
+@@ -259,8 +262,11 @@ void mxc_cpufreq_resume(void)
+ {
+ 	mutex_lock(&set_cpufreq_lock);
+ 	cpu_freq_suspend_in = 1;
+-	if (clk_get_rate(cpu_clk) != pre_suspend_rate)
++	if (clk_get_rate(cpu_clk) != pre_suspend_rate) {
+ 		set_cpu_freq(pre_suspend_rate);
++		loops_per_jiffy = cpufreq_scale(loops_per_jiffy,
++			imx_freq_table[0].frequency, pre_suspend_rate / 1000);
++	}
+ 	cpu_freq_suspend_in = 0;
+ 	mutex_unlock(&set_cpufreq_lock);
+ }
+@@ -270,16 +276,22 @@ void mxc_cpufreq_resume(void)
+ static int mxc_cpufreq_suspend(struct cpufreq_policy *policy)
+ {
+ 	pre_suspend_rate = clk_get_rate(cpu_clk);
+-	if (pre_suspend_rate != (imx_freq_table[0].frequency * 1000))
++	if (pre_suspend_rate != (imx_freq_table[0].frequency * 1000)) {
+ 		set_cpu_freq(imx_freq_table[0].frequency * 1000);
++		loops_per_jiffy = cpufreq_scale(loops_per_jiffy,
++			pre_suspend_rate / 1000, imx_freq_table[0].frequency);
++	}
+ 
+ 	return 0;
+ }
+ 
+ static int mxc_cpufreq_resume(struct cpufreq_policy *policy)
+ {
+-	if (clk_get_rate(cpu_clk) != pre_suspend_rate)
++	if (clk_get_rate(cpu_clk) != pre_suspend_rate) {
+ 		set_cpu_freq(pre_suspend_rate);
++		loops_per_jiffy = cpufreq_scale(loops_per_jiffy,
++			imx_freq_table[0].frequency, pre_suspend_rate / 1000);
++	}
+ 	return 0;
+ }
+ #endif
+-- 
+1.7.7.4
+

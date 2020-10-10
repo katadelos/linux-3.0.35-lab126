@@ -1,0 +1,57 @@
+From d85c0551dc3a80b27577063f122a262b95ec56c0 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Mon, 12 Nov 2012 13:41:13 +0800
+Subject: [PATCH 2260/2463] ENGR00233780 ASRC: limit output buffer size to
+ avoid kernel dump
+
+For ASRC memory to memory transfer, user would send driver input buffer
+and driver would copy converted output buffer into user's buffer.
+However, ASRC can't promise the ratio of output buffer size/input buffer
+size being equal to output sample rate/input sample rate.e.g, for
+convert from 8k to 48k and 1000 bytes input buffer size, ASRC may pop
+out 5999 bytes or 6001 bytes. If driver copy all 6001 bytes into user's
+buffer, kernel dump may happens cause of accessing unexisted buffer.
+
+In this patch, if ASRC output buffer size is larger than user's buffer
+size, discard exact part.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/mxc/asrc/mxc_asrc.c |    7 ++++---
+ 1 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index 77f88f3..4a17f58 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -961,6 +961,8 @@ static void asrc_read_output_FIFO_S16(struct asrc_pair_params *params)
+ 		size = asrc_get_output_FIFO_size(params->index);
+ 	}
+ 
++	if (t_size > ASRC_OUTPUT_LAST_SAMPLE)
++		t_size = ASRC_OUTPUT_LAST_SAMPLE;
+ 	params->output_last_period.length = t_size * params->channel_nums * 2;
+ }
+ 
+@@ -985,6 +987,8 @@ static void asrc_read_output_FIFO_S24(struct asrc_pair_params *params)
+ 		size = asrc_get_output_FIFO_size(params->index);
+ 	}
+ 
++	if (t_size > ASRC_OUTPUT_LAST_SAMPLE)
++		t_size = ASRC_OUTPUT_LAST_SAMPLE;
+ 	params->output_last_period.length = t_size * params->channel_nums * 4;
+ }
+ 
+@@ -1288,9 +1292,6 @@ static int mxc_asrc_prepare_output_buffer(struct asrc_pair_params *params,
+ {
+ 	u32 word_size;
+ 
+-	pbuf->output_buffer_length = asrc_get_output_buffer_size(
+-			pbuf->input_buffer_length,
+-			params->input_sample_rate, params->output_sample_rate);
+ 	switch (params->output_word_width) {
+ 	case ASRC_WIDTH_24_BIT:
+ 		word_size = 4;
+-- 
+1.7.7.4
+

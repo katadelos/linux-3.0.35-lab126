@@ -1,0 +1,62 @@
+From 2dd75f173f1253b50fc3eae97d6a9785e0f622f4 Mon Sep 17 00:00:00 2001
+From: Sheng Nan <b38800@freescale.com>
+Date: Wed, 17 Oct 2012 14:55:10 +0800
+Subject: [PATCH 2158/2463] ENGR00229962 Capture: ov5642/ov5640: update sensor
+ params even if s_parm failed
+
+ioctl_s_parm for ov5642 and ov5640, it didn't check if sensor changed mode
+successfully.
+So it updates the sensor parameters with new framerate and new mode even
+if the sensor failed to change mode.
+
+The original framerate and mode is useful for the exposure calculation.
+It should keep consistent with sensor actual work mode.
+
+- This patch checks the return value of function which changes sensor mode
+  If it succeed, update sensor parameters.
+
+Signed-off-by: Sheng Nan <b38800@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov5640_mipi.c |    7 +++++--
+ drivers/media/video/mxc/capture/ov5642.c      |    3 +++
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov5640_mipi.c b/drivers/media/video/mxc/capture/ov5640_mipi.c
+index 44cdd46..bde39a5 100644
+--- a/drivers/media/video/mxc/capture/ov5640_mipi.c
++++ b/drivers/media/video/mxc/capture/ov5640_mipi.c
+@@ -1494,12 +1494,15 @@ static int ioctl_s_parm(struct v4l2_int_device *s, struct v4l2_streamparm *a)
+ 		}
+ 
+ 		orig_mode = sensor->streamcap.capturemode;
++		ret = ov5640_init_mode(frame_rate,
++				(u32)a->parm.capture.capturemode, orig_mode);
++		if (ret < 0)
++			return ret;
++
+ 		sensor->streamcap.timeperframe = *timeperframe;
+ 		sensor->streamcap.capturemode =
+ 				(u32)a->parm.capture.capturemode;
+ 
+-		ret = ov5640_init_mode(frame_rate,
+-				sensor->streamcap.capturemode, orig_mode);
+ 		break;
+ 
+ 	/* These are all the possible cases. */
+diff --git a/drivers/media/video/mxc/capture/ov5642.c b/drivers/media/video/mxc/capture/ov5642.c
+index 534d8ad..4264382 100644
+--- a/drivers/media/video/mxc/capture/ov5642.c
++++ b/drivers/media/video/mxc/capture/ov5642.c
+@@ -3526,6 +3526,9 @@ static int ioctl_s_parm(struct v4l2_int_device *s, struct v4l2_streamparm *a)
+ 		ret = ov5642_change_mode(new_frame_rate, old_frame_rate,
+ 				a->parm.capture.capturemode,
+ 				sensor->streamcap.capturemode);
++		if (ret < 0)
++			return ret;
++
+ 		sensor->streamcap.timeperframe = *timeperframe;
+ 		sensor->streamcap.capturemode =
+ 				(u32)a->parm.capture.capturemode;
+-- 
+1.7.7.4
+

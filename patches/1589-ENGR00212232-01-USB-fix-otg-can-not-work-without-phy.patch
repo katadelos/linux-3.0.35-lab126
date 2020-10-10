@@ -1,0 +1,69 @@
+From fa00801bc04fa389b678472651469b12437d0371 Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Mon, 4 Jun 2012 16:24:01 +0800
+Subject: [PATCH 1589/2463] ENGR00212232-01 USB:fix otg can not work without
+ phy power if VBUS removed
+
+According to ticket TKT094250 :There is no VBUS supply or not supply for USB
+PHY power 3p0,USB dp/dm is floating when there is no connection in device mode:
+S/W can run the following flow to ensure the internal DP/DM linestate does not
+change. These should be done before set SUSP/PHCD bit after detecting the VBUS
+change from high to low.
+clear HW_USBPHY_DEBUG_CLKGATE
+loopback_utmi_dig_tst1 = 1
+loopback_utmi_dig_tst0 = 0
+loopback_tsti_tx_en = 1
+loopback_tsti_tx_hiz = 0
+loopback_tsti_tx_hs_mode = 0;
+
+After detecting the VBUS or ID change (connected to a host or device), SW do:
+set HW_USBPHY_DEBUG_CLKGATE back to 1
+clear the loopback_XXXX signals above back to 0
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ arch/arm/mach-mx6/usb_dr.c |   17 +++++++++++------
+ 1 files changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index 1e05434..dbd1e67 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -235,15 +235,20 @@ void mx6_set_otghost_vbus_func(driver_vbus_func driver_vbus)
+ 
+ static void _dr_discharge_line(bool enable)
+ {
++	void __iomem *anatop_base_addr = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
+ 	void __iomem *phy_reg = MX6_IO_ADDRESS(USB_PHY0_BASE_ADDR);
++
++	pr_debug("DR: %s  enable is %d\n", __func__, enable);
+ 	if (enable) {
+-		__raw_writel(BF_USBPHY_DEBUG_ENHSTPULLDOWN(0x3), phy_reg + HW_USBPHY_DEBUG_SET);
+-		__raw_writel(BF_USBPHY_DEBUG_HSTPULLDOWN(0x3), phy_reg + HW_USBPHY_DEBUG_SET);
++		__raw_writel(BM_USBPHY_DEBUG_CLKGATE, phy_reg + HW_USBPHY_DEBUG_CLR);
++		__raw_writel(BM_ANADIG_USB1_LOOPBACK_UTMI_DIG_TST1
++					|BM_ANADIG_USB1_LOOPBACK_TSTI_TX_EN,
++			anatop_base_addr + HW_ANADIG_USB1_LOOPBACK);
+ 	} else {
+-		__raw_writel(BF_USBPHY_DEBUG_ENHSTPULLDOWN(0x3), phy_reg + HW_USBPHY_DEBUG_CLR);
+-		__raw_writel(BF_USBPHY_DEBUG_HSTPULLDOWN(0x3), phy_reg + HW_USBPHY_DEBUG_CLR);
++		__raw_writel(0x0,
++			anatop_base_addr + HW_ANADIG_USB1_LOOPBACK);
++		__raw_writel(BM_USBPHY_DEBUG_CLKGATE, phy_reg + HW_USBPHY_DEBUG_SET);
+ 	}
+-
+ }
+ 
+ /* Below two macros are used at otg mode to indicate usb mode*/
+@@ -560,7 +565,7 @@ static void device_wakeup_handler(struct fsl_usb2_platform_data *pdata)
+ void __init mx6_usb_dr_init(void)
+ {
+ 	struct platform_device *pdev, *pdev_wakeup;
+-	static void __iomem *anatop_base_addr = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
++	void __iomem *anatop_base_addr = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
+ 
+ #ifdef CONFIG_USB_OTG
+ 	/* wake_up_enable is useless, just for usb_register_remote_wakeup execution*/
+-- 
+1.7.7.4
+

@@ -1,0 +1,33 @@
+From 600554e96031d5e2a44d400f3323fad250bf440e Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Mon, 2 Apr 2012 16:19:29 -0500
+Subject: [PATCH 1260/2463] ENGR00178763: MX6-Fix TO1.0 boot-fail issue
+
+TO1.0 parts donot boot properly after the following commit:
+88d3af87222b37e454acd6a8de3b0cf18180da32
+MX6-Switch ARM_CLK to PLL2_400MHz when ARM freq
+is below 400MHz.
+
+Correct gpt_clk was not getting enabled. Fix by adding the
+appropriate gpt_clk.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index fa99bb6..c84d43a 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -1934,6 +1934,7 @@ static struct clk gpt_clk[] = {
+ 	 .enable = _clk_enable,
+ 	 .disable = _clk_disable,
+ 	 .get_rate = _clk_gpt_get_rate,
++	 .secondary = &gpt_clk[1],
+ 	 },
+ 	{
+ 	__INIT_CLK_DEBUG(gpt_serial_clk)
+-- 
+1.7.7.4
+

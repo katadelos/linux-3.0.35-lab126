@@ -1,0 +1,56 @@
+From 619ca1976c90972a5cb93f2c65487adef0e229ca Mon Sep 17 00:00:00 2001
+From: B38613 <B38613@freescale.com>
+Date: Fri, 18 May 2012 18:15:56 +0800
+Subject: [PATCH 1491/2463] ENGR00209686-2:sdio:suspend/resume issue
+
+1.add MMC_PM_WAKE_SDIO_IRQ capability, it should be
+used together with MMC_PM_KEEP_POWER although not support
+SDIO wakeup in function.
+2.add MMC_CAP_NONREMOVABLE to describe imx6's three sdhc
+devices's removable feature.Now emmc is permanent,sdio and
+sd is removable instead of all default were permanent before.
+According to this feature, detimine whether reinit card
+or not in resume.
+
+Signed-off-by: B38613 <B38613@freescale.com>
+---
+ drivers/mmc/core/sdio.c            |    2 +-
+ drivers/mmc/host/sdhci-esdhc-imx.c |    9 ++++++++-
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mmc/core/sdio.c b/drivers/mmc/core/sdio.c
+index 9b18b54..16b7484 100644
+--- a/drivers/mmc/core/sdio.c
++++ b/drivers/mmc/core/sdio.c
+@@ -652,7 +652,7 @@ static int mmc_sdio_resume(struct mmc_host *host)
+ 	mmc_claim_host(host);
+ 
+ 	/* No need to reinitialize powered-resumed nonremovable cards */
+-	if (mmc_card_is_removable(host) || !mmc_card_keep_power(host))
++	if (mmc_card_is_removable(host) && !mmc_card_keep_power(host))
+ 		err = mmc_sdio_init_card(host, host->ocr, host->card,
+ 					mmc_card_keep_power(host));
+ 	else if (mmc_card_keep_power(host) && mmc_card_wake_sdio_irq(host)) {
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index c2d416d..00bfc85 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -722,7 +722,14 @@ static int esdhc_pltfm_init(struct sdhci_host *host, struct sdhci_pltfm_data *pd
+ 	if (boarddata->support_8bit)
+ 		host->mmc->caps |= MMC_CAP_8_BIT_DATA;
+ 	if (boarddata->keep_power_at_suspend)
+-		host->mmc->pm_caps |= MMC_PM_KEEP_POWER;
++		host->mmc->pm_caps |= (MMC_PM_KEEP_POWER | \
++					MMC_PM_WAKE_SDIO_IRQ);
++	if (boarddata->cd_type == ESDHC_CD_PERMANENT)
++		host->mmc->caps |= MMC_CAP_NONREMOVABLE;
++	else if (boarddata->cd_type == ESDHC_CD_CONTROLLER
++		|| boarddata->cd_type == ESDHC_CD_NONE
++		|| boarddata->cd_type == ESDHC_CD_GPIO)
++		host->mmc->caps &= ~MMC_CAP_NONREMOVABLE;
+ 	if (cpu_is_mx6()) {
+ 		host->mmc->caps |= MMC_CAP_1_8V_DDR;
+ 		host->tuning_min = SDHCI_TUNE_CTRL_MIN;
+-- 
+1.7.7.4
+

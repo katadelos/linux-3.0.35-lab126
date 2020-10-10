@@ -1,0 +1,51 @@
+From b9ccbfeb48634f6ab4865faed4127661afe6ec79 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Wed, 18 Jul 2012 11:11:39 +0800
+Subject: [PATCH 1766/2463] ENGR00217509 ASRC:Use ideal ratio mode for p2p
+ playback
+
+When use ESAI p2p playback, ASRC is configured no ratio mode.
+Due to an IC bug(TKT117009), user may hear noise sometimes.
+
+In this patch, use ideal ratio mode for ESAI p2p playback to avoid
+ noise.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/mxc/asrc/mxc_asrc.c |   20 ++++++++++++++++++++
+ 1 files changed, 20 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index db20cbf..4ef31c8 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -583,6 +583,26 @@ int asrc_config_pair(struct asrc_config *config)
+ 		}
+ 	}
+ 
++	if ((config->inclk == INCLK_ASRCK1_CLK) &&
++			(config->outclk == OUTCLK_ESAI_TX)) {
++		reg = __raw_readl(g_asrc->vaddr + ASRC_ASRCTR_REG);
++		reg &= ~(1 << (20 + config->pair));
++		reg |= (0x03 << (13 + (config->pair << 1)));
++		__raw_writel(reg, g_asrc->vaddr + ASRC_ASRCTR_REG);
++		err = asrc_set_clock_ratio(config->pair,
++					   config->input_sample_rate,
++					   config->output_sample_rate);
++		if (err < 0)
++			return err;
++
++		err = asrc_set_process_configuration(config->pair,
++						     config->input_sample_rate,
++						     config->
++						     output_sample_rate);
++		if (err < 0)
++			return err;
++	}
++
+ 	/* Config input and output wordwidth */
+ 	reg = __raw_readl(
+ 		g_asrc->vaddr + ASRC_ASRMCR1A_REG + (config->pair << 2));
+-- 
+1.7.7.4
+

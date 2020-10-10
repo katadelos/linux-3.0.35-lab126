@@ -1,0 +1,865 @@
+From 87a9758b9e153ff955aeb141e67b6023c7077791 Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Wed, 23 Jan 2013 10:36:00 +0800
+Subject: [PATCH 2373/2463] ENGR00241582 MX6 USB host: USB host certification
+ patch
+
+The patch include:
+- USB test mode on hub port and Root-hub port
+- support 3 types of message:
+	too much hub ties for hub attachment
+	too much power consumption for device attachment
+	unsupported device class warning
+- support menuconfig select the FSL_USB_TEST_MODE, located in:
+ 	-> Device Drivers
+	   -> USB support (USB_SUPPORT [=y])
+	   	 -> FSL High-speed Electrical Test Mode support
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ drivers/usb/core/hub.c      |   59 ++++++
+ drivers/usb/host/Kconfig    |    7 +
+ drivers/usb/host/Makefile   |    1 +
+ drivers/usb/host/arc_hset.c |  468 +++++++++++++++++++++++++++++++++++++++++++
+ drivers/usb/host/ehci-hcd.c |   31 +++-
+ drivers/usb/host/ehci-q.c   |  181 +++++++++++++++++
+ 6 files changed, 746 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/usb/core/hub.c b/drivers/usb/core/hub.c
+index 55a63e4..90241fa 100644
+--- a/drivers/usb/core/hub.c
++++ b/drivers/usb/core/hub.c
+@@ -156,7 +156,50 @@ EXPORT_SYMBOL_GPL(ehci_cf_port_reset_rwsem);
+ #define HUB_DEBOUNCE_STEP	  25
+ #define HUB_DEBOUNCE_STABLE	 100
+ 
++#ifdef CONFIG_FSL_USB_TEST_MODE
++static u8 usb_device_white_list[] = {
++	USB_CLASS_HID,
++	USB_CLASS_HUB,
++	USB_CLASS_MASS_STORAGE
++};
++
++static inline int in_white_list(u8 interfaceclass)
++{
++	int i;
++	for (i = 0; i < sizeof(usb_device_white_list); i++)	{
++		if (interfaceclass == usb_device_white_list[i])
++			return 1;
++	}
++	return 0;
++}
++
++static inline int device_in_white_list(struct usb_device *udev)
++{
++	int i;
++	int num_configs;
++	struct usb_host_config *c;
++
++	/* for test fixture, we always return 1 */
++	if (udev->descriptor.idVendor == 0x1A0A)
++		return 1;
++
++	c = udev->config;
++	num_configs = udev->descriptor.bNumConfigurations;
++	for (i = 0; i < num_configs; (i++, c++)) {
++		struct usb_interface_descriptor	*desc = NULL;
++
++		/* It's possible that a config has no interfaces! */
++		if (c->desc.bNumInterfaces > 0)
++			desc = &c->intf_cache[0]->altsetting->desc;
+ 
++		if (desc && !in_white_list((u8)desc->bInterfaceClass))
++			continue;
++
++		return 1;
++	}
++	return 0;
++}
++#endif
+ static int usb_reset_and_verify_device(struct usb_device *udev);
+ 
+ static inline char *portspeed(struct usb_hub *hub, int portstatus)
+@@ -1903,6 +1946,14 @@ int usb_new_device(struct usb_device *udev)
+ 	udev->dev.devt = MKDEV(USB_DEVICE_MAJOR,
+ 			(((udev->bus->busnum-1) * 128) + (udev->devnum-1)));
+ 
++#ifdef CONFIG_FSL_USB_TEST_MODE
++	if (!device_in_white_list(udev)) {
++		printk(KERN_ERR "unsupported device: not in white list\n");
++		goto fail;
++	} else {
++		printk(KERN_DEBUG "supported device\n");
++	}
++#endif
+ 	/* Tell the world! */
+ 	announce_device(udev);
+ 
+@@ -3309,6 +3360,10 @@ static void hub_port_connect_change(struct usb_hub *hub, int port1,
+ 		usb_set_device_state(udev, USB_STATE_POWERED);
+  		udev->bus_mA = hub->mA_per_port;
+ 		udev->level = hdev->level + 1;
++#ifdef CONFIG_FSL_USB_TEST_MODE
++		printk(KERN_INFO "+++ %s:udev->level :%d", __func__,
++						udev->level);
++#endif
+ 		udev->wusb = hub_is_wusb(hub);
+ 
+ 		/* Only USB 3.0 devices are connected to SuperSpeed hubs. */
+@@ -3527,6 +3582,10 @@ static void hub_events(void)
+ 			if (ret < 0)
+ 				continue;
+ 
++#ifdef CONFIG_FSL_USB_TEST_MODE
++			if (portstatus & USB_PORT_STAT_TEST)
++				continue;
++#endif
+ 			if (portchange & USB_PORT_STAT_C_CONNECTION) {
+ 				clear_port_feature(hdev, i,
+ 					USB_PORT_FEAT_C_CONNECTION);
+diff --git a/drivers/usb/host/Kconfig b/drivers/usb/host/Kconfig
+index 9e99765..c9f9a65 100755
+--- a/drivers/usb/host/Kconfig
++++ b/drivers/usb/host/Kconfig
+@@ -59,6 +59,13 @@ config USB_EHCI_HCD
+ 	  To compile this driver as a module, choose M here: the
+ 	  module will be called ehci-hcd.
+ 
++config FSL_USB_TEST_MODE
++	bool "FSL High-speed Electrical Test Mode Support"
++	depends on USB_EHCI_ARC
++	default n
++	---help---
++	    enable freescale test mode
++
+ config USB_EHCI_ARC
+ 	bool "Support for Freescale controller"
+ 	depends on USB_EHCI_HCD && (ARCH_MXC || ARCH_STMP3XXX || ARCH_MXS)
+diff --git a/drivers/usb/host/Makefile b/drivers/usb/host/Makefile
+index 624a362..0bcc665 100644
+--- a/drivers/usb/host/Makefile
++++ b/drivers/usb/host/Makefile
+@@ -35,3 +35,4 @@ obj-$(CONFIG_USB_HWA_HCD)	+= hwa-hc.o
+ obj-$(CONFIG_USB_IMX21_HCD)	+= imx21-hcd.o
+ obj-$(CONFIG_USB_FSL_MPH_DR_OF)	+= fsl-mph-dr-of.o
+ obj-$(CONFIG_USB_OCTEON2_COMMON) += octeon2-common.o
++obj-$(CONFIG_FSL_USB_TEST_MODE)	+= arc_hset.o
+diff --git a/drivers/usb/host/arc_hset.c b/drivers/usb/host/arc_hset.c
+new file mode 100644
+index 0000000..2ec9055
+--- /dev/null
++++ b/drivers/usb/host/arc_hset.c
+@@ -0,0 +1,468 @@
++/*
++ * HS USB Host-mode HSET driver for ARC USB controller
++ * Copyright 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Zhang Yan <jasper.zhang@freescale.com>
++ * Peter Chen <peter.chen@freescale.com>  */
++
++#include <linux/kernel.h>
++#include <linux/errno.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/module.h>
++#include <linux/delay.h>
++#include <linux/usb.h>
++#include <linux/proc_fs.h>
++#include <linux/seq_file.h>
++
++#define EHCI_IAA_MSECS		10		/* arbitrary */
++#include <linux/usb/hcd.h>
++#include "../core/usb.h"
++#include "ehci-fsl.h"
++#include <linux/uaccess.h>
++#include <linux/io.h>
++#include <mach/arc_otg.h>
++#include "ehci.h"
++
++#define rh_level 1
++#define SINGLE_STEP_SLEEP_COUNT  15000
++#define USB_HIGH_SPEED		0x01
++#define USB_FULL_SPEED		0x02
++#define USB_LOW_SPEED		0x03
++
++/* ARC port test mode */
++#define PORTSC_PTC_TEST_MODE_DISABLE	0x00
++#define PORTSC_PTC_TEST_J		0x01
++#define PORTSC_PTC_TEST_K		0x02
++#define PORTSC_PTC_SE0_NAK		0x03
++#define PORTSC_PTC_TEST_PACKET		0x04
++#define PORTSC_PTC_FORCE_ENABLE_HS	0x05
++#define PORTSC_PTC_FORCE_ENABLE_FS	0x06
++#define PORTSC_PTC_FORCE_ENABLE_LS	0x07
++
++/* Other test */
++#define HSET_TEST_SUSPEND_RESUME	0x08
++#define HSET_TEST_GET_DEV_DESC		0x09
++#define HSET_TEST_GET_DEV_DESC_DATA	0x0A
++
++
++#define TEST_DEVICE_VID	 0x1A0A
++static struct usb_device_id archset_table[] = {
++	{ USB_DEVICE(TEST_DEVICE_VID, 0x0101) },	/* Test_SE0_NAK */
++	{ USB_DEVICE(TEST_DEVICE_VID, 0x0102) },	/* Test_J */
++	{ USB_DEVICE(TEST_DEVICE_VID, 0x0103) },	/* Test_K */
++	{ USB_DEVICE(TEST_DEVICE_VID, 0x0104) },	/* Test_Packet */
++	{ USB_DEVICE(TEST_DEVICE_VID, 0x0105) },	/* Force enable */
++	{ USB_DEVICE(TEST_DEVICE_VID, 0x0106) },	/* HS_HOST_PORT_SUSPEND_RESUME */
++	{ USB_DEVICE(TEST_DEVICE_VID, 0x0107) },	/* SINGLE_STEP_GET_DEV_DESC */
++	{ USB_DEVICE(TEST_DEVICE_VID, 0x0108) },	/* SINGLE_STEP_GET_DEV_DESC_DATA */
++	{ }	/* Terminating entry */
++};
++MODULE_DEVICE_TABLE(usb, archset_table);
++
++/* Private data */
++struct usb_archset {
++	struct usb_device    *udev;	/* the usb device for this device */
++	struct usb_interface *interface;	/* the interface for this device */
++	struct kref           kref;
++	struct ehci_hcd       *ehci;	/* the usb controller */
++	char                  ptcname[24];
++};
++
++ void set_single_step_desc_data_on(void);
++ void clear_single_step_desc_data_on(void);
++
++static void arc_kill_per_sched(struct ehci_hcd *ehci)
++{
++	u32 command = 0;
++	command = ehci_readl(ehci, &ehci->regs->command);
++	command &= ~(CMD_PSE);
++	ehci_writel(ehci, command, &ehci->regs->command);
++	printk(KERN_INFO "+++ %s: Periodic Schedule Stopped", __func__);
++}
++
++static void arc_hset_test(struct ehci_hcd *ehci, int mode)
++{
++	u32 portsc = 0;
++
++	portsc = ehci_readl(ehci, &ehci->regs->port_status[0]);
++	portsc &= ~(0xf << 16);
++	portsc |= (mode << 16);
++	ehci_writel(ehci, portsc, &ehci->regs->port_status[0]);
++}
++
++static inline void hub_set_testmode(struct usb_device *udev, u8
++			test_mode)
++{
++	struct usb_device *hub_dev;
++	int i;
++	int max_port;
++	int status;
++	u8 level = udev->level;
++
++	if (level == 0)
++		return;
++	else {
++		printk(KERN_INFO "run %s at tie %d hub\n", __func__, level);
++		/* get the port number of parent */
++		if (udev->parent != NULL) {
++			hub_dev = udev->parent;
++			max_port = hub_dev->maxchild;
++		} else {
++			printk(KERN_INFO "device don't have parent hub\n");
++			return;
++		}
++
++		for (i = 0; i < max_port; i++) {
++			status = usb_control_msg(hub_dev, usb_sndctrlpipe(udev, 0),
++				USB_REQ_SET_FEATURE, USB_RT_PORT,
++				USB_PORT_FEAT_SUSPEND, i+1,
++				NULL, 0, 1000);
++			if (status >= 0)
++				printk(KERN_INFO "send port_suspend to port %d\n", i+1);
++			else {
++				printk(KERN_INFO "send port_suspend error %d to port %d\n",
++					status, i+1);
++				continue;
++			}
++		}
++		msleep(1000);
++		status = usb_control_msg(hub_dev, usb_sndctrlpipe(udev, 0),
++				USB_REQ_SET_FEATURE/*USB_REQ_CLEAR_FEATURE*/, USB_RT_PORT,
++				USB_PORT_FEAT_TEST, (__u16) ((test_mode << 8) | udev->portnum),
++				NULL, 0, 1000);
++		if (status >= 0)
++			printk(KERN_INFO "send cmd %d to port %d\n", test_mode, udev->portnum);
++		else
++			printk(KERN_INFO "send cmd %d error %d to port %d\n", test_mode, status, udev->portnum);
++	}
++}
++
++static inline void test_j(struct usb_archset *hset)
++{
++	struct usb_device *udev = hset->udev;
++	u8 level = udev->level;
++	if (level == rh_level) {
++		printk(KERN_INFO "%s at tie %d hub\n", __func__, level);
++		arc_hset_test(hset->ehci, PORTSC_PTC_TEST_J);
++	} else
++		hub_set_testmode(udev, PORTSC_PTC_TEST_J);
++}
++
++static inline void test_k(struct usb_archset *hset)
++{
++	struct usb_device *udev = hset->udev;
++	u8 level = udev->level;
++	printk(KERN_INFO "%s at tie %d hub\n", __func__, level);
++	if (level == rh_level)
++		arc_hset_test(hset->ehci, PORTSC_PTC_TEST_K);
++	else
++		hub_set_testmode(udev, PORTSC_PTC_TEST_K);
++}
++
++static inline void test_se0_nak(struct usb_archset *hset)
++{
++	struct usb_device *udev = hset->udev;
++	u8 level = udev->level;
++	printk(KERN_INFO "%s at tie %d hub\n", __func__, level);
++	if (level == rh_level)
++		arc_hset_test(hset->ehci, PORTSC_PTC_SE0_NAK);
++	else
++		hub_set_testmode(udev, PORTSC_PTC_SE0_NAK);
++}
++
++static inline void test_packet(struct usb_archset *hset)
++{
++	struct usb_device *udev = hset->udev;
++	u8 level = udev->level;
++	printk(KERN_INFO "%s at tie %d hub\n", __func__, level);
++	if (level == rh_level)
++		arc_hset_test(hset->ehci, PORTSC_PTC_TEST_PACKET);
++	else
++		hub_set_testmode(udev, PORTSC_PTC_TEST_PACKET);
++}
++
++static inline void test_force_enable(struct usb_archset *hset, int
++			forcemode)
++{
++	struct usb_device *udev = hset->udev;
++	u8 level = udev->level;
++	int ptc_fmode = 0;
++	printk(KERN_INFO "%s at tie %d hub\n", __func__, level);
++	if (level == 0) {
++		switch (forcemode) {
++		case USB_HIGH_SPEED:
++			ptc_fmode = PORTSC_PTC_FORCE_ENABLE_HS;
++			break;
++		case USB_FULL_SPEED:
++			ptc_fmode = PORTSC_PTC_FORCE_ENABLE_FS;
++			break;
++		case USB_LOW_SPEED:
++			ptc_fmode = PORTSC_PTC_FORCE_ENABLE_LS;
++			break;
++		default:
++			printk(KERN_ERR "unknown speed mode %d\n", forcemode);
++			return;
++		}
++		arc_hset_test(hset->ehci, ptc_fmode);
++	} else
++		hub_set_testmode(udev, PORTSC_PTC_FORCE_ENABLE_HS);
++}
++
++static void suspend(struct usb_archset *hset)
++{
++	struct ehci_hcd *ehci = hset->ehci;
++	u32 portsc = 0;
++
++	portsc = ehci_readl(ehci, &ehci->regs->port_status[0]);
++	portsc |= PORT_SUSPEND;	/* Set suspend */
++	ehci_writel(ehci, portsc, &ehci->regs->port_status[0]);
++}
++
++
++static void resume(struct usb_archset *hset)
++{
++	struct ehci_hcd *ehci = hset->ehci;
++	u32 portsc = 0;
++
++	portsc = ehci_readl(ehci, &ehci->regs->port_status[0]);
++	portsc |= PORT_RESUME;
++	ehci_writel(ehci, portsc, &ehci->regs->port_status[0]);
++}
++
++static void test_suspend_resume(struct usb_archset *hset)
++{
++	printk(KERN_INFO "%s\n", __func__);
++
++	suspend(hset);
++	msleep(15000);	/* Wait for 15s */
++	resume(hset);
++}
++
++static void test_single_step_get_dev_desc(struct usb_archset *hset)
++{
++	struct ehci_hcd *ehci = hset->ehci;
++	struct usb_bus *bus = hcd_to_bus(ehci_to_hcd(ehci));
++	struct usb_device *udev = hset->udev;
++	int    result;
++
++	if (!ehci || !bus || !bus->root_hub) {
++		printk(KERN_ERR "Host controller not ready!\n");
++		return;
++	}
++
++	if (!udev) {
++		printk(KERN_ERR "No device connected.\n");
++		return;
++	}
++
++	/* Stop Periodic schedule to prevent polling of hubs */
++	arc_kill_per_sched(hset->ehci);
++
++	msleep(SINGLE_STEP_SLEEP_COUNT);	/* SOF for 15s */
++
++	result = usb_get_device_descriptor(udev, sizeof(struct usb_device_descriptor));
++	if (result < 0 && result != -ETIMEDOUT)
++		printk(KERN_ERR "usb_get_device_descriptor failed %d\n", result);
++	else
++		printk(KERN_INFO "usb_get_device_descriptor passed\n");
++}
++static void test_single_step_get_dev_desc_data(struct usb_archset *hset)
++{
++	struct usb_device *udev = hset->udev;
++	struct usb_device_descriptor *desc;
++	int    result;
++	unsigned int size = sizeof(struct usb_device_descriptor);
++	printk(KERN_INFO "%s size = %d\n", __func__, size);
++	desc = kmalloc(sizeof(*desc), GFP_NOIO);
++	if (!desc) {
++		printk(KERN_ERR "alloc desc failed\n");
++		return ;
++	}
++
++	set_single_step_desc_data_on();
++
++	result = usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
++					USB_REQ_GET_DESCRIPTOR, USB_DIR_IN,
++					(0x01 << 8) + 0, 0, desc, size, USB_CTRL_GET_TIMEOUT);
++	if (result < 0 && result != -ETIMEDOUT)
++		printk(KERN_ERR "the setup transaction failed %d\n", result);
++	else
++		printk(KERN_INFO "the setup transaction passed\n");
++
++
++	/* Stop Periodic schedule to prevent polling of hubs */
++	arc_kill_per_sched(hset->ehci);
++
++	msleep(SINGLE_STEP_SLEEP_COUNT);
++
++	result = usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
++					USB_REQ_GET_DESCRIPTOR, USB_DIR_IN,
++					(0x01 << 8) + 0, 0, desc, size,	USB_CTRL_GET_TIMEOUT);
++	if (result <= 0 && result != -ETIMEDOUT)
++		printk(KERN_ERR "the data transaction failed %d\n", result);
++	else
++		printk(KERN_INFO "the data transaction passed\n");
++
++	result = usb_control_msg(udev, usb_rcvctrlpipe(udev, 0),
++					USB_REQ_GET_DESCRIPTOR, USB_DIR_IN,
++					(0x01 << 8) + 0, 0, desc, size, USB_CTRL_GET_TIMEOUT);
++	if (result < 0 && result != -ETIMEDOUT)
++		printk(KERN_ERR "the status transaction failed %d\n", result);
++	else
++		printk(KERN_INFO "the status transaction passed\n");
++
++	clear_single_step_desc_data_on();
++
++	kfree(desc);
++
++	msleep(SINGLE_STEP_SLEEP_COUNT);	/* SOF for 15s */
++	printk(KERN_INFO "test_single_step_get_dev_desc_data finished\n");
++}
++
++
++void test_single_step_set_feature(struct usb_archset *hset)
++{
++	struct ehci_hcd *ehci = hset->ehci;
++	struct usb_bus *bus = hcd_to_bus(ehci_to_hcd(ehci));
++	struct usb_device *udev;
++
++	if (!ehci || !bus || !bus->root_hub) {
++		printk(KERN_ERR "Host controller not ready!\n");
++		return;
++	}
++	udev = bus->root_hub->children[0];
++	if (!udev) {
++		printk(KERN_ERR "No device connected.\n");
++		return;
++	}
++	usb_control_msg(udev, usb_sndctrlpipe(udev, 0),
++				USB_REQ_SET_FEATURE, 0, 0, 0,
++				NULL, 0, USB_CTRL_SET_TIMEOUT);
++}
++
++static struct usb_archset *the_hset[4];
++static struct usb_archset *init_hset_dev(void *controller)
++{
++	struct ehci_hcd *ehci = (struct ehci_hcd *)controller;
++	struct usb_archset *hset = NULL;
++	int ctrid = 0;
++
++	ctrid = ehci_to_hcd(ehci)->self.busnum-1;
++	if (the_hset[ctrid]) {
++		kref_get(&the_hset[ctrid]->kref);
++		return the_hset[ctrid];
++	}
++
++	hset = kzalloc(sizeof(struct usb_archset), GFP_KERNEL);
++	if (hset == NULL) {
++		printk(KERN_ERR "Out of memory!\n");
++		return NULL;
++	}
++	hset->ehci = (struct ehci_hcd *)controller;
++	kref_init(&hset->kref);
++	the_hset[ctrid] = hset;
++
++	return hset;
++}
++
++
++static void hset_delete(struct kref *kref)
++{
++	struct usb_archset *hset = container_of(kref, struct usb_archset,
++								kref);
++
++	kfree(hset);
++}
++
++static int archset_probe(struct usb_interface *iface,
++		const struct usb_device_id *id)
++{
++	struct usb_archset *hset;
++	struct usb_device *udev;
++	struct usb_hcd *hcd;
++
++	udev = usb_get_dev(interface_to_usbdev(iface));
++	hcd = bus_to_hcd(udev->bus);
++	hset = init_hset_dev((void *)hcd_to_ehci(hcd));
++	if (hset == NULL)
++		return -ENOMEM;
++
++	hset->udev = udev;
++	usb_set_intfdata(iface, hset);
++	switch (id->idProduct) {
++	case 0x0101:
++		test_se0_nak(hset);
++		break;
++	case 0x0102:
++		test_j(hset);
++		break;
++	case 0x0103:
++		test_k(hset);
++		break;
++	case 0x0104:
++		test_packet(hset);
++		break;
++	case 0x0105:
++		printk(KERN_INFO "Force FS/FS/LS ?\n");
++		test_force_enable(hset, USB_HIGH_SPEED);
++		break;
++	case 0x0106:
++		test_suspend_resume(hset);
++		break;
++	case 0x0107:
++		printk(KERN_INFO "Begin SINGLE_STEP_GET_DEVICE_DESCRIPTOR\n");
++		test_single_step_get_dev_desc(hset);
++		break;
++	case 0x0108:
++		printk(KERN_INFO "Begin SINGLE_STEP_GET_DEVICE_DESCRIPTOR_DATA\n");
++		test_single_step_get_dev_desc_data(hset);
++		break;
++	}
++
++	return 0;
++}
++
++static void archset_disconnect(struct usb_interface *iface)
++{
++	struct usb_archset *hset;
++
++	hset = usb_get_intfdata(iface);
++	usb_set_intfdata(iface, NULL);
++
++	usb_put_dev(hset->udev);
++	kref_put(&hset->kref, hset_delete);
++}
++
++
++static struct usb_driver archset_driver = {
++	.name = "arc hset",
++	.probe = archset_probe,
++	.disconnect = archset_disconnect,
++	.id_table = archset_table,
++};
++
++static int __init usb_hset_init(void)
++{
++	int ret = 0;
++	printk(KERN_ERR "usb register error with %d\n", ret);
++	/* register driver to usb subsystem */
++	ret = usb_register(&archset_driver);
++    if (ret)
++		printk(KERN_ERR "usb register error with %d\n", ret);
++	else
++		printk(KERN_INFO "usb hset init succeed\n");
++
++	return ret;
++}
++
++static void __exit usb_hset_exit(void)
++{
++	usb_deregister(&archset_driver);
++}
++
++module_init(usb_hset_init);
++module_exit(usb_hset_exit);
++MODULE_DESCRIPTION("Freescale USB Host Test Mode Driver");
++MODULE_AUTHOR("Jasper Zhang");
++MODULE_LICENSE("GPL");
++
+diff --git a/drivers/usb/host/ehci-hcd.c b/drivers/usb/host/ehci-hcd.c
+index 58f4472..2bea9581 100644
+--- a/drivers/usb/host/ehci-hcd.c
++++ b/drivers/usb/host/ehci-hcd.c
+@@ -48,6 +48,21 @@
+ #include <asm/system.h>
+ #include <asm/unaligned.h>
+ 
++
++#ifdef CONFIG_FSL_USB_TEST_MODE
++static u32 single_step_desc_data_on;
++void set_single_step_desc_data_on(void)
++{
++	single_step_desc_data_on = 1;
++}
++EXPORT_SYMBOL_GPL(set_single_step_desc_data_on);
++
++void clear_single_step_desc_data_on(void)
++{
++	single_step_desc_data_on = 0;
++}
++EXPORT_SYMBOL_GPL(clear_single_step_desc_data_on);
++#endif
+ /*-------------------------------------------------------------------------*/
+ 
+ /*
+@@ -964,8 +979,22 @@ static int ehci_urb_enqueue (
+ 		/* FALLTHROUGH */
+ 	/* case PIPE_BULK: */
+ 	default:
+-		if (!qh_urb_transaction (ehci, urb, &qtd_list, mem_flags))
++#ifdef CONFIG_FSL_USB_TEST_MODE
++		if (!single_step_desc_data_on) {
++			printk(KERN_DEBUG "in test mode, but single step NOT on\n");
++			if (!qh_urb_transaction(ehci, urb, &qtd_list,
++						mem_flags))
++				return -ENOMEM;
++		} else {
++			printk(KERN_DEBUG "in test mode, single step on\n");
++			if (!single_step_qh_urb_transaction(ehci, urb,
++				&qtd_list, mem_flags))
++				return -ENOMEM;
++		}
++#else
++		if (!qh_urb_transaction(ehci, urb, &qtd_list, mem_flags))
+ 			return -ENOMEM;
++#endif
+ 		return submit_async(ehci, urb, &qtd_list, mem_flags);
+ 
+ 	case PIPE_INTERRUPT:
+diff --git a/drivers/usb/host/ehci-q.c b/drivers/usb/host/ehci-q.c
+index e4dd26a..361dd5d 100644
+--- a/drivers/usb/host/ehci-q.c
++++ b/drivers/usb/host/ehci-q.c
+@@ -592,6 +592,187 @@ static void qtd_list_free (
+ 	}
+ }
+ 
++#ifdef CONFIG_FSL_USB_TEST_MODE
++/*
++ * create a list of filled qtds for this URB; won't link into qh.
++ */
++static struct list_head *
++single_step_qh_urb_transaction(
++	struct ehci_hcd		*ehci,
++	struct urb		*urb,
++	struct list_head	*head,
++	gfp_t			flags
++) {
++	struct ehci_qtd		*qtd, *qtd_prev;
++	dma_addr_t		buf;
++	int			len, this_sg_len, maxpacket;
++	int			is_input;
++	u32			token;
++	int			i;
++	struct scatterlist	*sg;
++#define SINGLE_STEP_PHASE_SETUP  0
++#define SINGLE_STEP_PHASE_DATA   1
++#define SINGLE_STEP_PHASE_STATUS 2
++#define SINGLE_STEP_PHASE_NONE   0xFF
++	static u32  phase_state = SINGLE_STEP_PHASE_NONE;
++
++	/*
++	 * URBs map to sequences of QTDs:  one logical transaction
++	 */
++	qtd = ehci_qtd_alloc(ehci, flags);
++	if (unlikely(!qtd))
++		return NULL;
++	list_add_tail(&qtd->qtd_list, head);
++	qtd->urb = urb;
++
++	token = QTD_STS_ACTIVE;
++	token |= (EHCI_TUNE_CERR << 10);
++	/* for split transactions, SplitXState initialized to zero */
++	len = urb->transfer_buffer_length;
++	is_input = usb_pipein(urb->pipe);
++	if (!is_input) {
++		printk(KERN_INFO "single step can only send IN\n");
++		return NULL;
++	}
++
++	if (!usb_pipecontrol(urb->pipe)) {
++		printk(KERN_INFO "single step can only send control pipe\n");
++		return NULL;
++	}
++
++	if (phase_state == SINGLE_STEP_PHASE_NONE) {
++		/*
++		 * SETUP pid
++		 * we use transfer_buffer_length to identfiy whether it
++		 * is in setup phase or data phase
++		 */
++		qtd_fill(ehci, qtd, urb->setup_dma,
++				sizeof(struct usb_ctrlrequest),
++				token | (2 /* "setup" */ << 8), 8);
++
++		/* ... and always at least one more pid */
++		qtd->urb = urb;
++		phase_state = SINGLE_STEP_PHASE_SETUP;
++	}
++	/*
++	 * data transfer stage:  buffer setup
++	 */
++	else
++		if (phase_state == SINGLE_STEP_PHASE_SETUP &&
++		len != 0) {
++		i = urb->num_sgs;
++		if (len > 0 && i > 0) {
++			sg = urb->sg;
++			buf = sg_dma_address(sg);
++
++			/* urb->transfer_buffer_length may be smaller than the
++			* size of the scatterlist (or vice versa)
++			*/
++			this_sg_len = min_t(int, sg_dma_len(sg), len);
++		} else {
++			sg = NULL;
++			buf = urb->transfer_dma;
++			this_sg_len = len;
++		}
++
++		if (is_input)
++			token |= (1 /* "in" */ << 8);
++		/* else it's already initted to "out" pid (0 << 8) */
++		maxpacket = max_packet(usb_maxpacket(urb->dev,
++						urb->pipe, !is_input));
++		/* for the first data qtd, the toggle should be 1 */
++		token ^= QTD_TOGGLE;
++
++		/*
++		 * buffer gets wrapped in one or more qtds;
++		 * last one may be "short" (including zero len)
++		 * and may serve as a control status ack
++		 */
++		for (;;) {
++			int this_qtd_len;
++
++			this_qtd_len = qtd_fill(ehci, qtd, buf, this_sg_len,
++							token, maxpacket);
++			this_sg_len -= this_qtd_len;
++			len -= this_qtd_len;
++			buf += this_qtd_len;
++
++			/*
++			* short reads advance to a "magic" dummy instead of
++			* the next qtd ... that forces the queue to stop, for
++			* manual cleanup. (will usually be overridden later.)
++			*/
++			if (is_input)
++				qtd->hw_alt_next = ehci->async->hw->hw_alt_next;
++
++			/* qh makes control packets use qtd toggle; switch it*/
++			if ((maxpacket & (this_qtd_len + (maxpacket - 1))) == 0)
++				token ^= QTD_TOGGLE;
++
++			if (likely(this_sg_len <= 0)) {
++				if (--i <= 0 || len <= 0)
++					break;
++				sg = sg_next(sg);
++				buf = sg_dma_address(sg);
++				this_sg_len = min_t(int, sg_dma_len(sg), len);
++			}
++
++			qtd_prev = qtd;
++			qtd = ehci_qtd_alloc(ehci, flags);
++			if (unlikely(!qtd))
++				goto cleanup;
++			qtd->urb = urb;
++			qtd_prev->hw_next = QTD_NEXT(ehci, qtd->qtd_dma);
++			list_add_tail(&qtd->qtd_list, head);
++		}
++
++		phase_state = SINGLE_STEP_PHASE_DATA;
++
++		/*
++		 * unless the caller requires manual cleanup after short reads,
++		 * have the alt_next mechanism keep the queue running after the
++		 * last data qtd (the only one, for control and other cases).
++		 */
++		if (likely((urb->transfer_flags & URB_SHORT_NOT_OK) == 0
++					|| usb_pipecontrol(urb->pipe)))
++			qtd->hw_alt_next = EHCI_LIST_END(ehci);
++	}
++
++	/*
++	 * control requests may need a terminating data "status" ack;
++	 * bulk ones may need a terminating short packet (zero length).
++	 */
++	else
++		if (phase_state == SINGLE_STEP_PHASE_DATA) {
++		int	one_more = 0;
++		if (usb_pipecontrol(urb->pipe)) {
++			one_more = 1;
++			/* for single step, it always be out here */
++			token &= ~(3 << 8);
++			token |= QTD_TOGGLE;	/* force DATA1 */
++		} else if (usb_pipebulk(urb->pipe)
++				&& (urb->transfer_flags & URB_ZERO_PACKET)
++				&& !(urb->transfer_buffer_length % maxpacket)) {
++			one_more = 1;
++		}
++		if (one_more) {
++			/* never any data in such packets */
++			qtd_fill(ehci, qtd, 0, 0, token, 0);
++		}
++	}
++
++	/* by default, enable interrupt on urb completion */
++	if (likely(!(urb->transfer_flags & URB_NO_INTERRUPT)))
++		qtd->hw_token |= cpu_to_hc32(ehci, QTD_IOC);
++	return head;
++
++cleanup:
++	qtd_list_free(ehci, urb, head);
++	phase_state = SINGLE_STEP_PHASE_NONE;
++	return NULL;
++}
++#endif
++
+ /*
+  * create a list of filled qtds for this URB; won't link into qh.
+  */
+-- 
+1.7.7.4
+

@@ -1,0 +1,41 @@
+From c7ac038483ca94ba954f55eaf783db821e2ace39 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Fri, 26 Aug 2011 10:58:30 +0800
+Subject: [PATCH 0364/2463] ENGR00155391-1 [MX6]Clean up build warning
+
+Fix build warning.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/platsmp.c |    2 +-
+ arch/arm/plat-mxc/cpu.c     |    1 +
+ 2 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/platsmp.c b/arch/arm/mach-mx6/platsmp.c
+index 5155efe..1ea1200 100644
+--- a/arch/arm/mach-mx6/platsmp.c
++++ b/arch/arm/mach-mx6/platsmp.c
+@@ -94,7 +94,7 @@ int __cpuinit boot_secondary(unsigned int cpu, struct task_struct *idle)
+ 	val = jiffies;
+ 	/* wait cpu<n> boot up and clear boot_entry, timeout is 500ms */
+ 	while (__raw_readl(src_base + SRC_GPR1_OFFSET + 4 * 2 * cpu) != 0) {
+-		if (time_after(jiffies, val + HZ / 2)) {
++		if (time_after(jiffies, (unsigned long)(val + HZ / 2))) {
+ 			printk(KERN_WARNING "cpu %d: boot up failed!\n", cpu);
+ 			break;
+ 		}
+diff --git a/arch/arm/plat-mxc/cpu.c b/arch/arm/plat-mxc/cpu.c
+index 3581fba..22abeb2 100755
+--- a/arch/arm/plat-mxc/cpu.c
++++ b/arch/arm/plat-mxc/cpu.c
+@@ -17,6 +17,7 @@
+  */
+ 
+ #include <linux/module.h>
++#include <mach/clock.h>
+ 
+ unsigned int __mxc_cpu_type;
+ EXPORT_SYMBOL(__mxc_cpu_type);
+-- 
+1.7.7.4
+

@@ -1,0 +1,235 @@
+From c2bf83a71f43f0cc04a8b0e8d455f59f4a9614e2 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <b42378@freescale.com>
+Date: Tue, 16 Oct 2012 16:20:03 +0800
+Subject: [PATCH 2161/2463] ENGR00225520 SDMA:fix kernel dump occasionally
+ during I2C stress test
+
+ Stress test with I2C devices occasionally caused kernel dump and panic:
+==========================dump=start==========================
+v4l_capture_testapp    0  TINFO  :
+  Color space conversion YUV420->RGB565X success!
+v4l_capture_testapp    0  TINFO  :
+  Color space conversion YUV420->RGB565X success!
+clean up environment...VPU interrupt received.
+
+Unable to handle kernel paging request at virtual address ffdf401a
+pgd = ba2a4000
+[ffdf401a] *pgd=4fe1a811, *pte=00000000, *ppte=00000000
+Internal error: Oops: 7 [#1] PREEMPT SMP
+Modules linked in: mxc_v4l2_capture ipu_still ipu_bg_overlay_sdc
+ ipu_prp_enc ipu_fg_overlay_sdc ipu_csi_enc ov5642_camera
+  camera_sensor_clock [last unloaded: ipu_csi_enc]
+CPU: 0    Not tainted  (3.0.35-2039-g267e004 #1)
+PC is at sdma_int_handler+0x144/0x1a4
+LR is at sdma_int_handler+0x70/0x1a4
+pc : [<802663f4>]    lr : [<80266320>]    psr: 60000193
+sp : ba3e7ca8  ip : bfee2100  fp : 00000001
+r10: 80a67200  r9 : 80acbcf0  r8 : 00000003
+r7 : 00000001  r6 : 00000001  r5 : 00000002  r4 : bfee20e0
+r3 : ffdf4000  r2 : 00010104  r1 : ffdf4018  r0 : bfee2104
+Flags: nZCv  IRQs off  FIQs on  Mode SVC_32  ISA ARM  Segment user
+Control: 10c53c7d  Table: 4a2a404a  DAC: 00000015
+Process mxc_vpu_test.ou (pid: 3277, stack limit = 0xba3e62f0)
+Stack: (0xba3e7ca8 to 0xba3e8000)
+7ca0:                   80038f40 bfee2000 002977e3 bf9cda80
+ 80a6724c 00000000
+7cc0: 00000000 00000022 80acbcf0 80a67200 00000001 800a5cb8
+ 0000f08f 00000000
+[<802663f4>] (sdma_int_handler+0x144/0x1a4)
+ from [<800a5cb8>] (handle_irq_event_percpu+0x50/0x180)
+[<800a5cb8>] (handle_irq_event_percpu+0x50/0x180)
+ from [<800a5e24>] (handle_irq_event+0x3c/0x5c)
+[<800a5e24>] (handle_irq_event+0x3c/0x5c)
+ from [<800a81a8>] (handle_fasteoi_irq+0xbc/0x154)
+[<800a81a8>] (handle_fasteoi_irq+0xbc/0x154)
+ from [<800a5620>] (generic_handle_irq+0x28/0x3c)
+[<800a5620>] (generic_handle_irq+0x28/0x3c)
+ from [<80040830>] (handle_IRQ+0x4c/0xac)
+[<80040830>] (handle_IRQ+0x4c/0xac)
+ from [<8003f9cc>] (__irq_svc+0x4c/0xe8)
+[<8003f9cc>] (__irq_svc+0x4c/0xe8)
+ from [<800764f4>] (__do_softirq+0x4c/0x140)
+[<800764f4>] (__do_softirq+0x4c/0x140)
+ from [<80076a90>] (irq_exit+0x94/0x9c)
+[<80076a90>] (irq_exit+0x94/0x9c)
+ from [<8003a1b4>] (do_local_timer+0x70/0x90)
+[<8003a1b4>] (do_local_timer+0x70/0x90)
+ from [<8003f9cc>] (__irq_svc+0x4c/0xe8)
+Exception stack(0xba3e7de8 to 0xba3e7e30)
+[<8003f9cc>] (__irq_svc+0x4c/0xe8)
+ from [<80071a88>] (vprintk+0x328/0x4a8)
+[<80071a88>] (vprintk+0x328/0x4a8)
+ from [<804ddb28>] (printk+0x1c/0x2c)
+[<804ddb28>] (printk+0x1c/0x2c)
+ from [<80390de0>] (vpu_ioctl+0x2cc/0x864)
+[<80390de0>] (vpu_ioctl+0x2cc/0x864)
+ from [<800fc314>] (do_vfs_ioctl+0x80/0x54c)
+[<800fc314>] (do_vfs_ioctl+0x80/0x54c)
+ from [<800fc818>] (sys_ioctl+0x38/0x5c)
+[<800fc818>] (sys_ioctl+0x38/0x5c)
+ from [<8003ff80>] (ret_fast_syscall+0x0/0x30)
+Code: e594101c e5943038 e0811081 e0831101 (e5d13002)
+---[ end trace 82daf36a5a07d470 ]---
+Kernel panic - not syncing: Fatal exception in interrupt
+Rebooting in 60 seconds..
+==========================dump=end==========================
+ This kernel dump only happened after one period of stress-test's done.
+
+ From the dump info above, we just located the issue happened in SDMA driver.
+ Regularly, it'd not be any problem when sdma_int_handler()'s called. But after
+tracing, we found that in those occasional times, the last one irq of a channel
+hadn't been responded while sdma_free_chan_resources() was already done.
+ sdma_free_chan_resources() should be called in the end of the procedure. Any
+irq wouldn't occur after its resources're freed.
+ But considering about stress test, the test scripts uses "kill" cmd to close
+aplay, which means pcm_free() might be called before last buffer's transmission
+was finished. Plus, many modules're working in the same time during the test.
+So CPU0, the only core can handle irq, would be busy with irq-handlings, while
+the other CPU cores(i.e. CPU1~3) might be idle and deal with free() much faster
+than CPU0's irq-handling. Then kernel panic.
+
+ Since we know, in some extreme circumstances, the irq would not be handled in
+time, we can manually handle the irq ONLY IF we could still detect one irq to
+the channel in the beginning of free(), right before its resources's gonna be
+freed.
+ This Patch added checking code in the beginning of sdma_free_chan_resources()
+to detect when the channel's gonna be freed if there's still one irq pended.
+If so, just handle the irq manually before we free it.
+ Again, considering about sdma_int_handler() might be running at the same time,
+and if it already cleared the value of reg but hadn't handled the irq yet, also
+added code to pend free() until irq to the channel was handled.
+
+Signed-off-by: Nicolin Chen <b42378@freescale.com>
+---
+ drivers/dma/imx-sdma.c |   60 ++++++++++++++++++++++++++++++++++++++++++++---
+ 1 files changed, 56 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/dma/imx-sdma.c b/drivers/dma/imx-sdma.c
+index e946498..4ac8319 100644
+--- a/drivers/dma/imx-sdma.c
++++ b/drivers/dma/imx-sdma.c
+@@ -32,6 +32,7 @@
+ #include <linux/slab.h>
+ #include <linux/platform_device.h>
+ #include <linux/dmaengine.h>
++#include <linux/delay.h>
+ 
+ #include <asm/irq.h>
+ #include <mach/sdma.h>
+@@ -278,6 +279,7 @@ struct sdma_channel {
+ 	enum dma_status			status;
+ 	unsigned int			chn_count;
+ 	unsigned int			chn_real_count;
++	unsigned int			irq_handling;
+ };
+ 
+ #define MAX_DMA_CHANNELS 32
+@@ -324,6 +326,7 @@ struct sdma_engine {
+ 	struct dma_device		dma_device;
+ 	struct clk			*clk;
+ 	struct sdma_script_start_addrs	*script_addrs;
++	spinlock_t			irq_reg_lock;
+ };
+ 
+ #define SDMA_H_CONFIG_DSPDMA	(1 << 12) /* indicates if the DSPDMA is used */
+@@ -537,18 +540,33 @@ static void mxc_sdma_handle_channel(struct sdma_channel *sdmac)
+ static irqreturn_t sdma_int_handler(int irq, void *dev_id)
+ {
+ 	struct sdma_engine *sdma = dev_id;
+-	u32 stat;
++	struct sdma_channel *sdmac;
++	unsigned long flag;
++	int channel;
++	u32 stat, stat_bak;
+ 
++	spin_lock_irqsave(&sdma->irq_reg_lock, flag);
+ 	stat = readl_relaxed(sdma->regs + SDMA_H_INTR);
+ 	writel_relaxed(stat, sdma->regs + SDMA_H_INTR);
++	spin_unlock_irqrestore(&sdma->irq_reg_lock, flag);
++
++	stat_bak = stat;
++	while (stat_bak) {
++		channel = fls(stat_bak) - 1;
++		sdmac = &sdma->channel[channel];
++		sdmac->irq_handling = 1;
++		stat_bak &= ~(1 << channel);
++	}
+ 
+ 	while (stat) {
+-		int channel = fls(stat) - 1;
+-		struct sdma_channel *sdmac = &sdma->channel[channel];
++		channel = fls(stat) - 1;
++		sdmac = &sdma->channel[channel];
+ 
+-		mxc_sdma_handle_channel(sdmac);
++		if (sdmac->irq_handling)
++			mxc_sdma_handle_channel(sdmac);
+ 
+ 		stat &= ~(1 << channel);
++		sdmac->irq_handling = 0;
+ 	}
+ 
+ 	return IRQ_HANDLED;
+@@ -878,6 +896,8 @@ static int sdma_request_channel(struct sdma_channel *sdmac)
+ 
+ 	sdmac->buf_tail = 0;
+ 
++	sdmac->irq_handling = 0;
++
+ 	return 0;
+ out:
+ 
+@@ -973,11 +993,41 @@ static int sdma_alloc_chan_resources(struct dma_chan *chan)
+ 	return 0;
+ }
+ 
++static void sdma_irq_pending_check(struct sdma_channel *sdmac)
++{
++	struct sdma_engine *sdma = sdmac->sdma;
++	unsigned long flag;
++	u32 stat;
++
++	spin_lock_irqsave(&sdma->irq_reg_lock, flag);
++	stat = readl_relaxed(sdma->regs + SDMA_H_INTR);
++
++	/*Check if the current channel's IRQ hasn't been responded*/
++	if (stat & (1 << sdmac->channel)) {
++		/*Handle the irq manually*/
++		writel_relaxed(1 << sdmac->channel, sdma->regs + SDMA_H_INTR);
++		spin_unlock_irqrestore(&sdma->irq_reg_lock, flag);
++
++		/*Prevent irq_handler from doing handle_channel() again*/
++		sdmac->irq_handling = 0;
++		mxc_sdma_handle_channel(sdmac);
++	} else {
++		spin_unlock_irqrestore(&sdma->irq_reg_lock, flag);
++	}
++
++	/*Wait here until irq_handler's finished*/
++	while (sdmac->irq_handling)
++		udelay(100);
++}
++
+ static void sdma_free_chan_resources(struct dma_chan *chan)
+ {
+ 	struct sdma_channel *sdmac = to_sdma_chan(chan);
+ 	struct sdma_engine *sdma = sdmac->sdma;
+ 
++	/*Check if irq to the channel is still pending*/
++	sdma_irq_pending_check(sdmac);
++
+ 	sdma_disable_channel(sdmac);
+ 
+ 	if (sdmac->event_id0)
+@@ -1449,6 +1499,8 @@ static int __init sdma_probe(struct platform_device *pdev)
+ 	dma_cap_set(DMA_SLAVE, sdma->dma_device.cap_mask);
+ 	dma_cap_set(DMA_CYCLIC, sdma->dma_device.cap_mask);
+ 
++	spin_lock_init(&sdma->irq_reg_lock);
++
+ 	INIT_LIST_HEAD(&sdma->dma_device.channels);
+ 	/* Initialize channel parameters */
+ 	for (i = 0; i < MAX_DMA_CHANNELS; i++) {
+-- 
+1.7.7.4
+

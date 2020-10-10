@@ -1,0 +1,68 @@
+From c4195d9089cbaf3d831a801feb39856c2991fbb0 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Wed, 14 Mar 2012 13:54:17 +0800
+Subject: [PATCH 1223/2463] ENGR00177589 USB: fix two USB common bug for i.MX6
+
+- Without host wakeup enable, after doing system suspend/resume,
+plug in usb cable(both host/device) with no response, the reason is
+usb wakeup is not enable after suspend resume.
+- clock refcount will not be 0 after usb enters low power mode,the
+ reason is OTG ID wake up not do recover hcd.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/host/ehci-arc.c |   20 +++++++++++++++-----
+ 1 files changed, 15 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index 0bac00b..3fddb2f 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -147,7 +147,8 @@ static irqreturn_t ehci_fsl_pre_irq(int irq, void *dev)
+ 	pdata = hcd->self.controller->platform_data;
+ 
+ 	if (!test_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags)) {
+-		if (pdata->irq_delay || pdata->wakeup_event != WAKEUP_EVENT_DPDM)
++		if (pdata->irq_delay || (pdata->wakeup_event == WAKEUP_EVENT_VBUS)
++				|| (pdata->wakeup_event == WAKEUP_EVENT_INVALID))
+ 			return IRQ_NONE;
+ 
+ 		pr_debug("%s\n", __func__);
+@@ -669,14 +670,15 @@ static int ehci_fsl_drv_suspend(struct platform_device *pdev,
+ 	/* Only handles OTG mode switch event, system suspend event will be done in bus suspend */
+ 	if (pdata->pmflags == 0) {
+ 		printk(KERN_DEBUG "%s, pm event \n", __func__);
+-		/* Need open clock for register access */
+-		if (!test_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags))
++		if (!host_can_wakeup_system(pdev)) {
++			/* Need open clock for register access */
+ 			fsl_usb_clk_gate(hcd->self.controller->platform_data, true);
+ 
+-		if (!host_can_wakeup_system(pdev))
+ 			usb_host_set_wakeup(hcd->self.controller, false);
+ 
+-		fsl_usb_clk_gate(hcd->self.controller->platform_data, false);
++			fsl_usb_clk_gate(hcd->self.controller->platform_data, false);
++		}
++
+ 		printk(KERN_DEBUG "host suspend ends\n");
+ 		return 0;
+ 	}
+@@ -763,6 +765,14 @@ static int ehci_fsl_drv_resume(struct platform_device *pdev)
+ 	if (pdata->pmflags == 0) {
+ 		printk(KERN_DEBUG "%s,pm event, wait for wakeup irq if needed\n", __func__);
+ 		wait_event_interruptible(wake_up_pdata->wq, !wake_up_pdata->usb_wakeup_is_pending);
++		if (!host_can_wakeup_system(pdev)) {
++			/* Need open clock for register access */
++			fsl_usb_clk_gate(hcd->self.controller->platform_data, true);
++
++			usb_host_set_wakeup(hcd->self.controller, true);
++
++			fsl_usb_clk_gate(hcd->self.controller->platform_data, false);
++		}
+ 		return 0;
+ 	}
+ 	if (!test_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags)) {
+-- 
+1.7.7.4
+

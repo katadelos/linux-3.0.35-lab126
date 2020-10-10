@@ -1,0 +1,38 @@
+From ae40eae6949c822e745c18c0e83b53bec46aaf3e Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Sun, 1 Apr 2012 13:37:55 +0800
+Subject: [PATCH 1257/2463] ENGR00178631 MX6: fix audmux build error
+
+fix the build error for audmux located at
+drivers\mxc\dam
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ drivers/mxc/dam/dam.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/dam/dam.c b/drivers/mxc/dam/dam.c
+index 9e57e1a..cf8c305 100644
+--- a/drivers/mxc/dam/dam.c
++++ b/drivers/mxc/dam/dam.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -34,7 +34,9 @@
+ 
+ #define ModifyRegister32(a, b, c)	(c = (((c)&(~(a))) | (b)))
+ 
+-#define DAM_VIRT_BASE_ADDR	IO_ADDRESS(AUDMUX_BASE_ADDR)
++#if defined(CONFIG_ARCH_MX6)
++#define DAM_VIRT_BASE_ADDR	IO_ADDRESS(MX6Q_AUDMUX_BASE_ADDR)
++#endif
+ 
+ #ifndef _reg_DAM_PTCR1
+ #define    _reg_DAM_PTCR1   (*((volatile unsigned long *) \
+-- 
+1.7.7.4
+

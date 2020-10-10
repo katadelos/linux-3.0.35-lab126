@@ -1,0 +1,203 @@
+From 878fa817c8c7daa575d4ff15ffc0ea0e4e460f46 Mon Sep 17 00:00:00 2001
+From: Anish Trivedi <anish@freescale.com>
+Date: Fri, 15 Jul 2011 15:55:34 -0500
+Subject: [PATCH 0262/2463] ENGR00153208-1 Machine layer changes for SNVS RTC
+ driver
+
+Add SNVS RTC as a device on MX6
+
+Signed-off-by: Anish Trivedi <anish@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig                   |    1 +
+ arch/arm/mach-mx6/Kconfig                         |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c          |    3 +
+ arch/arm/mach-mx6/devices-imx6q.h                 |    4 ++
+ arch/arm/plat-mxc/devices/Kconfig                 |    3 +
+ arch/arm/plat-mxc/devices/Makefile                |    1 +
+ arch/arm/plat-mxc/devices/platform-imx_snvs_rtc.c |   53 +++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h   |    8 +++
+ arch/arm/plat-mxc/include/mach/mx6.h              |    4 +-
+ 9 files changed, 76 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 11955f81..0c76232 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1608,6 +1608,7 @@ CONFIG_RTC_INTF_DEV_UIE_EMUL=y
+ # CONFIG_RTC_DRV_BQ4802 is not set
+ # CONFIG_RTC_DRV_RP5C01 is not set
+ # CONFIG_RTC_DRV_V3020 is not set
++CONFIG_RTC_DRV_SNVS=y
+ 
+ #
+ # on-CPU RTC drivers
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 77eae0a..2654399 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -38,6 +38,7 @@ config MACH_MX6Q_SABREAUTO
+ 	select IMX_HAVE_PLATFORM_AHCI
+ 	select IMX_HAVE_PLATFORM_IMX_OCOTP
+ 	select IMX_HAVE_PLATFORM_IMX2_WDT
++	select IMX_HAVE_PLATFORM_IMX_SNVS_RTC
+ 	help
+ 	  Include support for i.MX 6Quad SABRE Automotive Infotainment platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index cb3d658..0b1e967 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -526,6 +526,9 @@ static void __init mx6_board_init(void)
+ 	imx6q_add_lcdif(&lcdif_data);
+ 	imx6q_add_ldb(&ldb_data);
+ 	imx6q_add_v4l2_output(0);
++
++	imx6q_add_imx_snvs_rtc();
++
+ 	imx6q_add_imx_i2c(1, &mx6q_sabreauto_i2c_data);
+ 	imx6q_add_imx_i2c(2, &mx6q_sabreauto_i2c_data);
+ 	i2c_register_board_info(2, mxc_i2c2_board_info,
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 1a304a0..fe408c6 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -23,6 +23,10 @@ extern const struct imx_imx_uart_1irq_data imx6q_imx_uart_data[] __initconst;
+ #define imx6q_add_imx_uart(id, pdata)	\
+ 	imx_add_imx_uart_1irq(&imx6q_imx_uart_data[id], pdata)
+ 
++extern const struct imx_snvs_rtc_data imx6q_imx_snvs_rtc_data __initconst;
++#define imx6q_add_imx_snvs_rtc()	\
++	imx_add_snvs_rtc(&imx6q_imx_snvs_rtc_data)
++
+ extern const struct imx_anatop_thermal_imx_data
+ imx6q_anatop_thermal_imx_data __initconst;
+ #define imx6q_add_anatop_thermal_imx(id, pdata)	\
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index 554adb8..1307a4a 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -31,6 +31,9 @@ config IMX_HAVE_PLATFORM_IMXDI_RTC
+ config IMX_HAVE_PLATFORM_IMX_SRTC
+ 	bool
+ 
++config IMX_HAVE_PLATFORM_IMX_SNVS_RTC
++	bool
++
+ config IMX_HAVE_PLATFORM_IMX_FB
+ 	bool
+ 	select HAVE_FB_IMX
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index 992b715..43db741 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -8,6 +8,7 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX21_HCD) += platform-imx21-hcd.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX2_WDT) += platform-imx2-wdt.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMXDI_RTC) += platform-imxdi_rtc.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_SRTC) += platform-imx_srtc.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_SNVS_RTC) += platform-imx_snvs_rtc.o
+ obj-y += platform-imx-dma.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_FB) += platform-imx-fb.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_I2C) += platform-imx-i2c.o
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_snvs_rtc.c b/arch/arm/plat-mxc/devices/platform-imx_snvs_rtc.c
+new file mode 100644
+index 0000000..031a074
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx_snvs_rtc.c
+@@ -0,0 +1,53 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <asm/sizes.h>
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++
++#define imx_snvs_rtc_data_entry_single(soc)				\
++	{								\
++		.iobase = soc ## _SNVS_BASE_ADDR,			\
++		.irq = soc ## _INT_SNVS,				\
++	}
++
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_snvs_rtc_data imx6q_imx_snvs_rtc_data __initconst =
++	imx_snvs_rtc_data_entry_single(MX6Q);
++#endif /* ifdef CONFIG_SOC_IMX6Q */
++
++struct platform_device *__init imx_add_snvs_rtc(
++		const struct imx_snvs_rtc_data *data)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + SZ_4K - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.start = data->irq,
++			.end = data->irq,
++			.flags = IORESOURCE_IRQ,
++		},
++	};
++
++	return imx_add_platform_device("snvs_rtc", 0,
++			res, ARRAY_SIZE(res), NULL, 0);
++}
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index c384f31..b37e876 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -93,6 +93,14 @@ struct imx_srtc_data {
+ struct platform_device *__init imx_add_srtc(
+ 		const struct imx_srtc_data *data);
+ 
++struct imx_snvs_rtc_data {
++	resource_size_t iobase;
++	resource_size_t irq;
++};
++struct platform_device *__init imx_add_snvs_rtc(
++		const struct imx_snvs_rtc_data *data);
++
++
+ #include <mach/imxfb.h>
+ struct imx_imx_fb_data {
+ 	resource_size_t iobase;
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 6ccbdac..48d90f6 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -171,7 +171,7 @@
+ #define ANATOP_BASE_ADDR            (AIPS1_OFF_BASE_ADDR + 0x48000)
+ #define USB_PHY0_BASE_ADDR          (AIPS1_OFF_BASE_ADDR + 0x49000)
+ #define USB_PHY1_BASE_ADDR          (AIPS1_OFF_BASE_ADDR + 0x4a000)
+-#define SNVS_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x4C000)
++#define MX6Q_SNVS_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x4C000)
+ #define EPIT1_BASE_ADDR             (AIPS1_OFF_BASE_ADDR + 0x50000)
+ #define EPIT2_BASE_ADDR             (AIPS1_OFF_BASE_ADDR + 0x54000)
+ #define SRC_BASE_ADDR               (AIPS1_OFF_BASE_ADDR + 0x58000)
+@@ -287,7 +287,7 @@
+ #define MXC_INT_RAWNAND_GPMI                       48
+ #define MXC_INT_DTCP                               49
+ #define MXC_INT_VDOA                               50
+-#define MXC_INT_SNVS                               51
++#define MX6Q_INT_SNVS                               51
+ #define MXC_INT_SNVS_SEC                           52
+ #define MXC_INT_CSU                                53
+ #define MX6Q_INT_USDHC1                             54
+-- 
+1.7.7.4
+

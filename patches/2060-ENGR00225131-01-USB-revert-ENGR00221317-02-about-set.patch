@@ -1,0 +1,195 @@
+From fd9e5a74f5e5afff09c13c964c1dac86ec8e5fc4 Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Thu, 20 Sep 2012 15:11:46 +0800
+Subject: [PATCH 2060/2463] ENGR00225131-01 USB: revert ENGR00221317-02 about
+ set stop_mode_config patch
+
+IC designer had clarified that 1P1 can be turned off if we do not need support
+remote wakeup. So If there is no requirement for USB remote wake up, the 1P1
+can be turn off. USB driver will support dynamically turn on(off) 1P1 during
+system suspend. 1P1 will be turn on depend on USB wakeup is enabled.
+
+This reverts commit c6f69925f9d1f39ccc8c6fcc583122fcf03c105c.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ arch/arm/mach-mx6/pm.c         |    6 ------
+ arch/arm/mach-mx6/usb_dr.c     |   18 ------------------
+ arch/arm/mach-mx6/usb_h1.c     |   13 +++----------
+ arch/arm/plat-mxc/usb_common.c |   37 -------------------------------------
+ 4 files changed, 3 insertions(+), 71 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index ddce7be..20139e0 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -38,7 +38,6 @@
+ #endif
+ #include "crm_regs.h"
+ #include "src-reg.h"
+-#include "regs-anadig.h"
+ 
+ #define SCU_CTRL_OFFSET				0x00
+ #define GPC_IMR1_OFFSET				0x08
+@@ -123,11 +122,6 @@ static void usb_power_down_handler(void)
+ {
+ 	u32 temp;
+ 	bool usb_oh3_clk_already_on;
+-	if ((__raw_readl(anatop_base + HW_ANADIG_ANA_MISC0)
+-		& BM_ANADIG_ANA_MISC0_STOP_MODE_CONFIG) != 0) {
+-			usb_vbus_wakeup_enabled = false;
+-			return;
+-	}
+ 	/* enable usb oh3 clock if needed*/
+ 	temp = __raw_readl(MXC_CCM_CCGR6);
+ 	usb_oh3_clk_already_on =	\
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index 8fe9700..908af24 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -173,9 +173,6 @@ static int usb_phy_enable(struct fsl_usb2_platform_data *pdata)
+ static int usbotg_init_ext(struct platform_device *pdev)
+ {
+ 	struct clk *usb_clk;
+-#ifdef CONFIG_USB_EHCI_ARC_OTG
+-	void __iomem *anatop_base_addr = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
+-#endif
+ 	u32 ret;
+ 
+ 	/* at mx6q: this clock is AHB clock for usb core */
+@@ -201,12 +198,6 @@ static int usbotg_init_ext(struct platform_device *pdev)
+ 		mdelay(3);
+ 	}
+ 	otg_used++;
+-#ifdef CONFIG_USB_EHCI_ARC_OTG
+-	usb_stop_mode_lock();
+-	if (usb_stop_mode_refcount(true) == 1)
+-		__raw_writel(BM_ANADIG_ANA_MISC0_STOP_MODE_CONFIG, anatop_base_addr + HW_ANADIG_ANA_MISC0_SET);
+-	usb_stop_mode_unlock();
+-#endif
+ 
+ 	return ret;
+ }
+@@ -214,9 +205,6 @@ static int usbotg_init_ext(struct platform_device *pdev)
+ static void usbotg_uninit_ext(struct platform_device *pdev)
+ {
+ 	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
+-#ifdef CONFIG_USB_EHCI_ARC_OTG
+-	void __iomem *anatop_base_addr = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
+-#endif
+ 
+ 	clk_disable(usb_phy1_clk);
+ 	clk_put(usb_phy1_clk);
+@@ -226,12 +214,6 @@ static void usbotg_uninit_ext(struct platform_device *pdev)
+ 
+ 	usbotg_uninit(pdata);
+ 	otg_used--;
+-#ifdef CONFIG_USB_EHCI_ARC_OTG
+-	usb_stop_mode_lock();
+-	 if (usb_stop_mode_refcount(false) == 0)
+-		__raw_writel(BM_ANADIG_ANA_MISC0_STOP_MODE_CONFIG, anatop_base_addr + HW_ANADIG_ANA_MISC0_CLR);
+-	 usb_stop_mode_unlock();
+-#endif
+ }
+ 
+ static void usbotg_clock_gate(bool on)
+diff --git a/arch/arm/mach-mx6/usb_h1.c b/arch/arm/mach-mx6/usb_h1.c
+index bece29f..36aa2aa 100644
+--- a/arch/arm/mach-mx6/usb_h1.c
++++ b/arch/arm/mach-mx6/usb_h1.c
+@@ -134,7 +134,6 @@ static int fsl_usb_host_init_ext(struct platform_device *pdev)
+ {
+ 	int ret;
+ 	struct clk *usb_clk;
+-	void __iomem *anatop_base_addr = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
+ 	usb_clk = clk_get(NULL, "usboh3_clk");
+ 	clk_enable(usb_clk);
+ 	usb_oh3_clk = usb_clk;
+@@ -146,25 +145,19 @@ static int fsl_usb_host_init_ext(struct platform_device *pdev)
+ 	}
+ 	usbh1_internal_phy_clock_gate(true);
+ 	usb_phy_enable(pdev->dev.platform_data);
+-	usb_stop_mode_lock();
+-	if (usb_stop_mode_refcount(true) == 1)
+-		__raw_writel(BM_ANADIG_ANA_MISC0_STOP_MODE_CONFIG, anatop_base_addr + HW_ANADIG_ANA_MISC0_SET);
+-	usb_stop_mode_unlock();
++
+ 	return 0;
+ }
+ 
+ static void fsl_usb_host_uninit_ext(struct platform_device *pdev)
+ {
+ 	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
+-	void __iomem *anatop_base_addr = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
++
+ 	fsl_usb_host_uninit(pdata);
+ 
+ 	clk_disable(usb_oh3_clk);
+ 	clk_put(usb_oh3_clk);
+-	usb_stop_mode_lock();
+-	if (usb_stop_mode_refcount(false) == 0)
+-		__raw_writel(BM_ANADIG_ANA_MISC0_STOP_MODE_CONFIG, anatop_base_addr + HW_ANADIG_ANA_MISC0_CLR);
+-	usb_stop_mode_unlock();
++
+ }
+ 
+ static void usbh1_clock_gate(bool on)
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index d85d8d6..97d963a 100755
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -53,9 +53,7 @@ typedef void (*driver_vbus_func)(bool);
+ 
+ void __iomem *imx_otg_base;
+ static  driver_vbus_func s_driver_vbus;
+-static int stop_mode_refcount;
+ 
+-DEFINE_MUTEX(usb_common_mutex);
+ EXPORT_SYMBOL(imx_otg_base);
+ 
+ #define MXC_NUMBER_USB_TRANSCEIVER 6
+@@ -73,41 +71,6 @@ bool usb_icbug_swfix_need(void)
+ }
+ EXPORT_SYMBOL(usb_icbug_swfix_need);
+ 
+-/*
+-  * The Mx6 phy sometimes work abnormally after system suspend/resume if the 1V1 is off.
+-  * So we should keep the 1V1 active during the system suspend if any USB host enabled.
+-  * Set stop_mode_config when any USB host enabled by default, it will impact on system power.
+-  * #define DISABLE_STOP_MODE will disable the feature.
+-  */
+-#ifndef DISABLE_STOP_MODE
+-int usb_stop_mode_refcount(bool enable)
+-{
+-	if (enable)
+-		stop_mode_refcount++;
+-	else
+-		stop_mode_refcount--;
+-	return stop_mode_refcount;
+-}
+-#else
+-int usb_stop_mode_refcount(bool enable)
+-{
+-	return 0;
+-}
+-#endif
+-EXPORT_SYMBOL(usb_stop_mode_refcount);
+-
+-void usb_stop_mode_lock(void)
+-{
+-	mutex_lock(&usb_common_mutex);
+-}
+-EXPORT_SYMBOL(usb_stop_mode_lock);
+-
+-void usb_stop_mode_unlock(void)
+-{
+-	mutex_unlock(&usb_common_mutex);
+-}
+-EXPORT_SYMBOL(usb_stop_mode_unlock);
+-
+ void mx6_set_host1_vbus_func(driver_vbus_func driver_vbus)
+ {
+ 	s_driver_vbus = driver_vbus;
+-- 
+1.7.7.4
+

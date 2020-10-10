@@ -1,0 +1,35 @@
+From 8be2f7ab9806cf7cfdde8e3b6838477f6230021f Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Wed, 14 Dec 2011 13:11:07 +0800
+Subject: [PATCH 0744/2463] ENGR00170244-5 ARM: AHCI: Enable PDDQ mode on mx53
+ loco board
+
+In order to save the power consumption, enable the
+PDDQ mode of AHCI PHY when there is no sata disk
+on the port
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx53_loco.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx53_loco.c b/arch/arm/mach-mx5/board-mx53_loco.c
+index 56f88d1..257933a 100755
+--- a/arch/arm/mach-mx5/board-mx53_loco.c
++++ b/arch/arm/mach-mx5/board-mx53_loco.c
+@@ -480,9 +480,9 @@ static int mx53_loco_sata_init(struct device *dev, void __iomem *addr)
+ 	tmpdata = clk_get_rate(clk) / 1000;
+ 	clk_put(clk);
+ 
+-	sata_init(addr, tmpdata);
+-
+-	return ret;
++	ret = sata_init(addr, tmpdata);
++	if (ret == 0)
++		return ret;
+ 
+ release_sata_ref_clk:
+ 	clk_disable(sata_ref_clk);
+-- 
+1.7.7.4
+

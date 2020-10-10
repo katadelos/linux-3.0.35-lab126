@@ -1,0 +1,48 @@
+From c2b6c819c44bad9cf7cd9836237bbaad58305935 Mon Sep 17 00:00:00 2001
+From: Wu Guoxing <b39297@freescale.com>
+Date: Tue, 21 Feb 2012 13:02:50 +0800
+Subject: [PATCH 1060/2463] ENGR00174899: mx6/dl:gpu2d:fix gc320 can not run
+ at high core clock issue
+
+gc320 on Rigel can not run at high core clock, above 200M core clock will
+make system hang.
+change gc320's axi outstanding limit to 16 as a ic workaround.
+
+Signed-off-by: Wu Guoxing <b39297@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c  |   11 +++++++++++
+ 1 files changed, 11 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+index 416021a..f7c2387 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+@@ -23,6 +23,7 @@
+ 
+ #include "gc_hal.h"
+ #include "gc_hal_kernel.h"
++#include <mach/hardware.h>
+ 
+ #define _GC_OBJ_ZONE    gcvZONE_HARDWARE
+ 
+@@ -499,6 +500,16 @@ gckHARDWARE_Construct(
+ 
+ #endif
+ 
++    if(cpu_is_mx6dl())
++    {
++        /*set outstanding limit on mx6dl*/
++        gctUINT32 data;
++
++        gcmkONERROR(gckOS_ReadRegisterEx(Os, Core, 0x00414, &data));
++        data = (data & (~0xFF)) | 0x10;
++        gcmkONERROR(gckOS_WriteRegisterEx(Os, Core, 0x00414, data));
++    }
++
+     /* Set power state to ON. */
+     hardware->chipPowerState  = gcvPOWER_ON;
+     hardware->clockState      = gcvTRUE;
+-- 
+1.7.7.4
+

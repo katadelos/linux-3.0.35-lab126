@@ -1,0 +1,39 @@
+From 99f9d845fd775d7a6a0834e27b465a89d613bc76 Mon Sep 17 00:00:00 2001
+From: "justin.jiang" <b31011@freescale.com>
+Date: Fri, 27 Apr 2012 12:42:29 +0800
+Subject: [PATCH 1376/2463] ENGR00180076: prompt "mmc0: error -110 during
+ resume" with atheros wifi card
+
+* only happend on sabre-auto board,atheros sdio wifi card can't be used
+  after suspend/resume
+
+* Fix by keeping sdio power at suspend.
+
+Signed-off-by: justin.jiang <b31011@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 302f769..b46f597 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -258,6 +258,7 @@ static int plt_sd3_pad_change(int clock)
+ static const struct esdhc_platform_data mx6q_sabreauto_sd3_data __initconst = {
+ 	.cd_gpio		= SABREAUTO_SD3_CD,
+ 	.wp_gpio		= SABREAUTO_SD3_WP,
++	.keep_power_at_suspend = 1,
+ 	.support_18v		= 1,
+ 	.support_8bit		= 1,
+ 	.delay_line		= 0,
+@@ -267,6 +268,7 @@ static const struct esdhc_platform_data mx6q_sabreauto_sd3_data __initconst = {
+ static const struct esdhc_platform_data mx6q_sabreauto_sd1_data __initconst = {
+ 	.cd_gpio = SABREAUTO_SD1_CD,
+ 	.wp_gpio = SABREAUTO_SD1_WP,
++	.keep_power_at_suspend = 1,
+ };
+ 
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,43 @@
+From 5d261634ca9d8b303575c5ca00bb6f92f1764db5 Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Tue, 11 Dec 2012 12:42:42 +0800
+Subject: [PATCH 2311/2463] ENGR00236020-1 ALSA: add calling of trigger in
+ machine driver
+
+soc_pcm_trigger() calls trigger functions of cpu_dai, codec_dai
+and platform, but the trigger function of machine is not called.
+add calling of trigger in machine driver in soc_pcm_trigger()
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ sound/soc/soc-core.c |    7 +++++++
+ 1 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/soc-core.c b/sound/soc/soc-core.c
+index ad12a4c..e62ad5f 100644
+--- a/sound/soc/soc-core.c
++++ b/sound/soc/soc-core.c
+@@ -5,6 +5,7 @@
+  * Copyright 2005 Openedhand Ltd.
+  * Copyright (C) 2010 Slimlogic Ltd.
+  * Copyright (C) 2010 Texas Instruments Inc.
++ * Copyright (C) 2012 Freescale Semiconductor, Inc.
+  *
+  * Author: Liam Girdwood <lrg@slimlogic.co.uk>
+  *         with code, comments and ideas from :-
+@@ -986,6 +987,12 @@ static int soc_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
+ 		if (ret < 0)
+ 			return ret;
+ 	}
++
++	if (rtd->dai_link->ops && rtd->dai_link->ops->trigger) {
++		ret = rtd->dai_link->ops->trigger(substream, cmd);
++		if (ret < 0)
++			return ret;
++	}
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,33 @@
+From f1a5a826e1a5c83f17c42da4b85961f871430391 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Thu, 14 Mar 2013 16:37:09 +0800
+Subject: [PATCH 2445/2463] ENGR00252064-1 csi/v4l: need power on sensor for
+ its initialization
+
+Need power on the sensor for its initialization, otherwise the sensor can
+not work properly.
+
+Signed-off-by: Sheng Nan <b38800@freescale.com>
+Signed-off-by: Robby Cai <R63905@freescale.com>
+(cherry picked from commit 24ef6f52c717b9f2288d1c66ec6efd284935e23e)
+---
+ drivers/media/video/mxc/capture/csi_v4l2_capture.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/csi_v4l2_capture.c b/drivers/media/video/mxc/capture/csi_v4l2_capture.c
+index 5c9c69c..4a60c65 100644
+--- a/drivers/media/video/mxc/capture/csi_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/csi_v4l2_capture.c
+@@ -1737,7 +1737,9 @@ static int csi_v4l2_master_attach(struct v4l2_int_device *slave)
+ 	}
+ 
+ 	csi_enable_mclk(CSI_MCLK_I2C, true, true);
++	vidioc_int_s_power(cam->sensor, 1);
+ 	vidioc_int_dev_init(slave);
++	vidioc_int_s_power(cam->sensor, 0);
+ 	csi_enable_mclk(CSI_MCLK_I2C, false, false);
+ 	cam_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+ 	vidioc_int_g_fmt_cap(cam->sensor, &cam_fmt);
+-- 
+1.7.7.4
+

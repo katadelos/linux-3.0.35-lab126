@@ -1,0 +1,53 @@
+From 29105af181bfc3841ed4f9d09c7b8ca31f402dc6 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Wed, 25 Apr 2012 15:22:06 +0800
+Subject: [PATCH 1365/2463] ENGR00175575 IPU-FB: ldb and hdmi clock is not
+ turnoff when not in use.
+
+ldb clock is not turnoff,
+ldb_di0_clk's enable_count is not zero when not in use.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |   18 +++++++++---------
+ 1 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 8eade2c..457c4ca 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -315,15 +315,6 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 
+ 	dev_dbg(fbi->device, "Reconfiguring framebuffer\n");
+ 
+-	if (mxc_fbi->dispdrv && mxc_fbi->dispdrv->drv->setup) {
+-		retval = mxc_fbi->dispdrv->drv->setup(mxc_fbi->dispdrv, fbi);
+-		if (retval < 0) {
+-			dev_err(fbi->device, "setup error, dispdrv:%s.\n",
+-					mxc_fbi->dispdrv->drv->name);
+-			return -EINVAL;
+-		}
+-	}
+-
+ 	ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+ 	ipu_disable_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+ 	ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_nf_irq);
+@@ -390,6 +381,15 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 	if (mxc_fbi->next_blank != FB_BLANK_UNBLANK)
+ 		return retval;
+ 
++	if (mxc_fbi->dispdrv && mxc_fbi->dispdrv->drv->setup) {
++		retval = mxc_fbi->dispdrv->drv->setup(mxc_fbi->dispdrv, fbi);
++		if (retval < 0) {
++			dev_err(fbi->device, "setup error, dispdrv:%s.\n",
++					mxc_fbi->dispdrv->drv->name);
++			return -EINVAL;
++		}
++	}
++
+ 	_setup_disp_channel1(fbi);
+ 
+ 	if (!mxc_fbi->overlay) {
+-- 
+1.7.7.4
+

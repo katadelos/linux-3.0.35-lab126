@@ -1,0 +1,239 @@
+From 662c78262b105e0a98fa85e519342963b31c1c9c Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Tue, 12 Jun 2012 18:24:54 +0800
+Subject: [PATCH 1617/2463] ENGR00213749: imx6sl: Add keypad support on
+ EINK-DC3 board
+
+Add the support for keypad on EINK-DC3 board which is stacked on ARM2 board.
+- configure the iomux setting
+- add dummy kpp clock to fool imx_keypad driver
+- add platform device for keypad
+- add key mapping (4x4 array) used on EINK-DC3
+- update the defconfig for keypad driver
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ arch/arm/configs/imx6s_defconfig                |    3 +-
+ arch/arm/mach-mx6/Kconfig                       |    1 +
+ arch/arm/mach-mx6/board-mx6sl_arm2.c            |   28 +++++++++++++++++++++++
+ arch/arm/mach-mx6/board-mx6sl_arm2.h            |   10 ++++++++
+ arch/arm/mach-mx6/clock_mx6sl.c                 |    1 +
+ arch/arm/mach-mx6/devices-imx6q.h               |    3 ++
+ arch/arm/plat-mxc/devices/platform-imx-keypad.c |    5 ++++
+ arch/arm/plat-mxc/include/mach/iomux-mx6sl.h    |   11 +++++---
+ arch/arm/plat-mxc/include/mach/mx6.h            |    3 +-
+ 9 files changed, 59 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/configs/imx6s_defconfig b/arch/arm/configs/imx6s_defconfig
+index ffb73c8..6e8281a 100644
+--- a/arch/arm/configs/imx6s_defconfig
++++ b/arch/arm/configs/imx6s_defconfig
+@@ -260,6 +260,7 @@ CONFIG_IMX_HAVE_PLATFORM_IMX2_WDT=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_SNVS_RTC=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_CAAM=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_I2C=y
++CONFIG_IMX_HAVE_PLATFORM_IMX_KEYPAD=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_SSI=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_ESAI=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_UART=y
+@@ -1034,7 +1035,7 @@ CONFIG_KEYBOARD_GPIO=y
+ # CONFIG_KEYBOARD_MAX7359 is not set
+ # CONFIG_KEYBOARD_MCS is not set
+ # CONFIG_KEYBOARD_MPR121 is not set
+-# CONFIG_KEYBOARD_IMX is not set
++CONFIG_KEYBOARD_IMX=y
+ # CONFIG_KEYBOARD_NEWTON is not set
+ # CONFIG_KEYBOARD_OPENCORES is not set
+ # CONFIG_KEYBOARD_STOWAWAY is not set
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index c6851d0..a96597d 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -98,6 +98,7 @@ config MACH_MX6SL_ARM2
+ 	select IMX_HAVE_PLATFORM_IMX_EPDC
+ 	select IMX_HAVE_PLATFORM_IMX_SPDC
+ 	select IMX_HAVE_PLATFORM_IMX_PXP
++	select IMX_HAVE_PLATFORM_IMX_KEYPAD
+ 	help
+ 	  Include support for i.MX 6Sololite Armadillo2 platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 2d42966..b17a0ff 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -1042,6 +1042,33 @@ static struct mxc_fb_platform_data fb_data[] = {
+ static struct platform_device lcd_wvga_device = {
+ 	.name = "lcd_seiko",
+ };
++
++static int mx6sl_arm2_keymap[] = {
++	KEY(0, 0, KEY_SELECT),
++	KEY(0, 1, KEY_BACK),
++	KEY(0, 2, KEY_F1),
++	KEY(0, 3, KEY_F2),
++
++	KEY(1, 0, KEY_F3),
++	KEY(1, 1, KEY_F4),
++	KEY(1, 2, KEY_F5),
++	KEY(1, 3, KEY_MENU),
++
++	KEY(2, 0, KEY_PREVIOUS),
++	KEY(2, 1, KEY_NEXT),
++	KEY(2, 2, KEY_HOME),
++	KEY(2, 3, KEY_NEXT),
++
++	KEY(3, 0, KEY_UP),
++	KEY(3, 1, KEY_LEFT),
++	KEY(3, 2, KEY_RIGHT),
++	KEY(3, 3, KEY_DOWN),
++};
++
++static const struct matrix_keymap_data mx6sl_arm2_map_data __initconst = {
++	.keymap		= mx6sl_arm2_keymap,
++	.keymap_size	= ARRAY_SIZE(mx6sl_arm2_keymap),
++};
+ /*!
+  * Board specific initialization.
+  */
+@@ -1118,6 +1145,7 @@ static void __init mx6_arm2_init(void)
+ 	imx6q_add_imx2_wdt(0, NULL);
+ 
+ 	imx_add_viv_gpu(&imx6_gpu_data, &imx6q_gpu_pdata);
++	imx6sl_add_imx_keypad(&mx6sl_arm2_map_data);
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.h b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+index 940c46d..724f29f 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.h
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+@@ -143,6 +143,16 @@ static iomux_v3_cfg_t mx6sl_arm2_pads[] = {
+ 	MX6SL_PAD_PWM1__PWM1_PWMO,
+ 	/* LCD power on */
+ 	MX6SL_PAD_KEY_ROW5__GPIO_4_3,
++
++	/* keypad on E-Ink add-on board */
++	MX6SL_PAD_KEY_COL0__KPP_COL_0,
++	MX6SL_PAD_KEY_COL1__KPP_COL_1,
++	MX6SL_PAD_KEY_COL2__KPP_COL_2,
++	MX6SL_PAD_KEY_COL3__KPP_COL_3,
++	MX6SL_PAD_KEY_ROW0__KPP_ROW_0,
++	MX6SL_PAD_KEY_ROW1__KPP_ROW_1,
++	MX6SL_PAD_KEY_ROW2__KPP_ROW_2,
++	MX6SL_PAD_KEY_ROW3__KPP_ROW_3,
+ };
+ 
+ static iomux_v3_cfg_t mx6sl_arm2_epdc_enable_pads[] = {
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 0c17ed4..e1a4e00 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -3866,6 +3866,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "usb_phy4_clk", usb_phy4_clk),
+ 	_REGISTER_CLOCK("imx2-wdt.0", NULL, dummy_clk),
+ 	_REGISTER_CLOCK("imx2-wdt.1", NULL, dummy_clk),
++	_REGISTER_CLOCK(NULL, "kpp", dummy_clk),
+ 	_REGISTER_CLOCK(NULL, NULL, aips_tz2_clk),
+ 	_REGISTER_CLOCK(NULL, NULL, aips_tz1_clk),
+ 	_REGISTER_CLOCK(NULL, "clko_clk", clko_clk),
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 6f8b485..7695d12 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -239,3 +239,6 @@ extern const struct imx_pcie_data imx6q_pcie_data __initconst;
+ 
+ #define imx6q_add_busfreq(pdata)	imx_add_busfreq(pdata)
+ 
++extern const struct imx_imx_keypad_data imx6sl_imx_keypad_data;
++#define imx6sl_add_imx_keypad(pdata)	\
++	imx_add_imx_keypad(&imx6sl_imx_keypad_data, pdata)
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-keypad.c b/arch/arm/plat-mxc/devices/platform-imx-keypad.c
+index 2636611..1a12021 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-keypad.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-keypad.c
+@@ -46,6 +46,11 @@ const struct imx_imx_keypad_data imx51_imx_keypad_data __initconst =
+ 	imx_imx_keypad_data_entry_single(MX51, SZ_16);
+ #endif /* ifdef CONFIG_SOC_IMX51 */
+ 
++#ifdef CONFIG_SOC_IMX6SL
++const struct imx_imx_keypad_data imx6sl_imx_keypad_data __initconst =
++	imx_imx_keypad_data_entry_single(MX6SL, SZ_16);
++#endif /* ifdef CONFIG_SOC_IMX6SL */
++
+ struct platform_device *__init imx_add_imx_keypad(
+ 		const struct imx_imx_keypad_data *data,
+ 		const struct matrix_keymap_data *pdata)
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h b/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
+index 5ce2318..00734c9 100755
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
+@@ -69,6 +69,9 @@
+ 				PAD_CTL_PUE | PAD_CTL_PKE |		\
+ 				PAD_CTL_SPEED_MED | PAD_CTL_DSE_40ohm)
+ 
++#define MX6SL_KEYPAD_CTRL	(PAD_CTL_HYS | PAD_CTL_PKE | PAD_CTL_PUE | \
++				PAD_CTL_PUS_100K_UP | PAD_CTL_DSE_120ohm)
++
+ #define MX6SL_PAD_AUD_MCLK__AUDMUX_AUDIO_CLK_OUT                              \
+ 		IOMUX_PAD(0x02A4, 0x004C, 0, 0x0000, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_AUD_MCLK__PWM4_PWMO                                         \
+@@ -1708,7 +1711,7 @@
+ 		IOMUX_PAD(0x0490, 0x0188, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_KEY_ROW0__KPP_ROW_0                                         \
+-		IOMUX_PAD(0x0494, 0x018C, 0, 0x0754, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x0494, 0x018C, 0, 0x0754, 0, MX6SL_KEYPAD_CTRL)
+ #define MX6SL_PAD_KEY_ROW0__I2C2_SDA                                          \
+ 		IOMUX_PAD(0x0494, 0x018C, 1 | IOMUX_CONFIG_SION, 0x0728, 2, MX6SL_I2C_PAD_CTRL)
+ #define MX6SL_PAD_KEY_ROW0__LCDIF_DAT_1                                       \
+@@ -1725,7 +1728,7 @@
+ 		IOMUX_PAD(0x0494, 0x018C, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_KEY_ROW1__KPP_ROW_1                                         \
+-		IOMUX_PAD(0x0498, 0x0190, 0, 0x0758, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x0498, 0x0190, 0, 0x0758, 0, MX6SL_KEYPAD_CTRL)
+ #define MX6SL_PAD_KEY_ROW1__ECSPI4_MISO                                       \
+ 		IOMUX_PAD(0x0498, 0x0190, 1, 0x06D4, 2, NO_PAD_CTRL)
+ #define MX6SL_PAD_KEY_ROW1__LCDIF_DAT_3                                       \
+@@ -1742,7 +1745,7 @@
+ 		IOMUX_PAD(0x0498, 0x0190, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_KEY_ROW2__KPP_ROW_2                                         \
+-		IOMUX_PAD(0x049C, 0x0194, 0, 0x075C, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x049C, 0x0194, 0, 0x075C, 0, MX6SL_KEYPAD_CTRL)
+ #define MX6SL_PAD_KEY_ROW2__ECSPI4_SCLK                                       \
+ 		IOMUX_PAD(0x049C, 0x0194, 1, 0x06D0, 2, NO_PAD_CTRL)
+ #define MX6SL_PAD_KEY_ROW2__LCDIF_DAT_5                                       \
+@@ -1759,7 +1762,7 @@
+ 		IOMUX_PAD(0x049C, 0x0194, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_KEY_ROW3__KPP_ROW_3                                         \
+-		IOMUX_PAD(0x04A0, 0x0198, 0, 0x0760, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x04A0, 0x0198, 0, 0x0760, 0, MX6SL_KEYPAD_CTRL)
+ #define MX6SL_PAD_KEY_ROW3__AUDMUX_AUD6_RXC                                   \
+ 		IOMUX_PAD(0x04A0, 0x0198, 1, 0x061C, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_KEY_ROW3__LCDIF_DAT_7                                       \
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 51c047a..bb4423e 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -178,7 +178,7 @@
+ #define GPIO5_BASE_ADDR			(AIPS1_OFF_BASE_ADDR + 0x2C000)
+ #define GPIO6_BASE_ADDR			(AIPS1_OFF_BASE_ADDR + 0x30000)
+ #define GPIO7_BASE_ADDR			(AIPS1_OFF_BASE_ADDR + 0x34000)
+-#define KPP_BASE_ADDR			(AIPS1_OFF_BASE_ADDR + 0x38000)
++#define MX6SL_KPP_BASE_ADDR		(AIPS1_OFF_BASE_ADDR + 0x38000)
+ #define MX6Q_WDOG1_BASE_ADDR		(AIPS1_OFF_BASE_ADDR + 0x3C000)
+ #define MX6Q_WDOG2_BASE_ADDR		(AIPS1_OFF_BASE_ADDR + 0x40000)
+ #define CCM_BASE_ADDR			(AIPS1_OFF_BASE_ADDR + 0x44000)
+@@ -418,6 +418,7 @@
+ #define MXC_INT_WDOG1			112
+ #define MXC_INT_WDOG2			113
+ #define MXC_INT_KPP			114
++#define MX6SL_INT_KPP			114
+ #define MX6Q_INT_PWM1			115
+ #define MX6Q_INT_PWM2			116
+ #define MX6Q_INT_PWM3			117
+-- 
+1.7.7.4
+

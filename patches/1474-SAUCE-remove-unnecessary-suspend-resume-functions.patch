@@ -1,0 +1,89 @@
+From cc3b359b4d8fc72a0f84321f244833a9e6d17bec Mon Sep 17 00:00:00 2001
+From: Adrian Alonso <aalonso@freescale.com>
+Date: Mon, 14 May 2012 18:43:37 -0500
+Subject: [PATCH 1474/2463] SAUCE remove unnecessary suspend/resume functions
+
+BugLink: http://bugs.launchpad.net/bugs/882723
+
+Disabling/re-enabling clocks is not necessary as it's done in *_startup()
+and *_shutdown() functions, and shall be performed during suspend/resume.
+
+This is causing warnings of un-matched clk_enable()/clk_disable()
+
+Rework patch for imx_3.0.15 code base
+
+Signed-off-by: Eric Miao <eric.miao@linaro.org>
+Signed-off-by: Adrian Alonso <aalonso@freescale.com>
+---
+ sound/soc/codecs/mxc_spdif.c |   52 ------------------------------------------
+ 1 files changed, 0 insertions(+), 52 deletions(-)
+
+diff --git a/sound/soc/codecs/mxc_spdif.c b/sound/soc/codecs/mxc_spdif.c
+index 26b0af1..613caf6 100644
+--- a/sound/soc/codecs/mxc_spdif.c
++++ b/sound/soc/codecs/mxc_spdif.c
+@@ -1141,61 +1141,9 @@ static int mxc_spdif_soc_remove(struct snd_soc_codec *codec)
+ 	return 0;
+ }
+ 
+-#ifdef CONFIG_PM
+-static int mxc_spdif_soc_suspend(struct snd_soc_codec *codec,
+-				 pm_message_t state)
+-{
+-	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
+-	struct mxc_spdif_platform_data *plat_data;
+-
+-	if (codec == NULL)
+-		return -EINVAL;
+-
+-	plat_data = spdif_priv->plat_data;
+-
+-	if (spdif_priv->tx_active)
+-		clk_disable(plat_data->spdif_clk);
+-
+-	if (spdif_priv->rx_active)
+-		clk_disable(plat_data->spdif_clk);
+-
+-	clk_disable(plat_data->spdif_core_clk);
+-
+-	return 0;
+-}
+-
+-static int mxc_spdif_soc_resume(struct snd_soc_codec *codec)
+-{
+-	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
+-	struct mxc_spdif_platform_data *plat_data;
+-
+-	if (codec == NULL)
+-		return -EINVAL;
+-
+-	plat_data = spdif_priv->plat_data;
+-
+-	clk_enable(plat_data->spdif_core_clk);
+-
+-	if (spdif_priv->tx_active)
+-		clk_enable(plat_data->spdif_clk);
+-
+-	if (spdif_priv->rx_active)
+-		clk_enable(plat_data->spdif_clk);
+-
+-	spdif_softreset();
+-
+-	return 0;
+-}
+-#else
+-#define mxc_spdif_soc_suspend	NULL
+-#define mxc_spdif_soc_resume	NULL
+-#endif /* CONFIG_PM */
+-
+ struct snd_soc_codec_driver soc_codec_dev_spdif = {
+ 	.probe = mxc_spdif_soc_probe,
+ 	.remove = mxc_spdif_soc_remove,
+-	.suspend = mxc_spdif_soc_suspend,
+-	.resume = mxc_spdif_soc_resume,
+ };
+ 
+ static int __devinit mxc_spdif_probe(struct platform_device *pdev)
+-- 
+1.7.7.4
+

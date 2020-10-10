@@ -1,0 +1,33 @@
+From 0da57aa62e4883d6c66cfd9b6bf66ada8f3716cd Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Tue, 27 Mar 2012 16:27:09 +0800
+Subject: [PATCH 1232/2463] ENGR00178061 mx6 sabresd:fix GPIO warning when
+ board boot up
+
+Need add gpio_request before use gpio_direction_output
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index da4f5ef..d4ef1d0 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1015,6 +1015,12 @@ static void __init imx6q_sabresd_init_usb(void)
+ 	}
+ 	gpio_direction_output(SABRESD_USB_OTG_PWR, 0);
+ 	/* keep USB host1 VBUS always on */
++	ret = gpio_request(SABRESD_USB_H1_PWR, "usb-h1-pwr");
++	if (ret) {
++		pr_err("failed to get GPIO SABRESD_USB_H1_PWR: %d\n",
++			ret);
++		return;
++	}
+ 	gpio_direction_output(SABRESD_USB_H1_PWR, 1);
+ 	if (board_is_mx6_reva())
+ 		mxc_iomux_set_gpr_register(1, 13, 1, 1);
+-- 
+1.7.7.4
+

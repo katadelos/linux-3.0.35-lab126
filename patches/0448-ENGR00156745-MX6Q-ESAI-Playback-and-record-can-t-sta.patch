@@ -1,0 +1,166 @@
+From cb0932fe4184aa29b75ff5fcf6e3daca2c20d31d Mon Sep 17 00:00:00 2001
+From: Lionel Xu <Lionel.Xu@freescale.com>
+Date: Fri, 30 Sep 2011 14:47:31 +0800
+Subject: [PATCH 0448/2463] ENGR00156745 MX6Q ESAI: Playback and record can't
+ start up concurrently
+
+Proper flag setting and placement should be used to avoid function hw_param
+called multiple times when playback and record startup concurrently.
+
+Signed-off-by: Lionel Xu <Lionel.Xu@freescale.com>
+---
+ sound/soc/codecs/cs42888.c  |    1 -
+ sound/soc/imx/imx-cs42888.c |   20 ++++++++++++++------
+ sound/soc/imx/imx-esai.c    |   29 ++++++++++++++++++++---------
+ sound/soc/imx/imx-esai.h    |    5 +++++
+ 4 files changed, 39 insertions(+), 16 deletions(-)
+
+diff --git a/sound/soc/codecs/cs42888.c b/sound/soc/codecs/cs42888.c
+index c810333..f2480cc 100644
+--- a/sound/soc/codecs/cs42888.c
++++ b/sound/soc/codecs/cs42888.c
+@@ -784,7 +784,6 @@ struct snd_soc_dai_driver cs42888_dai = {
+ 		.formats = CS42888_FORMATS,
+ 	},
+ 	.ops = &cs42888_dai_ops,
+-	.symmetric_rates = 1,
+ };
+ 
+ /**
+diff --git a/sound/soc/imx/imx-cs42888.c b/sound/soc/imx/imx-cs42888.c
+index e9f6633..d34be0a 100644
+--- a/sound/soc/imx/imx-cs42888.c
++++ b/sound/soc/imx/imx-cs42888.c
+@@ -34,23 +34,29 @@
+ #include "../codecs/cs42888.h"
+ 
+ 
+-struct imx_3stack_pcm_state {
+-	int lr_clk_active;
++struct imx_priv_state {
++	int hw;
+ };
+ 
+-static struct imx_3stack_pcm_state clk_state;
++static struct imx_priv_state hw_state;
+ unsigned int mclk_freq;
+ 
+ static int imx_3stack_startup(struct snd_pcm_substream *substream)
+ {
+-	clk_state.lr_clk_active++;
++	struct snd_soc_pcm_runtime *rtd = substream->private_data;
++	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
++	if (!cpu_dai->active)
++		hw_state.hw = 0;
+ 
+ 	return 0;
+ }
+ 
+ static void imx_3stack_shutdown(struct snd_pcm_substream *substream)
+ {
+-	clk_state.lr_clk_active--;
++	struct snd_soc_pcm_runtime *rtd = substream->private_data;
++	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
++	if (!cpu_dai->active)
++		hw_state.hw = 0;
+ }
+ 
+ static int imx_3stack_surround_hw_params(struct snd_pcm_substream *substream,
+@@ -62,8 +68,10 @@ static int imx_3stack_surround_hw_params(struct snd_pcm_substream *substream,
+ 	unsigned int rate = params_rate(params);
+ 	u32 dai_format;
+ 	unsigned int lrclk_ratio = 0;
+-	if (clk_state.lr_clk_active > 1)
++
++	if (hw_state.hw)
+ 		return 0;
++	hw_state.hw = 1;
+ 	if (cpu_is_mx53()) {
+ 		switch (rate) {
+ 		case 32000:
+diff --git a/sound/soc/imx/imx-esai.c b/sound/soc/imx/imx-esai.c
+index ebd45ff..a3c5c44 100644
+--- a/sound/soc/imx/imx-esai.c
++++ b/sound/soc/imx/imx-esai.c
+@@ -277,18 +277,23 @@ static int imx_esai_startup(struct snd_pcm_substream *substream,
+ {
+ 	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
+ 
+-	clk_enable(esai->clk);
++	if (!(local_esai->imx_esai_txrx_state & IMX_DAI_ESAI_TXRX)) {
++		clk_enable(esai->clk);
+ 
+-	writel(ESAI_ECR_ERST, esai->base + ESAI_ECR);
+-	writel(ESAI_ECR_ESAIEN, esai->base + ESAI_ECR);
++		writel(ESAI_ECR_ERST, esai->base + ESAI_ECR);
++		writel(ESAI_ECR_ESAIEN, esai->base + ESAI_ECR);
+ 
+-	writel(ESAI_GPIO_ESAI, esai->base + ESAI_PRRC);
+-	writel(ESAI_GPIO_ESAI, esai->base + ESAI_PCRC);
++		writel(ESAI_GPIO_ESAI, esai->base + ESAI_PRRC);
++		writel(ESAI_GPIO_ESAI, esai->base + ESAI_PCRC);
++	}
+ 
+-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
++		local_esai->imx_esai_txrx_state |= IMX_DAI_ESAI_TX;
+ 		writel(ESAI_TCR_TPR, esai->base + ESAI_TCR);
+-	else
++	} else {
++		local_esai->imx_esai_txrx_state |= IMX_DAI_ESAI_RX;
+ 		writel(ESAI_RCR_RPR, esai->base + ESAI_RCR);
++	}
+ 
+ 	ESAI_DUMP();
+ 	return 0;
+@@ -422,9 +427,14 @@ static void imx_esai_shutdown(struct snd_pcm_substream *substream,
+ {
+ 	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
+ 
+-	/* close easi clock */
+-	clk_disable(esai->clk);
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++		local_esai->imx_esai_txrx_state &= ~IMX_DAI_ESAI_TX;
++	else
++		local_esai->imx_esai_txrx_state &= ~IMX_DAI_ESAI_RX;
+ 
++	if (!(local_esai->imx_esai_txrx_state & IMX_DAI_ESAI_TXRX))
++		/* close easi clock */
++		clk_disable(esai->clk);
+ }
+ 
+ static int imx_esai_trigger(struct snd_pcm_substream *substream, int cmd,
+@@ -532,6 +542,7 @@ static struct snd_soc_dai_ops imx_esai_dai_ops = {
+ static int imx_esai_dai_probe(struct snd_soc_dai *dai)
+ {
+ 	struct imx_esai *esai = dev_get_drvdata(dai->dev);
++	local_esai->imx_esai_txrx_state = 0;
+ 	snd_soc_dai_set_drvdata(dai, esai);
+ 	return 0;
+ }
+diff --git a/sound/soc/imx/imx-esai.h b/sound/soc/imx/imx-esai.h
+index e8f2a71..97cf1c4 100644
+--- a/sound/soc/imx/imx-esai.h
++++ b/sound/soc/imx/imx-esai.h
+@@ -304,6 +304,10 @@
+ #include <linux/dmaengine.h>
+ #include <mach/dma.h>
+ 
++#define IMX_DAI_ESAI_TX 0x04
++#define IMX_DAI_ESAI_RX 0x08
++#define IMX_DAI_ESAI_TXRX (IMX_DAI_ESAI_TX | IMX_DAI_ESAI_RX)
++
+ struct imx_esai {
+ 	struct platform_device *ac97_dev;
+ 	struct snd_soc_dai *imx_ac97;
+@@ -322,6 +326,7 @@ struct imx_esai {
+ 	struct imx_pcm_dma_params dma_params_tx;
+ 
+ 	int enabled;
++	int imx_esai_txrx_state;
+ 
+ 	struct platform_device *soc_platform_pdev;
+ 	struct platform_device *soc_platform_pdev_fiq;
+-- 
+1.7.7.4
+

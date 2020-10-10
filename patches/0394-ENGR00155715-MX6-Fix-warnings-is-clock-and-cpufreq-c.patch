@@ -1,0 +1,67 @@
+From 863c058a1820fb896e6afcd004636a1cfcb115b1 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Tue, 30 Aug 2011 16:23:52 -0500
+Subject: [PATCH 0394/2463] ENGR00155715: MX6: Fix warnings is clock and
+ cpufreq code.
+
+Fixed warnings in clocks and cpufreq code.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/pm.c      |    1 -
+ arch/arm/plat-mxc/cpufreq.c |   10 ++--------
+ 2 files changed, 2 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index ac5ede9..362d026 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -61,7 +61,6 @@ static struct clk *cpu_clk;
+ static struct pm_platform_data *pm_data;
+ 
+ #if defined(CONFIG_CPU_FREQ)
+-static int org_freq;
+ extern int set_cpu_freq(int wp);
+ #endif
+ extern void mx6q_suspend(suspend_state_t state);
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index e65d033..88cfaa6 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -42,7 +42,6 @@ static struct cpufreq_frequency_table *imx_freq_table;
+ 
+ static int cpu_op_nr;
+ static struct cpu_op *cpu_op_tbl;
+-static struct regulator *gp_regulator;
+ static u32 pre_suspend_rate;
+ 
+ extern int dvfs_core_is_active;
+@@ -165,11 +164,9 @@ static int mxc_set_target(struct cpufreq_policy *policy,
+ 	return ret;
+ }
+ 
+-static int mxc_cpufreq_suspend(struct platform_device *pdev,
++static int mxc_cpufreq_suspend(struct cpufreq_policy *policy,
+ 				 pm_message_t state)
+ {
+-	struct cpufreq_policy *policy = pdev;
+-
+ 	pre_suspend_rate = clk_get_rate(cpu_clk);
+ 	/* Set to max freq and voltage */
+ 	if (pre_suspend_rate != (imx_freq_table[0].frequency * 1000))
+@@ -178,11 +175,8 @@ static int mxc_cpufreq_suspend(struct platform_device *pdev,
+ 	return 0;
+ }
+ 
+-static int mxc_cpufreq_resume(struct platform_device *pdev,
+-				 pm_message_t state)
++static int mxc_cpufreq_resume(struct cpufreq_policy *policy)
+ {
+-	struct cpufreq_policy *policy = pdev;
+-
+ 	if (clk_get_rate(cpu_clk) != pre_suspend_rate)
+ 		set_cpu_freq(pre_suspend_rate);
+ 
+-- 
+1.7.7.4
+

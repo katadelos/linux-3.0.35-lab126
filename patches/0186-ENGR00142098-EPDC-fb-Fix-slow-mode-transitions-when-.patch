@@ -1,0 +1,74 @@
+From 660bef1bc392f2efd0f4af8abbdf2e8eeb608d00 Mon Sep 17 00:00:00 2001
+From: Danny Nold <dannynold@freescale.com>
+Date: Tue, 31 May 2011 12:45:12 -0500
+Subject: [PATCH 0186/2463] ENGR00142098 - EPDC fb: Fix slow mode transitions
+ when powerdown delay disabled
+
+- When the powerdown delay is set to FB_POWERDOWN_DISABLE, the
+mxc_epdc_fb_flush_updates() function does not execute correctly, always
+resulting in a time out while waiting to receive a completion that signals
+that all updates have completed.  This causes long delays when changing the FB
+mode, since a mode change will always result in a call to
+mxc_epdc_fb_flush_updates().
+
+Fixed this bug by creating a new mxc_epdc_fb_data variable to track whether
+all active updates have completed.  mxc_epdc_fb_flush_updates() now
+keys off of this variable to determine whether to wait for all
+active updates to complete.
+
+Signed-off-by: Danny Nold <dannynold@freescale.com>
+---
+ drivers/video/mxc/mxc_epdc_fb.c |    9 +++++++--
+ 1 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_epdc_fb.c b/drivers/video/mxc/mxc_epdc_fb.c
+index 5866ef8..39e442d 100644
+--- a/drivers/video/mxc/mxc_epdc_fb.c
++++ b/drivers/video/mxc/mxc_epdc_fb.c
+@@ -178,6 +178,7 @@ struct mxc_epdc_fb_data {
+ 	int eof_sync_period;
+ 	struct mutex power_mutex;
+ 	bool powering_down;
++	bool updates_active;
+ 	int pwrdown_delay;
+ 	unsigned long tce_prevent;
+ 
+@@ -861,6 +862,8 @@ static void epdc_powerup(struct mxc_epdc_fb_data *fb_data)
+ 
+ 	dev_dbg(fb_data->dev, "EPDC Powerup\n");
+ 
++	fb_data->updates_active = true;
++
+ 	/* Enable pins used by EPDC */
+ 	if (fb_data->pdata->enable_pins)
+ 		fb_data->pdata->enable_pins();
+@@ -2694,8 +2697,7 @@ void mxc_epdc_fb_flush_updates(struct mxc_epdc_fb_data *fb_data)
+ 	 */
+ 	if (!list_empty(&fb_data->upd_pending_list) ||
+ 		!is_free_list_full(fb_data) ||
+-		((fb_data->power_state == POWER_STATE_ON) &&
+-		!fb_data->powering_down)) {
++		(fb_data->updates_active == true)) {
+ 		/* Initialize event signalling updates are done */
+ 		init_completion(&fb_data->updates_done);
+ 		fb_data->waiting_for_idle = true;
+@@ -2985,6 +2987,8 @@ static irqreturn_t mxc_epdc_irq_handler(int irq, void *dev_id)
+ 		(fb_data->cur_update == NULL) &&
+ 		!epdc_luts_active) {
+ 
++		fb_data->updates_active = false;
++
+ 		if (fb_data->pwrdown_delay != FB_POWERDOWN_DISABLE) {
+ 			/*
+ 			 * Set variable to prevent overlapping
+@@ -3949,6 +3953,7 @@ int __devinit mxc_epdc_fb_probe(struct platform_device *pdev)
+ 	fb_data->power_state = POWER_STATE_OFF;
+ 	fb_data->powering_down = false;
+ 	fb_data->wait_for_powerdown = false;
++	fb_data->updates_active = false;
+ 	fb_data->pwrdown_delay = 0;
+ 
+ 	/* Register FB */
+-- 
+1.7.7.4
+

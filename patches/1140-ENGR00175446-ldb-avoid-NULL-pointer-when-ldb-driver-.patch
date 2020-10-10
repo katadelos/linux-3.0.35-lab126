@@ -1,0 +1,48 @@
+From 7f09b8c05207ed1c199f89db2547b0871e4d22e9 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Mon, 27 Feb 2012 09:31:18 +0800
+Subject: [PATCH 1140/2463] ENGR00175446 ldb: avoid NULL pointer when ldb
+ driver is probed but not inited.
+
+ldb: avoid NULL pointer when ldb driver is probed but not inited.
+It can lead to kernel crash when framebuffer on LVDS panel is not inited.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/video/mxc/ldb.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/video/mxc/ldb.c b/drivers/video/mxc/ldb.c
+index 6172c0f..dacb9b4 100644
+--- a/drivers/video/mxc/ldb.c
++++ b/drivers/video/mxc/ldb.c
+@@ -728,6 +728,8 @@ static int ldb_suspend(struct platform_device *pdev, pm_message_t state)
+ 	struct ldb_data *ldb = dev_get_drvdata(&pdev->dev);
+ 	uint32_t	data;
+ 
++	if (!ldb->inited)
++		return 0;
+ 	data = readl(ldb->control_reg);
+ 	ldb->control_reg_data = data;
+ 	data &= ~(LDB_CH0_MODE_MASK | LDB_CH1_MODE_MASK);
+@@ -740,6 +742,8 @@ static int ldb_resume(struct platform_device *pdev)
+ {
+ 	struct ldb_data *ldb = dev_get_drvdata(&pdev->dev);
+ 
++	if (!ldb->inited)
++		return 0;
+ 	writel(ldb->control_reg_data, ldb->control_reg);
+ 
+ 	return 0;
+@@ -778,6 +782,8 @@ static int ldb_remove(struct platform_device *pdev)
+ {
+ 	struct ldb_data *ldb = dev_get_drvdata(&pdev->dev);
+ 
++	if (!ldb->inited)
++		return 0;
+ 	mxc_dispdrv_puthandle(ldb->disp_ldb);
+ 	mxc_dispdrv_unregister(ldb->disp_ldb);
+ 	kfree(ldb);
+-- 
+1.7.7.4
+

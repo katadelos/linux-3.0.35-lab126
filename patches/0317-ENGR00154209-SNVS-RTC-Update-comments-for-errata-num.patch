@@ -1,0 +1,42 @@
+From a099a146ffb5ba144ca567e0a1903bd0f91cbd0f Mon Sep 17 00:00:00 2001
+From: Anish Trivedi <anish@freescale.com>
+Date: Tue, 2 Aug 2011 16:23:28 -0500
+Subject: [PATCH 0317/2463] ENGR00154209 SNVS RTC: Update comments for errata
+ number
+
+Add TKT052983 errata number to comments field. This errata
+requires reading the counter value twice until both
+values match to ensure integrity of read value.
+
+Signed-off-by: Anish Trivedi <anish@freescale.com>
+---
+ drivers/rtc/rtc-snvs.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/rtc/rtc-snvs.c b/drivers/rtc/rtc-snvs.c
+index 08e5378..3125ec0 100644
+--- a/drivers/rtc/rtc-snvs.c
++++ b/drivers/rtc/rtc-snvs.c
+@@ -94,7 +94,7 @@ static DEFINE_SPINLOCK(rtc_lock);
+  * LP counter register reads should always use this function.
+  * This function reads 2 consective times from LP counter register
+  * until the 2 values match. This is to avoid reading corrupt
+- * value if the counter is in the middle of updating
++ * value if the counter is in the middle of updating (TKT052983)
+  */
+ static inline u32 rtc_read_lp_counter(void __iomem *counter_reg)
+ {
+@@ -132,7 +132,9 @@ static inline void rtc_write_sync_lp(void __iomem *ioaddr)
+ 	/* Wait for 3 CKIL cycles */
+ 	for (i = 0; i < 3; i++) {
+ 
+-		/* Do consective reads of LSB of counter to ensure integrity */
++		/* TKT052983: Do consective reads of LSB of counter
++		 * to ensure integrity
++		 */
+ 		do {
+ 			count1 = __raw_readl(ioaddr + SNVS_LPSRTCLR);
+ 			count2 = __raw_readl(ioaddr + SNVS_LPSRTCLR);
+-- 
+1.7.7.4
+

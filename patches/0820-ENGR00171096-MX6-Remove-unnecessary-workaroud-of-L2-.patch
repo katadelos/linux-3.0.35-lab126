@@ -1,0 +1,37 @@
+From b84909af46c8d1557cfcddfc1a97eacdae07d978 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Fri, 30 Dec 2011 14:52:18 +0800
+Subject: [PATCH 0820/2463] ENGR00171096 [MX6]Remove unnecessary workaroud of
+ L2 in suspend/resume
+
+We have many operation before enabling L2 cache, which can
+make sure L2 already can be accessed before enabled.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/mx6q_suspend.S |    9 ---------
+ 1 files changed, 0 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mx6q_suspend.S b/arch/arm/mach-mx6/mx6q_suspend.S
+index bbda5aa..31bccf1 100644
+--- a/arch/arm/mach-mx6/mx6q_suspend.S
++++ b/arch/arm/mach-mx6/mx6q_suspend.S
+@@ -461,15 +461,6 @@ are running with MMU off.
+ ****************************************************************/
+ resume:
+ 	ldr	r0, =SRC_BASE_ADDR
+-	/* Due to the L2 cache errata(TKT065875)
+-	, need to wait at least 170ns, each IO read
+-	takes about 76ns, but the actual wait time
+-	to make system more stable is about 380ns */
+-	ldr	r1, [r0]
+-	ldr	r1, [r0, #0x4]
+-	ldr	r1, [r0, #0x8]
+-	ldr	r1, [r0, #0xc]
+-	ldr	r1, [r0, #0x10]
+ 	mov	r1, #0x0
+ 	str	r1, [r0, #SRC_GPR1_OFFSET] /* clear SRC_GPR1 */
+ 	ldr	r0, [r0, #SRC_GPR2_OFFSET]
+-- 
+1.7.7.4
+

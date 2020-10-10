@@ -1,0 +1,91 @@
+From e3ccb6f8abda247506040dd519ef57bf1a244b8a Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Sun, 14 Oct 2012 21:33:21 +0800
+Subject: [PATCH 2172/2463] ENGR00229473 elcdif fb: fix lcd framebuffer
+ potential recursive locking
+
+This can be detected by enabling CONFIG_LOCKDEP and CONFIG_PROVE_LOCKING
+The dump log:
+
+=============================================
+[ INFO: possible recursive locking detected ]
+3.0.35-02140-gb4181ce-dirty #959
+---------------------------------------------
+swapper/1 is trying to acquire lock:
+ ((fb_notifier_list).rwsem){.+.+.+}, at: [<80088758>] __blocking_notifier_call_chain+0x44/0x88
+
+ but task is already holding lock:
+  ((fb_notifier_list).rwsem){.+.+.+}, at: [<80088758>] __blocking_notifier_call_chain+0x44/0x88
+
+  other info that might help us debug this:
+   Possible unsafe locking scenario:
+
+CPU0
+----
+ lock((fb_notifier_list).rwsem);
+ lock((fb_notifier_list).rwsem);
+
+*** DEADLOCK ***
+
+May be due to missing lock nesting notation
+
+5 locks held by swapper/1:
+ #0:  (&__lockdep_no_validate__){+.+.+.}, at: [<8027f244>] __driver_attach+0x48/0x98
+ #1:  (&__lockdep_no_validate__){+.+.+.}, at: [<8027f254>] __driver_attach+0x58/0x98
+ #2:  (registration_lock){+.+.+.}, at: [<8023a17c>] register_framebuffer+0x18/0x24c
+ #3:  (&fb_info->lock){+.+.+.}, at: [<80238dc8>] lock_fb_info+0x18/0x3c
+ #4:  ((fb_notifier_list).rwsem){.+.+.+}, at: [<80088758>] __blocking_notifier_call_chain+0x44/0x88
+
+stack backtrace:
+[<800405c4>] (unwind_backtrace+0x0/0xf8) from [<80097c78>] (__lock_acquire+0x1644/0x1c18)
+[<80097c78>] (__lock_acquire+0x1644/0x1c18) from [<80098748>] (lock_acquire+0x84/0x98)
+[<80098748>] (lock_acquire+0x84/0x98) from [<804d0aa8>] (down_read+0x34/0x44)
+[<804d0aa8>] (down_read+0x34/0x44) from [<80088758>] (__blocking_notifier_call_chain+0x44/0x88)
+[<80088758>] (__blocking_notifier_call_chain+0x44/0x88) from [<800887b4>] (blocking_notifier_call_chain+0x18/0x20)
+[<800887b4>] (blocking_notifier_call_chain+0x18/0x20) from [<802397e0>] (fb_set_var+0x264/0x290)
+[<802397e0>] (fb_set_var+0x264/0x290) from [<8024a320>] (lcd_init_fb+0x54/0x70)
+[<8024a320>] (lcd_init_fb+0x54/0x70) from [<8024a3f0>] (lcd_fb_event+0x44/0xb4)
+[<8024a3f0>] (lcd_fb_event+0x44/0xb4) from [<80088514>] (notifier_call_chain.isra.1+0x74/0xd0)
+[<80088514>] (notifier_call_chain.isra.1+0x74/0xd0) from [<80088774>] (__blocking_notifier_call_chain+0x60/0x88)
+[<80088774>] (__blocking_notifier_call_chain+0x60/0x88) from [<800887b4>] (blocking_notifier_call_chain+0x18/0x20)
+[<800887b4>] (blocking_notifier_call_chain+0x18/0x20) from [<8023a2d4>] (register_framebuffer+0x170/0x24c)
+[<8023a2d4>] (register_framebuffer+0x170/0x24c) from [<8024fe8c>] (mxc_elcdif_fb_probe+0x464/0x564)
+[<8024fe8c>] (mxc_elcdif_fb_probe+0x464/0x564) from [<8028031c>] (platform_drv_probe+0x18/0x1c)
+[<8028031c>] (platform_drv_probe+0x18/0x1c) from [<8027f0f0>] (driver_probe_device+0x90/0x19c)
+[<8027f0f0>] (driver_probe_device+0x90/0x19c) from [<8027f290>] (__driver_attach+0x94/0x98)
+[<8027f290>] (__driver_attach+0x94/0x98) from [<8027e2e4>] (bus_for_each_dev+0x5c/0x88)
+[<8027e2e4>] (bus_for_each_dev+0x5c/0x88) from [<8027eabc>] (bus_add_driver+0x188/0x250)
+[<8027eabc>] (bus_add_driver+0x188/0x250) from [<8027f750>] (driver_register+0x78/0x13c)
+[<8027f750>] (driver_register+0x78/0x13c) from [<8001c838>] (mxc_elcdif_fb_init+0x38/0x48)
+[<8001c838>] (mxc_elcdif_fb_init+0x38/0x48) from [<80035334>] (do_one_initcall+0x34/0x178)
+[<80035334>] (do_one_initcall+0x34/0x178) from [<80008968>] (kernel_init+0x84/0x124)
+[<80008968>] (kernel_init+0x84/0x124) from [<8003b614>] (kernel_thread_exit+0x0/0x8)
+
+In fact, we don't need support dynamically switch the framebuffer.
+so, we only need do once registeration in probe function.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+Acked-by: Lily Zhang
+---
+ drivers/video/mxc/mxcfb_seiko_wvga.c |    5 -----
+ 1 files changed, 0 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/video/mxc/mxcfb_seiko_wvga.c b/drivers/video/mxc/mxcfb_seiko_wvga.c
+index c96238d..6e9abaf 100644
+--- a/drivers/video/mxc/mxcfb_seiko_wvga.c
++++ b/drivers/video/mxc/mxcfb_seiko_wvga.c
+@@ -89,11 +89,6 @@ static int lcd_fb_event(struct notifier_block *nb, unsigned long val, void *v)
+ 		return 0;
+ 
+ 	switch (val) {
+-	case FB_EVENT_FB_REGISTERED:
+-		lcd_init_fb(event->info);
+-		fb_show_logo(event->info, 0);
+-		lcd_poweron();
+-		break;
+ 	case FB_EVENT_BLANK:
+ 		if ((event->info->var.xres != 800) ||
+ 		    (event->info->var.yres != 480)) {
+-- 
+1.7.7.4
+

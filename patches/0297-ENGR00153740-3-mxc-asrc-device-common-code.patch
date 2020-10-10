@@ -1,0 +1,143 @@
+From 5caddc1ae7c299a1dc760e259f53c3ed9c1bcdf7 Mon Sep 17 00:00:00 2001
+From: Dong Aisheng <b29396@freescale.com>
+Date: Wed, 27 Jul 2011 10:17:06 +0800
+Subject: [PATCH 0297/2463] ENGR00153740-3 mxc: asrc device common code
+
+Used for add asrc device.
+
+Signed-off-by: Dong Aisheng <b29396@freescale.com>
+---
+ arch/arm/plat-mxc/devices/Kconfig               |    3 +
+ arch/arm/plat-mxc/devices/Makefile              |    1 +
+ arch/arm/plat-mxc/devices/platform-imx-asrc.c   |   72 +++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h |   16 +++++
+ 4 files changed, 92 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index 2955bbc..b076058 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -154,3 +154,6 @@ config IMX_HAVE_PLATFORM_FSL_USB_WAKEUP
+ 
+ config IMX_HAVE_PLATFORM_IMX_PM
+ 	bool
++
++config IMX_HAVE_PLATFORM_IMX_ASRC
++	bool
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index 54c0b1e..5073906 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -53,3 +53,4 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_FSL_OTG) += platform-fsl-usb2-otg.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_FSL_USB_WAKEUP) += platform-fsl-usb2-wakeup.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_PM) += platform-imx-pm.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_MXC_HDMI) +=  platform-mxc_hdmi.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_ASRC) += platform-imx-asrc.o
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-asrc.c b/arch/arm/plat-mxc/devices/platform-imx-asrc.c
+new file mode 100644
+index 0000000..c112a9b
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx-asrc.c
+@@ -0,0 +1,72 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it under
++ * the terms of the GNU General Public License version 2 as published by the
++ * Free Software Foundation.
++ */
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++
++#define imx_imx_asrc_data_entry(soc, _id,  _size)			\
++	[_id] = {							\
++		.id = _id,						\
++		.iobase = soc ## _ASRC ## _BASE_ADDR,			\
++		.iosize = _size,					\
++		.irq = soc ## _INT_ASRC,				\
++		.dmatx1 = soc ## _DMA_REQ_ASRC## _TX1,			\
++		.dmarx1 = soc ## _DMA_REQ_ASRC## _RX1,			\
++		.dmatx2 = soc ## _DMA_REQ_ASRC## _TX2,			\
++		.dmarx2 = soc ## _DMA_REQ_ASRC## _RX2,			\
++		.dmatx3 = soc ## _DMA_REQ_ASRC## _TX3,			\
++		.dmarx3 = soc ## _DMA_REQ_ASRC## _RX3,			\
++	}
++
++#ifdef CONFIG_SOC_IMX53
++const struct imx_imx_asrc_data imx53_imx_asrc_data[] __initconst = {
++#define imx53_imx_asrc_data_entry(_id)				\
++	imx_imx_asrc_data_entry(MX53, _id, SZ_4K)
++	imx53_imx_asrc_data_entry(0),
++};
++#endif /* ifdef CONFIG_SOC_IMX6Q */
++
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_imx_asrc_data imx6q_imx_asrc_data[] __initconst = {
++#define imx6q_imx_asrc_data_entry(_id)				\
++	imx_imx_asrc_data_entry(MX6Q, _id, SZ_4K)
++	imx6q_imx_asrc_data_entry(0),
++};
++#endif /* ifdef CONFIG_SOC_IMX6Q */
++
++struct platform_device *__init imx_add_imx_asrc(
++		const struct imx_imx_asrc_data *data,
++		const struct imx_asrc_platform_data *pdata)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + data->iosize - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.start = data->irq,
++			.end = data->irq,
++			.flags = IORESOURCE_IRQ,
++		},
++#define DMARES(_name) {							\
++	.name = #_name,							\
++	.start = data->dma ## _name,					\
++	.end = data->dma ## _name,					\
++	.flags = IORESOURCE_DMA,					\
++}
++		DMARES(tx1),
++		DMARES(rx1),
++		DMARES(tx2),
++		DMARES(rx2),
++		DMARES(tx3),
++		DMARES(rx3),
++	};
++
++	return imx_add_platform_device("mxc_asrc", data->id,
++			res, ARRAY_SIZE(res),
++			pdata, sizeof(*pdata));
++}
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index dbb3ed5..eca6361 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -538,6 +538,22 @@ struct imx_mxc_hdmi_data {
+ struct platform_device *__init imx_add_mxc_hdmi(
+ 		const struct imx_mxc_hdmi_data *data,
+ 		const struct fsl_mxc_lcd_platform_data *pdata);
++#include <mach/mxc_asrc.h>
++struct imx_imx_asrc_data {
++	int id;
++	resource_size_t iobase;
++	resource_size_t iosize;
++	resource_size_t irq;
++	resource_size_t dmatx1;
++	resource_size_t dmarx1;
++	resource_size_t dmatx2;
++	resource_size_t dmarx2;
++	resource_size_t dmatx3;
++	resource_size_t dmarx3;
++};
++struct platform_device *__init imx_add_imx_asrc(
++		const struct imx_imx_asrc_data *data,
++		const struct imx_asrc_platform_data *pdata);
+ struct platform_device *__init imx_add_dcp(
+ 
+ struct imx_fsl_usb2_otg_data {
+-- 
+1.7.7.4
+

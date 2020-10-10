@@ -1,0 +1,57 @@
+From 2b31c6f178a8126c0e27baa72c5e7bf84b3b53d5 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Tue, 31 Jan 2012 13:34:20 +0800
+Subject: [PATCH 0936/2463] ENGR00173378-1 usb: device: Change judgement
+ condition for resume occurrence
+
+At former code, it uses portsc.fpr to indicate if the host sends
+resume signal to device, but it has some limitations that if the code
+can't be executed before the resume signal finishes, the portsc.fpr
+will be cleared automatically.
+Now, it uses usbsts.pci to judge host resume signal, this bit
+will not be cleared before the non-wakeup interrupt handler is called,
+and the wakeup code is executed before non-wakeup interrupt handler.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ arch/arm/mach-mx6/usb_dr.c |   15 ++++++++++-----
+ 1 files changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index fb241f5..4c7c21d 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -423,14 +423,19 @@ static enum usb_wakeup_event _is_device_wakeup(struct fsl_usb2_platform_data *pd
+ 	pr_debug("%s\n", __func__);
+ 
+ 	/* if ID=1, it is a device wakeup event */
+-	if (wakeup_req && (UOG_OTGSC & OTGSC_STS_USB_ID) && (UOG_PORTSC1 & PORTSC_PORT_FORCE_RESUME)) {
+-		printk(KERN_INFO "otg udc wakeup, host sends resume signal\n");
+-		return true;
+-	}
+ 	if (wakeup_req && (UOG_OTGSC & OTGSC_STS_USB_ID) && (UOG_USBSTS & USBSTS_URI)) {
+ 		printk(KERN_INFO "otg udc wakeup, host sends reset signal\n");
+ 		return true;
+ 	}
++	if (wakeup_req && (UOG_OTGSC & OTGSC_STS_USB_ID) &&  \
++		((UOG_USBSTS & USBSTS_PCI) || (UOG_PORTSC1 & PORTSC_PORT_FORCE_RESUME))) {
++		/*
++		 * When the line state from J to K, the Port Change Detect bit
++		 * in the USBSTS register is also set to '1'.
++		 */
++		printk(KERN_INFO "otg udc wakeup, host sends resume signal\n");
++		return true;
++	}
+ 	if (wakeup_req && (UOG_OTGSC & OTGSC_STS_USB_ID) && (UOG_OTGSC & OTGSC_STS_A_VBUS_VALID) \
+ 		&& (UOG_OTGSC & OTGSC_IS_B_SESSION_VALID)) {
+ 		printk(KERN_INFO "otg udc vbus rising wakeup\n");
+-- 
+1.7.7.4
+

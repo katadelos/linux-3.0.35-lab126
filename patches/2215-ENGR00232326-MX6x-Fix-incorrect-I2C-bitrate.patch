@@ -1,0 +1,72 @@
+From 24a51586c5a00ddf8b5e5de749f8269951f2de3f Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Thu, 25 Oct 2012 15:51:51 -0500
+Subject: [PATCH 2215/2463] ENGR00232326 MX6x-Fix incorrect I2C bitrate
+
+IPG_PERCLK is the parent of I2C. I2C needs a minimum of
+12.8MHz as its input clock to achieve 400KHz speed. Hence
+change the IPG_PERCLK speed accordingly.
+MX6DQ/MX6DL - Set IPG_PERCLK at 22MHz (sourced from IPG_CLK)
+MX6SL - Set IPG_PERCLK to 24MHz(Sourced from 24MHz XTAL).
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c       |   11 ++++++++---
+ arch/arm/mach-mx6/clock_mx6sl.c |   11 +++++++----
+ 2 files changed, 15 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index bbddb94..fb4055c 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4244,7 +4244,7 @@ static struct clk caam_clk[] = {
+ 	 __INIT_CLK_DEBUG(caam_ipg_clk)
+ 	.id = 2,
+ 	.enable_reg = MXC_CCM_CCGR0,
+-	.enable_shift = MXC_CCM_CCGRx_CG6_OFFSET,
++	.enable_shift = MXC_CCM_CCGRx_CG4_OFFSET,
+ 	.enable = _clk_enable,
+ 	.disable = _clk_disable,
+ 	.parent = &mmdc_ch0_axi_clk[0],
+@@ -5343,8 +5343,13 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 		clk_debug_register(lookups[i].clk);
+ 	}
+ 
+-	/* Lower the ipg_perclk frequency to 6MHz. */
+-	clk_set_rate(&ipg_perclk, 6000000);
++	/* Lower the ipg_perclk frequency to 22MHz.
++	  * I2C needs a minimum of 12.8MHz as its source
++	  * to acheive 400KHz speed. IPG_PERCLK sources
++	  * I2C. 22MHz when divided by the I2C divider gives the
++	  * freq closest to 400KHz.
++	  */
++	clk_set_rate(&ipg_perclk, 22000000);
+ 
+ 	/* Timer needs to be initialized first as the
+ 	  * the WAIT routines use GPT counter as
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 544b995..961e7ee 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -4003,11 +4003,14 @@ int __init mx6sl_clocks_init(unsigned long ckil, unsigned long osc,
+ 	 * should be from OSC24M */
+ 	clk_set_parent(&ipg_perclk, &osc_clk);
+ 
+-	/* Need to set IPG_PERCLK to 3MHz, so that we can
+-	  * satisfy the 2.5:1 AHB:IPG_PERCLK ratio. Since AHB
+-	  * can be dropped to as low as 8MHz in low power mode.
++
++	/*IPG_PERCLK sources I2C.
++	  * I2C needs a minimum of 12.8MHz as its source
++	  * to acheive 400KHz speed.
++	  * Hence set ipg_perclk to 24MHz.
+ 	  */
+-	clk_set_rate(&ipg_perclk, 3000000);
++
++	clk_set_rate(&ipg_perclk, 24000000);
+ 
+ 	gpt_clk[0].parent = &ipg_perclk;
+ 	gpt_clk[0].get_rate = NULL;
+-- 
+1.7.7.4
+

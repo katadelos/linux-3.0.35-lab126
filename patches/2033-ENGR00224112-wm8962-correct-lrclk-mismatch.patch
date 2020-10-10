@@ -1,0 +1,30 @@
+From 0916af964b9deb5f7a17612772d0319bfcaa2a11 Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Wed, 12 Sep 2012 20:29:01 +0800
+Subject: [PATCH 2033/2463] ENGR00224112 wm8962: correct lrclk mismatch
+
+lrclk trigger settings between ssi and wm8962 are different,
+which causes L/R channel swap.
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ sound/soc/imx/imx-wm8962.c |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/imx/imx-wm8962.c b/sound/soc/imx/imx-wm8962.c
+index 8da589f..b13f68f 100644
+--- a/sound/soc/imx/imx-wm8962.c
++++ b/sound/soc/imx/imx-wm8962.c
+@@ -111,6 +111,9 @@ static int imx_hifi_hw_params(struct snd_pcm_substream *substream,
+ 				 channels == 1 ? 0xfffffffe : 0xfffffffc,
+ 				 2, 32);
+ 
++	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_IF |
++		SND_SOC_DAIFMT_CBM_CFM;
++
+ 	/* set cpu DAI configuration */
+ 	ret = snd_soc_dai_set_fmt(cpu_dai, dai_format);
+ 	if (ret < 0)
+-- 
+1.7.7.4
+

@@ -1,0 +1,63 @@
+From ca039b2c721f4458df16ba926d9db98b1ef11184 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Wed, 21 Dec 2011 18:32:11 +0800
+Subject: [PATCH 0799/2463] ENGR00170784 - FEC : dma skb buffer map is not
+ used rightly.
+
+Enable "CONFIG_DMA_API_DEBUG" in kernel, and system print:
+
+DMA-API: device driver tries to free DMA memory it has not
+allocated [device address=0x0000000046688020]...[<80222494>]
+(debug_dma_unmap_page+0x8c/0x98) from [<802a36a0>]
+(fec_enet_interrupt+0x430/0x5ac)
+
+Correct the usage of "dma_map_single" function.
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ drivers/net/fec.c |    8 +++++---
+ 1 files changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index b56a623..c3cb637 100755
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -401,7 +401,8 @@ fec_enet_tx(struct net_device *ndev)
+ 		if (bdp == fep->cur_tx && fep->tx_full == 0)
+ 			break;
+ 
+-		dma_unmap_single(&fep->pdev->dev, bdp->cbd_bufaddr,
++		if (bdp->cbd_bufaddr)
++			dma_unmap_single(&fep->pdev->dev, bdp->cbd_bufaddr,
+ 				FEC_ENET_TX_FRSIZE, DMA_TO_DEVICE);
+ 		bdp->cbd_bufaddr = 0;
+ 
+@@ -542,7 +543,8 @@ fec_enet_rx(struct net_device *ndev)
+ 		ndev->stats.rx_bytes += pkt_len;
+ 		data = (__u8*)__va(bdp->cbd_bufaddr);
+ 
+-		dma_unmap_single(&fep->pdev->dev, bdp->cbd_bufaddr,
++		if (bdp->cbd_bufaddr)
++			dma_unmap_single(&fep->pdev->dev, bdp->cbd_bufaddr,
+ 				FEC_ENET_TX_FRSIZE, DMA_FROM_DEVICE);
+ 
+ 		if (id_entry->driver_data & FEC_QUIRK_SWAP_FRAME)
+@@ -1089,7 +1091,6 @@ fec_enet_open(struct net_device *ndev)
+ 	/* I should reset the ring buffers here, but I don't yet know
+ 	 * a simple way to do that.
+ 	 */
+-
+ 	if (!clk_get_usecount(fep->clk))
+ 		clk_enable(fep->clk);
+ 	ret = fec_enet_alloc_buffers(ndev);
+@@ -1290,6 +1291,7 @@ static int fec_enet_init(struct net_device *ndev)
+ 
+ 		/* Initialize the BD for every fragment in the page. */
+ 		bdp->cbd_sc = 0;
++		bdp->cbd_bufaddr = 0;
+ 		bdp++;
+ 	}
+ 
+-- 
+1.7.7.4
+

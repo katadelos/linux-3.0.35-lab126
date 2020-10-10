@@ -1,0 +1,284 @@
+From b829a6c66e6bab87ef456ffcac3ffc3df82e4533 Mon Sep 17 00:00:00 2001
+From: Larry Li <b20787@freescale.com>
+Date: Tue, 12 Jun 2012 17:08:17 +0800
+Subject: [PATCH 1604/2463] ENGR00213170-1 [MX6SL] Add resource needed by GPU
+
+Prepare resourec such as memory, interrupt, clock, regester address
+needed by GPU.
+
+Signed-off-by: Larry Li <b20787@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_arm2.c         |   18 +++-
+ arch/arm/mach-mx6/clock_mx6sl.c              |  167 ++++++++++++++++++++++++++
+ arch/arm/plat-mxc/devices/platform-viv_gpu.c |   13 ++-
+ 3 files changed, 196 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 3d1bba1..2d42966 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -563,6 +563,10 @@ static struct mxc_dvfs_platform_data mx6sl_arm2_dvfscore_data = {
+ 	.delay_time		= 80,
+ };
+ 
++static struct viv_gpu_platform_data imx6q_gpu_pdata __initdata = {
++	.reserved_mem_size = SZ_128M,
++};
++
+ void __init early_console_setup(unsigned long base, struct clk *clk);
+ 
+ static inline void mx6_arm2_init_uart(void)
+@@ -1112,6 +1116,8 @@ static void __init mx6_arm2_init(void)
+ 
+ 	imx6q_add_viim();
+ 	imx6q_add_imx2_wdt(0, NULL);
++
++	imx_add_viv_gpu(&imx6_gpu_data, &imx6q_gpu_pdata);
+ }
+ 
+ extern void __iomem *twd_base;
+@@ -1134,7 +1140,17 @@ static struct sys_timer mxc_timer = {
+ 
+ static void __init mx6_arm2_reserve(void)
+ {
+-
++#if defined(CONFIG_MXC_GPU_VIV) || defined(CONFIG_MXC_GPU_VIV_MODULE)
++	phys_addr_t phys;
++
++	if (imx6q_gpu_pdata.reserved_mem_size) {
++		phys = memblock_alloc_base(imx6q_gpu_pdata.reserved_mem_size,
++					   SZ_4K, MEMBLOCK_ALLOC_ACCESSIBLE);
++		memblock_free(phys, imx6q_gpu_pdata.reserved_mem_size);
++		memblock_remove(phys, imx6q_gpu_pdata.reserved_mem_size);
++		imx6q_gpu_pdata.reserved_mem_base = phys;
++	}
++#endif
+ }
+ 
+ MACHINE_START(MX6SL_ARM2, "Freescale i.MX 6SoloLite Armadillo2 Board")
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 877b37d..0c17ed4 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -3331,6 +3331,170 @@ static struct clk aips_tz1_clk = {
+ 	.disable = _clk_disable_inwait,
+ };
+ 
++/* Raster 2D and OpenVG GPU core share the same clock gate bits,
++ * so we abstract gpu2d_core_clk to handle clock gate enabling
++ * and disabling for both 2D core. These two 2D core have
++ * different multiplexer, so gpu2d_axi_clk and openvg_axi_clk
++ * are provided for them to control the multiplexer individually.
++*/
++static struct clk gpu2d_core_clk = {
++	__INIT_CLK_DEBUG(gpu2d_core_clk)
++	.enable = _clk_enable,
++	.enable_reg = MXC_CCM_CCGR1,
++	.enable_shift = MXC_CCM_CCGRx_CG13_OFFSET,
++	.disable = _clk_disable,
++	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
++};
++
++static unsigned long _clk_openvg_axi_round_rate(struct clk *clk,
++						unsigned long rate)
++{
++	u32 div;
++	u32 parent_rate = clk_get_rate(clk->parent);
++
++	div = parent_rate / rate;
++
++	/* Make sure rate is not greater than the maximum value for the clock.
++	 * Also prevent a div of 0.
++	 */
++	if (div == 0)
++		div++;
++
++	if (div > 8)
++		div = 8;
++
++	return parent_rate / div;
++}
++
++static int _clk_openvg_axi_set_parent(struct clk *clk, struct clk *parent)
++{
++	int mux;
++	u32 reg = __raw_readl(MXC_CCM_CBCMR)
++		& ~MXC_CCM_CBCMR_GPU3D_CORE_CLK_SEL_MASK;
++
++	mux = _get_mux6(parent, &pll3_pfd1_540M,
++		&pll3_usb_otg_main_clk,
++		&pll2_528_bus_main_clk, &pll2_pfd2_400M, NULL, NULL);
++	reg |= (mux << MXC_CCM_CBCMR_GPU3D_CORE_CLK_SEL_OFFSET);
++	__raw_writel(reg, MXC_CCM_CBCMR);
++
++	return 0;
++}
++
++static unsigned long _clk_openvg_axi_get_rate(struct clk *clk)
++{
++	u32 reg, div;
++
++	reg = __raw_readl(MXC_CCM_CBCMR);
++	div = ((reg & MXC_CCM_CBCMR_GPU3D_CORE_PODF_MASK) >>
++			MXC_CCM_CBCMR_GPU3D_CORE_PODF_OFFSET) + 1;
++
++	return clk_get_rate(clk->parent) / div;
++}
++
++static int _clk_openvg_axi_set_rate(struct clk *clk, unsigned long rate)
++{
++	u32 reg, div;
++	u32 parent_rate = clk_get_rate(clk->parent);
++
++	div = parent_rate / rate;
++	if (div == 0)
++		div++;
++	if (div > 8)
++		div = 8;
++
++	reg = __raw_readl(MXC_CCM_CBCMR);
++	reg &= ~MXC_CCM_CBCMR_GPU3D_CORE_PODF_MASK;
++	reg |= (div - 1) << MXC_CCM_CBCMR_GPU3D_CORE_PODF_OFFSET;
++	__raw_writel(reg, MXC_CCM_CBCMR);
++
++	return 0;
++}
++
++static struct clk openvg_axi_clk = {
++	__INIT_CLK_DEBUG(openvg_axi_clk)
++	.parent = &pll2_528_bus_main_clk,
++	.set_parent = _clk_openvg_axi_set_parent,
++	.set_rate = _clk_openvg_axi_set_rate,
++	.get_rate = _clk_openvg_axi_get_rate,
++	.round_rate = _clk_openvg_axi_round_rate,
++	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
++};
++
++static unsigned long _clk_gpu2d_axi_round_rate(struct clk *clk,
++						unsigned long rate)
++{
++	u32 div;
++	u32 parent_rate = clk_get_rate(clk->parent);
++
++	div = parent_rate / rate;
++
++	/* Make sure rate is not greater than the maximum value for the clock.
++	 * Also prevent a div of 0.
++	 */
++	if (div == 0)
++		div++;
++
++	if (div > 8)
++		div = 8;
++
++	return parent_rate / div;
++}
++
++static int _clk_gpu2d_axi_set_parent(struct clk *clk, struct clk *parent)
++{
++	int mux;
++	u32 reg = __raw_readl(MXC_CCM_CBCMR) &
++				~MXC_CCM_CBCMR_GPU3D_SHADER_CLK_SEL_MASK;
++
++	mux = _get_mux6(parent, &pll2_pfd2_400M, &pll3_usb_otg_main_clk,
++		&pll3_pfd1_540M, &pll2_528_bus_main_clk, NULL, NULL);
++	reg |= (mux << MXC_CCM_CBCMR_GPU3D_SHADER_CLK_SEL_OFFSET);
++	__raw_writel(reg, MXC_CCM_CBCMR);
++
++	return 0;
++}
++
++static unsigned long _clk_gpu2d_axi_get_rate(struct clk *clk)
++{
++	u32 reg, div = 1;
++
++	reg = __raw_readl(MXC_CCM_CBCMR);
++	div = ((reg & MXC_CCM_CBCMR_GPU3D_SHADER_PODF_MASK) >>
++			MXC_CCM_CBCMR_GPU3D_SHADER_PODF_OFFSET) + 1;
++
++	return clk_get_rate(clk->parent) / div;
++}
++
++static int _clk_gpu2d_axi_set_rate(struct clk *clk, unsigned long rate)
++{
++	u32 reg, div;
++	u32 parent_rate = clk_get_rate(clk->parent);
++
++	div = parent_rate / rate;
++	if (div == 0)
++		div++;
++	if (((parent_rate / div) != rate) || (div > 8))
++		return -EINVAL;
++
++	reg = __raw_readl(MXC_CCM_CBCMR);
++	reg &= ~MXC_CCM_CBCMR_GPU3D_SHADER_PODF_MASK;
++	reg |= (div - 1) << MXC_CCM_CBCMR_GPU3D_SHADER_PODF_OFFSET;
++	__raw_writel(reg, MXC_CCM_CBCMR);
++
++	return 0;
++}
++
++static struct clk gpu2d_axi_clk = {
++	__INIT_CLK_DEBUG(gpu2d_axi_clk)
++	.parent = &pll2_528_bus_main_clk,
++	.set_parent = _clk_gpu2d_axi_set_parent,
++	.set_rate = _clk_gpu2d_axi_set_rate,
++	.get_rate = _clk_gpu2d_axi_get_rate,
++	.round_rate = _clk_gpu2d_axi_round_rate,
++	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
++};
++
+ /* set the parent by the ipcg table */
+ 
+ static struct clk pwm_clk[] = {
+@@ -3711,6 +3875,9 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK("mxs-perfmon.2", "perfmon", perfmon2_clk),
+ 	_REGISTER_CLOCK(NULL, "anaclk_1", anaclk_1),
+ 	_REGISTER_CLOCK(NULL, "anaclk_2", anaclk_2),
++	_REGISTER_CLOCK(NULL, "gpu2d_clk", gpu2d_core_clk),
++	_REGISTER_CLOCK(NULL, "gpu2d_axi_clk", gpu2d_axi_clk),
++	_REGISTER_CLOCK(NULL, "openvg_axi_clk", openvg_axi_clk),
+ };
+ 
+ static void clk_tree_init(void)
+diff --git a/arch/arm/plat-mxc/devices/platform-viv_gpu.c b/arch/arm/plat-mxc/devices/platform-viv_gpu.c
+index dad9d5a..40cd3fc 100644
+--- a/arch/arm/plat-mxc/devices/platform-viv_gpu.c
++++ b/arch/arm/plat-mxc/devices/platform-viv_gpu.c
+@@ -22,6 +22,16 @@
+ #include <mach/devices-common.h>
+ 
+ #ifdef CONFIG_ARCH_MX6
++#ifdef CONFIG_SOC_IMX6SL
++const struct imx_viv_gpu_data imx6_gpu_data __initconst = {
++	.iobase_3d = 0,
++	.irq_3d = -1,
++	.iobase_2d = MX6SL_GPU_2D_ARB_BASE_ADDR,
++	.irq_2d = MXC_INT_GPU2D_IRQ,
++	.iobase_vg = OPENVG_ARB_BASE_ADDR,
++	.irq_vg = MXC_INT_OPENVG_XAQ2,
++};
++#else
+ const struct imx_viv_gpu_data imx6_gpu_data __initconst = {
+ 	.iobase_3d = GPU_3D_ARB_BASE_ADDR,
+ 	.irq_3d = MXC_INT_GPU3D_IRQ,
+@@ -31,6 +41,7 @@ const struct imx_viv_gpu_data imx6_gpu_data __initconst = {
+ 	.irq_vg = MXC_INT_OPENVG_XAQ2,
+ };
+ #endif
++#endif
+ 
+ struct platform_device *__init imx_add_viv_gpu(
+ 		const struct imx_viv_gpu_data *data,
+@@ -71,7 +82,7 @@ struct platform_device *__init imx_add_viv_gpu(
+ 		},
+ 	};
+ 
+-	if (cpu_is_mx6q())
++	if (cpu_is_mx6q() || cpu_is_mx6sl())
+ 		res_count = ARRAY_SIZE(res);
+ 	else if (cpu_is_mx6dl())
+ 		/* No openVG on i.mx6 Solo/DL */
+-- 
+1.7.7.4
+

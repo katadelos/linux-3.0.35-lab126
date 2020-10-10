@@ -1,0 +1,46 @@
+From f663a63e47bb00e639d1e7382ee5edff9b3de93b Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Wed, 28 Mar 2012 18:40:21 +0800
+Subject: [PATCH 1242/2463] ENGR00178302 IPUv3:Enable error interrupts
+ defaultly
+
+This patch enables IPUv3 error interrupts defaultly.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c |   12 ++++++++++++
+ 1 files changed, 12 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 8a0efa4..a97166a 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -485,6 +485,12 @@ static int __devinit ipu_probe(struct platform_device *pdev)
+ 
+ 	ipu_reset(ipu);
+ 
++	/* Enable error interrupts by default */
++	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(5));
++	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(6));
++	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(9));
++	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(10));
++
+ 	ipu_disp_init(ipu);
+ 
+ 	/* Set sync refresh channels and CSI->mem channel as high priority */
+@@ -630,6 +636,12 @@ int32_t ipu_init_channel(struct ipu_soc *ipu, ipu_channel_t channel, ipu_channel
+ 
+ 	_ipu_lock(ipu);
+ 
++	/* Re-enable error interrupts every time a channel is initialized */
++	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(5));
++	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(6));
++	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(9));
++	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(10));
++
+ 	if (ipu->channel_init_mask & (1L << IPU_CHAN_ID(channel))) {
+ 		dev_warn(ipu->dev, "Warning: channel already initialized %d\n",
+ 			IPU_CHAN_ID(channel));
+-- 
+1.7.7.4
+

@@ -1,0 +1,35 @@
+From 8b22d8cfaf0641145763d8d2d8bdb543b7cc9cbc Mon Sep 17 00:00:00 2001
+From: Sheng Nan <b38800@freescale.com>
+Date: Wed, 17 Oct 2012 14:14:06 +0800
+Subject: [PATCH 2159/2463] ENGR00229952 mxc_v4l2_capture: csi ic mem uses
+ hard coded initial DMA base addr
+
+When setup csi ic mem on the fly channel, the capture output buffer is
+initialized with hard coded dummy address 0xdeadbeaf
+
+This also causes IPU warning when use this channel:
+imx-ipuv3 imx-ipuv3.0: IDMAC20's EBA0 is not 8-byte aligned
+
+- use the pre-allocated dummy_frame.vaddress instead of 0xdeadbeaf
+
+Signed-off-by: Sheng Nan <b38800@freescale.com>
+---
+ drivers/media/video/mxc/capture/ipu_prp_enc.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_enc.c b/drivers/media/video/mxc/capture/ipu_prp_enc.c
+index def4165..a3c90d5 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_enc.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_enc.c
+@@ -70,7 +70,7 @@ static int prp_enc_setup(cam_data *cam)
+ {
+ 	ipu_channel_params_t enc;
+ 	int err = 0;
+-	dma_addr_t dummy = 0xdeadbeaf;
++	dma_addr_t dummy = cam->dummy_frame.buffer.m.offset;
+ #ifdef CONFIG_MXC_MIPI_CSI2
+ 	void *mipi_csi2_info;
+ 	int ipu_id;
+-- 
+1.7.7.4
+

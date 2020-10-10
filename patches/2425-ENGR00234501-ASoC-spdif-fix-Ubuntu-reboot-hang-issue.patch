@@ -1,0 +1,129 @@
+From 31addad8626c015165c0401f22cc6995c424cb64 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <b42378@freescale.com>
+Date: Mon, 11 Mar 2013 17:09:14 +0800
+Subject: [PATCH 2425/2463] ENGR00234501 ASoC: spdif: fix Ubuntu reboot hang
+ issue
+
+  spdif driver registered kcontrol for ALSA subsystem controlling, while some
+of those kcontrol functions lack of clk_enable() before register-accessing. So
+system would definitely hang when those functions're called, which did happen
+during reboot test on Ubuntu due to its pulse-audio.
+  This patch added paired clk_en/disable() to those functions so as to pevent
+system hang issue.
+
+Acked-by: Wang Shengjiu <b02247@freescale.com>
+Tested-by: Anson Huang <b20788@freescale.com>
+Signed-off-by: Nicolin Chen <b42378@freescale.com>
+---
+ sound/soc/codecs/mxc_spdif.c |   35 ++++++++++++++++++++++++++++++++++-
+ 1 files changed, 34 insertions(+), 1 deletions(-)
+
+diff --git a/sound/soc/codecs/mxc_spdif.c b/sound/soc/codecs/mxc_spdif.c
+index 33b2337..77e62ae 100644
+--- a/sound/soc/codecs/mxc_spdif.c
++++ b/sound/soc/codecs/mxc_spdif.c
+@@ -1,7 +1,7 @@
+ /*
+  * MXC SPDIF ALSA Soc Codec Driver
+  *
+- * Copyright (C) 2007-2012 Freescale Semiconductor, Inc.
++ * Copyright (C) 2007-2013 Freescale Semiconductor, Inc.
+  */
+ 
+ /*
+@@ -881,8 +881,13 @@ static int mxc_spdif_info(struct snd_kcontrol *kcontrol,
+ static int mxc_spdif_capture_get(struct snd_kcontrol *kcontrol,
+ 				 struct snd_ctl_elem_value *ucontrol)
+ {
++	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
++	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
++	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
+ 	unsigned int cstatus;
+ 
++	clk_enable(plat_data->spdif_clk);
++
+ 	if (!(__raw_readl(spdif_base_addr + SPDIF_REG_SIS) & INT_CNEW))
+ 		return -EAGAIN;
+ 
+@@ -898,6 +903,8 @@ static int mxc_spdif_capture_get(struct snd_kcontrol *kcontrol,
+ 	/* clear intr */
+ 	__raw_writel(INT_CNEW, spdif_base_addr + SPDIF_REG_SIC);
+ 
++	clk_disable(plat_data->spdif_clk);
++
+ 	return 0;
+ }
+ 
+@@ -980,12 +987,19 @@ static int mxc_spdif_vbit_info(struct snd_kcontrol *kcontrol,
+ static int mxc_spdif_vbit_get(struct snd_kcontrol *kcontrol,
+ 			      struct snd_ctl_elem_value *ucontrol)
+ {
++	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
++	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
++	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
+ 	unsigned int int_val;
+ 
++	clk_enable(plat_data->spdif_clk);
++
+ 	int_val = __raw_readl(spdif_base_addr + SPDIF_REG_SIS);
+ 	ucontrol->value.integer.value[0] = (int_val & INT_VAL_NOGOOD) != 0;
+ 	__raw_writel(INT_VAL_NOGOOD, spdif_base_addr + SPDIF_REG_SIC);
+ 
++	clk_disable(plat_data->spdif_clk);
++
+ 	return 0;
+ }
+ 
+@@ -1016,9 +1030,11 @@ static int mxc_spdif_rxrate_get(struct snd_kcontrol *kcontrol,
+ 	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
+ 
+ 	if (atomic_read(&spdif_priv->dpll_locked)) {
++		clk_enable(plat_data->spdif_clk);
+ 		ucontrol->value.integer.value[0] =
+ 		    spdif_get_rxclk_rate(plat_data->spdif_clk,
+ 					 SPDIF_DEFAULT_GAINSEL);
++		clk_disable(plat_data->spdif_clk);
+ 	} else {
+ 		ucontrol->value.integer.value[0] = 0;
+ 	}
+@@ -1046,9 +1062,18 @@ static int mxc_spdif_usync_info(struct snd_kcontrol *kcontrol,
+ static int mxc_spdif_usync_get(struct snd_kcontrol *kcontrol,
+ 			       struct snd_ctl_elem_value *ucontrol)
+ {
++	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
++	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
++	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
+ 	unsigned int int_val;
++
++	clk_enable(plat_data->spdif_clk);
++
+ 	int_val = __raw_readl(spdif_base_addr + SPDIF_REG_SRCD);
+ 	ucontrol->value.integer.value[0] = (int_val & SRCD_CD_USER) != 0;
++
++	clk_disable(plat_data->spdif_clk);
++
+ 	return 0;
+ }
+ 
+@@ -1060,10 +1085,18 @@ static int mxc_spdif_usync_get(struct snd_kcontrol *kcontrol,
+ static int mxc_spdif_usync_put(struct snd_kcontrol *kcontrol,
+ 				   struct snd_ctl_elem_value *ucontrol)
+ {
++	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
++	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
++	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
+ 	unsigned int int_val;
+ 
++	clk_enable(plat_data->spdif_clk);
++
+ 	int_val = ucontrol->value.integer.value[0] << SRCD_CD_USER_OFFSET;
+ 	__raw_writel(int_val, spdif_base_addr + SPDIF_REG_SRCD);
++
++	clk_disable(plat_data->spdif_clk);
++
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

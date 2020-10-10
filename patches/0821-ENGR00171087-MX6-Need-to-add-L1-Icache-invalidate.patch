@@ -1,0 +1,54 @@
+From 6b0a0f256b3c9d4cbcdf169b8fbf992ccc3ca3a0 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Fri, 30 Dec 2011 14:55:14 +0800
+Subject: [PATCH 0821/2463] ENGR00171087 [MX6]Need to add L1 Icache invalidate
+
+As there might be dirty data line on any core of MX6
+SOC when power on or reset, we need to do L1 I-cache
+invalidation in the resume process and start up
+process for all cores.
+
+This is very important for us, as not all of the hardware
+will do cache invalidation during power on or reset, so
+we need to do the invalidation for all cache(L1, L2,
+I and D) before first time enabling. Please keep in mind.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/headsmp.S      |    3 +++
+ arch/arm/mach-mx6/mx6q_suspend.S |    4 +++-
+ 2 files changed, 6 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/headsmp.S b/arch/arm/mach-mx6/headsmp.S
+index 3adc6e8..d9fca6a 100644
+--- a/arch/arm/mach-mx6/headsmp.S
++++ b/arch/arm/mach-mx6/headsmp.S
+@@ -115,6 +115,9 @@ ENTRY(mx6_secondary_startup)
+ 	offset is passed from GPR parameter, currently we store
+ 	it at r8, future code change should avoid using r8.
+ *****************************************************************************/
++	/* Invalidate L1 I-cache first */
++	mov	r1,	#0x0
++	mcr p15, 0, r1, c7, c5, 0 @ Invalidate I-Cache
+ 	/* count the offset value and store it in r8 */
+ 	ldr r3, =mx6_secondary_startup
+ 	mrc	p15, 0, r0, c0, c0, 5
+diff --git a/arch/arm/mach-mx6/mx6q_suspend.S b/arch/arm/mach-mx6/mx6q_suspend.S
+index 31bccf1..29d5a76 100644
+--- a/arch/arm/mach-mx6/mx6q_suspend.S
++++ b/arch/arm/mach-mx6/mx6q_suspend.S
+@@ -460,8 +460,10 @@ when SOC exit stop mode, arm core restart from here, currently
+ are running with MMU off.
+ ****************************************************************/
+ resume:
++	/* Invalidate L1 I-cache first */
++	mov	r1,	#0x0
++	mcr p15, 0, r1, c7, c5, 0 @ Invalidate I-Cache
+ 	ldr	r0, =SRC_BASE_ADDR
+-	mov	r1, #0x0
+ 	str	r1, [r0, #SRC_GPR1_OFFSET] /* clear SRC_GPR1 */
+ 	ldr	r0, [r0, #SRC_GPR2_OFFSET]
+ 
+-- 
+1.7.7.4
+

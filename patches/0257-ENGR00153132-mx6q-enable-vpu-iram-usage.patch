@@ -1,0 +1,59 @@
+From 7e9402f36aa426646818bc4cf86d5b4759ef09cd Mon Sep 17 00:00:00 2001
+From: Sammy He <r62914@freescale.com>
+Date: Fri, 15 Jul 2011 02:36:20 +0800
+Subject: [PATCH 0257/2463] ENGR00153132 mx6q: enable vpu iram usage
+
+Enable iram for vpu on mx6q.
+
+Signed-off-by: Sammy He <r62914@freescale.com>
+---
+ arch/arm/mach-mx6/cpu.c                      |    3 +++
+ arch/arm/plat-mxc/devices/platform-imx_vpu.c |    4 +++-
+ 2 files changed, 6 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index d5da904..6856467 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -22,6 +22,7 @@
+ #include <linux/clk.h>
+ #include <linux/module.h>
+ #include <mach/hardware.h>
++#include <linux/iram_alloc.h>
+ #include <asm/io.h>
+ 
+ static int __init post_cpu_init(void)
+@@ -29,6 +30,8 @@ static int __init post_cpu_init(void)
+ 	unsigned int reg;
+ 	void __iomem *base;
+ 
++	iram_init(MX6Q_IRAM_BASE_ADDR, MX6Q_IRAM_SIZE);
++
+ 	base = ioremap(AIPS1_ON_BASE_ADDR, PAGE_SIZE);
+ 	__raw_writel(0x0, base + 0x40);
+ 	__raw_writel(0x0, base + 0x44);
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_vpu.c b/arch/arm/plat-mxc/devices/platform-imx_vpu.c
+index 1b72734..a3a3927 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx_vpu.c
++++ b/arch/arm/plat-mxc/devices/platform-imx_vpu.c
+@@ -112,7 +112,7 @@ const struct imx_vpu_data imx53_vpu_data __initconst =
+ #ifdef CONFIG_SOC_IMX6Q
+ const struct imx_vpu_data imx6q_vpu_data __initconst =
+ 			imx6_vpu_data_entry_single(MX6Q,
+-			false, 0x14000, NULL, NULL);
++			true, 0x21000, NULL, NULL);
+ #endif
+ 
+ struct platform_device *__init imx_add_vpu(
+@@ -140,6 +140,8 @@ struct platform_device *__init imx_add_vpu(
+ 
+ 	pdata.reset = data->reset;
+ 	pdata.pg = data->pg;
++	pdata.iram_enable = data->iram_enable;
++	pdata.iram_size = data->iram_size;
+ 
+ 	return imx_add_platform_device("mxc_vpu", -1,
+ 			res, ARRAY_SIZE(res), &pdata, sizeof(pdata));
+-- 
+1.7.7.4
+

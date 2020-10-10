@@ -1,0 +1,47 @@
+From d6f36d3a199b5b6115ee7cd1a0df0c24fdc6957a Mon Sep 17 00:00:00 2001
+From: Shawn Guo <shawn.guo@linaro.org>
+Date: Thu, 30 Jun 2011 16:06:33 +0800
+Subject: [PATCH 0848/2463] dmaengine: mxs-dma: skip request_irq for NO_IRQ
+
+In general, the mxs-dma users get separate irq for each channel,
+but gpmi is special one which has only one irq shared by all gpmi
+channels.  It causes mxs_dma channel allocation function fail for
+all other gpmi channels except the first one calling into the
+function.
+
+The patch gets request_irq call skipped for NO_IRQ case, and leaves
+this gpmi specific quirk to gpmi driver to sort out.  It will fix
+above problem if gpmi driver sets chan_irq as gpmi irq for only one
+channel and NO_IRQ for all the rest channels.
+
+Signed-off-by: Shawn Guo <shawn.guo@linaro.org>
+Cc: Vinod Koul <vinod.koul@intel.com>
+Signed-off-by: Vinod Koul <vinod.koul@intel.com>
+---
+ drivers/dma/mxs-dma.c |   10 ++++++----
+ 1 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/dma/mxs-dma.c b/drivers/dma/mxs-dma.c
+index d7b2ab9..4c68699 100644
+--- a/drivers/dma/mxs-dma.c
++++ b/drivers/dma/mxs-dma.c
+@@ -330,10 +330,12 @@ static int mxs_dma_alloc_chan_resources(struct dma_chan *chan)
+ 
+ 	memset(mxs_chan->ccw, 0, PAGE_SIZE);
+ 
+-	ret = request_irq(mxs_chan->chan_irq, mxs_dma_int_handler,
+-				0, "mxs-dma", mxs_dma);
+-	if (ret)
+-		goto err_irq;
++	if (mxs_chan->chan_irq != NO_IRQ) {
++		ret = request_irq(mxs_chan->chan_irq, mxs_dma_int_handler,
++					0, "mxs-dma", mxs_dma);
++		if (ret)
++			goto err_irq;
++	}
+ 
+ 	ret = clk_enable(mxs_dma->clk);
+ 	if (ret)
+-- 
+1.7.7.4
+

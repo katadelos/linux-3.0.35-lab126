@@ -1,0 +1,185 @@
+From 841de62a59e9bc296c526d7f78f2070504c4ca2e Mon Sep 17 00:00:00 2001
+From: Alejandro Sierra <b18039@freescale.com>
+Date: Fri, 6 Apr 2012 20:48:22 -0500
+Subject: [PATCH 1291/2463] ENGR00179129 Board support for I2C AMFM module for
+ IMX6Q and IMX6DL
+
+Modifications in ARD board file to support the Audio for AMFM
+module for IMX6Q and IMX6DL (REV A and REV B) Supported for
+kernel 3.0.15. Also it contains the I2C configuration for
+the AMFM module.
+
+Signed-off-by: Alejandro Sierra <b18039@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c    |   50 +++++++++++++++++++++++++-
+ arch/arm/mach-mx6/board-mx6q_sabreauto.h    |    8 ++++
+ arch/arm/mach-mx6/board-mx6solo_sabreauto.h |    5 +++
+ 3 files changed, 61 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 6f1d122..46f32b0 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -137,6 +137,7 @@ static struct clk *sata_clk;
+ static int mipi_sensor;
+ static int can0_enable;
+ static int uart3_en;
++static int tuner_en;
+ 
+ static int __init uart3_enable(char *p)
+ {
+@@ -145,6 +146,13 @@ static int __init uart3_enable(char *p)
+ }
+ early_param("uart3", uart3_enable);
+ 
++static int __init tuner_enable(char *p)
++{
++	tuner_en = 1;
++	return 0;
++}
++early_param("tuner", tuner_enable);
++
+ enum sd_pad_mode {
+ 	SD_PAD_MODE_LOW_SPEED,
+ 	SD_PAD_MODE_MED_SPEED,
+@@ -658,8 +666,29 @@ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+ 		I2C_BOARD_INFO("cs42888", 0x48),
+ 		.platform_data = (void *)&cs42888_data,
+ 	},
++	{
++		I2C_BOARD_INFO("si4763_i2c", 0x63),
++	},
++
++};
++struct platform_device mxc_si4763_audio_device = {
++	.name = "imx-tuner-si4763",
++	.id = 0,
+ };
+ 
++struct platform_device si4763_codec_device = {
++	.name = "si4763",
++	.id = 0,
++};
++
++static struct imx_ssi_platform_data mx6_sabreauto_ssi1_pdata = {
++	.flags = IMX_SSI_DMA | IMX_SSI_SYN,
++};
++static struct mxc_audio_platform_data si4763_audio_data = {
++	.ssi_num = 1,
++	.src_port = 2,
++	.ext_port = 5,
++};
+ static void imx6q_sabreauto_usbotg_vbus(bool on)
+ {
+ 	if (on)
+@@ -1241,23 +1270,27 @@ static void __init mx6_board_init(void)
+ 	iomux_v3_cfg_t *can1_pads = NULL;
+ 	iomux_v3_cfg_t *mipi_sensor_pads = NULL;
+ 	iomux_v3_cfg_t *i2c3_pads = NULL;
++	iomux_v3_cfg_t *tuner_pads = NULL;
+ 
+ 	int common_pads_cnt;
+ 	int can0_pads_cnt;
+ 	int can1_pads_cnt;
+ 	int mipi_sensor_pads_cnt;
+ 	int i2c3_pads_cnt;
++	int tuner_pads_cnt;
+ 
+ 	if (cpu_is_mx6q()) {
+ 		common_pads = mx6q_sabreauto_pads;
+ 		can0_pads = mx6q_sabreauto_can0_pads;
+ 		can1_pads = mx6q_sabreauto_can1_pads;
+ 		mipi_sensor_pads = mx6q_sabreauto_mipi_sensor_pads;
++		tuner_pads = mx6q_tuner_pads;
+ 
+ 		common_pads_cnt = ARRAY_SIZE(mx6q_sabreauto_pads);
+ 		can0_pads_cnt = ARRAY_SIZE(mx6q_sabreauto_can0_pads);
+ 		can1_pads_cnt = ARRAY_SIZE(mx6q_sabreauto_can1_pads);
+ 		mipi_sensor_pads_cnt = ARRAY_SIZE(mx6q_sabreauto_mipi_sensor_pads);
++		tuner_pads_cnt = ARRAY_SIZE(mx6q_tuner_pads);
+ 		if (board_is_mx6_reva()) {
+ 			i2c3_pads = mx6q_i2c3_pads_rev_a;
+ 			i2c3_pads_cnt = ARRAY_SIZE(mx6q_i2c3_pads_rev_a);
+@@ -1270,11 +1303,13 @@ static void __init mx6_board_init(void)
+ 		can0_pads = mx6dl_sabreauto_can0_pads;
+ 		can1_pads = mx6dl_sabreauto_can1_pads;
+ 		mipi_sensor_pads = mx6dl_sabreauto_mipi_sensor_pads;
++		tuner_pads = mx6dl_tuner_pads;
+ 
+ 		common_pads_cnt = ARRAY_SIZE(mx6dl_sabreauto_pads);
+ 		can0_pads_cnt = ARRAY_SIZE(mx6dl_sabreauto_can0_pads);
+ 		can1_pads_cnt = ARRAY_SIZE(mx6dl_sabreauto_can1_pads);
+ 		mipi_sensor_pads_cnt = ARRAY_SIZE(mx6dl_sabreauto_mipi_sensor_pads);
++		tuner_pads_cnt = ARRAY_SIZE(mx6dl_tuner_pads);
+ 		if (board_is_mx6_reva()) {
+ 			i2c3_pads = mx6dl_i2c3_pads_rev_a;
+ 			i2c3_pads_cnt = ARRAY_SIZE(mx6dl_i2c3_pads_rev_a);
+@@ -1294,9 +1329,14 @@ static void __init mx6_board_init(void)
+ 		mxc_iomux_v3_setup_multiple_pads(can0_pads,
+ 						can0_pads_cnt);
+ 	}
+-	BUG_ON(!can1_pads);
+-	mxc_iomux_v3_setup_multiple_pads(can1_pads, can1_pads_cnt);
++		BUG_ON(!can1_pads);
++		mxc_iomux_v3_setup_multiple_pads(can1_pads, can1_pads_cnt);
+ 
++	if (tuner_en) {
++		BUG_ON(!tuner_pads);
++		mxc_iomux_v3_setup_multiple_pads(tuner_pads,
++			tuner_pads_cnt);
++	}
+ 
+ 	/* assert i2c-rst  */
+ 	gpio_request(SABREAUTO_I2C_EXP_RST, "i2c-rst");
+@@ -1449,6 +1489,12 @@ static void __init mx6_board_init(void)
+ 	imx6q_add_hdmi_soc();
+ 	imx6q_add_hdmi_soc_dai();
+ 	imx6q_add_mlb150(&mx6_sabreauto_mlb150_data);
++
++	/* Tuner audio interface */
++	imx6q_add_imx_ssi(1, &mx6_sabreauto_ssi1_pdata);
++	mxc_register_device(&si4763_codec_device, NULL);
++	mxc_register_device(&mxc_si4763_audio_device, &si4763_audio_data);
++
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.h b/arch/arm/mach-mx6/board-mx6q_sabreauto.h
+index d2a097e..4c74a6a 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.h
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.h
+@@ -138,6 +138,7 @@ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 	MX6Q_PAD_DISP0_DAT18__IPU1_DISP0_DAT_18,
+ 	MX6Q_PAD_DISP0_DAT19__IPU1_DISP0_DAT_19,
+ 	MX6Q_PAD_DISP0_DAT21__IPU1_DISP0_DAT_21,
++
+ 	/* LITE_SENS_INT_B */
+ 	MX6Q_PAD_DISP0_DAT23__GPIO_5_17,
+ 	/*PMIC INT*/
+@@ -347,3 +348,10 @@ static iomux_v3_cfg_t mx6q_i2c3_pads_rev_b[] __initdata = {
+ 	MX6Q_PAD_EIM_A24__GPIO_5_4,
+ 	MX6Q_PAD_GPIO_16__ENET_ANATOP_ETHERNET_REF_OUT,
+ };
++static iomux_v3_cfg_t mx6q_tuner_pads[] __initdata = {
++	MX6Q_PAD_DISP0_DAT16__AUDMUX_AUD5_TXC,
++	MX6Q_PAD_DISP0_DAT18__AUDMUX_AUD5_TXFS,
++	MX6Q_PAD_DISP0_DAT19__AUDMUX_AUD5_RXD,
++
++};
++
+diff --git a/arch/arm/mach-mx6/board-mx6solo_sabreauto.h b/arch/arm/mach-mx6/board-mx6solo_sabreauto.h
+index 3829c7a..dd113ba 100644
+--- a/arch/arm/mach-mx6/board-mx6solo_sabreauto.h
++++ b/arch/arm/mach-mx6/board-mx6solo_sabreauto.h
+@@ -350,3 +350,8 @@ static iomux_v3_cfg_t mx6dl_i2c3_pads_rev_b[] __initdata = {
+ 	MX6DL_PAD_EIM_A24__GPIO_5_4,
+ 	MX6DL_PAD_GPIO_16__ENET_ANATOP_ETHERNET_REF_OUT,
+ };
++static iomux_v3_cfg_t mx6dl_tuner_pads[] __initdata = {
++	MX6DL_PAD_DISP0_DAT16__AUDMUX_AUD5_TXC,
++	MX6DL_PAD_DISP0_DAT18__AUDMUX_AUD5_TXFS,
++	MX6DL_PAD_DISP0_DAT19__AUDMUX_AUD5_RXD,
++};
+-- 
+1.7.7.4
+

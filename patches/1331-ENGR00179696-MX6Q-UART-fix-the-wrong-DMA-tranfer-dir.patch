@@ -1,0 +1,40 @@
+From d6827689b0370c79cf2d6abb1a9a81f639399e4f Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Mon, 16 Apr 2012 10:54:12 +0800
+Subject: [PATCH 1331/2463] ENGR00179696 MX6Q/UART : fix the wrong DMA tranfer
+ direction.
+
+The current SDMA use the new DMA tranfer direction. But the UART still
+uses the old. This cause the RX failed.
+So use the new DMA transfer direction for UART.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/tty/serial/imx.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/tty/serial/imx.c b/drivers/tty/serial/imx.c
+index f8cd9bd..d65c589 100644
+--- a/drivers/tty/serial/imx.c
++++ b/drivers/tty/serial/imx.c
+@@ -881,7 +881,7 @@ static int imx_uart_dma_init(struct imx_port *sport)
+ 		goto err;
+ 	}
+ 
+-	slave_config.direction = DMA_FROM_DEVICE;
++	slave_config.direction = DMA_DEV_TO_MEM;
+ 	slave_config.src_addr = sport->port.mapbase + URXD0;
+ 	slave_config.src_addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
+ 	slave_config.src_maxburst = RXTL; /* fix me */
+@@ -908,7 +908,7 @@ static int imx_uart_dma_init(struct imx_port *sport)
+ 		goto err;
+ 	}
+ 
+-	slave_config.direction = DMA_TO_DEVICE;
++	slave_config.direction = DMA_MEM_TO_DEV;
+ 	slave_config.dst_addr = sport->port.mapbase + URTX0;
+ 	slave_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_1_BYTE;
+ 	slave_config.dst_maxburst = TXTL; /* fix me */
+-- 
+1.7.7.4
+

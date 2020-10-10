@@ -1,0 +1,42 @@
+From 6af0601e9a7974dd3ce3d5a5b38f7711a1cf0498 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Fri, 20 Jul 2012 10:11:06 +0800
+Subject: [PATCH 1786/2463] ENGR00217717 mfgtool firmware will crash during
+ mfgtool running
+
+- the root cause of this issue is there is no protection for
+  the resource which will be accessed by multiple thread
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ drivers/usb/gadget/fsl_updater.c |    4 +++-
+ 1 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/usb/gadget/fsl_updater.c b/drivers/usb/gadget/fsl_updater.c
+index 01b35f3..39175d6 100644
+--- a/drivers/usb/gadget/fsl_updater.c
++++ b/drivers/usb/gadget/fsl_updater.c
+@@ -1,7 +1,7 @@
+ /*
+  * Freescale UUT driver
+  *
+- * Copyright 2008-2011 Freescale Semiconductor, Inc.
++ * Copyright 2008-2012 Freescale Semiconductor, Inc.
+  * Copyright 2008-2009 Embedded Alley Solutions, Inc All Rights Reserved.
+  */
+ 
+@@ -71,9 +71,11 @@ static u32 count_list(struct list_head *l)
+ 	u32 count = 0;
+ 	struct list_head *tmp;
+ 
++	mutex_lock(&utp_context.lock);
+ 	list_for_each(tmp, l) {
+ 		count++;
+ 	}
++	mutex_unlock(&utp_context.lock);
+ 
+ 	return count;
+ }
+-- 
+1.7.7.4
+

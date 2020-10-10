@@ -1,0 +1,3583 @@
+From bacc136fbaa939c2a9b56568f6a35dc80e8fe237 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Wed, 2 Nov 2011 12:26:49 +0800
+Subject: [PATCH 0528/2463] ENGR00161207 - FEC: Add IEEE 1588 driver for imx6
+
+- Support time stamp sync with networking master timer.
+- Support ipg 40MHz clock, and precision is about 20ns.
+- Don't support ipg 66MHz clock.
+- Test flow:
+	1. Enable CONFIG_FEC_1588 in imx6_defconfig file.
+	2. Select pll3 for ipg clk 40M in uboot plugin code.
+		I. set reg 0x20c8028 value to 0x10000;
+		II.set reg 0x20c8024 value to 0x3040;
+		III. set reg 0x20c4014[25] to 0x1
+		IV. set reg 0x20c4014[12:10] to 0x5
+	3. Rebuid uboot and setup the ethernet environment.
+	4. Run the 1588 stack ptp_main in master and slave.
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ drivers/net/Kconfig    |   23 +
+ drivers/net/Makefile   |    9 +
+ drivers/net/fec.c      |  104 +++-
+ drivers/net/fec.h      |   33 +-
+ drivers/net/fec_1588.c |  809 ++++++++++++++++++++++
+ drivers/net/fec_1588.h |  222 ++++++
+ drivers/net/imx_ptp.c  | 1748 ++++++++++++++++++++++++++++++++++++++++++++++++
+ drivers/net/imx_ptp.h  |  356 ++++++++++
+ 8 files changed, 3296 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/net/Kconfig b/drivers/net/Kconfig
+index 0c3f234..a6ccb22 100644
+--- a/drivers/net/Kconfig
++++ b/drivers/net/Kconfig
+@@ -1951,6 +1951,29 @@ config FEC
+ 	  Say Y here if you want to use the built-in 10/100 Fast ethernet
+ 	  controller on some Motorola ColdFire and Freescale i.MX processors.
+ 
++config FEC_1588
++	bool "Enable FEC 1588 timestamping"
++	depends on FEC
++
++choice
++	prompt "IEEE 1588 operation mode"
++	depends on (ARCH_MX5 || ARCH_MX6) && FEC_1588
++	default OUT_OF_BAND
++
++config OUT_OF_BAND
++	bool "out-of-band mode"
++	help
++	  IEEE 1588 operation mode is out-of-band, in this mode, the Tx and Rx
++	  timestamp will be caputred into special registers.
++
++config IN_BAND
++	bool "in-band mode"
++	help
++	  IEEE 1588 operation mode is in-band, in this mode, the Tx timestamp
++	  will be captured into special retisters, but the Rx timestamp will be
++	  captured into the first eight bytes of received ethernet packet.
++endchoice
++
+ config FEC_MPC52xx
+ 	tristate "MPC52xx FEC driver"
+ 	depends on PPC_MPC52xx && PPC_BESTCOMM
+diff --git a/drivers/net/Makefile b/drivers/net/Makefile
+index d5ce011..f7e26ba 100644
+--- a/drivers/net/Makefile
++++ b/drivers/net/Makefile
+@@ -128,6 +128,15 @@ obj-$(CONFIG_FEC_MPC52xx) += fec_mpc52xx.o
+ ifeq ($(CONFIG_FEC_MPC52xx_MDIO),y)
+ 	obj-$(CONFIG_FEC_MPC52xx) += fec_mpc52xx_phy.o
+ endif
++ifeq ($(CONFIG_ARCH_MX28),y)
++	obj-$(CONFIG_FEC_1588) += fec_1588.o
++endif
++ifeq ($(CONFIG_ARCH_MX53),y)
++	obj-$(CONFIG_FEC_1588) += imx_ptp.o
++endif
++ifeq ($(CONFIG_ARCH_MX6),y)
++	obj-$(CONFIG_FEC_1588) += fec_1588.o
++endif
+ obj-$(CONFIG_68360_ENET) += 68360enet.o
+ obj-$(CONFIG_WD80x3) += wd.o 8390.o
+ obj-$(CONFIG_EL2) += 3c503.o 8390p.o
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index 0fc9d108..9730f6e 100644
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -18,6 +18,7 @@
+  * Bug fixes and cleanup by Philippe De Muyter (phdm@macqel.be)
+  * Copyright (c) 2004-2006 Macq Electronique SA.
+  *
++ * Support for FEC IEEE 1588.
+  * Copyright (C) 2010-2011 Freescale Semiconductor, Inc.
+  */
+ 
+@@ -53,6 +54,7 @@
+ #endif
+ 
+ #include "fec.h"
++#include "fec_1588.h"
+ 
+ #if defined(CONFIG_ARM)
+ #define FEC_ALIGNMENT	0xf
+@@ -140,8 +142,16 @@ MODULE_PARM_DESC(macaddr, "FEC Ethernet MAC address");
+ #define FEC_ENET_RXB	((uint)0x01000000)	/* A buffer was received */
+ #define FEC_ENET_MII	((uint)0x00800000)	/* MII interrupt */
+ #define FEC_ENET_EBERR	((uint)0x00400000)	/* SDMA bus error */
++#define FEC_ENET_TS_AVAIL       ((uint)0x00010000)
++#define FEC_ENET_TS_TIMER       ((uint)0x00008000)
+ 
++#if defined(CONFIG_FEC_1588) && (defined(CONFIG_ARCH_MX28) || \
++				defined(CONFIG_ARCH_MX6))
++#define FEC_DEFAULT_IMASK (FEC_ENET_TXF | FEC_ENET_RXF | FEC_ENET_MII | \
++				FEC_ENET_TS_AVAIL | FEC_ENET_TS_TIMER)
++#else
+ #define FEC_DEFAULT_IMASK (FEC_ENET_TXF | FEC_ENET_RXF | FEC_ENET_MII)
++#endif
+ 
+ /* The FEC stores dest/src/type, data, and checksum for receive packets.
+  */
+@@ -209,9 +219,13 @@ struct fec_enet_private {
+ 	int	mii_timeout;
+ 	uint	phy_speed;
+ 	phy_interface_t	phy_interface;
++	int	index;
+ 	int	link;
+ 	int	full_duplex;
+ 	struct	completion mdio_done;
++
++	struct  fec_ptp_private *ptp_priv;
++	uint    ptimer_present;
+ };
+ 
+ /* FEC MII MMFR bits definition */
+@@ -248,6 +262,7 @@ fec_enet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+ 	struct bufdesc *bdp;
+ 	void *bufaddr;
+ 	unsigned short	status;
++	unsigned long   estatus;
+ 	unsigned long flags;
+ 
+ 	if (!fep->link) {
+@@ -289,6 +304,17 @@ fec_enet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+ 		bufaddr = fep->tx_bounce[index];
+ 	}
+ 
++	if (fep->ptimer_present) {
++		if (fec_ptp_do_txstamp(skb)) {
++			estatus = BD_ENET_TX_TS;
++			status |= BD_ENET_TX_PTP;
++		} else
++			estatus = 0;
++#ifdef CONFIG_ENHANCED_BD
++		bdp->cbd_esc = (estatus | BD_ENET_TX_INT);
++		bdp->cbd_bdu = 0;
++#endif
++	}
+ 	/*
+ 	 * Some design made an incorrect assumption on endian mode of
+ 	 * the system that it's running on. As the result, driver has to
+@@ -352,11 +378,14 @@ static void
+ fec_enet_tx(struct net_device *ndev)
+ {
+ 	struct	fec_enet_private *fep;
++	struct  fec_ptp_private *fpp;
+ 	struct bufdesc *bdp;
+ 	unsigned short status;
++	unsigned long  estatus;
+ 	struct	sk_buff	*skb;
+ 
+ 	fep = netdev_priv(ndev);
++	fpp = fep->ptp_priv;
+ 	spin_lock(&fep->hw_lock);
+ 	bdp = fep->dirty_tx;
+ 
+@@ -397,6 +426,19 @@ fec_enet_tx(struct net_device *ndev)
+ 		if (status & BD_ENET_TX_DEF)
+ 			ndev->stats.collisions++;
+ 
++#if defined(CONFIG_ENHANCED_BD)
++		if (fep->ptimer_present) {
++			estatus = bdp->cbd_esc;
++			if (estatus & BD_ENET_TX_TS)
++				fec_ptp_store_txstamp(fpp, skb, bdp);
++		}
++#elif defined(CONFIG_IN_BAND)
++		if (fep->ptimer_present) {
++			if (status & BD_ENET_TX_PTP)
++				fec_ptp_store_txstamp(fpp, skb, bdp);
++		}
++#endif
++
+ 		/* Free the sk buffer associated with this last transmit */
+ 		dev_kfree_skb_any(skb);
+ 		fep->tx_skbuff[fep->skb_dirty] = NULL;
+@@ -430,6 +472,7 @@ static void
+ fec_enet_rx(struct net_device *ndev)
+ {
+ 	struct fec_enet_private *fep = netdev_priv(ndev);
++	struct  fec_ptp_private *fpp = fep->ptp_priv;
+ 	const struct platform_device_id *id_entry =
+ 				platform_get_device_id(fep->pdev);
+ 	struct bufdesc *bdp;
+@@ -513,7 +556,10 @@ fec_enet_rx(struct net_device *ndev)
+ 			skb_reserve(skb, NET_IP_ALIGN);
+ 			skb_put(skb, pkt_len - 4);	/* Make room */
+ 			skb_copy_to_linear_data(skb, data, pkt_len - 4);
+-			skb->protocol = eth_type_trans(skb, ndev);
++			/* 1588 messeage TS handle */
++			if (fep->ptimer_present)
++				fec_ptp_store_rxstamp(fpp, skb, bdp);
++			skb->protocol = eth_type_trans(skb, dev);
+ 			netif_rx(skb);
+ 		}
+ 
+@@ -526,6 +572,11 @@ rx_processing_done:
+ 		/* Mark the buffer empty */
+ 		status |= BD_ENET_RX_EMPTY;
+ 		bdp->cbd_sc = status;
++#ifdef CONFIG_ENHANCED_BD
++		bdp->cbd_esc = BD_ENET_RX_INT;
++		bdp->cbd_prot = 0;
++		bdp->cbd_bdu = 0;
++#endif
+ 
+ 		/* Update BD pointer to next entry */
+ 		if (status & BD_ENET_RX_WRAP)
+@@ -982,6 +1033,9 @@ static int fec_enet_alloc_buffers(struct net_device *ndev)
+ 		bdp->cbd_bufaddr = dma_map_single(&fep->pdev->dev, skb->data,
+ 				FEC_ENET_RX_FRSIZE, DMA_FROM_DEVICE);
+ 		bdp->cbd_sc = BD_ENET_RX_EMPTY;
++#ifdef CONFIG_ENHANCED_BD
++		bdp->cbd_esc = BD_ENET_RX_INT;
++#endif
+ 		bdp++;
+ 	}
+ 
+@@ -995,6 +1049,9 @@ static int fec_enet_alloc_buffers(struct net_device *ndev)
+ 
+ 		bdp->cbd_sc = 0;
+ 		bdp->cbd_bufaddr = 0;
++#ifdef CONFIG_ENHANCED_BD
++		bdp->cbd_esc = BD_ENET_TX_INT;
++#endif
+ 		bdp++;
+ 	}
+ 
+@@ -1246,8 +1303,8 @@ fec_restart(struct net_device *dev, int duplex)
+ 	struct fec_enet_private *fep = netdev_priv(dev);
+ 	const struct platform_device_id *id_entry =
+ 				platform_get_device_id(fep->pdev);
+-	int i;
+-	u32 val, temp_mac[2];
++	int i, ret;
++	u32 val, temp_mac[2], reg = 0;
+ 
+ 	/* Whack a reset.  We should wait for this. */
+ 	writel(1, fep->hwp + FEC_ECNTRL);
+@@ -1331,7 +1388,22 @@ fec_restart(struct net_device *dev, int duplex)
+ 			val |= (1 << 9);
+ 
+ 		writel(val, fep->hwp + FEC_R_CNTRL);
+-	} else {
++
++		if (fep->ptimer_present) {
++			/* Set Timer count */
++			ret = fec_ptp_start(fep->ptp_priv);
++			if (ret) {
++				fep->ptimer_present = 0;
++				reg = 0x0;
++			} else
++#if defined(CONFIG_SOC_IMX28) || defined(CONFIG_ARCH_MX6)
++				reg = 0x00000010;
++#else
++				reg = 0x0;
++#endif
++	} else
++		reg = 0x0;
++
+ #ifdef FEC_MIIGSK_ENR
+ 		if (fep->phy_interface == PHY_INTERFACE_MODE_RMII) {
+ 			/* disable the gasket and wait */
+@@ -1352,7 +1424,7 @@ fec_restart(struct net_device *dev, int duplex)
+ 	}
+ 
+ 	/* ENET enable */
+-	val = (0x1 << 1);
++	val = reg | (0x1 << 1);
+ 
+ 	/* if phy work at 1G mode, set ENET RGMII speed to 1G */
+ 	if (fep->phy_dev && (fep->phy_dev->supported &
+@@ -1397,6 +1469,8 @@ fec_stop(struct net_device *dev)
+ 		writel(2, fep->hwp + FEC_ECNTRL);
+ 
+ 	writel(fep->phy_speed, fep->hwp + FEC_MII_SPEED);
++	if (fep->ptimer_present)
++		fec_ptp_stop(fep->ptp_priv);
+ 	writel(FEC_DEFAULT_IMASK, fep->hwp + FEC_IMASK);
+ }
+ 
+@@ -1473,6 +1547,18 @@ fec_probe(struct platform_device *pdev)
+ 	if (ret)
+ 		goto failed_mii_init;
+ 
++	if (fec_ptp_malloc_priv(&(fep->ptp_priv))) {
++		if (fep->ptp_priv) {
++			fep->ptp_priv->hwp = fep->hwp;
++			ret = fec_ptp_init(fep->ptp_priv, pdev->id);
++			if (ret)
++				printk(KERN_WARNING "IEEE1588: ptp-timer is unavailable\n");
++			else
++				fep->ptimer_present = 1;
++		} else
++			printk(KERN_ERR "IEEE1588: failed to malloc memory\n");
++	}
++
+ 	/* Carrier starts down, phylib will bring it up */
+ 	netif_carrier_off(ndev);
+ 
+@@ -1484,6 +1570,9 @@ fec_probe(struct platform_device *pdev)
+ 
+ failed_register:
+ 	fec_enet_mii_remove(fep);
++	if (fep->ptimer_present)
++		fec_ptp_cleanup(fep->ptp_priv);
++	kfree(fep->ptp_priv);
+ failed_mii_init:
+ failed_init:
+ 	clk_disable(fep->clk);
+@@ -1515,7 +1604,10 @@ fec_drv_remove(struct platform_device *pdev)
+ 	fec_enet_mii_remove(fep);
+ 	clk_disable(fep->clk);
+ 	clk_put(fep->clk);
+-	iounmap(fep->hwp);
++	iounmap((void __iomem *)ndev->base_addr);
++	if (fep->ptimer_present)
++		fec_ptp_cleanup(fep->ptp_priv);
++	kfree(fep->ptp_priv);
+ 	unregister_netdev(ndev);
+ 	free_netdev(ndev);
+ 
+diff --git a/drivers/net/fec.h b/drivers/net/fec.h
+index 8b2c6d7..1c4063c 100644
+--- a/drivers/net/fec.h
++++ b/drivers/net/fec.h
+@@ -15,7 +15,8 @@
+ 
+ #if defined(CONFIG_M523x) || defined(CONFIG_M527x) || defined(CONFIG_M528x) || \
+     defined(CONFIG_M520x) || defined(CONFIG_M532x) || \
+-    defined(CONFIG_ARCH_MXC) || defined(CONFIG_SOC_IMX28)
++    defined(CONFIG_ARCH_MXC) || defined(CONFIG_SOC_IMX28) || \
++    defined(CONFIG_ARCH_MX6)
+ /*
+  *	Just figures, Motorola would have to change the offsets for
+  *	registers in the same peripheral device on different models
+@@ -47,6 +48,16 @@
+ #define FEC_MIIGSK_CFGR		0x300 /* MIIGSK Configuration reg */
+ #define FEC_MIIGSK_ENR		0x308 /* MIIGSK Enable reg */
+ 
++/* Define the FEC 1588 registers offset */
++#if defined(CONFIG_SOC_IMX28) || defined(CONFIG_ARCH_MX6)
++#define FEC_ATIME_CTRL		0x400
++#define FEC_ATIME		0x404
++#define FEC_ATIME_EVT_OFFSET	0x408
++#define FEC_ATIME_EVT_PERIOD	0x40c
++#define FEC_ATIME_CORR		0x410
++#define FEC_ATIME_INC		0x414
++#define FEC_TS_TIMESTAMP	0x418
++#endif
+ #else
+ 
+ #define FEC_ECNTRL		0x000 /* Ethernet control reg */
+@@ -76,14 +87,27 @@
+ #endif /* CONFIG_M5272 */
+ 
+ 
++#if (defined(CONFIG_SOC_IMX28) || defined(CONFIG_ARCH_MX6)) \
++				&& defined(CONFIG_FEC_1588)
++#define CONFIG_ENHANCED_BD
++#endif
++
+ /*
+  *	Define the buffer descriptor structure.
+  */
+-#if defined(CONFIG_ARCH_MXC) || defined(CONFIG_SOC_IMX28)
++#if defined(CONFIG_ARCH_MXC) || defined(CONFIG_SOC_IMX28) || \
++				defined(CONFIG_ARCH_MX6)
+ struct bufdesc {
+ 	unsigned short cbd_datlen;	/* Data length */
+ 	unsigned short cbd_sc;	/* Control and status info */
+ 	unsigned long cbd_bufaddr;	/* Buffer address */
++#ifdef CONFIG_ENHANCED_BD
++	unsigned long cbd_esc;
++	unsigned long cbd_prot;
++	unsigned long cbd_bdu;
++	unsigned long ts;
++	unsigned short res0[4];
++#endif
+ };
+ #else
+ struct bufdesc {
+@@ -126,6 +150,9 @@ struct bufdesc {
+ #define BD_ENET_RX_CL           ((ushort)0x0001)
+ #define BD_ENET_RX_STATS        ((ushort)0x013f)        /* All status bits */
+ 
++#define BD_ENET_RX_INT          0x00800000
++#define BD_ENET_RX_PTP          ((ushort)0x0400)
++
+ /* Buffer descriptor control/status used by Ethernet transmit.
+ */
+ #define BD_ENET_TX_READY        ((ushort)0x8000)
+@@ -143,6 +170,8 @@ struct bufdesc {
+ #define BD_ENET_TX_CSL          ((ushort)0x0001)
+ #define BD_ENET_TX_STATS        ((ushort)0x03ff)        /* All status bits */
+ 
++#define BD_ENET_TX_INT          0x40000000
++#define BD_ENET_TX_PTP          ((ushort)0x0100)
+ 
+ /****************************************************************************/
+ #endif /* FEC_H */
+diff --git a/drivers/net/fec_1588.c b/drivers/net/fec_1588.c
+new file mode 100644
+index 0000000..c7d3a63
+--- /dev/null
++++ b/drivers/net/fec_1588.c
+@@ -0,0 +1,809 @@
++/*
++ * drivers/net/fec_1588.c
++ *
++ * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2009 IXXAT Automation, GmbH
++ *
++ * FEC Ethernet Driver -- IEEE 1588 interface functionality
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ */
++
++#include <linux/io.h>
++#include <linux/device.h>
++#include <linux/fs.h>
++#include <linux/vmalloc.h>
++#include <linux/spinlock.h>
++#include <linux/ip.h>
++#include <linux/udp.h>
++#include "fec.h"
++#include "fec_1588.h"
++
++static DECLARE_WAIT_QUEUE_HEAD(ptp_rx_ts_wait);
++static DECLARE_WAIT_QUEUE_HEAD(ptp_tx_ts_wait);
++
++#define PTP_GET_RX_TIMEOUT      (HZ)
++#define PTP_GET_TX_TIMEOUT      (HZ)
++
++#if defined(CONFIG_ARCH_MX28)
++static struct fec_ptp_private *ptp_private[2];
++#elif defined(CONFIG_ARCH_MX6)
++static struct fec_ptp_private *ptp_private[1];
++#endif
++
++/* Alloc the ring resource */
++static int fec_ptp_init_circ(struct circ_buf *ptp_buf, int size)
++{
++	ptp_buf->buf = vmalloc(size * sizeof(struct fec_ptp_data_t));
++
++	if (!ptp_buf->buf)
++		return 1;
++	ptp_buf->head = 0;
++	ptp_buf->tail = 0;
++
++	return 0;
++}
++
++static inline int fec_ptp_calc_index(int size, int curr_index, int offset)
++{
++	return (curr_index + offset) % size;
++}
++
++static int fec_ptp_is_empty(struct circ_buf *buf)
++{
++	return (buf->head == buf->tail);
++}
++
++static int fec_ptp_nelems(struct circ_buf *buf, int size)
++{
++	const int front = buf->head;
++	const int end = buf->tail;
++	int n_items;
++
++	if (end > front)
++		n_items = end - front;
++	else if (end < front)
++		n_items = size - (front - end);
++	else
++		n_items = 0;
++
++	return n_items;
++}
++
++static int fec_ptp_is_full(struct circ_buf *buf, int size)
++{
++	if (fec_ptp_nelems(buf, size) ==
++				(size - 1))
++		return 1;
++	else
++		return 0;
++}
++
++static int fec_ptp_insert(struct circ_buf *ptp_buf,
++			  struct fec_ptp_data_t *data,
++			  struct fec_ptp_private *priv,
++			  int size)
++{
++	struct fec_ptp_data_t *tmp;
++
++	if (fec_ptp_is_full(ptp_buf, size))
++		return 1;
++
++	spin_lock(&priv->ptp_lock);
++	tmp = (struct fec_ptp_data_t *)(ptp_buf->buf) + ptp_buf->tail;
++
++	tmp->key = data->key;
++	memcpy(tmp->spid, data->spid, 10);
++	tmp->ts_time.sec = data->ts_time.sec;
++	tmp->ts_time.nsec = data->ts_time.nsec;
++
++	ptp_buf->tail = fec_ptp_calc_index(size, ptp_buf->tail, 1);
++	spin_unlock(&priv->ptp_lock);
++
++	return 0;
++}
++
++static int fec_ptp_find_and_remove(struct circ_buf *ptp_buf,
++				   struct fec_ptp_data_t *data,
++				   struct fec_ptp_private *priv,
++				   int size)
++{
++	int i;
++	int end = ptp_buf->tail;
++	unsigned long flags;
++	struct fec_ptp_data_t *tmp;
++
++	if (fec_ptp_is_empty(ptp_buf))
++		return 1;
++
++	i = ptp_buf->head;
++	while (i != end) {
++		tmp = (struct fec_ptp_data_t *)(ptp_buf->buf) + i;
++		if (tmp->key == data->key &&
++				!memcmp(tmp->spid, data->spid, 10))
++			break;
++		i = fec_ptp_calc_index(size, i, 1);
++	}
++
++	spin_lock_irqsave(&priv->ptp_lock, flags);
++	if (i == end) {
++		ptp_buf->head = end;
++		spin_unlock_irqrestore(&priv->ptp_lock, flags);
++		return 1;
++	}
++
++	data->ts_time.sec = tmp->ts_time.sec;
++	data->ts_time.nsec = tmp->ts_time.nsec;
++
++	ptp_buf->head = fec_ptp_calc_index(size, i, 1);
++	spin_unlock_irqrestore(&priv->ptp_lock, flags);
++
++	return 0;
++}
++
++/* 1588 Module intialization */
++int fec_ptp_start(struct fec_ptp_private *priv)
++{
++	struct fec_ptp_private *fpp = priv;
++
++	/* Select 1588 Timer source and enable module for starting Tmr Clock *
++	 * When enable both FEC0 and FEC1 1588 Timer in the same time,       *
++	 * enable FEC1 timer's slave mode. */
++	if ((fpp == ptp_private[0]) || !(ptp_private[0]->ptp_active)) {
++		writel(FEC_T_CTRL_RESTART, fpp->hwp + FEC_ATIME_CTRL);
++		writel(FEC_T_INC_40MHZ << FEC_T_INC_OFFSET,
++				fpp->hwp + FEC_ATIME_INC);
++		writel(FEC_T_PERIOD_ONE_SEC, fpp->hwp + FEC_ATIME_EVT_PERIOD);
++		/* start counter */
++		writel(FEC_T_CTRL_PERIOD_RST | FEC_T_CTRL_ENABLE,
++				fpp->hwp + FEC_ATIME_CTRL);
++		fpp->ptp_slave = 0;
++		fpp->ptp_active = 1;
++
++		#if defined(CONFIG_ARCH_MX28)
++		/* if the FEC1 timer was enabled, set it to slave mode */
++		if ((fpp == ptp_private[0]) && (ptp_private[1]->ptp_active)) {
++			writel(0, ptp_private[1]->hwp + FEC_ATIME_CTRL);
++			fpp->prtc = ptp_private[1]->prtc;
++			writel(FEC_T_CTRL_RESTART,
++					ptp_private[1]->hwp + FEC_ATIME_CTRL);
++			writel(FEC_T_INC_40MHZ << FEC_T_INC_OFFSET,
++					ptp_private[1]->hwp + FEC_ATIME_INC);
++			/* Set the timer as slave mode */
++			writel(FEC_T_CTRL_SLAVE,
++					ptp_private[1]->hwp + FEC_ATIME_CTRL);
++			ptp_private[1]->ptp_slave = 1;
++			ptp_private[1]->ptp_active = 1;
++		}
++		#endif
++	} else {
++		writel(FEC_T_INC_40MHZ << FEC_T_INC_OFFSET,
++				fpp->hwp + FEC_ATIME_INC);
++		/* Set the timer as slave mode */
++		writel(FEC_T_CTRL_SLAVE, fpp->hwp + FEC_ATIME_CTRL);
++		fpp->ptp_slave = 1;
++		fpp->ptp_active = 1;
++	}
++
++	return 0;
++}
++
++/* Cleanup routine for 1588 module.
++ * When PTP is disabled this routing is called */
++void fec_ptp_stop(struct fec_ptp_private *priv)
++{
++	struct fec_ptp_private *fpp = priv;
++
++	writel(0, fpp->hwp + FEC_ATIME_CTRL);
++	writel(FEC_T_CTRL_RESTART, fpp->hwp + FEC_ATIME_CTRL);
++	priv->ptp_active = 0;
++	priv->ptp_slave = 0;
++
++}
++
++static void fec_get_curr_cnt(struct fec_ptp_private *priv,
++			struct ptp_rtc_time *curr_time)
++{
++	u32 tempval;
++	struct fec_ptp_private *tmp_priv;
++
++	if (!priv->ptp_slave)
++		tmp_priv = priv;
++	else
++		tmp_priv = ptp_private[0];
++
++	tempval = readl(priv->hwp + FEC_ATIME_CTRL);
++	tempval |= FEC_T_CTRL_CAPTURE;
++
++	writel(tempval, priv->hwp + FEC_ATIME_CTRL);
++	writel(tempval, priv->hwp + FEC_ATIME_CTRL);
++	curr_time->rtc_time.nsec = readl(priv->hwp + FEC_ATIME);
++	curr_time->rtc_time.sec = tmp_priv->prtc;
++
++	writel(tempval, priv->hwp + FEC_ATIME_CTRL);
++	tempval = readl(priv->hwp + FEC_ATIME);
++
++	if (tempval < curr_time->rtc_time.nsec) {
++		curr_time->rtc_time.nsec = tempval;
++		curr_time->rtc_time.sec = tmp_priv->prtc;
++	}
++}
++
++/* Set the 1588 timer counter registers */
++static void fec_set_1588cnt(struct fec_ptp_private *priv,
++			struct ptp_rtc_time *fec_time)
++{
++	u32 tempval;
++	unsigned long flags;
++	struct fec_ptp_private *tmp_priv;
++
++	if (!priv->ptp_slave)
++		tmp_priv = priv;
++	else
++		tmp_priv = ptp_private[0];
++
++	spin_lock_irqsave(&priv->cnt_lock, flags);
++	tmp_priv->prtc = fec_time->rtc_time.sec;
++
++	tempval = fec_time->rtc_time.nsec;
++	writel(tempval, tmp_priv->hwp + FEC_ATIME);
++	spin_unlock_irqrestore(&priv->cnt_lock, flags);
++}
++
++/* Set the BD to ptp */
++int fec_ptp_do_txstamp(struct sk_buff *skb)
++{
++	struct iphdr *iph;
++	struct udphdr *udph;
++
++	if (skb->len > 44) {
++		/* Check if port is 319 for PTP Event, and check for UDP */
++		iph = ip_hdr(skb);
++		if (iph == NULL || iph->protocol != FEC_PACKET_TYPE_UDP)
++			return 0;
++
++		udph = udp_hdr(skb);
++		if (udph != NULL && ntohs(udph->dest) == 319)
++			return 1;
++	}
++
++	return 0;
++}
++
++void fec_ptp_store_txstamp(struct fec_ptp_private *priv,
++			   struct sk_buff *skb,
++			   struct bufdesc *bdp)
++{
++	int msg_type, seq_id, control;
++	struct fec_ptp_data_t tmp_tx_time;
++	struct fec_ptp_private *fpp;
++	unsigned char *sp_id;
++	unsigned short portnum;
++
++	if (!priv->ptp_slave)
++		fpp = priv;
++	else
++		fpp = ptp_private[0];
++
++	seq_id = *((u16 *)(skb->data + FEC_PTP_SEQ_ID_OFFS));
++	control = *((u8 *)(skb->data + FEC_PTP_CTRL_OFFS));
++	sp_id = skb->data + FEC_PTP_SPORT_ID_OFFS;
++	portnum = ntohs(*((unsigned short *)(sp_id + 8)));
++
++	tmp_tx_time.key = ntohs(seq_id);
++	memcpy(tmp_tx_time.spid, sp_id, 8);
++	memcpy(tmp_tx_time.spid + 8, (unsigned char *)&portnum, 2);
++	tmp_tx_time.ts_time.sec = fpp->prtc;
++	tmp_tx_time.ts_time.nsec = bdp->ts;
++
++	switch (control) {
++
++	case PTP_MSG_SYNC:
++		fec_ptp_insert(&(priv->tx_time_sync), &tmp_tx_time, priv,
++				DEFAULT_PTP_TX_BUF_SZ);
++		break;
++
++	case PTP_MSG_DEL_REQ:
++		fec_ptp_insert(&(priv->tx_time_del_req), &tmp_tx_time, priv,
++				DEFAULT_PTP_TX_BUF_SZ);
++		break;
++
++	/* clear transportSpecific field*/
++	case PTP_MSG_ALL_OTHER:
++		msg_type = (*((u8 *)(skb->data +
++				FEC_PTP_MSG_TYPE_OFFS))) & 0x0F;
++		switch (msg_type) {
++		case PTP_MSG_P_DEL_REQ:
++			fec_ptp_insert(&(priv->tx_time_pdel_req), &tmp_tx_time,
++					priv, DEFAULT_PTP_TX_BUF_SZ);
++			break;
++		case PTP_MSG_P_DEL_RESP:
++			fec_ptp_insert(&(priv->tx_time_pdel_resp), &tmp_tx_time,
++					priv, DEFAULT_PTP_TX_BUF_SZ);
++			break;
++		default:
++			break;
++		}
++		break;
++	default:
++		break;
++	}
++
++	wake_up_interruptible(&ptp_tx_ts_wait);
++}
++
++void fec_ptp_store_rxstamp(struct fec_ptp_private *priv,
++			   struct sk_buff *skb,
++			   struct bufdesc *bdp)
++{
++	int msg_type, seq_id, control;
++	struct fec_ptp_data_t tmp_rx_time;
++	struct fec_ptp_private *fpp;
++	struct iphdr *iph;
++	struct udphdr *udph;
++	unsigned char *sp_id;
++	unsigned short portnum;
++
++	if (!priv->ptp_slave)
++		fpp = priv;
++	else
++		fpp = ptp_private[0];
++
++	/* Check for UDP, and Check if port is 319 for PTP Event */
++	iph = (struct iphdr *)(skb->data + FEC_PTP_IP_OFFS);
++	if (iph->protocol != FEC_PACKET_TYPE_UDP)
++		return;
++
++	udph = (struct udphdr *)(skb->data + FEC_PTP_UDP_OFFS);
++	if (ntohs(udph->dest) != 319)
++		return;
++
++	seq_id = *((u16 *)(skb->data + FEC_PTP_SEQ_ID_OFFS));
++	control = *((u8 *)(skb->data + FEC_PTP_CTRL_OFFS));
++	sp_id = skb->data + FEC_PTP_SPORT_ID_OFFS;
++	portnum = ntohs(*((unsigned short *)(sp_id + 8)));
++
++	tmp_rx_time.key = ntohs(seq_id);
++	memcpy(tmp_rx_time.spid, sp_id, 8);
++	memcpy(tmp_rx_time.spid + 8, (unsigned char *)&portnum, 2);
++	tmp_rx_time.ts_time.sec = fpp->prtc;
++	tmp_rx_time.ts_time.nsec = bdp->ts;
++
++	switch (control) {
++
++	case PTP_MSG_SYNC:
++		fec_ptp_insert(&(priv->rx_time_sync), &tmp_rx_time, priv,
++				DEFAULT_PTP_RX_BUF_SZ);
++		break;
++
++	case PTP_MSG_DEL_REQ:
++		fec_ptp_insert(&(priv->rx_time_del_req), &tmp_rx_time, priv,
++				DEFAULT_PTP_RX_BUF_SZ);
++		break;
++
++	/* clear transportSpecific field*/
++	case PTP_MSG_ALL_OTHER:
++		msg_type = (*((u8 *)(skb->data +
++				FEC_PTP_MSG_TYPE_OFFS))) & 0x0F;
++		switch (msg_type) {
++		case PTP_MSG_P_DEL_REQ:
++			fec_ptp_insert(&(priv->rx_time_pdel_req), &tmp_rx_time,
++					priv, DEFAULT_PTP_RX_BUF_SZ);
++			break;
++		case PTP_MSG_P_DEL_RESP:
++			fec_ptp_insert(&(priv->rx_time_pdel_resp), &tmp_rx_time,
++					priv, DEFAULT_PTP_RX_BUF_SZ);
++			break;
++		default:
++			break;
++		}
++		break;
++	default:
++		break;
++	}
++
++	wake_up_interruptible(&ptp_rx_ts_wait);
++}
++
++static uint8_t fec_get_tx_timestamp(struct fec_ptp_private *priv,
++				    struct ptp_ts_data *pts,
++				    struct ptp_time *tx_time)
++{
++	struct fec_ptp_data_t tmp;
++	int flag;
++	u8 mode;
++
++	tmp.key = pts->seq_id;
++	memcpy(tmp.spid, pts->spid, 10);
++	mode = pts->message_type;
++
++	switch (mode) {
++	case PTP_MSG_SYNC:
++		flag = fec_ptp_find_and_remove(&(priv->tx_time_sync), &tmp,
++						priv, DEFAULT_PTP_TX_BUF_SZ);
++		break;
++	case PTP_MSG_DEL_REQ:
++		flag = fec_ptp_find_and_remove(&(priv->tx_time_del_req), &tmp,
++						priv, DEFAULT_PTP_TX_BUF_SZ);
++		break;
++
++	case PTP_MSG_P_DEL_REQ:
++		flag = fec_ptp_find_and_remove(&(priv->tx_time_pdel_req), &tmp,
++						priv, DEFAULT_PTP_TX_BUF_SZ);
++		break;
++	case PTP_MSG_P_DEL_RESP:
++		flag = fec_ptp_find_and_remove(&(priv->tx_time_pdel_resp), &tmp,
++						priv, DEFAULT_PTP_TX_BUF_SZ);
++		break;
++
++	default:
++		flag = 1;
++		printk(KERN_ERR "ERROR\n");
++		break;
++	}
++
++	if (!flag) {
++		tx_time->sec = tmp.ts_time.sec;
++		tx_time->nsec = tmp.ts_time.nsec;
++		return 0;
++	} else {
++		wait_event_interruptible_timeout(ptp_tx_ts_wait, 0,
++					PTP_GET_TX_TIMEOUT);
++
++		switch (mode) {
++		case PTP_MSG_SYNC:
++			flag = fec_ptp_find_and_remove(&(priv->tx_time_sync),
++					&tmp, priv, DEFAULT_PTP_TX_BUF_SZ);
++			break;
++		case PTP_MSG_DEL_REQ:
++			flag = fec_ptp_find_and_remove(&(priv->tx_time_del_req),
++					&tmp, priv, DEFAULT_PTP_TX_BUF_SZ);
++			break;
++		case PTP_MSG_P_DEL_REQ:
++			flag = fec_ptp_find_and_remove(
++				&(priv->tx_time_pdel_req), &tmp, priv,
++				DEFAULT_PTP_TX_BUF_SZ);
++			break;
++		case PTP_MSG_P_DEL_RESP:
++			flag = fec_ptp_find_and_remove(
++				&(priv->tx_time_pdel_resp), &tmp, priv,
++				DEFAULT_PTP_TX_BUF_SZ);
++			break;
++		}
++
++		if (flag == 0) {
++			tx_time->sec = tmp.ts_time.sec;
++			tx_time->nsec = tmp.ts_time.nsec;
++			return 0;
++		}
++
++		return -1;
++	}
++}
++
++static uint8_t fec_get_rx_timestamp(struct fec_ptp_private *priv,
++				    struct ptp_ts_data *pts,
++				    struct ptp_time *rx_time)
++{
++	struct fec_ptp_data_t tmp;
++	int flag;
++	u8 mode;
++
++	tmp.key = pts->seq_id;
++	memcpy(tmp.spid, pts->spid, 10);
++	mode = pts->message_type;
++
++	switch (mode) {
++	case PTP_MSG_SYNC:
++		flag = fec_ptp_find_and_remove(&(priv->rx_time_sync), &tmp,
++				priv, DEFAULT_PTP_RX_BUF_SZ);
++		break;
++	case PTP_MSG_DEL_REQ:
++		flag = fec_ptp_find_and_remove(&(priv->rx_time_del_req), &tmp,
++				priv, DEFAULT_PTP_RX_BUF_SZ);
++		break;
++
++	case PTP_MSG_P_DEL_REQ:
++		flag = fec_ptp_find_and_remove(&(priv->rx_time_pdel_req), &tmp,
++				priv, DEFAULT_PTP_RX_BUF_SZ);
++		break;
++	case PTP_MSG_P_DEL_RESP:
++		flag = fec_ptp_find_and_remove(&(priv->rx_time_pdel_resp), &tmp,
++				priv, DEFAULT_PTP_RX_BUF_SZ);
++		break;
++
++	default:
++		flag = 1;
++		printk(KERN_ERR "ERROR\n");
++		break;
++	}
++
++	if (!flag) {
++		rx_time->sec = tmp.ts_time.sec;
++		rx_time->nsec = tmp.ts_time.nsec;
++		return 0;
++	} else {
++		wait_event_interruptible_timeout(ptp_rx_ts_wait, 0,
++					PTP_GET_RX_TIMEOUT);
++
++		switch (mode) {
++		case PTP_MSG_SYNC:
++			flag = fec_ptp_find_and_remove(&(priv->rx_time_sync),
++				&tmp, priv, DEFAULT_PTP_RX_BUF_SZ);
++			break;
++		case PTP_MSG_DEL_REQ:
++			flag = fec_ptp_find_and_remove(
++				&(priv->rx_time_del_req), &tmp, priv,
++				DEFAULT_PTP_RX_BUF_SZ);
++			break;
++		case PTP_MSG_P_DEL_REQ:
++			flag = fec_ptp_find_and_remove(
++				&(priv->rx_time_pdel_req), &tmp, priv,
++				DEFAULT_PTP_RX_BUF_SZ);
++			break;
++		case PTP_MSG_P_DEL_RESP:
++			flag = fec_ptp_find_and_remove(
++				&(priv->rx_time_pdel_resp), &tmp, priv,
++				DEFAULT_PTP_RX_BUF_SZ);
++			break;
++		}
++
++		if (flag == 0) {
++			rx_time->sec = tmp.ts_time.sec;
++			rx_time->nsec = tmp.ts_time.nsec;
++			return 0;
++		}
++
++		return -1;
++	}
++}
++
++static void fec_handle_ptpdrift(struct ptp_set_comp *comp,
++				struct ptp_time_correct *ptc)
++{
++	u32 ndrift;
++	u32 i, adj_inc, adj_period;
++	u32 tmp_current, tmp_winner;
++
++	ndrift = comp->drift;
++
++	if (ndrift == 0) {
++		ptc->corr_inc = 0;
++		ptc->corr_period = 0;
++		return;
++	} else if (ndrift >= FEC_ATIME_40MHZ) {
++		ptc->corr_inc = (u32)(ndrift / FEC_ATIME_40MHZ);
++		ptc->corr_period = 1;
++		return;
++	} else {
++		tmp_winner = 0xFFFFFFFF;
++		adj_inc = 1;
++
++		if (ndrift > (FEC_ATIME_40MHZ / FEC_T_INC_40MHZ)) {
++			adj_inc = FEC_T_INC_40MHZ / 2;
++		} else if (ndrift > (FEC_ATIME_40MHZ / (FEC_T_INC_40MHZ * 4))) {
++			adj_inc = FEC_T_INC_40MHZ / 4;
++			adj_period = 2;
++		} else {
++			adj_inc = 4;
++			adj_period = 4;
++		}
++
++		for (i = 1; i < adj_inc; i++) {
++			tmp_current = (FEC_ATIME_40MHZ * i) % ndrift;
++			if (tmp_current == 0) {
++				ptc->corr_inc = i;
++				ptc->corr_period = (u32)((FEC_ATIME_40MHZ *
++						adj_period * i)	/ ndrift);
++				break;
++			} else if (tmp_current < tmp_winner) {
++				ptc->corr_inc = i;
++				ptc->corr_period = (u32)((FEC_ATIME_40MHZ *
++						adj_period * i)	/ ndrift);
++				tmp_winner = tmp_current;
++			}
++		}
++	}
++}
++
++static void fec_set_drift(struct fec_ptp_private *priv,
++			  struct ptp_set_comp *comp)
++{
++	struct ptp_time_correct	tc;
++	struct fec_ptp_private *fpp;
++	u32 tmp, corr_ns;
++
++	memset(&tc, 0, sizeof(struct ptp_time_correct));
++	fec_handle_ptpdrift(comp, &tc);
++	if (tc.corr_inc == 0)
++		return;
++
++	if (comp->o_ops == TRUE)
++		corr_ns = FEC_T_INC_40MHZ + tc.corr_inc;
++	else
++		corr_ns = FEC_T_INC_40MHZ - tc.corr_inc;
++
++	if (!priv->ptp_slave)
++		fpp = priv;
++	else
++		fpp = ptp_private[0];
++
++	tmp = readl(fpp->hwp + FEC_ATIME_INC) & FEC_T_INC_MASK;
++	tmp |= corr_ns << FEC_T_INC_CORR_OFFSET;
++	writel(tmp, fpp->hwp + FEC_ATIME_INC);
++	writel(tc.corr_period, fpp->hwp + FEC_ATIME_CORR);
++}
++
++static int ptp_open(struct inode *inode, struct file *file)
++{
++	return 0;
++}
++
++static int ptp_release(struct inode *inode, struct file *file)
++{
++	return 0;
++}
++
++static long ptp_ioctl(
++	struct file *file,
++	unsigned int cmd,
++	unsigned long arg)
++{
++	struct ptp_rtc_time *cnt;
++	struct ptp_rtc_time curr_time;
++	struct ptp_time rx_time, tx_time;
++	struct ptp_ts_data *p_ts;
++	struct ptp_set_comp *p_comp;
++	struct fec_ptp_private *priv;
++	unsigned int minor = MINOR(file->f_path.dentry->d_inode->i_rdev);
++	int retval = 0;
++
++	priv = (struct fec_ptp_private *) ptp_private[minor];
++
++	switch (cmd) {
++	case PTP_GET_RX_TIMESTAMP:
++		p_ts = (struct ptp_ts_data *)arg;
++		retval = fec_get_rx_timestamp(priv, p_ts, &rx_time);
++		if (retval == 0 &&
++			copy_to_user((void __user *)(&(p_ts->ts)), &rx_time,
++					sizeof(rx_time)))
++			retval = -EFAULT;
++		break;
++	case PTP_GET_TX_TIMESTAMP:
++		p_ts = (struct ptp_ts_data *)arg;
++		fec_get_tx_timestamp(priv, p_ts, &tx_time);
++		if (copy_to_user((void __user *)(&(p_ts->ts)), &tx_time,
++				sizeof(tx_time)))
++			retval = -EFAULT;
++		break;
++	case PTP_GET_CURRENT_TIME:
++		fec_get_curr_cnt(priv, &curr_time);
++		if (copy_to_user((void __user *)arg, &curr_time,
++			sizeof(curr_time)))
++			retval = -EFAULT;;
++		break;
++	case PTP_SET_RTC_TIME:
++		cnt = (struct ptp_rtc_time *)arg;
++		fec_set_1588cnt(priv, cnt);
++		break;
++	case PTP_FLUSH_TIMESTAMP:
++		/* reset sync buffer */
++		priv->rx_time_sync.head = 0;
++		priv->rx_time_sync.tail = 0;
++		priv->tx_time_sync.head = 0;
++		priv->tx_time_sync.tail = 0;
++		/* reset delay_req buffer */
++		priv->rx_time_del_req.head = 0;
++		priv->rx_time_del_req.tail = 0;
++		priv->tx_time_del_req.head = 0;
++		priv->tx_time_del_req.tail = 0;
++		/* reset pdelay_req buffer */
++		priv->rx_time_pdel_req.head = 0;
++		priv->rx_time_pdel_req.tail = 0;
++		priv->tx_time_pdel_req.head = 0;
++		priv->tx_time_pdel_req.tail = 0;
++		/* reset pdelay_resp buffer */
++		priv->rx_time_pdel_resp.head = 0;
++		priv->rx_time_pdel_resp.tail = 0;
++		priv->tx_time_pdel_resp.head = 0;
++		priv->tx_time_pdel_resp.tail = 0;
++		break;
++	case PTP_SET_COMPENSATION:
++		p_comp = (struct ptp_set_comp *)arg;
++		fec_set_drift(priv, p_comp);
++		break;
++	case PTP_GET_ORIG_COMP:
++		((struct ptp_get_comp *)arg)->dw_origcomp = FEC_PTP_ORIG_COMP;
++		break;
++	default:
++		return -EINVAL;
++	}
++	return retval;
++}
++
++static const struct file_operations ptp_fops = {
++	.owner	= THIS_MODULE,
++	.llseek	= NULL,
++	.read	= NULL,
++	.write	= NULL,
++	.unlocked_ioctl = ptp_ioctl,
++	.open	= ptp_open,
++	.release = ptp_release,
++};
++
++static int init_ptp(void)
++{
++	if (register_chrdev(PTP_MAJOR, "ptp", &ptp_fops))
++		printk(KERN_ERR "Unable to register PTP device as char\n");
++	else
++		printk(KERN_INFO "Register PTP device as char /dev/ptp\n");
++
++	return 0;
++}
++
++static void ptp_free(void)
++{
++	/*unregister the PTP device*/
++	unregister_chrdev(PTP_MAJOR, "ptp");
++}
++
++/*
++ * Resource required for accessing 1588 Timer Registers.
++ */
++int fec_ptp_init(struct fec_ptp_private *priv, int id)
++{
++	fec_ptp_init_circ(&(priv->rx_time_sync), DEFAULT_PTP_RX_BUF_SZ);
++	fec_ptp_init_circ(&(priv->rx_time_del_req), DEFAULT_PTP_RX_BUF_SZ);
++	fec_ptp_init_circ(&(priv->rx_time_pdel_req), DEFAULT_PTP_RX_BUF_SZ);
++	fec_ptp_init_circ(&(priv->rx_time_pdel_resp), DEFAULT_PTP_RX_BUF_SZ);
++	fec_ptp_init_circ(&(priv->tx_time_sync), DEFAULT_PTP_TX_BUF_SZ);
++	fec_ptp_init_circ(&(priv->tx_time_del_req), DEFAULT_PTP_TX_BUF_SZ);
++	fec_ptp_init_circ(&(priv->tx_time_pdel_req), DEFAULT_PTP_TX_BUF_SZ);
++	fec_ptp_init_circ(&(priv->tx_time_pdel_resp), DEFAULT_PTP_TX_BUF_SZ);
++
++	spin_lock_init(&priv->ptp_lock);
++	spin_lock_init(&priv->cnt_lock);
++	ptp_private[id] = priv;
++	priv->dev_id = id;
++	if (id == 0)
++		init_ptp();
++	return 0;
++}
++EXPORT_SYMBOL(fec_ptp_init);
++
++void fec_ptp_cleanup(struct fec_ptp_private *priv)
++{
++
++	if (priv->rx_time_sync.buf)
++		vfree(priv->rx_time_sync.buf);
++	if (priv->rx_time_del_req.buf)
++		vfree(priv->rx_time_del_req.buf);
++	if (priv->rx_time_pdel_req.buf)
++		vfree(priv->rx_time_pdel_req.buf);
++	if (priv->rx_time_pdel_resp.buf)
++		vfree(priv->rx_time_pdel_resp.buf);
++	if (priv->tx_time_sync.buf)
++		vfree(priv->tx_time_sync.buf);
++	if (priv->tx_time_del_req.buf)
++		vfree(priv->tx_time_del_req.buf);
++	if (priv->tx_time_pdel_req.buf)
++		vfree(priv->tx_time_pdel_req.buf);
++	if (priv->tx_time_pdel_resp.buf)
++		vfree(priv->tx_time_pdel_resp.buf);
++
++	ptp_free();
++}
++EXPORT_SYMBOL(fec_ptp_cleanup);
+diff --git a/drivers/net/fec_1588.h b/drivers/net/fec_1588.h
+new file mode 100644
+index 0000000..e947abd
+--- /dev/null
++++ b/drivers/net/fec_1588.h
+@@ -0,0 +1,222 @@
++/*
++ * drivers/net/fec_1588.h
++ *
++ * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ */
++
++#ifndef FEC_1588_H
++#define FEC_1588_H
++
++#include <linux/netdevice.h>
++#include <linux/etherdevice.h>
++#include <linux/circ_buf.h>
++
++#define FALSE			0
++#define TRUE			1
++
++/* FEC 1588 register bits */
++#define FEC_T_CTRL_SLAVE		0x00002000
++#define FEC_T_CTRL_CAPTURE		0x00000800
++#define FEC_T_CTRL_RESTART		0x00000200
++#define FEC_T_CTRL_PERIOD_RST		0x00000030
++#define FEC_T_CTRL_ENABLE		0x00000001
++
++#define FEC_T_INC_MASK			0x0000007f
++#define FEC_T_INC_OFFSET		0
++#define FEC_T_INC_CORR_MASK		0x00007f00
++#define FEC_T_INC_CORR_OFFSET		8
++
++
++#define FEC_T_INC_40MHZ			25
++#define FEC_ATIME_40MHZ			40000000
++/*
++#define FEC_T_INC_40MHZ			15
++#define FEC_ATIME_40MHZ			66000000
++*/
++
++#define FEC_T_PERIOD_ONE_SEC		0x3B9ACA00
++
++/* IEEE 1588 definition */
++#define FEC_ECNTRL_TS_EN	0x10
++#define PTP_MAJOR		232	/*the temporary major number
++						 *used by PTP driver, the major
++						 *number 232~239 is unassigned*/
++
++#define DEFAULT_PTP_RX_BUF_SZ		2048
++#define DEFAULT_PTP_TX_BUF_SZ		16
++#define PTP_MSG_SYNC			0x0
++#define PTP_MSG_DEL_REQ			0x1
++#define PTP_MSG_P_DEL_REQ		0x2
++#define PTP_MSG_P_DEL_RESP		0x3
++#define PTP_MSG_DEL_RESP		0x4
++#define PTP_MSG_ALL_OTHER		0x5
++
++#define PTP_GET_TX_TIMESTAMP		0x1
++#define PTP_GET_RX_TIMESTAMP		0x9
++#define PTP_SET_RTC_TIME		0x3
++#define PTP_SET_COMPENSATION		0x4
++#define PTP_GET_CURRENT_TIME		0x5
++#define PTP_FLUSH_TIMESTAMP		0x6
++#define PTP_ADJ_ADDEND			0x7
++#define PTP_GET_ORIG_COMP		0x8
++#define PTP_GET_ADDEND			0xB
++#define PTP_GET_RX_TIMESTAMP_PDELAY_REQ		0xC
++#define PTP_GET_RX_TIMESTAMP_PDELAY_RESP	0xD
++
++#define FEC_PTP_DOMAIN_DLFT		0xe0000181
++#define FEC_PTP_IP_OFFS			0xE
++#define FEC_PTP_UDP_OFFS		0x22
++#define FEC_PTP_MSG_TYPE_OFFS		0x2A
++#define FEC_PTP_SPORT_ID_OFFS		0x3E
++#define FEC_PTP_SEQ_ID_OFFS		0x48
++#define FEC_PTP_CTRL_OFFS		0x4A
++#define FEC_PACKET_TYPE_UDP		0x11
++
++#define FEC_PTP_ORIG_COMP		0x15555555
++
++/* PTP standard time representation structure */
++struct ptp_time{
++	u64 sec;	/* seconds */
++	u32 nsec;	/* nanoseconds */
++};
++
++/* Structure for PTP Time Stamp */
++struct fec_ptp_data_t {
++	u8		spid[10];
++	int		key;
++	struct ptp_time	ts_time;
++};
++
++/* interface for PTP driver command GET_TX_TIME */
++struct ptp_ts_data {
++	/* PTP version */
++	u8 version;
++	/* PTP source port ID */
++	u8 spid[10];
++	/* PTP sequence ID */
++	u16 seq_id;
++	/* PTP message type */
++	u8 message_type;
++	/* PTP timestamp */
++	struct ptp_time ts;
++};
++
++/* interface for PTP driver command SET_RTC_TIME/GET_CURRENT_TIME */
++struct ptp_rtc_time {
++	struct ptp_time rtc_time;
++};
++
++/* interface for PTP driver command SET_COMPENSATION */
++struct ptp_set_comp {
++	u32 drift;
++	bool o_ops;
++	u32 freq_compensation;
++};
++
++/* interface for PTP driver command GET_ORIG_COMP */
++struct ptp_get_comp {
++	/* the initial compensation value */
++	u32 dw_origcomp;
++	/* the minimum compensation value */
++	u32 dw_mincomp;
++	/*the max compensation value*/
++	u32 dw_maxcomp;
++	/*the min drift applying min compensation value in ppm*/
++	u32 dw_mindrift;
++	/*the max drift applying max compensation value in ppm*/
++	u32 dw_maxdrift;
++};
++
++struct ptp_time_correct {
++	u32 corr_period;
++	u32 corr_inc;
++};
++
++/* PTP message version */
++#define PTP_1588_MSG_VER_1	1
++#define PTP_1588_MSG_VER_2	2
++
++#define BD_ENET_TX_TS		0x20000000
++#define BD_ENET_TX_BDU		0x80000000
++
++struct fec_ptp_private {
++	void __iomem *hwp;
++	int	dev_id;
++
++	struct	circ_buf rx_time_sync;
++	struct	circ_buf rx_time_del_req;
++	struct	circ_buf rx_time_pdel_req;
++	struct	circ_buf rx_time_pdel_resp;
++	struct	circ_buf tx_time_sync;
++	struct	circ_buf tx_time_del_req;
++	struct	circ_buf tx_time_pdel_req;
++	struct	circ_buf tx_time_pdel_resp;
++	spinlock_t ptp_lock;
++	spinlock_t cnt_lock;
++
++	u64	prtc;
++	u8	ptp_active;
++	u8	ptp_slave;
++	struct circ_buf	txstamp;
++};
++
++#ifdef CONFIG_FEC_1588
++static inline int fec_ptp_malloc_priv(struct fec_ptp_private **priv)
++{
++	*priv = kzalloc(sizeof(struct fec_ptp_private), GFP_KERNEL);
++	return 1;
++}
++extern int fec_ptp_init(struct fec_ptp_private *priv, int id);
++extern void fec_ptp_cleanup(struct fec_ptp_private *priv);
++extern int fec_ptp_start(struct fec_ptp_private *priv);
++extern void fec_ptp_stop(struct fec_ptp_private *priv);
++extern int fec_ptp_do_txstamp(struct sk_buff *skb);
++extern void fec_ptp_store_txstamp(struct fec_ptp_private *priv,
++				  struct sk_buff *skb,
++				  struct bufdesc *bdp);
++extern void fec_ptp_store_rxstamp(struct fec_ptp_private *priv,
++				  struct sk_buff *skb,
++				  struct bufdesc *bdp);
++#else
++static inline int fec_ptp_malloc_priv(struct fec_ptp_private **priv)
++{
++	return 0;
++}
++static inline int fec_ptp_init(struct fec_ptp_private *priv, int id)
++{
++	return 1;
++}
++static inline void fec_ptp_cleanup(struct fec_ptp_private *priv) { }
++static inline int fec_ptp_start(struct fec_ptp_private *priv)
++{
++	return 1;
++}
++static inline void fec_ptp_stop(struct fec_ptp_private *priv) {}
++static inline int fec_ptp_do_txstamp(struct sk_buff *skb)
++{
++	return 0;
++}
++static inline void fec_ptp_store_txstamp(struct fec_ptp_private *priv,
++					 struct sk_buff *skb,
++					 struct bufdesc *bdp) {}
++static inline void fec_ptp_store_rxstamp(struct fec_ptp_private *priv,
++					 struct sk_buff *skb,
++					 struct bufdesc *bdp) {}
++#endif /* 1588 */
++
++#endif
+diff --git a/drivers/net/imx_ptp.c b/drivers/net/imx_ptp.c
+new file mode 100644
+index 0000000..3bda93b
+--- /dev/null
++++ b/drivers/net/imx_ptp.c
+@@ -0,0 +1,1748 @@
++/*
++ * drivers/net/imx_ptp.c
++ *
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All rights reserved.
++ *
++ * Description: IEEE 1588 driver supporting imx5 Fast Ethernet Controller.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/kernel.h>
++#include <linux/delay.h>
++#include <linux/ioport.h>
++#include <linux/sched.h>
++#include <linux/slab.h>
++#include <linux/smp_lock.h>
++#include <linux/proc_fs.h>
++#include <linux/errno.h>
++#include <linux/init.h>
++#include <linux/reboot.h>
++#include <linux/list.h>
++#include <linux/interrupt.h>
++#include <linux/device.h>
++#include <linux/workqueue.h>
++#include <linux/time.h>
++#include <linux/clk.h>
++#include <linux/platform_device.h>
++#include <linux/vmalloc.h>
++#include <linux/ip.h>
++#include <linux/udp.h>
++#include <linux/io.h>
++#include <linux/uaccess.h>
++#include <asm/irq.h>
++#include <asm/system.h>
++#include <asm/byteorder.h>
++#include <asm/unaligned.h>
++
++#include "fec.h"
++#include "fec_1588.h"
++#include "imx_ptp.h"
++
++#ifdef PTP_DEBUG
++#define VDBG(fmt, args...)	printk(KERN_DEBUG "[%s]  " fmt "\n", \
++				__func__, ## args)
++#else
++#define VDBG(fmt, args...)	do {} while (0)
++#endif
++
++static DECLARE_WAIT_QUEUE_HEAD(ptp_rx_ts_wait);
++static DECLARE_WAIT_QUEUE_HEAD(ptp_tx_ts_wait);
++#define PTP_GET_RX_TIMEOUT	(HZ/10)
++#define PTP_GET_TX_TIMEOUT      (HZ/100)
++
++static struct fec_ptp_private *ptp_private;
++static void ptp_rtc_get_current_time(struct ptp *p_ptp,
++					struct ptp_time *p_time);
++static struct ptp *ptp_dev;
++
++/* The ring resource create and manage */
++static int fec_ptp_init_circ(struct circ_buf *ptp_buf, int size)
++{
++	ptp_buf->buf = vmalloc(size * sizeof(struct fec_ptp_data_t));
++
++	if (!ptp_buf->buf)
++		return 1;
++	ptp_buf->head = 0;
++	ptp_buf->tail = 0;
++
++	return 0;
++}
++
++static inline int fec_ptp_calc_index(int size, int curr_index, int offset)
++{
++	return (curr_index + offset) % size;
++}
++
++static int fec_ptp_is_empty(struct circ_buf *buf)
++{
++	return (buf->head == buf->tail);
++}
++
++static int fec_ptp_nelems(struct circ_buf *buf, int size)
++{
++	const int front = buf->head;
++	const int end = buf->tail;
++	int n_items;
++
++	if (end > front)
++		n_items = end - front;
++	else if (end < front)
++		n_items = size - (front - end);
++	else
++		n_items = 0;
++
++	return n_items;
++}
++
++static int fec_ptp_is_full(struct circ_buf *buf, int size)
++{
++	if (fec_ptp_nelems(buf, size) == (size - 1))
++		return 1;
++	else
++		return 0;
++}
++
++static int fec_ptp_insert(struct circ_buf *ptp_buf,
++			  struct fec_ptp_data_t *data,
++			  struct fec_ptp_private *priv,
++			  int size)
++{
++	struct fec_ptp_data_t *tmp;
++
++	if (fec_ptp_is_full(ptp_buf, size))
++		return 1;
++
++	spin_lock(&priv->ptp_lock);
++	tmp = (struct fec_ptp_data_t *)(ptp_buf->buf) + ptp_buf->tail;
++
++	tmp->key = data->key;
++	memcpy(tmp->spid, data->spid, 10);
++	tmp->ts_time.sec = data->ts_time.sec;
++	tmp->ts_time.nsec = data->ts_time.nsec;
++
++	ptp_buf->tail = fec_ptp_calc_index(size, ptp_buf->tail, 1);
++	spin_unlock(&priv->ptp_lock);
++
++	return 0;
++}
++
++static int fec_ptp_find_and_remove(struct circ_buf *ptp_buf,
++				   struct fec_ptp_data_t *data,
++				   struct fec_ptp_private *priv,
++				   int size)
++{
++	int i;
++	int end = ptp_buf->tail;
++	unsigned long flags;
++	struct fec_ptp_data_t *tmp;
++
++	if (fec_ptp_is_empty(ptp_buf))
++		return 1;
++
++	i = ptp_buf->head;
++	tmp = (struct fec_ptp_data_t *)(ptp_buf->buf) + i;
++	while (i != end) {
++		tmp = (struct fec_ptp_data_t *)(ptp_buf->buf) + i;
++		if (tmp->key == data->key &&
++				!memcmp(tmp->spid, data->spid, 10))
++			break;
++		i = fec_ptp_calc_index(size, i, 1);
++	}
++
++	spin_lock_irqsave(&priv->ptp_lock, flags);
++	if (i == end) {
++		ptp_buf->head = end;
++		spin_unlock_irqrestore(&priv->ptp_lock, flags);
++		return 1;
++	}
++
++	data->ts_time.sec = tmp->ts_time.sec;
++	data->ts_time.nsec = tmp->ts_time.nsec;
++
++	ptp_buf->head = fec_ptp_calc_index(size, i, 1);
++	spin_unlock_irqrestore(&priv->ptp_lock, flags);
++
++	return 0;
++}
++
++/* ptp and rtc param configuration */
++static void rtc_default_param(struct ptp_rtc *rtc)
++{
++	struct ptp_rtc_driver_param *drv_param = rtc->driver_param;
++	int i;
++
++	rtc->bypass_compensation = DEFAULT_BYPASS_COMPENSATION;
++	rtc->output_clock_divisor = DEFAULT_OUTPUT_CLOCK_DIVISOR;
++
++	drv_param->src_clock = DEFAULT_SRC_CLOCK;
++	drv_param->src_clock_freq_hz = clk_get_rate(rtc->clk);
++
++	drv_param->invert_input_clk_phase = DEFAULT_INVERT_INPUT_CLK_PHASE;
++	drv_param->invert_output_clk_phase = DEFAULT_INVERT_OUTPUT_CLK_PHASE;
++	drv_param->pulse_start_mode = DEFAULT_PULSE_START_MODE;
++	drv_param->events_mask = DEFAULT_EVENTS_RTC_MASK;
++
++	for (i = 0; i < PTP_RTC_NUM_OF_ALARMS; i++)
++		drv_param->alarm_polarity[i] = DEFAULT_ALARM_POLARITY ;
++
++	for (i = 0; i < PTP_RTC_NUM_OF_TRIGGERS; i++)
++		drv_param->trigger_polarity[i] = DEFAULT_TRIGGER_POLARITY;
++}
++
++static int ptp_rtc_config(struct ptp_rtc *rtc)
++{
++	/*allocate memory for RTC driver parameter*/
++	rtc->driver_param = kzalloc(sizeof(struct ptp_rtc_driver_param),
++					GFP_KERNEL);
++	if (!rtc->driver_param) {
++		printk(KERN_ERR "allocate memory failed\n");
++		return -ENOMEM;
++	}
++
++	/* expected RTC input clk frequency */
++	rtc->driver_param->rtc_freq_hz = PTP_RTC_FREQ * MHZ;
++
++	/*set default RTC configuration parameters*/
++	rtc_default_param(rtc);
++
++	return 0;
++}
++
++static void ptp_param_config(struct ptp *p_ptp)
++{
++	struct ptp_driver_param *drv_param;
++
++	p_ptp->driver_param = kzalloc(sizeof(struct ptp_driver_param),
++					GFP_KERNEL);
++	if (!p_ptp->driver_param) {
++		printk(KERN_ERR	"allocate memory failed for "
++				"PTP driver parameters\n");
++		return;
++	}
++
++	drv_param = p_ptp->driver_param;
++	/*set the default configuration parameters*/
++	drv_param->eth_type_value = ETH_TYPE_VALUE;
++	drv_param->vlan_type_value = VLAN_TYPE_VALUE;
++	drv_param->udp_general_port = UDP_GENERAL_PORT;
++	drv_param->udp_event_port = UDP_EVENT_PORT;
++	drv_param->ip_type_value = IP_TYPE_VALUE;
++	drv_param->eth_type_offset = ETH_TYPE_OFFSET;
++	drv_param->ip_type_offset = IP_TYPE_OFFSET;
++	drv_param->udp_dest_port_offset = UDP_DEST_PORT_OFFSET;
++	drv_param->ptp_type_offset = PTP_TYPE_OFFSET;
++
++	drv_param->ptp_msg_codes[e_PTP_MSG_SYNC] = DEFAULT_MSG_SYNC;
++	drv_param->ptp_msg_codes[e_PTP_MSG_DELAY_REQ] = DEFAULT_MSG_DELAY_REQ;
++	drv_param->ptp_msg_codes[e_PTP_MSG_FOLLOW_UP] = DEFAULT_MSG_FOLLOW_UP;
++	drv_param->ptp_msg_codes[e_PTP_MSG_DELAY_RESP] = DEFAULT_MSG_DELAY_RESP;
++	drv_param->ptp_msg_codes[e_PTP_MSG_MANAGEMENT] = DEFAULT_MSG_MANAGEMENT;
++}
++
++/* 64 bits operation */
++static u32 div64_oper(u64 dividend, u32 divisor, u32 *quotient)
++{
++	u32 time_h, time_l;
++	u32 result;
++	u64 tmp_dividend;
++	int i;
++
++	time_h = (u32)(dividend >> 32);
++	time_l = (u32)dividend;
++	time_h = time_h % divisor;
++	for (i = 1; i <= 32; i++) {
++		tmp_dividend = (((u64)time_h << 32) | (u64)time_l);
++		tmp_dividend = (tmp_dividend << 1);
++		time_h = (u32)(tmp_dividend >> 32);
++		time_l = (u32)tmp_dividend;
++		result = time_h / divisor;
++		time_h = time_h % divisor;
++		*quotient += (result << (32 - i));
++	}
++
++	return time_h;
++}
++
++/*64 bites add and return the result*/
++static u64 add64_oper(u64 addend, u64 augend)
++{
++	u64 result = 0;
++	u32 addendh, addendl, augendl, augendh;
++
++	addendh = (u32)(addend >> 32);
++	addendl = (u32)addend;
++
++	augendh = (u32)(augend>>32);
++	augendl = (u32)augend;
++
++	__asm__(
++	"adds %0,%2,%3\n"
++	"adc %1,%4,%5"
++	: "=r" (addendl), "=r" (addendh)
++	: "r" (addendl), "r" (augendl), "r" (addendh), "r" (augendh)
++	);
++
++	udelay(1);
++	result = (((u64)addendh << 32) | (u64)addendl);
++
++	return result;
++}
++
++/*64 bits multiplication and return the result*/
++static u64 multi64_oper(u32 multiplier, u32 multiplicand)
++{
++	u64 result = 0;
++	u64 tmp_ret = 0;
++	u32 tmp_multi = multiplicand;
++	int i;
++
++	for (i = 0; i < 32; i++) {
++		if (tmp_multi & 0x1) {
++			tmp_ret = ((u64)multiplier << i);
++			result = add64_oper(result, tmp_ret);
++		}
++		tmp_multi = (tmp_multi >> 1);
++	}
++
++	VDBG("multi 64 low result is 0x%x\n", result);
++	VDBG("multi 64 high result is 0x%x\n", (u32)(result>>32));
++
++	return result;
++}
++
++/*convert the 64 bites time stamp to second and nanosecond*/
++static void convert_rtc_time(u64 *rtc_time, struct ptp_time *p_time)
++{
++	u32 time_h;
++	u32 time_sec = 0;
++
++	time_h = div64_oper(*rtc_time, NANOSEC_IN_SEC, &time_sec);
++
++	p_time->sec = time_sec;
++	p_time->nsec = time_h;
++}
++
++/* convert rtc time to 64 bites timestamp */
++static u64 convert_unsigned_time(struct ptp_time *ptime)
++{
++	return add64_oper(multi64_oper(ptime->sec, NANOSEC_IN_SEC),
++			(u64)ptime->nsec);
++}
++
++/*RTC interrupt handler*/
++static irqreturn_t ptp_rtc_interrupt(int irq, void *_ptp)
++{
++	struct ptp *p_ptp = (struct ptp *)_ptp;
++	struct ptp_rtc *rtc = p_ptp->rtc;
++	struct ptp_time time;
++	register u32 events;
++
++	/*get valid events*/
++	events = readl(rtc->mem_map + PTP_TMR_TEVENT);
++
++	/*clear event bits*/
++	writel(events, rtc->mem_map + PTP_TMR_TEVENT);
++
++	/*get the current time as quickly as possible*/
++	ptp_rtc_get_current_time(p_ptp, &time);
++
++	if (events & RTC_TEVENT_ALARM_1) {
++		p_ptp->alarm_counters[0]++;
++		VDBG("PTP Alarm 1 event, time = %2d:%09d[sec:nsec]\n",
++			time.sec, time.nsec);
++	}
++	if (events & RTC_TEVENT_ALARM_2) {
++		p_ptp->alarm_counters[1]++;
++		VDBG("PTP Alarm 2 event, time = %2d:%09d[sec:nsec]\n",
++			time.sec, time.nsec);
++	}
++	if (events & RTC_TEVENT_PERIODIC_PULSE_1) {
++		p_ptp->pulse_counters[0]++;
++		VDBG("PTP Pulse 1 event, time = %2d:%09d[sec:nsec]\n",
++			time.sec, time.nsec);
++	}
++	if (events & RTC_TEVENT_PERIODIC_PULSE_2) {
++		p_ptp->pulse_counters[1]++;
++		VDBG("PTP Pulse 2 event, time = %2d:%09d[sec:nsec]\n",
++			time.sec, time.nsec);
++	}
++	if (events & RTC_TEVENT_PERIODIC_PULSE_3) {
++		p_ptp->pulse_counters[2]++;
++		VDBG("PTP Pulse 3 event, time = %2d:%09d[sec:nsec]\n",
++			time.sec, time.nsec);
++	}
++
++	return IRQ_HANDLED;
++}
++
++static int ptp_rtc_init(struct ptp *p_ptp)
++{
++	struct ptp_rtc *rtc = p_ptp->rtc;
++	struct ptp_rtc_driver_param *rtc_drv_param = rtc->driver_param;
++	void __iomem *rtc_mem = rtc->mem_map;
++	u32 freq_compensation = 0;
++	u32 tmr_ctrl = 0;
++	int ret = 0;
++	int i;
++
++	rtc = p_ptp->rtc;
++	rtc_drv_param = rtc->driver_param;
++	rtc_mem = rtc->mem_map;
++
++	if (!rtc->bypass_compensation)
++		rtc->clock_period_nansec = NANOSEC_PER_ONE_HZ_TICK /
++				rtc_drv_param->rtc_freq_hz;
++	else {
++		/*In bypass mode,the RTC clock equals the source clock*/
++		rtc->clock_period_nansec = NANOSEC_PER_ONE_HZ_TICK /
++				rtc_drv_param->src_clock_freq_hz;
++		tmr_ctrl |= RTC_TMR_CTRL_BYP;
++	}
++
++	tmr_ctrl |= ((rtc->clock_period_nansec <<
++			RTC_TMR_CTRL_TCLK_PERIOD_SHIFT) &
++			RTC_TMR_CTRL_TCLK_PERIOD_MSK);
++
++	if (rtc_drv_param->invert_input_clk_phase)
++		tmr_ctrl |= RTC_TMR_CTRL_CIPH;
++	if (rtc_drv_param->invert_output_clk_phase)
++		tmr_ctrl |= RTC_TMR_CTRL_COPH;
++	if (rtc_drv_param->pulse_start_mode == e_PTP_RTC_PULSE_START_ON_ALARM) {
++		tmr_ctrl |= RTC_TMR_CTRL_FS;
++		rtc->start_pulse_on_alarm = TRUE;
++	}
++
++	for (i = 0; i < PTP_RTC_NUM_OF_ALARMS; i++) {
++		if (rtc_drv_param->alarm_polarity[i] ==
++			e_PTP_RTC_ALARM_POLARITY_ACTIVE_LOW)
++			tmr_ctrl |= (RTC_TMR_CTRL_ALMP1 >> i);
++
++	}
++
++	/*clear TMR_ALARM registers*/
++	writel(0xFFFFFFFF, rtc_mem + PTP_TMR_ALARM1_L);
++	writel(0xFFFFFFFF, rtc_mem + PTP_TMR_ALARM1_H);
++	writel(0xFFFFFFFF, rtc_mem + PTP_TMR_ALARM2_L);
++	writel(0xFFFFFFFF, rtc_mem + PTP_TMR_ALARM2_H);
++
++	for (i = 0; i < PTP_RTC_NUM_OF_TRIGGERS; i++) {
++		if (rtc_drv_param->trigger_polarity[i] ==
++			e_PTP_RTC_TRIGGER_ON_FALLING_EDGE)
++			tmr_ctrl |= (RTC_TMR_CTRL_ETEP1 << i);
++	}
++
++	/*clear TMR_FIPER registers*/
++	writel(0xFFFFFFFF, rtc_mem + PTP_TMR_FIPER1);
++	writel(0xFFFFFFFF, rtc_mem + PTP_TMR_FIPER2);
++	writel(0xFFFFFFFF, rtc_mem + PTP_TMR_FIPER3);
++
++	/*set the source clock*/
++	/*use a clock from the QE bank of clocks*/
++	tmr_ctrl |= RTC_TMR_CTRL_CKSEL_EXT_CLK;
++
++	/*write register and perform software reset*/
++	writel((tmr_ctrl | RTC_TMR_CTRL_TMSR), rtc_mem + PTP_TMR_CTRL);
++	writel(tmr_ctrl, rtc_mem + PTP_TMR_CTRL);
++
++	/*clear TMR_TEVEMT*/
++	writel(RTC_EVENT_ALL, rtc_mem + PTP_TMR_TEVENT);
++
++	/*initialize TMR_TEMASK*/
++	writel(rtc_drv_param->events_mask, rtc_mem + PTP_TMR_TEMASK);
++
++	/*initialize TMR_ADD with the initial frequency compensation value:
++	 freq_compensation = (2^32 / frequency ratio)*/
++	div64_oper(((u64)rtc_drv_param->rtc_freq_hz << 32),
++			rtc_drv_param->src_clock_freq_hz, &freq_compensation);
++	p_ptp->orig_freq_comp = freq_compensation;
++	writel(freq_compensation, rtc_mem + PTP_TMR_ADD);
++
++	/*initialize TMR_PRSC*/
++	writel(rtc->output_clock_divisor, rtc_mem + PTP_TMR_PRSC);
++
++	/*initialize TMR_OFF*/
++	writel(0, rtc_mem + PTP_TMR_OFF_L);
++	writel(0, rtc_mem + PTP_TMR_OFF_H);
++
++	return ret;
++}
++
++static void init_ptp_parser(struct ptp *p_ptp)
++{
++	void __iomem *mem_map = p_ptp->mem_map;
++	struct ptp_driver_param *drv_param = p_ptp->driver_param;
++	u32 reg32;
++
++	/*initialzie PTP TSPDR1*/
++	reg32 = ((drv_param->eth_type_value << PTP_TSPDR1_ETT_SHIFT) &
++			PTP_TSPDR1_ETT_MASK);
++	reg32 |= ((drv_param->ip_type_value << PTP_TSPDR1_IPT_SHIFT) &
++			PTP_TSPDR1_IPT_MASK);
++	writel(reg32, mem_map + PTP_TSPDR1);
++
++	/*initialize PTP TSPDR2*/
++	reg32 = ((drv_param->udp_general_port << PTP_TSPDR2_DPNGE_SHIFT) &
++			PTP_TSPDR2_DPNGE_MASK);
++	reg32 |= (drv_param->udp_event_port & PTP_TSPDR2_DPNEV_MASK);
++	writel(reg32, mem_map + PTP_TSPDR2);
++
++	/*initialize PTP TSPDR3*/
++	reg32 = ((drv_param->ptp_msg_codes[e_PTP_MSG_SYNC] <<
++			PTP_TSPDR3_SYCTL_SHIFT) & PTP_TSPDR3_SYCTL_MASK);
++	reg32 |= ((drv_param->ptp_msg_codes[e_PTP_MSG_DELAY_REQ] <<
++			PTP_TSPDR3_DRCTL_SHIFT) & PTP_TSPDR3_DRCTL_MASK);
++	reg32 |= ((drv_param->ptp_msg_codes[e_PTP_MSG_DELAY_RESP] <<
++			PTP_TSPDR3_DRPCTL_SHIFT) & PTP_TSPDR3_DRPCTL_MASK);
++	reg32 |= (drv_param->ptp_msg_codes[e_PTP_MSG_FOLLOW_UP] &
++			PTP_TSPDR3_FUCTL_MASK);
++	writel(reg32, mem_map + PTP_TSPDR3);
++
++	/*initialzie PTP TSPDR4*/
++	reg32 = ((drv_param->ptp_msg_codes[e_PTP_MSG_MANAGEMENT] <<
++			PTP_TSPDR4_MACTL_SHIFT) & PTP_TSPDR4_MACTL_MASK);
++	reg32 |= (drv_param->vlan_type_value & PTP_TSPDR4_VLAN_MASK);
++	writel(reg32, mem_map + PTP_TSPDR4);
++
++	/*initialize PTP TSPOV*/
++	reg32 = ((drv_param->eth_type_offset << PTP_TSPOV_ETTOF_SHIFT) &
++			PTP_TSPOV_ETTOF_MASK);
++	reg32 |= ((drv_param->ip_type_offset << PTP_TSPOV_IPTOF_SHIFT) &
++			PTP_TSPOV_IPTOF_MASK);
++	reg32 |= ((drv_param->udp_dest_port_offset << PTP_TSPOV_UDOF_SHIFT) &
++			PTP_TSPOV_UDOF_MASK);
++	reg32 |= (drv_param->ptp_type_offset & PTP_TSPOV_PTOF_MASK);
++	writel(reg32, mem_map + PTP_TSPOV);
++}
++
++/* compatible with MXS 1588 */
++#ifdef CONFIG_IN_BAND
++void fec_ptp_store_txstamp(struct fec_ptp_private *priv,
++			   struct sk_buff *skb,
++			   struct bufdesc *bdp)
++{
++	int msg_type, seq_id, control;
++	struct fec_ptp_data_t tmp_tx_time, tmp;
++	struct fec_ptp_private *fpp = priv;
++	struct ptp *p_ptp = ptp_dev;
++	int flag;
++	unsigned char *sp_id;
++	unsigned short portnum;
++	u64 timestamp;
++
++	/* Check for PTP Event */
++	if ((bdp->cbd_sc & BD_ENET_TX_PTP) == 0)
++		return;
++
++	/* Get ts from tx ts queue */
++	memset(&tmp, 0, sizeof(struct fec_ptp_data_t));
++	tmp.key = SEQ_ID_OUT_OF_BAND;
++	flag = fec_ptp_find_and_remove(&(priv->txstamp), &tmp,
++				priv, DEFAULT_PTP_TX_BUF_SZ);
++	if (!flag) {
++		tmp_tx_time.ts_time.sec = tmp.ts_time.sec;
++		tmp_tx_time.ts_time.nsec = tmp.ts_time.nsec;
++	} else {
++		/*read timestamp from register*/
++		timestamp = ((u64)readl(p_ptp->mem_map + PTP_TMR_TXTS_H)
++				<< 32) |
++			(readl(p_ptp->mem_map + PTP_TMR_TXTS_L));
++		convert_rtc_time(&timestamp, &(tmp_tx_time.ts_time));
++	}
++
++	seq_id = *((u16 *)(skb->data + FEC_PTP_SEQ_ID_OFFS));
++	control = *((u8 *)(skb->data + FEC_PTP_CTRL_OFFS));
++	sp_id = skb->data + FEC_PTP_SPORT_ID_OFFS;
++	portnum = ntohs(*((unsigned short *)(sp_id + 8)));
++
++	tmp_tx_time.key = ntohs(seq_id);
++	memcpy(tmp_tx_time.spid, sp_id, 8);
++	memcpy(tmp_tx_time.spid + 8, (unsigned char *)&portnum, 2);
++
++	switch (control) {
++
++	case PTP_MSG_SYNC:
++		fec_ptp_insert(&(priv->tx_time_sync), &tmp_tx_time, priv,
++				DEFAULT_PTP_TX_BUF_SZ);
++		break;
++
++	case PTP_MSG_DEL_REQ:
++		fec_ptp_insert(&(priv->tx_time_del_req), &tmp_tx_time, priv,
++				DEFAULT_PTP_TX_BUF_SZ);
++		break;
++
++	/* clear transportSpecific field*/
++	case PTP_MSG_ALL_OTHER:
++		msg_type = (*((u8 *)(skb->data +
++				FEC_PTP_MSG_TYPE_OFFS))) & 0x0F;
++		switch (msg_type) {
++		case PTP_MSG_P_DEL_REQ:
++			fec_ptp_insert(&(priv->tx_time_pdel_req), &tmp_tx_time,
++					priv, DEFAULT_PTP_TX_BUF_SZ);
++			break;
++		case PTP_MSG_P_DEL_RESP:
++			fec_ptp_insert(&(priv->tx_time_pdel_resp), &tmp_tx_time,
++					priv, DEFAULT_PTP_TX_BUF_SZ);
++			break;
++		default:
++			break;
++		}
++		break;
++	default:
++		break;
++	}
++
++	wake_up_interruptible(&ptp_tx_ts_wait);
++}
++#else
++void fec_ptp_store_txstamp(struct fec_ptp_private *priv,
++			   struct sk_buff *skb,
++			   struct bufdesc *bdp)
++{
++}
++#endif
++
++static void ptp_store_txstamp(struct fec_ptp_private *priv,
++				struct ptp *p_ptp,
++				struct ptp_time *pts,
++				u32 events)
++{
++	struct fec_ptp_data_t tmp_tx_time;
++	u16 seq_id;
++
++	seq_id = SEQ_ID_OUT_OF_BAND;
++
++	memset(&tmp_tx_time, 0, sizeof(struct fec_ptp_data_t));
++	tmp_tx_time.key = ntohs(seq_id);
++	tmp_tx_time.ts_time.sec = pts->sec;
++	tmp_tx_time.ts_time.nsec = pts->nsec;
++	fec_ptp_insert(&(priv->txstamp), &tmp_tx_time,
++			priv, DEFAULT_PTP_TX_BUF_SZ);
++}
++
++/* out-of-band rx ts store */
++static void ptp_store_rxstamp(struct fec_ptp_private *priv,
++			      struct ptp *p_ptp,
++			      struct ptp_time *pts,
++			      u32 events)
++{
++	int control = PTP_MSG_ALL_OTHER;
++	u16 seq_id;
++	struct fec_ptp_data_t tmp_rx_time;
++
++	/* out-of-band mode can't get seq_id */
++	seq_id = SEQ_ID_OUT_OF_BAND;
++
++	memset(&tmp_rx_time, 0, sizeof(struct fec_ptp_data_t));
++	tmp_rx_time.key = ntohs(seq_id);
++	tmp_rx_time.ts_time.sec = pts->sec;
++	tmp_rx_time.ts_time.nsec = pts->nsec;
++	if (events & PTP_TS_RX_SYNC1)
++		control = PTP_MSG_SYNC;
++	else if (events & PTP_TS_RX_DELAY_REQ1)
++		control = PTP_MSG_DEL_REQ;
++	else if (events & PTP_TS_PDRQRE1)
++		control = PTP_MSG_P_DEL_REQ;
++	else if (events & PTP_TS_PDRSRE1)
++		control = PTP_MSG_DEL_RESP;
++
++	switch (control) {
++	case PTP_MSG_SYNC:
++		fec_ptp_insert(&(priv->rx_time_sync), &tmp_rx_time,
++				priv, DEFAULT_PTP_RX_BUF_SZ);
++		break;
++
++	case PTP_MSG_DEL_REQ:
++		fec_ptp_insert(&(priv->rx_time_del_req), &tmp_rx_time,
++				priv, DEFAULT_PTP_RX_BUF_SZ);
++		break;
++
++	case PTP_MSG_P_DEL_REQ:
++		fec_ptp_insert(&(priv->rx_time_pdel_req), &tmp_rx_time,
++				priv, DEFAULT_PTP_RX_BUF_SZ);
++		break;
++
++	case PTP_MSG_P_DEL_RESP:
++		fec_ptp_insert(&(priv->rx_time_pdel_resp), &tmp_rx_time,
++				priv, DEFAULT_PTP_RX_BUF_SZ);
++		break;
++
++	default:
++		break;
++	}
++
++	wake_up_interruptible(&ptp_rx_ts_wait);
++
++}
++
++/* in-band rx ts store */
++#ifdef CONFIG_IN_BAND
++void fec_ptp_store_rxstamp(struct fec_ptp_private *priv,
++			   struct sk_buff *skb,
++			   struct bufdesc *bdp)
++{
++	int msg_type, seq_id, control;
++	struct fec_ptp_data_t tmp_rx_time;
++	struct fec_ptp_private *fpp = priv;
++	u64 timestamp;
++	unsigned char *sp_id;
++	unsigned short portnum;
++
++	/* Check for PTP Event */
++	if ((bdp->cbd_sc & BD_ENET_RX_PTP) == 0) {
++		skb_pull(skb, 8);
++		return;
++	}
++
++	/* Get ts from skb data */
++	timestamp = *((u64 *)(skb->data));
++	convert_rtc_time(&timestamp, &(tmp_rx_time.ts_time));
++	skb_pull(skb, 8);
++
++	seq_id = *((u16 *)(skb->data + FEC_PTP_SEQ_ID_OFFS));
++	control = *((u8 *)(skb->data + FEC_PTP_CTRL_OFFS));
++	sp_id = skb->data + FEC_PTP_SPORT_ID_OFFS;
++	portnum = ntohs(*((unsigned short *)(sp_id + 8)));
++
++	tmp_rx_time.key = ntohs(seq_id);
++	memcpy(tmp_rx_time.spid, sp_id, 8);
++	memcpy(tmp_rx_time.spid + 8, (unsigned char *)&portnum, 2);
++
++	switch (control) {
++
++	case PTP_MSG_SYNC:
++		fec_ptp_insert(&(priv->rx_time_sync), &tmp_rx_time, priv,
++				DEFAULT_PTP_RX_BUF_SZ);
++		break;
++
++	case PTP_MSG_DEL_REQ:
++		fec_ptp_insert(&(priv->rx_time_del_req), &tmp_rx_time, priv,
++				DEFAULT_PTP_RX_BUF_SZ);
++		break;
++
++	/* clear transportSpecific field*/
++	case PTP_MSG_ALL_OTHER:
++		msg_type = (*((u8 *)(skb->data +
++				FEC_PTP_MSG_TYPE_OFFS))) & 0x0F;
++		switch (msg_type) {
++		case PTP_MSG_P_DEL_REQ:
++			fec_ptp_insert(&(priv->rx_time_pdel_req), &tmp_rx_time,
++					priv, DEFAULT_PTP_RX_BUF_SZ);
++			break;
++		case PTP_MSG_P_DEL_RESP:
++			fec_ptp_insert(&(priv->rx_time_pdel_resp), &tmp_rx_time,
++					priv, DEFAULT_PTP_RX_BUF_SZ);
++			break;
++		default:
++			break;
++		}
++		break;
++	default:
++		break;
++	}
++
++	wake_up_interruptible(&ptp_rx_ts_wait);
++}
++#else
++void fec_ptp_store_rxstamp(struct fec_ptp_private *priv,
++			   struct sk_buff *skb,
++			   struct bufdesc *bdp)
++{
++}
++#endif
++
++/*PTP interrupt handler*/
++static irqreturn_t ptp_interrupt(int irq, void *dev_id)
++{
++	struct ptp *p_ptp = (struct ptp *)dev_id;
++	void __iomem *mem_map = p_ptp->mem_map;
++	struct ptp_time ps;
++	u64 timestamp;
++	u32 events, orig_events;
++
++	/*get valid events*/
++	events = readl(mem_map + PTP_TMR_PEVENT);
++	while (events) {
++		if (events & PTP_TS_TX_FRAME1) {
++			/*read timestamp from register*/
++			timestamp = ((u64)readl(mem_map + PTP_TMR_TXTS_H)
++					<< 32) |
++				(readl(mem_map + PTP_TMR_TXTS_L));
++
++			/*clear event ASAP,hoping to prevent overrun*/
++			writel((u32)PTP_TS_TX_FRAME1,
++					mem_map + PTP_TMR_PEVENT);
++			/*check for overrun(which incalidates last timestamp)*/
++			events = readl(mem_map + PTP_TMR_PEVENT);
++
++			if (events & PTP_TS_TX_OVR1) {
++				/*lost synchronization with TX timestamps*/
++				/*clear overrun event*/
++				writel(PTP_TS_TX_OVR1,
++						mem_map + PTP_TMR_PEVENT);
++
++				p_ptp->tx_time_stamps_overrun++;
++			} else {
++				/*insert the Tx timestamps into the queue*/
++				convert_rtc_time(&timestamp, &ps);
++				ptp_store_txstamp(ptp_private, p_ptp,
++						&ps, orig_events);
++
++				/*this event is never really masked,
++				 *but it should be reported only
++				 *if includeed in usre events mask*/
++				if (p_ptp->events_mask & PTP_TS_TX_FRAME1)
++					p_ptp->tx_time_stamps++;
++				VDBG("tx interrupt\n");
++			}
++		}
++
++		/*typically only one of these events is relevant,
++		 *depending on whether the device is PTP master or slave*/
++		if (events & PTP_TS_RX_ALL) {
++			/*out-of-band mode:read timestamp
++			 *from registers*/
++			timestamp = ((u64)readl(mem_map + PTP_TMR_RXTS_H)
++					<< 32) |
++					(readl(mem_map + PTP_TMR_RXTS_L));
++
++			/*clear event ASAP,hoping to prevent overrun*/
++			orig_events = events;
++			writel((u32)(PTP_TS_RX_ALL),
++				mem_map + PTP_TMR_PEVENT);
++
++			/*check for overrun (which invalidates
++			 *last tiemstamp)*/
++			events = readl(mem_map + PTP_TMR_PEVENT);
++
++			if (events & PTP_TS_RX_OVR1) {
++				/*lost synchronization with Rx timestamp*/
++				/*clear overrun event. clear the
++				 *timestamp event as well, because
++				 *it may have arrived after it was
++				 *cleared above,but still it is not
++				 *synchronized with received frames*/
++				writel((u32)(PTP_TS_RX_ALL |
++					PTP_TS_RX_OVR1),
++					mem_map + PTP_TMR_RXTS_H);
++				p_ptp->rx_time_stamps_overrun++;
++			} else {
++				/*insert Rx timestamp into the queue*/
++				convert_rtc_time(&timestamp, &ps);
++				ptp_store_rxstamp(ptp_private, p_ptp,
++						&ps, orig_events);
++
++				/*the Rx TS event is never masked in
++				 *out-of-ban mode,but it should be
++				 *reported only if included in user's
++				 *event's mask*/
++				if (p_ptp->events_mask &
++					(PTP_TS_RX_SYNC1 |
++					PTP_TS_RX_DELAY_REQ1))
++					p_ptp->rx_time_stamps++;
++			}
++		}
++
++		writel(~PTP_TMR_PEVENT_VALID, mem_map + PTP_TMR_PEVENT);
++		events = readl(mem_map + PTP_TMR_PEVENT);
++	}
++
++	return IRQ_HANDLED;
++}
++
++static void init_ptp_tsu(struct ptp *p_ptp)
++{
++	struct ptp_driver_param *drv_param = p_ptp->driver_param;
++	void __iomem *mem_map;
++	u32 tsmr, pemask, events_mask;
++
++	mem_map = p_ptp->mem_map;
++
++	/*Tx timestamp events are required in all modes*/
++	events_mask = PTP_TS_TX_FRAME1 | PTP_TS_TX_OVR1;
++
++	/*read current values of TSU registers*/
++	tsmr = readl(mem_map + PTP_TSMR);
++	pemask = readl(mem_map + PTP_TMR_PEMASK);
++
++	if (drv_param->delivery_mode ==	e_PTP_TSU_DELIVERY_IN_BAND) {
++		tsmr |= PTP_TSMR_OPMODE1_IN_BAND;
++		events_mask &= ~(PTP_TS_TX_OVR1);
++	} else
++		/*rx timestamp events are required for out of band mode*/
++		events_mask |= (PTP_TS_RX_SYNC1 | PTP_TS_RX_DELAY_REQ1 |
++				PTP_TS_RX_OVR1);
++
++	pemask |= events_mask;
++
++	/*update TSU register*/
++	writel(tsmr, mem_map + PTP_TSMR);
++	writel(pemask, mem_map + PTP_TMR_PEMASK);
++}
++
++/* ptp module init */
++static void ptp_tsu_init(struct ptp *p_ptp)
++{
++	void __iomem *mem_map = p_ptp->mem_map;
++
++	/*initialization of registered PTP modules*/
++	init_ptp_parser(p_ptp);
++
++	/*reset timestamp*/
++	writel(0, mem_map + PTP_TSMR);
++	writel(0, mem_map + PTP_TMR_PEMASK);
++	writel(PTP_TMR_PEVENT_ALL, mem_map + PTP_TMR_PEVENT);
++
++}
++
++/* TSU configure function */
++static u32 ptp_tsu_enable(struct ptp *p_ptp)
++{
++	void __iomem *mem_map;
++	u32 tsmr;
++
++	/*enable the TSU*/
++	mem_map = p_ptp->mem_map;
++
++	/*set the TSU enable bit*/
++	tsmr = readl(mem_map + PTP_TSMR);
++	tsmr |= PTP_TSMR_EN1;
++
++	writel(tsmr, mem_map + PTP_TSMR);
++
++	return 0;
++}
++
++static u32 ptp_tsu_disable(struct ptp *p_ptp)
++{
++	void __iomem *mem_map;
++	u32 tsmr;
++
++	mem_map = p_ptp->mem_map;
++
++	tsmr = readl(mem_map + PTP_TSMR);
++	tsmr &= ~(PTP_TSMR_EN1);
++	writel(tsmr, mem_map + PTP_TSMR);
++
++	return 0;
++}
++
++static int ptp_tsu_config_events_mask(struct ptp *p_ptp,
++					u32 events_mask)
++{
++
++	p_ptp->events_mask = events_mask;
++
++	return 0;
++}
++
++/* rtc configure function */
++static u32 rtc_enable(struct ptp_rtc *rtc, bool reset_clock)
++{
++	u32 tmr_ctrl;
++
++	tmr_ctrl = readl(rtc->mem_map + PTP_TMR_CTRL);
++	if (reset_clock) {
++		writel((tmr_ctrl | RTC_TMR_CTRL_TMSR),
++				rtc->mem_map + PTP_TMR_CTRL);
++
++		/*clear TMR_OFF*/
++		writel(0, rtc->mem_map + PTP_TMR_OFF_L);
++		writel(0, rtc->mem_map + PTP_TMR_OFF_H);
++	}
++
++	writel((tmr_ctrl | RTC_TMR_CTRL_TE),
++			rtc->mem_map + PTP_TMR_CTRL);
++
++	return 0;
++}
++
++static u32 rtc_disable(struct ptp_rtc *rtc)
++{
++	u32 tmr_ctrl;
++
++	tmr_ctrl = readl(rtc->mem_map + PTP_TMR_CTRL);
++	writel((tmr_ctrl & ~RTC_TMR_CTRL_TE),
++			rtc->mem_map + PTP_TMR_CTRL);
++
++	return 0;
++}
++
++static u32 rtc_set_periodic_pulse(
++	struct ptp_rtc *rtc,
++	enum e_ptp_rtc_pulse_id pulse_ID,
++	u32 pulse_periodic)
++{
++	u32 factor;
++
++	if (rtc->start_pulse_on_alarm) {
++		/*from the spec:the ratio between the prescale register value
++		 *and the fiper value should be decisable by the clock period
++		 *FIPER_VALUE = (prescale_value * tclk_per * N) - tclk_per*/
++		 factor = (u32)((pulse_periodic + rtc->clock_period_nansec) /
++			(rtc->clock_period_nansec * rtc->output_clock_divisor));
++
++		if ((factor * rtc->clock_period_nansec *
++			rtc->output_clock_divisor) <
++			(pulse_periodic + rtc->clock_period_nansec))
++			pulse_periodic = ((factor * rtc->clock_period_nansec *
++				rtc->output_clock_divisor) -
++				rtc->clock_period_nansec);
++	}
++
++	/* Decrease it to fix PPS question (frequecy error)*/
++	pulse_periodic -= rtc->clock_period_nansec;
++
++	writel((u32)pulse_periodic, rtc->mem_map + PTP_TMR_FIPER1 +
++			(pulse_ID * 4));
++	return 0;
++}
++
++static u32 ptp_rtc_set_periodic_pulse(
++	struct ptp *p_ptp,
++	enum e_ptp_rtc_pulse_id pulse_ID,
++	struct ptp_time *ptime)
++{
++	u32 ret;
++	u64 pulse_periodic;
++
++	if (pulse_ID >= PTP_RTC_NUM_OF_PULSES)
++		return -1;
++	if (ptime->nsec < 0)
++		return -1;
++
++	pulse_periodic = convert_unsigned_time(ptime);
++	if (pulse_periodic > 0xFFFFFFFF)
++		return -1;
++
++	ret = rtc_set_periodic_pulse(p_ptp->rtc, pulse_ID, (u32)pulse_periodic);
++
++	return ret;
++}
++
++static u32 rtc_set_alarm(
++	struct ptp_rtc *rtc,
++	enum e_ptp_rtc_alarm_id alarm_ID,
++	u64 alarm_time)
++{
++	u32 fiper;
++	int i;
++
++	if ((alarm_ID == e_PTP_RTC_ALARM_1) && rtc->start_pulse_on_alarm)
++		alarm_time -= (3 * rtc->clock_period_nansec);
++
++	/*TMR_ALARM_L must be written first*/
++	writel((u32)alarm_time, rtc->mem_map + PTP_TMR_ALARM1_L +
++			(alarm_ID * 4));
++	writel((u32)(alarm_time >> 32),
++			rtc->mem_map + PTP_TMR_ALARM1_H + (alarm_ID * 4));
++
++	if ((alarm_ID == e_PTP_RTC_ALARM_1) && rtc->start_pulse_on_alarm) {
++		/*we must write the TMR_FIPER register again(hardware
++		 *constraint),From the spec:in order to keep tracking
++		 *the prescale output clock each tiem before enabling
++		 *the fiper,the user must reset the fiper by writing
++		 *a new value to the reigster*/
++		for (i = 0; i < PTP_RTC_NUM_OF_PULSES; i++) {
++			fiper = readl(rtc->mem_map + PTP_TMR_FIPER1 +
++					(i * 4));
++			writel(fiper, rtc->mem_map + PTP_TMR_FIPER1 +
++					(i * 4));
++		}
++	}
++
++	return 0;
++}
++
++static u32 ptp_rtc_set_alarm(
++	struct ptp *p_ptp,
++	enum e_ptp_rtc_alarm_id alarm_ID,
++	struct ptp_time *ptime)
++{
++	u32 ret;
++	u64 alarm_time;
++
++	if (alarm_ID >= PTP_RTC_NUM_OF_ALARMS)
++		return -1;
++	if (ptime->nsec < 0)
++		return -1;
++
++	alarm_time = convert_unsigned_time(ptime);
++
++	ret = rtc_set_alarm(p_ptp->rtc, alarm_ID, alarm_time);
++
++	return ret;
++}
++
++/* rtc ioctl function */
++/*get the current time from RTC time counter register*/
++static void ptp_rtc_get_current_time(struct ptp *p_ptp,
++					struct ptp_time *p_time)
++{
++	u64 times;
++	struct ptp_rtc *rtc = p_ptp->rtc;
++
++	/*TMR_CNT_L must be read first to get an accurate value*/
++	times = (u64)readl(rtc->mem_map + PTP_TMR_CNT_L);
++	times |= ((u64)readl(rtc->mem_map + PTP_TMR_CNT_H)) << 32;
++
++	/*convert RTC time*/
++	convert_rtc_time(&times, p_time);
++}
++
++static void ptp_rtc_reset_counter(struct ptp *p_ptp, struct ptp_time *p_time)
++{
++	u64 times;
++	struct ptp_rtc *rtc = p_ptp->rtc;
++
++	times = convert_unsigned_time(p_time);
++	writel((u32)times, rtc->mem_map + PTP_TMR_CNT_L);
++	writel((u32)(times >> 32), rtc->mem_map + PTP_TMR_CNT_H);
++
++}
++
++static void rtc_modify_frequency_compensation(
++	struct ptp_rtc *rtc,
++	u32 freq_compensation)
++{
++	writel(freq_compensation, rtc->mem_map + PTP_TMR_ADD);
++}
++
++/* Set the BD to ptp */
++int fec_ptp_do_txstamp(struct sk_buff *skb)
++{
++	struct iphdr *iph;
++	struct udphdr *udph;
++
++	if (skb->len > 44) {
++		/* Check if port is 319 for PTP Event, and check for UDP */
++		iph = ip_hdr(skb);
++		if (iph == NULL || iph->protocol != FEC_PACKET_TYPE_UDP)
++			return 0;
++
++		udph = udp_hdr(skb);
++		if (udph != NULL && ntohs(udph->dest) == 319)
++			return 1;
++	}
++
++	return 0;
++}
++
++static int fec_get_tx_timestamp(struct fec_ptp_private *priv,
++				 struct ptp_ts_data *pts,
++				 struct ptp_time *tx_time)
++{
++	struct fec_ptp_data_t tmp;
++	int flag;
++
++#ifdef CONFIG_IN_BAND
++	u8 mode;
++	tmp.key = pts->seq_id;
++	memcpy(tmp.spid, pts->spid, 10);
++	mode = pts->message_type;
++
++	switch (mode) {
++	case PTP_MSG_SYNC:
++		flag = fec_ptp_find_and_remove(&(priv->tx_time_sync), &tmp,
++				priv, DEFAULT_PTP_TX_BUF_SZ);
++		break;
++	case PTP_MSG_DEL_REQ:
++		flag = fec_ptp_find_and_remove(&(priv->tx_time_del_req), &tmp,
++				priv, DEFAULT_PTP_TX_BUF_SZ);
++		break;
++
++	case PTP_MSG_P_DEL_REQ:
++		flag = fec_ptp_find_and_remove(&(priv->tx_time_pdel_req), &tmp,
++				priv, DEFAULT_PTP_TX_BUF_SZ);
++		break;
++	case PTP_MSG_P_DEL_RESP:
++		flag = fec_ptp_find_and_remove(&(priv->tx_time_pdel_resp),
++				&tmp, priv, DEFAULT_PTP_TX_BUF_SZ);
++		break;
++
++	default:
++		flag = 1;
++		printk(KERN_ERR "ERROR\n");
++		break;
++	}
++
++	if (!flag) {
++		tx_time->sec = tmp.ts_time.sec;
++		tx_time->nsec = tmp.ts_time.nsec;
++		return 0;
++	} else {
++		wait_event_interruptible_timeout(ptp_tx_ts_wait, 0,
++					PTP_GET_TX_TIMEOUT);
++
++		switch (mode) {
++		case PTP_MSG_SYNC:
++			flag = fec_ptp_find_and_remove(&(priv->tx_time_sync),
++				&tmp, priv, DEFAULT_PTP_TX_BUF_SZ);
++			break;
++		case PTP_MSG_DEL_REQ:
++			flag = fec_ptp_find_and_remove(
++				&(priv->tx_time_del_req), &tmp,
++				priv, DEFAULT_PTP_TX_BUF_SZ);
++			break;
++		case PTP_MSG_P_DEL_REQ:
++			flag = fec_ptp_find_and_remove(
++				&(priv->tx_time_pdel_req), &tmp,
++				priv, DEFAULT_PTP_TX_BUF_SZ);
++			break;
++		case PTP_MSG_P_DEL_RESP:
++			flag = fec_ptp_find_and_remove(
++				&(priv->tx_time_pdel_resp), &tmp,
++				priv, DEFAULT_PTP_TX_BUF_SZ);
++			break;
++		}
++
++		if (flag == 0) {
++			tx_time->sec = tmp.ts_time.sec;
++			tx_time->nsec = tmp.ts_time.nsec;
++			return 0;
++		}
++
++		return -1;
++	}
++
++#else
++	memset(tmp.spid, 0, 10);
++	tmp.key = SEQ_ID_OUT_OF_BAND;
++
++	flag = fec_ptp_find_and_remove(&(priv->txstamp), &tmp,
++			priv, DEFAULT_PTP_TX_BUF_SZ);
++	tx_time->sec = tmp.ts_time.sec;
++	tx_time->nsec = tmp.ts_time.nsec;
++	return 0;
++#endif
++}
++
++static uint8_t fec_get_rx_timestamp(struct fec_ptp_private *priv,
++				    struct ptp_ts_data *pts,
++				    struct ptp_time *rx_time)
++{
++	struct fec_ptp_data_t tmp;
++	int flag;
++	u8 mode;
++
++#ifdef CONFIG_IN_BAND
++	tmp.key = pts->seq_id;
++	memcpy(tmp.spid, pts->spid, 10);
++#else
++	memset(tmp.spid, 0, 10);
++	tmp.key = SEQ_ID_OUT_OF_BAND;
++#endif
++	mode = pts->message_type;
++	switch (mode) {
++	case PTP_MSG_SYNC:
++		flag = fec_ptp_find_and_remove(&(priv->rx_time_sync), &tmp,
++				priv, DEFAULT_PTP_RX_BUF_SZ);
++		break;
++	case PTP_MSG_DEL_REQ:
++		flag = fec_ptp_find_and_remove(&(priv->rx_time_del_req), &tmp,
++				priv, DEFAULT_PTP_RX_BUF_SZ);
++		break;
++
++	case PTP_MSG_P_DEL_REQ:
++		flag = fec_ptp_find_and_remove(&(priv->rx_time_pdel_req), &tmp,
++				priv, DEFAULT_PTP_RX_BUF_SZ);
++		break;
++	case PTP_MSG_P_DEL_RESP:
++		flag = fec_ptp_find_and_remove(&(priv->rx_time_pdel_resp),
++				&tmp, priv, DEFAULT_PTP_RX_BUF_SZ);
++		break;
++
++	default:
++		flag = 1;
++		printk(KERN_ERR "ERROR\n");
++		break;
++	}
++
++	if (!flag) {
++		rx_time->sec = tmp.ts_time.sec;
++		rx_time->nsec = tmp.ts_time.nsec;
++		return 0;
++	} else {
++		wait_event_interruptible_timeout(ptp_rx_ts_wait, 0,
++					PTP_GET_RX_TIMEOUT);
++
++		switch (mode) {
++		case PTP_MSG_SYNC:
++			flag = fec_ptp_find_and_remove(&(priv->rx_time_sync),
++				&tmp, priv, DEFAULT_PTP_RX_BUF_SZ);
++			break;
++		case PTP_MSG_DEL_REQ:
++			flag = fec_ptp_find_and_remove(
++				&(priv->rx_time_del_req), &tmp,
++				priv, DEFAULT_PTP_RX_BUF_SZ);
++			break;
++		case PTP_MSG_P_DEL_REQ:
++			flag = fec_ptp_find_and_remove(
++				&(priv->rx_time_pdel_req), &tmp,
++				priv, DEFAULT_PTP_RX_BUF_SZ);
++			break;
++		case PTP_MSG_P_DEL_RESP:
++			flag = fec_ptp_find_and_remove(
++				&(priv->rx_time_pdel_resp), &tmp,
++				priv, DEFAULT_PTP_RX_BUF_SZ);
++			break;
++		}
++
++		if (flag == 0) {
++			rx_time->sec = tmp.ts_time.sec;
++			rx_time->nsec = tmp.ts_time.nsec;
++			return 0;
++		}
++
++		return -1;
++	}
++}
++
++/* 1588 Module start */
++int fec_ptp_start(struct fec_ptp_private *priv)
++{
++	struct ptp *p_ptp = ptp_dev;
++
++	/* Enable TSU clk */
++	clk_enable(p_ptp->clk);
++
++	/*initialize the TSU using the register function*/
++	init_ptp_tsu(p_ptp);
++
++	/* start counter */
++	p_ptp->fpp = ptp_private;
++	ptp_tsu_enable(p_ptp);
++
++	return 0;
++}
++
++/* Cleanup routine for 1588 module.
++ * When PTP is disabled this routing is called */
++void fec_ptp_stop(struct fec_ptp_private *priv)
++{
++	struct ptp *p_ptp = ptp_dev;
++
++	/* stop counter */
++	ptp_tsu_disable(p_ptp);
++	clk_disable(p_ptp->clk);
++
++	return;
++}
++
++static int ptp_open(struct inode *inode, struct file *file)
++{
++	return 0;
++}
++
++static int ptp_release(struct inode *inode, struct file *file)
++{
++	return 0;
++}
++
++/* ptp device ioctl function */
++static int ptp_ioctl(
++	struct inode *inode,
++	struct file *file,
++	unsigned int cmd,
++	unsigned long arg)
++{
++	struct ptp_rtc_time *cnt;
++	struct ptp_rtc_time curr_time;
++	struct ptp_time rx_time, tx_time;
++	struct ptp_ts_data *p_ts;
++	struct ptp_set_comp *p_comp;
++	struct fec_ptp_private *priv;
++	int retval = 0;
++
++	priv = (struct fec_ptp_private *) ptp_private;
++	switch (cmd) {
++	case PTP_GET_RX_TIMESTAMP:
++		p_ts = (struct ptp_ts_data *)arg;
++		retval = fec_get_rx_timestamp(priv, p_ts, &rx_time);
++		if (retval == 0)
++			retval = copy_to_user((void __user *)(&(p_ts->ts)),
++					&rx_time, sizeof(rx_time));
++		break;
++	case PTP_GET_TX_TIMESTAMP:
++		p_ts = (struct ptp_ts_data *)arg;
++		fec_get_tx_timestamp(priv, p_ts, &tx_time);
++		retval = copy_to_user((void __user *)(&(p_ts->ts)),
++				&tx_time, sizeof(tx_time));
++		break;
++	case PTP_GET_CURRENT_TIME:
++		ptp_rtc_get_current_time(ptp_dev, &(curr_time.rtc_time));
++		retval = copy_to_user((void __user *)arg, &curr_time,
++				sizeof(curr_time));
++		break;
++	case PTP_SET_RTC_TIME:
++		cnt = (struct ptp_rtc_time *)arg;
++		ptp_rtc_reset_counter(ptp_dev, &(cnt->rtc_time));
++		break;
++	case PTP_FLUSH_TIMESTAMP:
++		/* reset sync buffer */
++		priv->rx_time_sync.head = 0;
++		priv->rx_time_sync.tail = 0;
++		/* reset delay_req buffer */
++		priv->rx_time_del_req.head = 0;
++		priv->rx_time_del_req.tail = 0;
++		/* reset pdelay_req buffer */
++		priv->rx_time_pdel_req.head = 0;
++		priv->rx_time_pdel_req.tail = 0;
++		/* reset pdelay_resp buffer */
++		priv->rx_time_pdel_resp.head = 0;
++		priv->rx_time_pdel_resp.tail = 0;
++		/* reset sync buffer */
++		priv->tx_time_sync.head = 0;
++		priv->tx_time_sync.tail = 0;
++		/* reset delay_req buffer */
++		priv->tx_time_del_req.head = 0;
++		priv->tx_time_del_req.tail = 0;
++		/* reset pdelay_req buffer */
++		priv->tx_time_pdel_req.head = 0;
++		priv->tx_time_pdel_req.tail = 0;
++		/* reset pdelay_resp buffer */
++		priv->tx_time_pdel_resp.head = 0;
++		priv->tx_time_pdel_resp.tail = 0;
++		priv->txstamp.head = 0;
++		priv->txstamp.tail = 0;
++		break;
++	case PTP_SET_COMPENSATION:
++		p_comp = (struct ptp_set_comp *)arg;
++		rtc_modify_frequency_compensation(ptp_dev->rtc,
++				p_comp->freq_compensation);
++		break;
++	case PTP_GET_ORIG_COMP:
++		((struct ptp_get_comp *)arg)->dw_origcomp =
++					ptp_dev->orig_freq_comp;
++		break;
++	default:
++		return -EINVAL;
++	}
++	return retval;
++}
++
++static const struct file_operations ptp_fops = {
++	.owner	= THIS_MODULE,
++	.llseek	= NULL,
++	.read	= NULL,
++	.write	= NULL,
++	.ioctl	= ptp_ioctl,
++	.open	= ptp_open,
++	.release = ptp_release,
++};
++
++static int init_ptp_driver(struct ptp *p_ptp)
++{
++	struct ptp_time ptime;
++	int ret;
++
++	/* configure RTC param */
++	ret = ptp_rtc_config(p_ptp->rtc);
++	if (ret)
++		return -1;
++
++	/* initialize RTC register */
++	ptp_rtc_init(p_ptp);
++
++	/* initialize PTP TSU param */
++	ptp_param_config(p_ptp);
++
++	/* set TSU configuration parameters */
++#ifdef CONFIG_IN_BAND
++	p_ptp->driver_param->delivery_mode = e_PTP_TSU_DELIVERY_IN_BAND;
++#else
++	p_ptp->driver_param->delivery_mode = e_PTP_TSU_DELIVERY_OUT_OF_BAND;
++#endif
++
++	if (ptp_tsu_config_events_mask(p_ptp, DEFAULT_events_PTP_Mask))
++			goto end;
++
++	/* initialize PTP TSU register */
++	ptp_tsu_init(p_ptp);
++
++	/* set periodic pulses */
++	ptime.sec = USE_CASE_PULSE_1_PERIOD / NANOSEC_IN_SEC;
++	ptime.nsec = USE_CASE_PULSE_1_PERIOD % NANOSEC_IN_SEC;
++	ret = ptp_rtc_set_periodic_pulse(p_ptp, e_PTP_RTC_PULSE_1, &ptime);
++	if (ret)
++		goto end;
++
++	ptime.sec = USE_CASE_PULSE_2_PERIOD / NANOSEC_IN_SEC;
++	ptime.nsec = USE_CASE_PULSE_2_PERIOD % NANOSEC_IN_SEC;
++	ret = ptp_rtc_set_periodic_pulse(p_ptp, e_PTP_RTC_PULSE_2, &ptime);
++	if (ret)
++		goto end;
++
++	ptime.sec = USE_CASE_PULSE_3_PERIOD / NANOSEC_IN_SEC;
++	ptime.nsec = USE_CASE_PULSE_3_PERIOD % NANOSEC_IN_SEC;
++	ret = ptp_rtc_set_periodic_pulse(p_ptp, e_PTP_RTC_PULSE_3, &ptime);
++	if (ret)
++		goto end;
++
++	/* set alarm */
++	ptime.sec = (USE_CASE_ALARM_1_TIME / NANOSEC_IN_SEC);
++	ptime.nsec = (USE_CASE_ALARM_1_TIME % NANOSEC_IN_SEC);
++	ret = ptp_rtc_set_alarm(p_ptp, e_PTP_RTC_ALARM_1, &ptime);
++	if (ret)
++		goto end;
++
++	ptime.sec = (USE_CASE_ALARM_2_TIME / NANOSEC_IN_SEC);
++	ptime.nsec = (USE_CASE_ALARM_2_TIME % NANOSEC_IN_SEC);
++	ret = ptp_rtc_set_alarm(p_ptp, e_PTP_RTC_ALARM_2, &ptime);
++	if (ret)
++		goto end;
++
++	/* enable the RTC */
++	ret = rtc_enable(p_ptp->rtc, FALSE);
++	if (ret)
++		goto end;
++
++	udelay(10);
++	ptp_rtc_get_current_time(p_ptp, &ptime);
++	if (ptime.nsec == 0) {
++		printk(KERN_ERR "PTP RTC is not running\n");
++		goto end;
++	}
++
++	if (register_chrdev(PTP_MAJOR, "ptp", &ptp_fops))
++		printk(KERN_ERR "Unable to register PTP device as char\n");
++	else
++		printk(KERN_INFO "Register PTP as char device\n");
++
++end:
++	return ret;
++}
++
++static void ptp_free(void)
++{
++	rtc_disable(ptp_dev->rtc);
++	/*unregister the PTP device*/
++	unregister_chrdev(PTP_MAJOR, "ptp");
++}
++
++/*
++ * Resource required for accessing 1588 Timer Registers.
++ */
++int fec_ptp_init(struct fec_ptp_private *priv, int id)
++{
++	fec_ptp_init_circ(&(priv->rx_time_sync), DEFAULT_PTP_RX_BUF_SZ);
++	fec_ptp_init_circ(&(priv->rx_time_del_req), DEFAULT_PTP_RX_BUF_SZ);
++	fec_ptp_init_circ(&(priv->rx_time_pdel_req), DEFAULT_PTP_RX_BUF_SZ);
++	fec_ptp_init_circ(&(priv->rx_time_pdel_resp), DEFAULT_PTP_RX_BUF_SZ);
++	fec_ptp_init_circ(&(priv->tx_time_sync), DEFAULT_PTP_TX_BUF_SZ);
++	fec_ptp_init_circ(&(priv->tx_time_del_req), DEFAULT_PTP_TX_BUF_SZ);
++	fec_ptp_init_circ(&(priv->tx_time_pdel_req), DEFAULT_PTP_TX_BUF_SZ);
++	fec_ptp_init_circ(&(priv->tx_time_pdel_resp), DEFAULT_PTP_TX_BUF_SZ);
++
++	fec_ptp_init_circ(&(priv->txstamp), DEFAULT_PTP_TX_BUF_SZ);
++
++	spin_lock_init(&priv->ptp_lock);
++	spin_lock_init(&priv->cnt_lock);
++	ptp_private = priv;
++
++	return 0;
++}
++EXPORT_SYMBOL(fec_ptp_init);
++
++void fec_ptp_cleanup(struct fec_ptp_private *priv)
++{
++	if (priv->rx_time_sync.buf)
++		vfree(priv->rx_time_sync.buf);
++	if (priv->rx_time_del_req.buf)
++		vfree(priv->rx_time_del_req.buf);
++	if (priv->rx_time_pdel_req.buf)
++		vfree(priv->rx_time_pdel_req.buf);
++	if (priv->rx_time_pdel_resp.buf)
++		vfree(priv->rx_time_pdel_resp.buf);
++	if (priv->tx_time_sync.buf)
++		vfree(priv->tx_time_sync.buf);
++	if (priv->tx_time_del_req.buf)
++		vfree(priv->tx_time_del_req.buf);
++	if (priv->tx_time_pdel_req.buf)
++		vfree(priv->tx_time_pdel_req.buf);
++	if (priv->tx_time_pdel_resp.buf)
++		vfree(priv->tx_time_pdel_resp.buf);
++	if (priv->txstamp.buf)
++		vfree(priv->txstamp.buf);
++
++	ptp_free();
++}
++EXPORT_SYMBOL(fec_ptp_cleanup);
++
++/* probe just register memory and irq */
++static int __devinit
++ptp_probe(struct platform_device *pdev)
++{
++	int i, irq, ret = 0;
++	struct resource *r;
++
++	/* setup board info structure */
++	ptp_dev = kzalloc(sizeof(struct ptp), GFP_KERNEL);
++	if (!ptp_dev) {
++		ret = -ENOMEM;
++		goto err1;
++	}
++	ptp_dev->rtc = kzalloc(sizeof(struct ptp_rtc),
++				GFP_KERNEL);
++	if (!ptp_dev->rtc) {
++		ret = -ENOMEM;
++		goto err2;
++	}
++
++	/* PTP register memory */
++	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!r) {
++		ret = -ENXIO;
++		goto err3;
++	}
++
++	r = request_mem_region(r->start, resource_size(r), pdev->name);
++	if (!r) {
++		ret = -EBUSY;
++		goto err3;
++	}
++
++	ptp_dev->mem_map = ioremap(r->start, resource_size(r));
++	if (!ptp_dev->mem_map) {
++		ret = -ENOMEM;
++		goto failed_ioremap;
++	}
++
++	/* RTC register memory */
++	r = platform_get_resource(pdev, IORESOURCE_MEM, 1);
++	if (!r) {
++		ret = -ENXIO;
++		goto err4;
++	}
++
++	r = request_mem_region(r->start, resource_size(r), "PTP_RTC");
++	if (!r) {
++		ret = -EBUSY;
++		goto err4;
++	}
++
++	ptp_dev->rtc->mem_map = ioremap(r->start, resource_size(r));
++
++	if (!ptp_dev->rtc->mem_map) {
++		ret = -ENOMEM;
++		goto failed_ioremap1;
++	}
++
++	/* This device has up to two irqs on some platforms */
++	for (i = 0; i < 2; i++) {
++		irq = platform_get_irq(pdev, i);
++		if (i && irq < 0)
++			break;
++		if (i == 0)
++			ret = request_irq(irq, ptp_interrupt,
++					IRQF_DISABLED, pdev->name, ptp_dev);
++		else
++			ret = request_irq(irq, ptp_rtc_interrupt,
++					IRQF_DISABLED, "ptp_rtc", ptp_dev);
++		if (ret) {
++			while (i >= 0) {
++				irq = platform_get_irq(pdev, i);
++				free_irq(irq, ptp_dev);
++				i--;
++			}
++			goto failed_irq;
++		}
++	}
++
++	ptp_dev->rtc->clk = clk_get(NULL, "ieee_rtc_clk");
++	if (IS_ERR(ptp_dev->rtc->clk)) {
++		ret = PTR_ERR(ptp_dev->rtc->clk);
++		goto failed_clk1;
++	}
++
++	ptp_dev->clk = clk_get(&pdev->dev, "ieee_1588_clk");
++	if (IS_ERR(ptp_dev->clk)) {
++		ret = PTR_ERR(ptp_dev->clk);
++		goto failed_clk2;
++	}
++
++	clk_enable(ptp_dev->clk);
++
++	init_ptp_driver(ptp_dev);
++	clk_disable(ptp_dev->clk);
++
++	return 0;
++
++failed_clk2:
++	clk_put(ptp_dev->rtc->clk);
++failed_clk1:
++	for (i = 0; i < 2; i++) {
++		irq = platform_get_irq(pdev, i);
++		if (irq > 0)
++			free_irq(irq, ptp_dev);
++	}
++failed_irq:
++	iounmap((void __iomem *)ptp_dev->rtc->mem_map);
++failed_ioremap1:
++err4:
++	iounmap((void __iomem *)ptp_dev->mem_map);
++failed_ioremap:
++err3:
++	kfree(ptp_dev->rtc);
++err2:
++	kfree(ptp_dev);
++err1:
++	return ret;
++}
++
++static int __devexit
++ptp_drv_remove(struct platform_device *pdev)
++{
++	clk_disable(ptp_dev->clk);
++	clk_put(ptp_dev->clk);
++	clk_put(ptp_dev->rtc->clk);
++	iounmap((void __iomem *)ptp_dev->rtc->mem_map);
++	iounmap((void __iomem *)ptp_dev->mem_map);
++	kfree(ptp_dev->rtc->driver_param);
++	kfree(ptp_dev->rtc);
++	kfree(ptp_dev->driver_param);
++	kfree(ptp_dev);
++	return 0;
++}
++
++static struct platform_driver ptp_driver = {
++	.driver	= {
++		.name    = "ptp",
++		.owner	 = THIS_MODULE,
++	},
++	.probe   = ptp_probe,
++	.remove  = __devexit_p(ptp_drv_remove),
++};
++
++static int __init
++ptp_module_init(void)
++{
++	printk(KERN_INFO "iMX PTP Driver\n");
++
++	return platform_driver_register(&ptp_driver);
++}
++
++static void __exit
++ptp_cleanup(void)
++{
++	platform_driver_unregister(&ptp_driver);
++}
++
++module_exit(ptp_cleanup);
++module_init(ptp_module_init);
++
++MODULE_LICENSE("GPL");
+diff --git a/drivers/net/imx_ptp.h b/drivers/net/imx_ptp.h
+new file mode 100644
+index 0000000..81e69a7
+--- /dev/null
++++ b/drivers/net/imx_ptp.h
+@@ -0,0 +1,356 @@
++/*
++ * drivers/net/imx_ptp.h
++ *
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All rights reserved.
++ *
++ * Description: IEEE 1588 driver supporting imx5 Fast Ethernet Controller.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#ifndef _PTP_H_
++#define _PTP_H_
++#ifndef TRUE
++#define TRUE	1
++#endif
++#ifndef FALSE
++#define FALSE	0
++#endif
++
++#define PTP_NUM_OF_PORTS	2
++#define SEQ_ID_OUT_OF_BAND	0xFFFF
++
++/* PTP message types */
++enum e_ptp_message {
++	e_PTP_MSG_SYNC = 0,	/*Sync message*/
++	e_PTP_MSG_DELAY_REQ,	/*Dealy_req message*/
++	e_PTP_MSG_FOLLOW_UP,	/*Follow_up message*/
++	e_PTP_MSG_DELAY_RESP,	/*Delay_resp message*/
++	e_PTP_MSG_MANAGEMENT,	/*Management message*/
++	e_PTP_MSG_DUMMY_LAST
++};
++
++/* PTP time stamp delivery mode*/
++enum e_ptp_tsu_delivery_mode {
++	e_PTP_TSU_DELIVERY_IN_BAND,	/*in-band time-sttamp delivery mode*/
++	e_PTP_TSU_DELIVERY_OUT_OF_BAND	/*out-of-band time stamp delivery mode*/
++};
++
++/*PTP RTC Alarm Polarity Options*/
++enum e_ptp_rtc_alarm_polarity {
++	e_PTP_RTC_ALARM_POLARITY_ACTIVE_HIGH,	/*active-high output polarity*/
++	e_PTP_RTC_ALARM_POLARITY_ACTIVE_LOW	/*active-low output polarity*/
++};
++
++/*PTP RTC Trigger Polarity Options*/
++enum e_ptp_rtc_trig_polarity {
++	e_PTP_RTC_TRIGGER_ON_RISING_EDGE,	/*trigger on rising edge*/
++	e_PTP_RTC_TRIGGER_ON_FALLING_EDGE	/*trigger on falling edge*/
++};
++
++/*PTP RTC Periodic Pulse Start Mode*/
++enum e_ptp_rtc_pulse_start_mode {
++	e_PTP_RTC_PULSE_START_AUTO,	/*start pulse when RTC is enabled*/
++	e_PTP_RTC_PULSE_START_ON_ALARM	/*start pulse on alarm 1 event*/
++};
++
++/*PTP RTC Alarm ID*/
++enum e_ptp_rtc_alarm_id {
++	e_PTP_RTC_ALARM_1 = 0,	/*alarm signal 1*/
++	e_PTP_RTC_ALARM_2,	/*slarm signal 2*/
++	e_PTP_RTC_ALARM_DUMMY_LAST
++};
++#define PTP_RTC_NUM_OF_ALARMS e_PTP_RTC_ALARM_DUMMY_LAST
++
++/*PTP RTC Periodic Pulse ID*/
++enum e_ptp_rtc_pulse_id {
++	e_PTP_RTC_PULSE_1 = 0,	/*periodic pulse 1*/
++	e_PTP_RTC_PULSE_2,	/*periodic pulse 2*/
++	e_PTP_RTC_PULSE_3,	/*periodic pulse 3*/
++	e_PTP_RTC_PULSE_DUMMY_LASR
++};
++#define PTP_RTC_NUM_OF_PULSES e_PTP_RTC_PULSE_DUMMY_LASR
++
++/*PTP RTC External trigger ID*/
++enum e_ptp_rtc_trigger_id {
++	e_PTP_RTC_TRIGGER_1 = 0,	/*External trigger 1*/
++	e_PTP_RTC_TRIGGER_2,		/*External trigger 2*/
++	e_PTP_RTC_TRIGGER_DUMMY_LAST
++};
++#define PTP_RTC_NUM_OF_TRIGGERS e_PTP_RTC_TRIGGER_DUMMY_LAST
++
++/* PTP register definition */
++#define PTP_TSPDR1		0x0
++#define PTP_TSPDR2		0x4
++#define PTP_TSPDR3		0x8
++#define PTP_TSPDR4		0xc
++#define PTP_TSPOV		0x10
++#define PTP_TSMR		0x14
++#define PTP_TMR_PEVENT		0x18
++#define PTP_TMR_PEMASK		0x1c
++#define PTP_TMR_RXTS_H		0x20
++#define PTP_TMR_RXTS_L		0x30
++#define PTP_TMR_TXTS_H		0x40
++#define PTP_TMR_TXTS_L		0x50
++#define PTP_TSPDR5		0x60
++#define PTP_TSPDR6		0x64
++#define PTP_TSPDR7		0x68
++
++/* RTC register definition */
++#define PTP_TMR_CTRL		0x0
++#define PTP_TMR_TEVENT		0x4
++#define PTP_TMR_TEMASK		0x8
++#define PTP_TMR_CNT_L		0xc
++#define PTP_TMR_CNT_H		0x10
++#define PTP_TMR_ADD		0x14
++#define PTP_TMR_ACC		0x18
++#define PTP_TMR_PRSC		0x1c
++#define PTP_TMR_OFF_L		0x20
++#define PTP_TMR_OFF_H		0x24
++#define PTP_TMR_ALARM1_L	0x28
++#define PTP_TMR_ALARM1_H	0x2c
++#define PTP_TMR_ALARM2_L	0x30
++#define PTP_TMR_ALARM2_H	0x34
++#define PTP_TMR_FIPER1		0x38
++#define PTP_TMR_FIPER2		0x3c
++#define PTP_TMR_FIPER3		0x40
++#define PTP_TMR_ETTS1_L		0x44
++#define PTP_TMR_ETTS1_H		0x48
++#define PTP_TMR_ETTS2_L		0x4c
++#define PTP_TMR_ETTS2_H		0x50
++#define PTP_TMR_FSV_L		0x54
++#define PTP_TMR_FSV_H		0x58
++
++/* PTP parser registers*/
++#define PTP_TSPDR1_ETT_MASK	0xFFFF0000
++#define PTP_TSPDR1_IPT_MASK	0x0000FF00
++#define PTP_TSPDR1_ETT_SHIFT	16
++#define PTP_TSPDR1_IPT_SHIFT	8
++
++#define PTP_TSPDR2_DPNGE_MASK	0xFFFF0000
++#define PTP_TSPDR2_DPNEV_MASK	0x0000FFFF
++#define PTP_TSPDR2_DPNGE_SHIFT	16
++
++#define PTP_TSPDR3_SYCTL_MASK	0xFF000000
++#define PTP_TSPDR3_DRCTL_MASK	0x00FF0000
++#define PTP_TSPDR3_DRPCTL_MASK	0x0000FF00
++#define PTP_TSPDR3_FUCTL_MASK	0x000000FF
++#define PTP_TSPDR3_SYCTL_SHIFT	24
++#define PTP_TSPDR3_DRCTL_SHIFT	16
++#define PTP_TSPDR3_DRPCTL_SHIFT	8
++
++#define PTP_TSPDR4_MACTL_MASK	0xFF000000
++#define PTP_TSPDR4_VLAN_MASK	0x0000FFFF
++#define PTP_TSPDR4_MACTL_SHIFT	24
++
++/*PTP Parsing Offset Values*/
++#define PTP_TSPOV_ETTOF_MASK	0xFF000000
++#define PTP_TSPOV_IPTOF_MASK	0x00FF0000
++#define PTP_TSPOV_UDOF_MASK	0x0000FF00
++#define PTP_TSPOV_PTOF_MASK	0x000000FF
++#define PTP_TSPOV_ETTOF_SHIFT	24
++#define PTP_TSPOV_IPTOF_SHIFT	16
++#define PTP_TSPOV_UDOF_SHIFT	8
++
++/*PTP Mode register*/
++#define PTP_TSMR_OPMODE1_IN_BAND	0x00080000
++#define PTP_TSMR_OPMODE2_IN_BAND	0x00040000
++#define PTP_TSMR_OPMODE3_IN_BAND	0x00020000
++#define PTP_TSMR_OPMODE4_IN_BAND	0x00010000
++#define PTP_TSMR_EN1			0x00000008
++#define PTP_TSMR_EN2			0x00000004
++#define PTP_TSMR_EN3			0x00000002
++#define PTP_TSMR_EN4			0x00000001
++
++/*ptp tsu event register*/
++#define PTP_TS_EXR		0x80000000	/*rx, EX to receiver */
++#define PTP_TS_RX_OVR1		0x40000000	/*rx,overrun */
++#define PTP_TS_TX_OVR1		0x20000000	/*tx,overrun */
++#define PTP_TS_RX_SYNC1		0x10000000	/*rx,Sync Frame */
++#define PTP_TS_RX_DELAY_REQ1	0x08000000	/*rx,dealy_req frame */
++#define PTP_TS_TX_FRAME1	0x04000000	/*tx,PTP frame */
++#define PTP_TS_PDRQRE1		0x02000000	/*rx,Pdelay_Req frame */
++#define PTP_TS_PDRSRE1		0x01000000	/*rx,Pdelay_Resp frame */
++#define PTP_TS_EXT		0x00800000	/*tx, EX to transmitter */
++#define DEFAULT_events_PTP_Mask	0xFF800000
++#define PTP_TMR_PEVENT_ALL	DEFAULT_events_PTP_Mask
++#define PTP_TMR_PEVENT_VALID	0x7F000000
++
++#define PTP_TS_RX_ALL			 \
++		(PTP_TS_RX_SYNC1	|\
++		 PTP_TS_RX_DELAY_REQ1	|\
++		 PTP_TS_PDRQRE1		|\
++		 PTP_TS_PDRSRE1)
++
++/*RTC timer control register*/
++#define RTC_TMR_CTRL_ALMP1		0x80000000	/*active low output*/
++#define RTC_TMR_CTRL_ALMP2		0x40000000	/*active low output*/
++#define RTC_TMR_CTRL_FS			0x10000000
++#define RTC_TMR_CTRL_TCLK_PERIOD_MSK	0x03FF0000
++#define RTC_TMR_CTRL_ETEP2		0x00000200
++#define RTC_TMR_CTRL_ETEP1		0x00000100
++#define RTC_TMR_CTRL_COPH		0x00000080
++#define RTC_TMR_CTRL_CIPH		0x00000040
++#define RTC_TMR_CTRL_TMSR		0x00000020
++#define RTC_TMR_CTRL_DBG		0x00000010
++#define RTC_TMR_CTRL_BYP		0x00000008
++#define RTC_TMR_CTRL_TE			0x00000004
++#define RTC_TMR_CTRL_CKSEL_TX_CLK	0x00000002
++#define RTC_TMR_CTRL_CKSEL_QE_CLK	0x00000001
++#define RTC_TMR_CTRL_CKSEL_EXT_CLK	0x00000000
++#define RTC_TMR_CTRL_TCLK_PERIOD_SHIFT	16
++
++/*RTC event register*/
++#define RTC_TEVENT_EXT_TRIGGER_2_TS	0x02000000	/*External trigger2 TS*/
++#define RTC_TEVENT_EXT_TRIGGER_1_TS	0x01000000	/*External trigger1 TS*/
++#define RTC_TEVENT_ALARM_2		0x00020000	/*Alarm 2*/
++#define RTC_TEVENT_ALARM_1		0x00010000	/*Alarm 1*/
++#define RTC_TEVENT_PERIODIC_PULSE_1	0x00000080	/*Periodic pulse 1*/
++#define RTC_TEVENT_PERIODIC_PULSE_2	0x00000040	/*Periodic pulse 2*/
++#define RTC_TEVENT_PERIODIC_PULSE_3	0x00000020	/*Periodic pulse 3*/
++
++#define RTC_EVENT_ALL				 \
++		(RTC_TEVENT_EXT_TRIGGER_2_TS	|\
++		RTC_TEVENT_EXT_TRIGGER_1_TS	|\
++		RTC_TEVENT_ALARM_2		|\
++		RTC_TEVENT_ALARM_1		|\
++		RTC_TEVENT_PERIODIC_PULSE_1	|\
++		RTC_TEVENT_PERIODIC_PULSE_2	|\
++		RTC_TEVENT_PERIODIC_PULSE_3)
++
++#define OFFSET_RTC	0x0000
++#define OFFSET_PTP1	0x0080
++#define OFFSET_PTP2	0x0100
++
++#define NUM_OF_MODULE	2
++
++/*General definitions*/
++#define NANOSEC_PER_ONE_HZ_TICK	1000000000
++#define NANOSEC_IN_SEC		NANOSEC_PER_ONE_HZ_TICK
++#define MIN_RTC_CLK_FREQ_HZ	1000
++#define MHZ			1000000
++#define PTP_RTC_FREQ		50	/*MHz*/
++
++/*PTP driver's default values*/
++#define ETH_TYPE_VALUE		0x0800	/*IP frame*/
++#define VLAN_TYPE_VALUE		0x8100
++#define IP_TYPE_VALUE		0x11	/*UDP frame*/
++#define UDP_GENERAL_PORT	320
++#define UDP_EVENT_PORT		319
++#define ETH_TYPE_OFFSET		12
++#define IP_TYPE_OFFSET		23
++#define UDP_DEST_PORT_OFFSET	36
++#define PTP_TYPE_OFFSET		74
++#define PTP_SEQUENCE_OFFSET	72
++#define LENGTH_OF_TS		8
++
++#define PTP_TX				0x00800000
++#define PTP_RX				0x02000000
++
++/*RTC default values*/
++#define DEFAULT_SRC_CLOCK		0	/*external clock source*/
++#define DEFAULT_BYPASS_COMPENSATION	FALSE
++#define DEFAULT_INVERT_INPUT_CLK_PHASE	FALSE
++#define DEFAULT_INVERT_OUTPUT_CLK_PHASE	FALSE
++#define DEFAULT_OUTPUT_CLOCK_DIVISOR	0x0001
++#define DEFAULT_ALARM_POLARITY		e_PTP_RTC_ALARM_POLARITY_ACTIVE_HIGH
++#define DEFAULT_TRIGGER_POLARITY	e_PTP_RTC_TRIGGER_ON_RISING_EDGE
++#define DEFAULT_PULSE_START_MODE	e_PTP_RTC_PULSE_START_AUTO
++#define DEFAULT_EVENTS_RTC_MASK		RTC_EVENT_ALL
++
++/*PTP default message type*/
++#define DEFAULT_MSG_SYNC		e_PTP_MSG_SYNC
++#define DEFAULT_MSG_DELAY_REQ		e_PTP_MSG_DELAY_REQ
++#define DEFAULT_MSG_FOLLOW_UP		e_PTP_MSG_FOLLOW_UP
++#define DEFAULT_MSG_DELAY_RESP		e_PTP_MSG_DELAY_RESP
++#define DEFAULT_MSG_MANAGEMENT		e_PTP_MSG_MANAGEMENT
++
++#define USE_CASE_PULSE_1_PERIOD		(NANOSEC_IN_SEC)
++#define USE_CASE_PULSE_2_PERIOD		(NANOSEC_IN_SEC / 2)
++#define USE_CASE_PULSE_3_PERIOD		(NANOSEC_IN_SEC / 4)
++
++#define USE_CASE_ALARM_1_TIME		(NANOSEC_IN_SEC)
++#define USE_CASE_ALARM_2_TIME		(NANOSEC_IN_SEC * 2)
++
++#define UCC_PTP_ENABLE			0x40000000
++
++struct ptp_rtc_driver_param {
++	u32 src_clock;
++	u32 src_clock_freq_hz;
++	u32 rtc_freq_hz;
++	bool invert_input_clk_phase;
++	bool invert_output_clk_phase;
++	u32 events_mask;
++	enum e_ptp_rtc_pulse_start_mode pulse_start_mode;
++	enum e_ptp_rtc_alarm_polarity alarm_polarity[PTP_RTC_NUM_OF_ALARMS];
++	enum e_ptp_rtc_trig_polarity trigger_polarity[PTP_RTC_NUM_OF_TRIGGERS];
++};
++
++struct ptp_rtc {
++	void __iomem *mem_map;		/*pointer to RTC mem*/
++	bool bypass_compensation;			/*is bypass?*/
++	bool start_pulse_on_alarm;			/*start on alarm 1*/
++	u32 clock_period_nansec;			/*clock periodic in ns*/
++	u16 output_clock_divisor;			/*clock divisor*/
++	struct ptp_rtc_driver_param *driver_param;	/*driver parameters*/
++	u32 rtc_irq;
++	struct clk *clk;
++	struct {
++		void *ext_trig_timestamp_queue;
++	} ext_trig_ts[2];				/*external trigger ts*/
++};
++
++/*PTP driver parameters*/
++struct ptp_driver_param {
++	u16 eth_type_value;
++	u16 vlan_type_value;
++	u16 udp_general_port;
++	u16 udp_event_port;
++	u8 ip_type_value;
++	u8 eth_type_offset;
++	u8 ip_type_offset;
++	u8 udp_dest_port_offset;	/*offset of UDP destination port*/
++	u8 ptp_type_offset;
++	u8 ptp_msg_codes[e_PTP_MSG_DUMMY_LAST];
++
++	enum e_ptp_tsu_delivery_mode delivery_mode;
++};
++
++/*PTP control structure*/
++struct ptp {
++	spinlock_t lock;
++	void __iomem *mem_map;
++
++	/*TSU*/
++	u32 events_mask;
++	struct fec_ptp_private *fpp;
++	struct clk *clk;
++
++	/*RTC*/
++	struct ptp_rtc *rtc;		/*pointer to RTC control structure*/
++	u32 orig_freq_comp;		/*the initial frequency compensation*/
++
++	/*driver parameters*/
++	struct ptp_driver_param *driver_param;
++
++	u32 tx_time_stamps;
++	u32 rx_time_stamps;
++	u32 tx_time_stamps_overrun;
++	u32 rx_time_stamps_overrun;
++	u32 alarm_counters[PTP_RTC_NUM_OF_ALARMS];
++	u32 pulse_counters[PTP_RTC_NUM_OF_PULSES];
++};
++
++#endif
+-- 
+1.7.7.4
+

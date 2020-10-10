@@ -1,0 +1,49 @@
+From 698d46e6a807a93eabf18bf79efd92a78cb1a106 Mon Sep 17 00:00:00 2001
+From: Loren HUANG <b02279@freescale.com>
+Date: Tue, 29 Jan 2013 16:12:29 +0800
+Subject: [PATCH 2376/2463] ENGR00242201-3 gpu: Makeup GPU driver for kernel
+ 3.5.7
+
+Signed-off-by: Loren HUANG <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |   16 +++++++---------
+ 1 files changed, 7 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index 792dd96..af20f0b 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -6801,12 +6801,11 @@ gckOS_SetGPUPower(
+             case gcvCORE_MAJOR:
+                 clk_prepare(clk_3dcore);
+                 clk_enable(clk_3dcore);
+-                /*if (cpu_is_mx6q())*/
+-                    clk_prepare(clk_3dshader);
+-                    clk_enable(clk_3dshader);
+-                    clk_prepare(clk_3d_axi);
+-                    clk_enable(clk_3d_axi);
+-                    break;
++                clk_prepare(clk_3dshader);
++                clk_enable(clk_3dshader);
++                clk_prepare(clk_3d_axi);
++                clk_enable(clk_3d_axi);
++                break;
+             case gcvCORE_2D:
+                 clk_prepare(clk_2dcore);
+                 clk_enable(clk_2dcore);
+@@ -6827,9 +6826,8 @@ gckOS_SetGPUPower(
+         if (oldClockState == gcvTRUE) {
+             switch (Core) {
+             case gcvCORE_MAJOR:
+-                /*if (cpu_is_mx6q())*/
+-                    clk_disable(clk_3dshader);
+-                    clk_unprepare(clk_3dshader);
++                clk_disable(clk_3dshader);
++                clk_unprepare(clk_3dshader);
+                 clk_disable(clk_3dcore);
+                 clk_unprepare(clk_3dcore);
+                 clk_disable(clk_3d_axi);
+-- 
+1.7.7.4
+

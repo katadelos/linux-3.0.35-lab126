@@ -1,0 +1,45 @@
+From 759217f29c354198cd26df414e989f4f632c2c5b Mon Sep 17 00:00:00 2001
+From: Rong Dian <b38775@freescale.com>
+Date: Tue, 21 Aug 2012 15:07:42 +0800
+Subject: [PATCH 1934/2463] ENGR00220848 imx6 thermal: export thermal hot
+ variable for GPU
+
+export thermal hot variable for GPU
+
+Signed-off-by: Rong Dian <b38775@freescale.com>
+---
+ drivers/mxc/thermal/thermal.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/thermal/thermal.c b/drivers/mxc/thermal/thermal.c
+index 0f4cfb8..6f3c7a9 100644
+--- a/drivers/mxc/thermal/thermal.c
++++ b/drivers/mxc/thermal/thermal.c
+@@ -152,6 +152,8 @@ static const struct anatop_device_id thermal_device_ids[] = {
+ 	{ANATOP_THERMAL_HID},
+ 	{""},
+ };
++int thermal_hot;
++EXPORT_SYMBOL(thermal_hot);
+ 
+ enum {
+ 	DEBUG_USER_STATE = 1U << 0,
+@@ -584,6 +586,7 @@ static int anatop_thermal_notify(struct thermal_zone_device *thermal, int trip,
+ 		printk(KERN_WARNING "thermal_notify: trip_critical reached!\n");
+ 		arch_reset(mode, cmd);
+ 	} else if (trip_type == THERMAL_TRIP_HOT) {
++		thermal_hot = 1;
+ 		printk(KERN_DEBUG "thermal_notify: trip_hot reached!\n");
+ 		type = ANATOP_THERMAL_NOTIFY_HOT;
+ 		/* if temperature increase, continue to detach secondary CPUs*/
+@@ -598,6 +601,7 @@ static int anatop_thermal_notify(struct thermal_zone_device *thermal, int trip,
+ 			printk(KERN_INFO "No secondary CPUs detached!\n");
+ 		full_run = false;
+ 	} else {
++		thermal_hot = 0;
+ 		if (!full_run) {
+ 			temperature_cooling = 0;
+ 			if (cooling_cpuhotplug)
+-- 
+1.7.7.4
+

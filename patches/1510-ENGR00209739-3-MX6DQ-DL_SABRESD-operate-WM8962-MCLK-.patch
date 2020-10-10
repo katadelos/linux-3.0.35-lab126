@@ -1,0 +1,99 @@
+From ce7640728fa91f26998f26dd1bebfcc6f5850c67 Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Mon, 21 May 2012 18:34:26 +0800
+Subject: [PATCH 1510/2463] ENGR00209739-3 MX6DQ/DL_SABRESD: operate WM8962
+ MCLK by callback
+
+operate WM8962 MCLK by callback
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |   48 ++++++++++++++++++++-----------
+ 1 files changed, 31 insertions(+), 17 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index f8263f8..e749bc4 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -198,6 +198,7 @@
+ #define SABRESD_ELAN_INT	IMX_GPIO_NR(3, 28)
+ 
+ static struct clk *sata_clk;
++static struct clk *clko;
+ static int mma8451_position = 1;
+ static int mag3110_position = 2;
+ static int max11801_mode = 1;
+@@ -389,26 +390,20 @@ static struct platform_device mx6_sabresd_audio_wm8962_device = {
+ 	.name = "imx-wm8962",
+ };
+ 
+-static struct wm8962_pdata wm8962_config_data = {
+-	.gpio_init = {
+-		[2] = WM8962_GPIO_FN_DMICCLK,
+-		[4] = 0x8000 | WM8962_GPIO_FN_DMICDAT,
+-	},
+-};
++static struct mxc_audio_platform_data wm8962_data;
+ 
+-static struct mxc_audio_platform_data wm8962_data = {
+-	.ssi_num = 1,
+-	.src_port = 2,
+-	.ext_port = 3,
+-	.hp_gpio = SABRESD_HEADPHONE_DET,
+-	.hp_active_low = 1,
+-	.mic_gpio = SABRESD_MICROPHONE_DET,
+-	.mic_active_low = 1,
+-};
++static int wm8962_clk_enable(int enable)
++{
++	if (enable)
++		clk_enable(clko);
++	else
++		clk_disable(clko);
++
++	return 0;
++}
+ 
+ static int mxc_wm8962_init(void)
+ {
+-	struct clk *clko;
+ 	int rate;
+ 
+ 	clko = clk_get(NULL, "clko_clk");
+@@ -418,13 +413,32 @@ static int mxc_wm8962_init(void)
+ 	}
+ 	/* both audio codec and comera use CLKO clk*/
+ 	rate = clk_round_rate(clko, 22000000);
++	clk_set_rate(clko, rate);
+ 
+ 	wm8962_data.sysclk = rate;
+-	clk_set_rate(clko, rate);
+ 
+ 	return 0;
+ }
+ 
++static struct wm8962_pdata wm8962_config_data = {
++	.gpio_init = {
++		[2] = WM8962_GPIO_FN_DMICCLK,
++		[4] = 0x8000 | WM8962_GPIO_FN_DMICDAT,
++	},
++};
++
++static struct mxc_audio_platform_data wm8962_data = {
++	.ssi_num = 1,
++	.src_port = 2,
++	.ext_port = 3,
++	.hp_gpio = SABRESD_HEADPHONE_DET,
++	.hp_active_low = 1,
++	.mic_gpio = SABRESD_MICROPHONE_DET,
++	.mic_active_low = 1,
++	.init = mxc_wm8962_init,
++	.clock_enable = wm8962_clk_enable,
++};
++
+ static struct regulator_consumer_supply sabresd_vwm8962_consumers[] = {
+ 	REGULATOR_SUPPLY("SPKVDD1", "0-001a"),
+ 	REGULATOR_SUPPLY("SPKVDD2", "0-001a"),
+-- 
+1.7.7.4
+

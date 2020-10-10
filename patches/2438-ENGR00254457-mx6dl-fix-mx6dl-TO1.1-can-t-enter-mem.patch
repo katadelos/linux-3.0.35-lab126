@@ -1,0 +1,33 @@
+From d5852f8782335ea85a9e41c5dea361c9baea31a8 Mon Sep 17 00:00:00 2001
+From: Robin Gong <b38343@freescale.com>
+Date: Fri, 15 Mar 2013 12:37:04 +0800
+Subject: [PATCH 2438/2463] ENGR00254457 mx6dl: fix mx6dl TO1.1 can't enter
+ 'mem'
+
+The previous patch ENGR00251630 didn't notice mx6q_revision() will
+return -EINVAL and will match 'mx6q_revision()<IMX_CHIP_REVISION_1_1'
+,then mx6dl TO1.1 will also change suspend state to 'standby'.
+
+Signed-off-by: Robin Gong <b38343@freescale.com>
+---
+ arch/arm/mach-mx6/pm.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index 9f736e4..6e306c2 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -317,8 +317,8 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 	 * ARM_POWER_OFF mode.
+ 	 */
+ 	if (state == PM_SUSPEND_MEM &&
+-		((mx6dl_revision() == IMX_CHIP_REVISION_1_0) || mx6q_revision()
+-		<= IMX_CHIP_REVISION_1_1)) {
++		((mx6dl_revision() == IMX_CHIP_REVISION_1_0) ||
++		(cpu_is_mx6q() && mx6q_revision() <= IMX_CHIP_REVISION_1_1))) {
+ 		state = PM_SUSPEND_STANDBY;
+ 	}
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,57 @@
+From fc670d59cfb14635375f7329b0d0081e2ba5d2fa Mon Sep 17 00:00:00 2001
+From: Richard Zhao <richard.zhao@freescale.com>
+Date: Mon, 8 Aug 2011 09:16:27 +0800
+Subject: [PATCH 0323/2463] ENGR00154429 rtc-snvs: request_irq too early
+
+request_irq should be after hw init. It can avoid meaningless interrupt.
+
+Signed-off-by: Richard Zhao <richard.zhao@freescale.com>
+---
+ drivers/rtc/rtc-snvs.c |   23 +++++++++++------------
+ 1 files changed, 11 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/rtc/rtc-snvs.c b/drivers/rtc/rtc-snvs.c
+index 3125ec0..dfd7849 100644
+--- a/drivers/rtc/rtc-snvs.c
++++ b/drivers/rtc/rtc-snvs.c
+@@ -482,19 +482,7 @@ static int snvs_rtc_probe(struct platform_device *pdev)
+ 	pdata->baseaddr = res->start;
+ 	pdata->ioaddr = ioremap(pdata->baseaddr, 0xC00);
+ 	ioaddr = pdata->ioaddr;
+-
+-	/* Configure and enable the RTC */
+ 	pdata->irq = platform_get_irq(pdev, 0);
+-	if (pdata->irq >= 0) {
+-		if (request_irq(pdata->irq, snvs_rtc_interrupt, IRQF_SHARED,
+-				pdev->name, pdev) < 0) {
+-			dev_warn(&pdev->dev, "interrupt not available.\n");
+-			pdata->irq = -1;
+-		} else {
+-			disable_irq(pdata->irq);
+-			pdata->irq_enable = false;
+-		}
+-	}
+ 
+ 	/* initialize glitch detect */
+ 	__raw_writel(SNVS_LPPGDR_INIT, ioaddr + SNVS_LPPGDR);
+@@ -513,6 +501,17 @@ static int snvs_rtc_probe(struct platform_device *pdev)
+ 	__raw_writel(0xFFFFFFFF, ioaddr + SNVS_LPSR);
+ 	udelay(100);
+ 
++	if (pdata->irq >= 0) {
++		if (request_irq(pdata->irq, snvs_rtc_interrupt, IRQF_SHARED,
++				pdev->name, pdev) < 0) {
++			dev_warn(&pdev->dev, "interrupt not available.\n");
++			pdata->irq = -1;
++		} else {
++			disable_irq(pdata->irq);
++			pdata->irq_enable = false;
++		}
++	}
++
+ 	rtc = rtc_device_register(pdev->name, &pdev->dev,
+ 				  &snvs_rtc_ops, THIS_MODULE);
+ 	if (IS_ERR(rtc)) {
+-- 
+1.7.7.4
+

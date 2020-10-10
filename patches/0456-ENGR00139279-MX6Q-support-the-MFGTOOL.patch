@@ -1,0 +1,53 @@
+From cdbbcf67f3c0795aa55c456583a8a2bcd21132da Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Wed, 14 Sep 2011 17:34:54 +0800
+Subject: [PATCH 0456/2463] ENGR00139279 MX6Q: support the MFGTOOL
+
+fix ioctls.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/usb/gadget/fsl_updater.c |    4 ++--
+ drivers/usb/gadget/fsl_updater.h |    4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/usb/gadget/fsl_updater.c b/drivers/usb/gadget/fsl_updater.c
+index e0705b8..1bfe790 100644
+--- a/drivers/usb/gadget/fsl_updater.c
++++ b/drivers/usb/gadget/fsl_updater.c
+@@ -139,8 +139,8 @@ static ssize_t utp_file_write(struct file *file, const char __user *buf,
+ 	return size;
+ }
+ 
+-static int
+-utp_ioctl(struct inode *inode, struct file *file,
++static long
++utp_ioctl(struct file *file,
+ 	      unsigned int cmd, unsigned long arg)
+ {
+ 	int cpu_id = 0;
+diff --git a/drivers/usb/gadget/fsl_updater.h b/drivers/usb/gadget/fsl_updater.h
+index 9c276a8..e2cac2d 100644
+--- a/drivers/usb/gadget/fsl_updater.h
++++ b/drivers/usb/gadget/fsl_updater.h
+@@ -35,7 +35,7 @@ static ssize_t utp_file_write(struct file *file,
+ 			      size_t size,
+ 			      loff_t *off);
+ 
+-static int utp_ioctl(struct inode *inode, struct file *file,
++static long utp_ioctl(struct file *file,
+ 	      unsigned int cmd, unsigned long arg);
+ static struct utp_user_data *utp_user_data_alloc(size_t size);
+ static void utp_user_data_free(struct utp_user_data *uud);
+@@ -105,7 +105,7 @@ static const struct file_operations utp_fops = {
+ 	.open	= nonseekable_open,
+ 	.read	= utp_file_read,
+ 	.write	= utp_file_write,
+-	.ioctl  = utp_ioctl,
++	.unlocked_ioctl = utp_ioctl,
+ };
+ 
+ static struct miscdevice utp_dev = {
+-- 
+1.7.7.4
+

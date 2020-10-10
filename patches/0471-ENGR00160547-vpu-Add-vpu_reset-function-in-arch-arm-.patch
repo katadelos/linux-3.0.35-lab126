@@ -1,0 +1,52 @@
+From 9d5bd8967e39848550667631f0f0bf41fc64eb13 Mon Sep 17 00:00:00 2001
+From: Sammy He <r62914@freescale.com>
+Date: Sat, 22 Oct 2011 00:45:25 +0800
+Subject: [PATCH 0471/2463] ENGR00160547 vpu: Add vpu_reset function in
+ arch/arm for i.mx6q
+
+Add vpu hardware reset function for i.mx6q platform.
+
+Signed-off-by: Sammy He <r62914@freescale.com>
+---
+ arch/arm/plat-mxc/devices/platform-imx_vpu.c |   23 ++++++++++++++++++++++-
+ 1 files changed, 22 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_vpu.c b/arch/arm/plat-mxc/devices/platform-imx_vpu.c
+index b4edb91..ed30bc7 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx_vpu.c
++++ b/arch/arm/plat-mxc/devices/platform-imx_vpu.c
+@@ -110,9 +110,30 @@ const struct imx_vpu_data imx53_vpu_data __initconst =
+ #endif
+ 
+ #ifdef CONFIG_SOC_IMX6Q
++void mx6q_vpu_reset(void)
++{
++	u32 reg;
++	void __iomem *src_base;
++
++	src_base = ioremap(SRC_BASE_ADDR, PAGE_SIZE);
++
++	/* mask interrupt due to vpu passed reset */
++	reg = __raw_readl(src_base + 0x18);
++	reg |= 0x02;
++	 __raw_writel(reg, src_base + 0x18);
++
++	reg = __raw_readl(src_base);
++	reg |= 0x5;    /* warm reset vpu */
++	__raw_writel(reg, src_base);
++	while (__raw_readl(src_base) & 0x04)
++		;
++
++	iounmap(src_base);
++}
++
+ const struct imx_vpu_data imx6q_vpu_data __initconst =
+ 			imx6_vpu_data_entry_single(MX6Q,
+-			true, 0x21000, NULL, NULL);
++			true, 0x21000, mx6q_vpu_reset, NULL);
+ #endif
+ 
+ struct platform_device *__init imx_add_vpu(
+-- 
+1.7.7.4
+

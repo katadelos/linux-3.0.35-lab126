@@ -1,0 +1,51 @@
+From f1672f4161f477ab764c12c25c2270e6da728764 Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Thu, 13 Sep 2012 14:19:41 +0800
+Subject: [PATCH 2040/2463] ENGR00224137 mx6 : restore VDD_PU in resume with
+ the old value before suspend
+
+Before, VDD_PU regulator will be set 1.1V for ever, but now VDD_PU track with
+VDD_ARM, so we can not restore with 1.1V when system resume back.We need save
+the old value set when power off PU in suspend flow, and then restore it in
+resume flow.
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ arch/arm/mach-mx6/pm.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index 45b2e6f..650932d 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -113,7 +113,7 @@ static u32 ccm_analog_pfd528;
+ static u32 ccm_analog_pll3_480;
+ static u32 ccm_anadig_ana_misc2;
+ static bool usb_vbus_wakeup_enabled;
+-
++static u32 pu_val;
+ 
+ /*
+  * The USB VBUS wakeup should be disabled to avoid vbus wake system
+@@ -196,6 +196,7 @@ static void gpu_power_down(void)
+ 	__raw_writel(ccgr6 & ~MXC_CCM_CCGRx_CG7_MASK, MXC_CCM_CCGR6);
+ 	/* power off pu */
+ 	reg = __raw_readl(anatop_base + ANATOP_REG_CORE_OFFSET);
++	pu_val = reg & 0x0003fe00;/*save pu regulator value*/
+ 	reg &= ~0x0003fe00;
+ 	__raw_writel(reg, anatop_base + ANATOP_REG_CORE_OFFSET);
+ }
+@@ -207,10 +208,9 @@ static void gpu_power_up(void)
+ 	/* power on pu */
+ 	reg = __raw_readl(anatop_base + ANATOP_REG_CORE_OFFSET);
+ 	reg &= ~0x0003fe00;
+-	reg |= 0x10 << 9; /* 1.1v */
++	reg |= pu_val; /*restore pu regulator value*/
+ 	__raw_writel(reg, anatop_base + ANATOP_REG_CORE_OFFSET);
+ 	mdelay(10);
+-
+ 	/* enable clocks */
+ 	/* PLL2 PFD0 and PFD1 clock enable */
+ 	__raw_writel(ccm_analog_pfd528 &
+-- 
+1.7.7.4
+

@@ -1,0 +1,53 @@
+From 649363219c76a2c91db7df3effeb61ba201c560c Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Thu, 8 Nov 2012 15:50:20 +0800
+Subject: [PATCH 2249/2463] ENGR00233051-04 Mx6 USB: driver implementation for
+ OTG modulization
+
+- reset fsl_otg_dev to NULL after kfree
+- remove __exit_p prefix to make sure fsl_udc_remove is called when
+  module unload
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    4 ++--
+ drivers/usb/otg/fsl_otg.c       |    1 +
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 127e929..ae0daac 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -3245,7 +3245,7 @@ err1a:
+ /* Driver removal function
+  * Free resources and finish pending transactions
+  */
+-static int __exit fsl_udc_remove(struct platform_device *pdev)
++static int  fsl_udc_remove(struct platform_device *pdev)
+ {
+ 	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
+ 
+@@ -3529,7 +3529,7 @@ end:
+ --------------------------------------------------------------------------*/
+ 
+ static struct platform_driver udc_driver = {
+-	.remove  = __exit_p(fsl_udc_remove),
++	.remove  = fsl_udc_remove,
+ 	/* these suspend and resume are not usb suspend and resume */
+ 	.suspend = fsl_udc_suspend,
+ 	.resume  = fsl_udc_resume,
+diff --git a/drivers/usb/otg/fsl_otg.c b/drivers/usb/otg/fsl_otg.c
+index 4205ed9..d728cf9 100755
+--- a/drivers/usb/otg/fsl_otg.c
++++ b/drivers/usb/otg/fsl_otg.c
+@@ -1398,6 +1398,7 @@ static int fsl_otg_remove(struct platform_device *pdev)
+ 
+ 	kfree(fsl_otg_dev);
+ 
++	fsl_otg_dev = NULL;
+ 	remove_proc_file();
+ 
+ 	unregister_chrdev(FSL_OTG_MAJOR, FSL_OTG_NAME);
+-- 
+1.7.7.4
+

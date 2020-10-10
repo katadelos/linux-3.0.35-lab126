@@ -1,0 +1,60 @@
+From f0144e3d5368833d1cf0999cf3758618428266e6 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <richard.zhao@freescale.com>
+Date: Thu, 28 Jul 2011 09:02:12 +0800
+Subject: [PATCH 0304/2463] ENGR00153825 imx6: clk: fix gpu clock issues
+
+- fix issue that set_parent wrongly clear the whole register.
+- set_rate can accept none exact rates.
+
+Signed-off-by: Richard Zhao <richard.zhao@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |   12 ++++++------
+ 1 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index edac9b8..5cfbd7d 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -3562,7 +3562,7 @@ static int _clk_gpu3d_core_set_parent(struct clk *clk, struct clk *parent)
+ {
+ 	int mux;
+ 	u32 reg = __raw_readl(MXC_CCM_CBCMR)
+-		& MXC_CCM_CBCMR_GPU3D_CORE_CLK_SEL_MASK;
++		& ~MXC_CCM_CBCMR_GPU3D_CORE_CLK_SEL_MASK;
+ 
+ 	mux = _get_mux6(parent, &mmdc_ch0_axi_clk[0],
+ 		&pll3_usb_otg_main_clk,
+@@ -3592,8 +3592,8 @@ static int _clk_gpu3d_core_set_rate(struct clk *clk, unsigned long rate)
+ 	div = parent_rate / rate;
+ 	if (div == 0)
+ 		div++;
+-	if (((parent_rate / div) != rate) || (div > 8))
+-		return -EINVAL;
++	if (div > 8)
++		div = 8;
+ 
+ 	reg = __raw_readl(MXC_CCM_CBCMR);
+ 	reg &= ~MXC_CCM_CBCMR_GPU3D_CORE_PODF_MASK;
+@@ -3715,7 +3715,7 @@ static int _clk_gpu3d_shader_set_parent(struct clk *clk, struct clk *parent)
+ {
+ 	int mux;
+ 	u32 reg = __raw_readl(MXC_CCM_CBCMR)
+-		& MXC_CCM_CBCMR_GPU3D_SHADER_CLK_SEL_MASK;
++		& ~MXC_CCM_CBCMR_GPU3D_SHADER_CLK_SEL_MASK;
+ 
+ 	mux = _get_mux6(parent, &mmdc_ch0_axi_clk[0],
+ 		&pll3_usb_otg_main_clk,
+@@ -3745,8 +3745,8 @@ static int _clk_gpu3d_shader_set_rate(struct clk *clk, unsigned long rate)
+ 	div = parent_rate / rate;
+ 	if (div == 0)
+ 		div++;
+-	if (((parent_rate / div) != rate) || (div > 8))
+-		return -EINVAL;
++	if (div > 8)
++		div = 8;
+ 
+ 	reg = __raw_readl(MXC_CCM_CBCMR);
+ 	reg &= ~MXC_CCM_CBCMR_GPU3D_SHADER_PODF_MASK;
+-- 
+1.7.7.4
+

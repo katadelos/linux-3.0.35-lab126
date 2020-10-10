@@ -1,0 +1,59 @@
+From 30b0b3d67d251ebaf916b2463cc8eda479ef5758 Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Tue, 14 Aug 2012 15:02:00 +0800
+Subject: [PATCH 1932/2463] ENGR00218789 mx6: clock: keep PLL3 enable and
+ power bit all the time
+
+In order to support USB remote wake up, we should keep the PLL3 enable
+and power bit all the time. We use BM_ANADIG_ANA_MISC2_CONTROL0 to control
+the PLL3 power off PLL3's power when PLL3 is not used by other module.
+
+PLL3 power design logic as below:
+usb1_pll_480_ctrl_power_int=hw_anadig_usb1_pll_480_ctrl_power && ((disable_480_p
+ll_n && ~hw_anadig_ana_misc2_control0 )||pwrctl_otg_wakeup || utmi_otg_suspendm)
+There are two basic case:
+- If USB is active and USB remote wakeup happen , Pll3 will be turn on.
+- If USB is not active and no remote wakeup happen, the PLL3 will be controlled
+  by hw_anadig_ana_misc2_control0 bit.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |   15 +++++++++------
+ 1 files changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 0a01c31..d9af9f6 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -505,6 +505,15 @@ static void _clk_pll_disable(struct clk *clk)
+ 
+ 	if ((arm_needs_pll2_400) && (clk == &pll2_528_bus_main_clk))
+ 		return;
++	/*
++	 * To support USB remote wake up, need always keep power and enable bit
++	 * BM_ANADIG_ANA_MISC2_CONTROL0 will power off PLL3's power
++	 * Please see TKT064178 for detail.
++	 */
++	if (clk == &pll3_usb_otg_main_clk) {
++		__raw_writel(BM_ANADIG_ANA_MISC2_CONTROL0, apll_base + HW_ANADIG_ANA_MISC2_SET);
++		return;
++	}
+ 
+ 	pllbase = _get_pll_base(clk);
+ 
+@@ -514,12 +523,6 @@ static void _clk_pll_disable(struct clk *clk)
+ 
+ 	__raw_writel(reg, pllbase);
+ 
+-	/*
+-	 * It will power off PLL3's power, it is the TO1.1 fix
+-	 * Please see TKT064178 for detail.
+-	 */
+-	if (clk == &pll3_usb_otg_main_clk)
+-		__raw_writel(BM_ANADIG_ANA_MISC2_CONTROL0, apll_base + HW_ANADIG_ANA_MISC2_SET);
+ }
+ 
+ static unsigned long  _clk_pll1_main_get_rate(struct clk *clk)
+-- 
+1.7.7.4
+

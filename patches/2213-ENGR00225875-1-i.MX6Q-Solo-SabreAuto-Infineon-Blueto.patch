@@ -1,0 +1,194 @@
+From c4128ebe3f9e9cb60c36f6a97d903f8bd7860629 Mon Sep 17 00:00:00 2001
+From: Israel Perez <B37753@freescale.com>
+Date: Wed, 31 Oct 2012 17:06:44 -0500
+Subject: [PATCH 2213/2463] ENGR00225875-1 i.MX6Q/Solo SabreAuto Infineon
+ Bluetooth uart3 config
+
+Configure MUX settings for bluetooth operation over UART3.
+Enable RTS,CTS and DMA only for uart3.
+Affected files :
+arch/arm/mach-mx6/board-mx6q_sabreauto.c
+arch/arm/mach-mx6/board-mx6q_sabreauto.h
+arch/arm/mach-mx6/board-mx6solo_sabreauto.h
+arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+On behalf of Francisco Munoz <francisco.munoz@freescale.com>.
+Some modification are needed also on hciattach tool.
+
+Signed-off-by: Israel Perez <B37753@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c    |   22 +++++++++++++++++++++-
+ arch/arm/mach-mx6/board-mx6q_sabreauto.h    |   13 ++++++++++---
+ arch/arm/mach-mx6/board-mx6solo_sabreauto.h |   13 ++++++++++---
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h |    2 +-
+ 4 files changed, 42 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 93bbde5..a3e9af5 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -328,10 +328,16 @@ mx6q_sabreauto_anatop_thermal_data __initconst = {
+ 	.name = "anatop_thermal",
+ };
+ 
++static const struct imxuart_platform_data mx6_bt_uart_data __initconst = {
++	.flags = IMXUART_HAVE_RTSCTS | IMXUART_SDMA,
++	.dma_req_rx = MX6Q_DMA_REQ_UART3_RX,
++	.dma_req_tx = MX6Q_DMA_REQ_UART3_TX,
++};
++
+ static inline void mx6q_sabreauto_init_uart(void)
+ {
+ 	imx6q_add_imx_uart(1, NULL);
+-	imx6q_add_imx_uart(2, NULL);
++	imx6q_add_imx_uart(2, &mx6_bt_uart_data);
+ 	imx6q_add_imx_uart(3, NULL);
+ }
+ 
+@@ -539,6 +545,9 @@ static int max7310_u39_setup(struct i2c_client *client,
+ 
+ 	int n;
+ 
++	if (uart3_en)
++		max7310_gpio_value[4] = 1;
++
+ 	 for (n = 0; n < ARRAY_SIZE(max7310_gpio_value); ++n) {
+ 		gpio_request(gpio_base + n, "MAX7310 U39 GPIO Expander");
+ 		if (max7310_gpio_value[n] < 0)
+@@ -1343,6 +1352,7 @@ static void __init mx6_board_init(void)
+ 	iomux_v3_cfg_t *tuner_pads = NULL;
+ 	iomux_v3_cfg_t *spinor_pads = NULL;
+ 	iomux_v3_cfg_t *weimnor_pads = NULL;
++	iomux_v3_cfg_t *bluetooth_pads = NULL;
+ 	iomux_v3_cfg_t *extra_pads = NULL;
+ 
+ 	int common_pads_cnt;
+@@ -1353,6 +1363,7 @@ static void __init mx6_board_init(void)
+ 	int tuner_pads_cnt;
+ 	int spinor_pads_cnt;
+ 	int weimnor_pads_cnt;
++	int bluetooth_pads_cnt;
+ 	int extra_pads_cnt;
+ 
+ 	if (cpu_is_mx6q()) {
+@@ -1363,6 +1374,7 @@ static void __init mx6_board_init(void)
+ 		tuner_pads = mx6q_tuner_pads;
+ 		spinor_pads = mx6q_spinor_pads;
+ 		weimnor_pads = mx6q_weimnor_pads;
++		bluetooth_pads = mx6q_bluetooth_pads;
+ 
+ 		common_pads_cnt = ARRAY_SIZE(mx6q_sabreauto_pads);
+ 		can0_pads_cnt = ARRAY_SIZE(mx6q_sabreauto_can0_pads);
+@@ -1371,6 +1383,7 @@ static void __init mx6_board_init(void)
+ 		tuner_pads_cnt = ARRAY_SIZE(mx6q_tuner_pads);
+ 		spinor_pads_cnt = ARRAY_SIZE(mx6q_spinor_pads);
+ 		weimnor_pads_cnt = ARRAY_SIZE(mx6q_weimnor_pads);
++		bluetooth_pads_cnt = ARRAY_SIZE(mx6q_bluetooth_pads);
+ 		if (board_is_mx6_reva()) {
+ 			i2c3_pads = mx6q_i2c3_pads_rev_a;
+ 			i2c3_pads_cnt = ARRAY_SIZE(mx6q_i2c3_pads_rev_a);
+@@ -1392,6 +1405,7 @@ static void __init mx6_board_init(void)
+ 		tuner_pads = mx6dl_tuner_pads;
+ 		spinor_pads = mx6dl_spinor_pads;
+ 		weimnor_pads = mx6dl_weimnor_pads;
++		bluetooth_pads = mx6dl_bluetooth_pads;
+ 
+ 		common_pads_cnt = ARRAY_SIZE(mx6dl_sabreauto_pads);
+ 		can0_pads_cnt = ARRAY_SIZE(mx6dl_sabreauto_can0_pads);
+@@ -1400,6 +1414,7 @@ static void __init mx6_board_init(void)
+ 		tuner_pads_cnt = ARRAY_SIZE(mx6dl_tuner_pads);
+ 		spinor_pads_cnt = ARRAY_SIZE(mx6dl_spinor_pads);
+ 		weimnor_pads_cnt = ARRAY_SIZE(mx6dl_weimnor_pads);
++		bluetooth_pads_cnt = ARRAY_SIZE(mx6dl_bluetooth_pads);
+ 
+ 		if (board_is_mx6_reva()) {
+ 			i2c3_pads = mx6dl_i2c3_pads_rev_a;
+@@ -1434,6 +1449,11 @@ static void __init mx6_board_init(void)
+ 			mxc_iomux_v3_setup_multiple_pads(i2c3_pads,
+ 					i2c3_pads_cnt);
+ 		}
++		if (uart3_en) {
++			BUG_ON(!bluetooth_pads);
++			mxc_iomux_v3_setup_multiple_pads(bluetooth_pads,
++					bluetooth_pads_cnt);
++		}
+ 	}
+ 
+ 	if (can0_enable) {
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.h b/arch/arm/mach-mx6/board-mx6q_sabreauto.h
+index fee469a..b1e2b9e 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.h
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.h
+@@ -191,9 +191,7 @@ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 	MX6Q_PAD_GPIO_8__UART2_RXD,
+ 	MX6Q_PAD_SD4_DAT6__UART2_CTS,
+ 	MX6Q_PAD_SD4_DAT5__UART2_RTS,
+-	/* UART 3 */
+-	MX6Q_PAD_SD4_CLK__UART3_TXD,
+-	MX6Q_PAD_SD4_CMD__UART3_RXD,
++
+ 	/*USBs OC pin */
+ 	MX6Q_PAD_EIM_WAIT__GPIO_5_0,  /*HOST1_OC*/
+ 	MX6Q_PAD_SD4_DAT0__GPIO_2_8,  /*OTG_OC*/
+@@ -299,6 +297,15 @@ static iomux_v3_cfg_t mx6q_spinor_pads[] __initdata = {
+ 	MX6Q_PAD_EIM_D19__GPIO_3_19,
+ };
+ 
++/*Bluetooth is conflicted with GMPI and NOR chips*/
++static iomux_v3_cfg_t mx6q_bluetooth_pads[] __initdata = {
++	/* UART 3 */
++	MX6Q_PAD_SD4_CLK__UART3_RXD,
++	MX6Q_PAD_SD4_CMD__UART3_TXD,
++	MX6Q_PAD_EIM_D30__UART3_CTS,
++	MX6Q_PAD_EIM_EB3__UART3_RTS,
++};
++
+ static iomux_v3_cfg_t mx6q_weimnor_pads[] __initdata = {
+ 	/* Parallel NOR */
+ 	MX6Q_PAD_EIM_OE__WEIM_WEIM_OE,
+diff --git a/arch/arm/mach-mx6/board-mx6solo_sabreauto.h b/arch/arm/mach-mx6/board-mx6solo_sabreauto.h
+index 18f5d90..31c3a61 100644
+--- a/arch/arm/mach-mx6/board-mx6solo_sabreauto.h
++++ b/arch/arm/mach-mx6/board-mx6solo_sabreauto.h
+@@ -188,9 +188,7 @@ static iomux_v3_cfg_t mx6dl_sabreauto_pads[] = {
+ 	MX6DL_PAD_GPIO_8__UART2_RXD,
+ 	MX6DL_PAD_SD4_DAT6__UART2_CTS,
+ 	MX6DL_PAD_SD4_DAT5__UART2_RTS,
+-	/* UART 3 */
+-	MX6DL_PAD_SD4_CLK__UART3_TXD,
+-	MX6DL_PAD_SD4_CMD__UART3_RXD,
++
+ 	/*USBs OC pin */
+ 	MX6DL_PAD_EIM_WAIT__GPIO_5_0,  /*HOST1_OC*/
+ 	MX6DL_PAD_SD4_DAT0__GPIO_2_8,  /*OTG_OC*/
+@@ -297,6 +295,15 @@ static iomux_v3_cfg_t mx6dl_spinor_pads[] __initdata = {
+ 	MX6DL_PAD_EIM_D19__GPIO_3_19,
+ };
+ 
++/*Bluetooth is conflicted with GMPI and NOR chips*/
++static iomux_v3_cfg_t mx6dl_bluetooth_pads[] __initdata = {
++	/* UART 3 */
++	MX6DL_PAD_SD4_CLK__UART3_RXD,
++	MX6DL_PAD_SD4_CMD__UART3_TXD,
++	MX6DL_PAD_EIM_D30__UART3_CTS,
++	MX6DL_PAD_EIM_EB3__UART3_RTS,
++};
++
+ static iomux_v3_cfg_t mx6dl_weimnor_pads[] __initdata = {
+ 	/* Parallel NOR */
+ 	MX6DL_PAD_EIM_OE__WEIM_WEIM_OE,
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index 9226af1..fe107cf 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -566,7 +566,7 @@
+ #define _MX6Q_PAD_EIM_D30__IPU1_CSI0_D_3				\
+ 		IOMUX_PAD(0x03E0, 0x00CC, 3, 0x0000, 0, 0)
+ #define _MX6Q_PAD_EIM_D30__UART3_CTS			\
+-		IOMUX_PAD(0x03E0, 0x00CC, 4, 0x092C, 2, 0)
++		IOMUX_PAD(0x03E0, 0x00CC, 4, 0x0000, 0, 0)
+ #define _MX6Q_PAD_EIM_D30__GPIO_3_30			\
+ 		IOMUX_PAD(0x03E0, 0x00CC, 5, 0x0000, 0, 0)
+ #define _MX6Q_PAD_EIM_D30__USBOH3_USBH1_OC		\
+-- 
+1.7.7.4
+

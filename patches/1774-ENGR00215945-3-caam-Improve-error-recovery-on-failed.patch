@@ -1,0 +1,138 @@
+From 2589219d83c8725501a105eda611f816667636a4 Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Wed, 11 Jul 2012 14:48:09 -0700
+Subject: [PATCH 1774/2463] ENGR00215945-3: caam: Improve error recovery on
+ failed RNG4 kickstart
+
+RNG4 requires a kickstart process to transition into running mode.
+In the case that this kickstart process errors, the driver is shut
+back down (under the assumption that internal random padding of keys
+or data cannot occur).
+
+In an isolated case, the kickstart failed to start the RNG, an error
+was returned, and the driver attempted to de-register an RNG function
+that never completed, causing a crash. (This is difficult to test for
+without manual intervention).
+
+Therefore, amended the driver shutdown process to only de-register
+the hardware RNG when an instance kickstarted without error.
+
+This does NOT correct the kickstart problem, only the consequences.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/crypto/caam/caamrng.c |    2 +-
+ drivers/crypto/caam/ctrl.c    |   26 +++++++++++++++++++-------
+ drivers/crypto/caam/intern.h  |    1 +
+ 3 files changed, 21 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/crypto/caam/caamrng.c b/drivers/crypto/caam/caamrng.c
+index f992c10..a4b4a38 100644
+--- a/drivers/crypto/caam/caamrng.c
++++ b/drivers/crypto/caam/caamrng.c
+@@ -327,7 +327,7 @@ int caam_rng_startup(struct platform_device *pdev)
+ 	ctrldev = &pdev->dev;
+ 	priv = dev_get_drvdata(ctrldev);
+ 
+-	/* Check instantiated RNG before registration */
++	/* Check RNG present in hardware before registration */
+ 	if (!(rd_reg64(&priv->ctrl->perfmon.cha_num) & CHA_ID_RNG_MASK))
+ 		return -ENODEV;
+ 
+diff --git a/drivers/crypto/caam/ctrl.c b/drivers/crypto/caam/ctrl.c
+index d7374aa..28828b9 100644
+--- a/drivers/crypto/caam/ctrl.c
++++ b/drivers/crypto/caam/ctrl.c
+@@ -25,16 +25,18 @@ static int caam_remove(struct platform_device *pdev)
+ 	topregs = (struct caam_full __iomem *)ctrlpriv->ctrl;
+ 
+ #ifndef CONFIG_OF
+-	caam_algapi_shutdown(pdev);
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_RNG_API
++	if (ctrlpriv->rng_inst)
++		caam_rng_shutdown();
++#endif
+ 
+ #ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_AHASH_API
+ 	caam_algapi_hash_shutdown(pdev);
+ #endif
+ 
+-#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_RNG_API
+-	caam_rng_shutdown();
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_CRYPTO_API
++	caam_algapi_shutdown(pdev);
+ #endif
+-
+ #endif
+ 	/* shut down JobRs */
+ 	for (ring = 0; ring < ctrlpriv->total_jobrs; ring++) {
+@@ -125,7 +127,10 @@ static int instantiate_rng(struct device *jrdev)
+ 
+ 	build_instantiation_desc(desc);
+ 	desc_dma = dma_map_single(jrdev, desc, desc_bytes(desc), DMA_TO_DEVICE);
++	dma_sync_single_for_device(jrdev, desc_dma, desc_bytes(desc),
++				   DMA_TO_DEVICE);
+ 	init_completion(&instantiation.completion);
++
+ 	ret = caam_jr_enqueue(jrdev, desc, rng4_init_done, &instantiation);
+ 	if (!ret) {
+ 		wait_for_completion_interruptible(&instantiation.completion);
+@@ -357,7 +362,10 @@ static int caam_probe(struct platform_device *pdev)
+ 
+ 	/*
+ 	 * RNG4 based SECs (v5+ | >= i.MX6) need special initialization prior
+-	 * to executing any descriptors
++	 * to executing any descriptors. If there's a problem with init,
++	 * remove other subsystems and return; internal padding functions
++	 * cannot run without an RNG. This procedure assumes a single RNG4
++	 * instance.
+ 	 */
+ 	if ((rd_reg64(&topregs->ctrl.perfmon.cha_id) & CHA_ID_RNG_MASK)
+ 	    == CHA_ID_RNG_4) {
+@@ -365,8 +373,9 @@ static int caam_probe(struct platform_device *pdev)
+ 		ret = instantiate_rng(ctrlpriv->jrdev[0]);
+ 		if (ret) {
+ 			caam_remove(pdev);
+-			return ret;
++			return -ENODEV;
+ 		}
++		ctrlpriv->rng_inst++;
+ 	}
+ 
+ 	/* NOTE: RTIC detection ought to go here, around Si time */
+@@ -468,15 +477,18 @@ static int caam_probe(struct platform_device *pdev)
+  * start up the API code explicitly, and forego modularization
+  */
+ #ifndef CONFIG_OF
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_CRYPTO_API
+ 	/* FIXME: check status */
+ 	caam_algapi_startup(pdev);
++#endif
+ 
+ #ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_AHASH_API
+ 	caam_algapi_hash_startup(pdev);
+ #endif
+ 
+ #ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_RNG_API
+-	caam_rng_startup(pdev);
++	if (ctrlpriv->rng_inst)
++		caam_rng_startup(pdev);
+ #endif
+ #endif /* CONFIG_OF */
+ 	return 0;
+diff --git a/drivers/crypto/caam/intern.h b/drivers/crypto/caam/intern.h
+index 8550598..18e7385 100644
+--- a/drivers/crypto/caam/intern.h
++++ b/drivers/crypto/caam/intern.h
+@@ -100,6 +100,7 @@ struct caam_drv_private {
+ 	u8 total_jobrs;		/* Total Job Rings in device */
+ 	u8 qi_present;		/* Nonzero if QI present in device */
+ 	int secvio_irq;		/* Security violation interrupt number */
++	int rng_inst;		/* Total instantiated RNGs */
+ 
+ 	/* which jr allocated to scatterlist crypto */
+ 	atomic_t tfm_count ____cacheline_aligned;
+-- 
+1.7.7.4
+

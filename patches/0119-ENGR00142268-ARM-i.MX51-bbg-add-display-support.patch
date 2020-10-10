@@ -1,0 +1,662 @@
+From 1040344cd8ece3c76280f81d6ed3b8a3f359a764 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Mon, 18 Apr 2011 17:14:02 +0800
+Subject: [PATCH 0119/2463] ENGR00142268 ARM i.MX51 bbg: add display support.
+
+Add display device support for mx51 bbg.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx51_babbage.c        |  227 +++++++++++++++++++-
+ arch/arm/mach-mx5/devices-imx51.h             |   25 +++
+ arch/arm/plat-mxc/devices/platform-imx-scc2.c |  279 +++++++++++++++++++++++++
+ 3 files changed, 525 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx51_babbage.c b/arch/arm/mach-mx5/board-mx51_babbage.c
+index 59df327..d6975cb 100755
+--- a/arch/arm/mach-mx5/board-mx51_babbage.c
++++ b/arch/arm/mach-mx5/board-mx51_babbage.c
+@@ -16,13 +16,21 @@
+ #include <linux/gpio.h>
+ #include <linux/delay.h>
+ #include <linux/io.h>
++#include <linux/fsl_devices.h>
++#include <linux/fec.h>
++#include <linux/gpio_keys.h>
+ #include <linux/input.h>
+ #include <linux/spi/flash.h>
+ #include <linux/spi/spi.h>
++#include <linux/ipu.h>
++#include <linux/mxcfb.h>
++#include <linux/pwm_backlight.h>
+ 
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+ #include <mach/iomux-mx51.h>
++#include <mach/mxc_ehci.h>
++#include <mach/ipu-v3.h>
+ 
+ #include <asm/irq.h>
+ #include <asm/setup.h>
+@@ -38,6 +46,7 @@
+ #define BABBAGE_USB_HUB_RESET	IMX_GPIO_NR(1, 7)
+ #define BABBAGE_USBH1_STP	IMX_GPIO_NR(1, 27)
+ #define BABBAGE_PHY_RESET	IMX_GPIO_NR(2, 5)
++#define BABBAGE_VGA_RESET	IMX_GPIO_NR(2, 13)
+ #define BABBAGE_FEC_PHY_RESET	IMX_GPIO_NR(2, 14)
+ #define BABBAGE_POWER_KEY	IMX_GPIO_NR(2, 21)
+ #define BABBAGE_ECSPI1_CS0	IMX_GPIO_NR(4, 24)
+@@ -47,6 +56,17 @@
+ #define MX51_BBG_SD2_CD         IMX_GPIO_NR(1, 6)
+ #define MX51_BBG_SD2_WP         IMX_GPIO_NR(1, 5)
+ 
++#define BABBAGE_LVDS_POWER_DOWN		IMX_GPIO_NR(3, 3)	/* GPIO_3_3 */
++#define BABBAGE_DISP_BRIGHTNESS_CTL	IMX_GPIO_NR(3, 4)	/* GPIO_3_4 */
++#define BABBAGE_DVI_RESET		IMX_GPIO_NR(3, 5)	/* GPIO_3_5 */
++#define BABBAGE_DVI_POWER		IMX_GPIO_NR(3, 6)	/* GPIO_3_6 */
++#define BABBAGE_HEADPHONE_DET		IMX_GPIO_NR(3, 26)	/* GPIO_3_26 */
++#define BABBAGE_DVI_DET			IMX_GPIO_NR(3, 28)	/* GPIO_3_28 */
++
++#define BABBAGE_LCD_3V3_ON		IMX_GPIO_NR(4, 9)	/* GPIO_4_9 */
++#define BABBAGE_LCD_5V_ON		IMX_GPIO_NR(4, 10)	/* GPIO_4_10 */
++#define BABBAGE_DVI_I2C_EN		IMX_GPIO_NR(4, 14)	/* GPIO_4_14 */
++
+ /* USB_CTRL_1 */
+ #define MX51_USB_CTRL_1_OFFSET			0x10
+ #define MX51_USB_CTRL_UH1_EXT_CLK_EN		(1 << 25)
+@@ -163,6 +183,27 @@ static iomux_v3_cfg_t mx51babbage_pads[] = {
+ 	MX51_PAD_CSPI1_SCLK__ECSPI1_SCLK,
+ 	MX51_PAD_CSPI1_SS0__GPIO4_24,
+ 	MX51_PAD_CSPI1_SS1__GPIO4_25,
++
++	/* Display */
++	MX51_PAD_EIM_A19__GPIO2_13,
++	MX51_PAD_DI1_D0_CS__GPIO3_3,
++	MX51_PAD_DISPB2_SER_DIN__GPIO3_5,
++	MX51_PAD_DISPB2_SER_DIO__GPIO3_6,
++	MX51_PAD_NANDF_D14__GPIO3_26,
++	MX51_PAD_NANDF_D12__GPIO3_28,
++	MX51_PAD_CSI2_D12__GPIO4_9,
++	MX51_PAD_CSI2_D13__GPIO4_10,
++	MX51_PAD_CSI2_HSYNC__GPIO4_14,
++
++	MX51_PAD_DI_GP4__DI2_PIN15,
++	MX51_PAD_GPIO1_2__PWM1_PWMO,
++
++#ifdef CONFIG_FB_MXC_CLAA_WVGA_SYNC_PANEL
++	MX51_PAD_DISP1_DAT22__DISP2_DAT16,
++	MX51_PAD_DISP1_DAT23__DISP2_DAT17,
++
++	MX51_PAD_DI1_D1_CS__GPIO3_4,
++#endif
+ };
+ 
+ /* Serial ports */
+@@ -203,6 +244,8 @@ static struct mxc_pm_platform_data babbage_pm_data = {
+ 	.suspend_enter = babbage_suspend_enter,
+ 	.suspend_exit = babbage_suspend_exit,
+ };
++
++
+ static int gpio_usbh1_active(void)
+ {
+ 	iomux_v3_cfg_t usbh1stp_gpio = MX51_PAD_USBH1_STP__GPIO1_27;
+@@ -238,16 +281,18 @@ static inline void babbage_usbhub_reset(void)
+ {
+ 	int ret;
+ 
+-	/* Reset USB hub */
+-	ret = gpio_request_one(BABBAGE_USB_HUB_RESET,
+-					GPIOF_OUT_INIT_LOW, "GPIO1_7");
++	/* Bring USB hub out of reset */
++	ret = gpio_request(BABBAGE_USB_HUB_RESET, "GPIO1_7");
+ 	if (ret) {
+ 		printk(KERN_ERR"failed to get GPIO_USB_HUB_RESET: %d\n", ret);
+ 		return;
+ 	}
++	gpio_direction_output(BABBAGE_USB_HUB_RESET, 0);
+ 
+-	msleep(2);
+-	/* Deassert reset */
++	/* USB HUB RESET - De-assert USB HUB RESET_N */
++	msleep(1);
++	gpio_set_value(BABBAGE_USB_HUB_RESET, 0);
++	msleep(1);
+ 	gpio_set_value(BABBAGE_USB_HUB_RESET, 1);
+ }
+ 
+@@ -365,6 +410,111 @@ static const struct spi_imx_master mx51_babbage_spi_pdata __initconst = {
+ 	.num_chipselect = ARRAY_SIZE(mx51_babbage_spi_cs),
+ };
+ 
++static struct fb_videomode video_modes[] = {
++	{
++	 /*MITSUBISHI LVDS panel */
++	 "XGA", 60, 1024, 768, 15385,
++	 220, 40,
++	 21, 7,
++	 60, 10,
++	 0,
++	 FB_VMODE_NONINTERLACED,
++	 0,},
++	{
++	 /* 800x480 @ 57 Hz , pixel clk @ 27MHz */
++	 "CLAA-WVGA", 57, 800, 480, 37037, 40, 60, 10, 10, 20, 10,
++	 FB_SYNC_CLK_LAT_FALL,
++	 FB_VMODE_NONINTERLACED,
++	 0,},
++};
++
++static struct ipuv3_fb_platform_data bbg_fb_di0_data = {
++	.interface_pix_fmt = IPU_PIX_FMT_RGB24,
++	.mode_str = "1024x768M-16@60",
++	.modes = video_modes,
++	.num_modes = ARRAY_SIZE(video_modes),
++};
++
++static struct ipuv3_fb_platform_data bbg_fb_di1_data = {
++	.interface_pix_fmt = IPU_PIX_FMT_RGB565,
++	.mode_str = "CLAA-WVGA",
++	.modes = video_modes,
++	.num_modes = ARRAY_SIZE(video_modes),
++};
++
++static struct imx_ipuv3_platform_data ipu_data = {
++	.rev = 2,
++	.fb_head0_platform_data = &bbg_fb_di0_data,
++	.fb_head1_platform_data = &bbg_fb_di1_data,
++};
++
++static struct platform_pwm_backlight_data bbg_pwm_backlight_data = {
++	.pwm_id = 0,
++	.max_brightness = 255,
++	.dft_brightness = 128,
++	.pwm_period_ns = 78770,
++};
++
++static struct fsl_mxc_tve_platform_data tve_data = {
++	.dac_reg = "VVIDEO",
++};
++
++static void vga_reset(void)
++{
++
++	gpio_set_value(BABBAGE_VGA_RESET, 0);
++	msleep(50);
++	/* do reset */
++	gpio_set_value(BABBAGE_VGA_RESET, 1);
++	msleep(10);		/* tRES >= 50us */
++	gpio_set_value(BABBAGE_VGA_RESET, 0);
++}
++
++static struct fsl_mxc_lcd_platform_data vga_data = {
++	.core_reg = "VCAM",
++	.io_reg = "VGEN3",
++	.analog_reg = "VAUDIO",
++	.reset = vga_reset,
++};
++
++static void ddc_dvi_init()
++{
++	/* enable DVI I2C */
++	gpio_set_value(BABBAGE_DVI_I2C_EN, 1);
++}
++
++static int ddc_dvi_update()
++{
++	/* DVI cable state */
++	if (gpio_get_value(BABBAGE_DVI_DET) == 1)
++		return 1;
++	else
++		return 0;
++}
++
++static struct fsl_mxc_ddc_platform_data bbg_ddc_dvi_data = {
++	.di = 0,
++	.init = ddc_dvi_init,
++	.update = ddc_dvi_update,
++};
++
++static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
++	{
++	 .type = "mxc_ddc",
++	 .addr = 0x50,
++	 .irq = gpio_to_irq(BABBAGE_DVI_DET),
++	 .platform_data = &bbg_ddc_dvi_data,
++	 },
++};
++
++static struct i2c_board_info mxc_i2c_hs_board_info[] __initdata = {
++	{
++	 .type = "ch7026",
++	 .addr = 0x75,
++	 .platform_data = &vga_data,
++	 },
++};
++
+ static struct mxc_gpu_platform_data gpu_data __initdata;
+ 
+ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+@@ -420,6 +570,13 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ 		gpu_data.reserved_mem_base =
+ 				mem_tag->u.mem.start + left_mem;
+ 		gpu_data.reserved_mem_size = gpu_mem;
++
++		/* reserver memory for fb */
++		bbg_fb_di0_data.res_base = gpu_data.reserved_mem_base
++					+ gpu_data.reserved_mem_size;
++		bbg_fb_di0_data.res_size = fb_mem;
++		bbg_fb_di1_data.res_base = bbg_fb_di0_data.res_base;
++		bbg_fb_di1_data.res_size = bbg_fb_di0_data.res_size;
+ 	}
+ }
+ 
+@@ -442,14 +599,31 @@ static void __init mx51_babbage_init(void)
+ 	babbage_fec_reset();
+ 	imx51_add_fec(NULL);
+ 
++	imx51_add_ipuv3(&ipu_data);
++	imx51_add_vpu();
++	imx51_add_tve(&tve_data);
++	imx51_add_v4l2_output(0);
++
++	imx51_add_mxc_pwm(0);
++	imx51_add_mxc_pwm_backlight(0, &bbg_pwm_backlight_data);
++
+ 	/* Set the PAD settings for the pwr key. */
+ 	mxc_iomux_v3_setup_pad(power_key);
+-	imx_add_gpio_keys(&imx_button_data);
++	imx51_add_gpio_keys(&imx_button_data);
+ 
+ 	imx51_add_imx_i2c(0, &babbage_i2c_data);
+ 	imx51_add_imx_i2c(1, &babbage_i2c_data);
+ 	mxc_register_device(&mxc_hsi2c_device, &babbage_hsi2c_data);
+ 	mxc_register_device(&mxc_pm_device, &babbage_pm_data);
++	i2c_register_board_info(1, mxc_i2c1_board_info,
++				ARRAY_SIZE(mxc_i2c1_board_info));
++
++	vga_data.core_reg = NULL;
++	vga_data.io_reg = NULL;
++	vga_data.analog_reg = NULL;
++
++	i2c_register_board_info(3, mxc_i2c_hs_board_info,
++				ARRAY_SIZE(mxc_i2c_hs_board_info));
+ 
+ 	/*if (otg_mode_host)
+ 		mxc_register_device(&mxc_usbdr_host_device, &dr_utmi_config);
+@@ -469,6 +643,7 @@ static void __init mx51_babbage_init(void)
+ 
+ 	spi_register_board_info(mx51_babbage_spi_board_info,
+ 		ARRAY_SIZE(mx51_babbage_spi_board_info));
++
+ 	imx51_add_ecspi(0, &mx51_babbage_spi_pdata);
+ 	imx51_add_imx2_wdt(0, NULL);
+ 	imx51_add_mxc_gpu(&gpu_data);
+@@ -477,6 +652,46 @@ static void __init mx51_babbage_init(void)
+ 	  * even if SCC2 driver is not part of the image
+ 	  */
+ 	imx51_add_mxc_scc2();
++
++	if (mx51_revision() >= IMX_CHIP_REVISION_3_0) {
++		/* DVI_I2C_ENB = 0 tristates the DVI I2C level shifter */
++		gpio_request(BABBAGE_DVI_I2C_EN, "dvi-i2c-en");
++		gpio_direction_output(BABBAGE_DVI_I2C_EN, 0);
++	}
++
++	/* Deassert VGA reset to free i2c bus */
++	gpio_request(BABBAGE_VGA_RESET, "vga-reset");
++	gpio_direction_output(BABBAGE_VGA_RESET, 1);
++
++	/* LCD related gpio */
++	gpio_request(BABBAGE_DISP_BRIGHTNESS_CTL, "disp-brightness-ctl");
++	gpio_request(BABBAGE_LVDS_POWER_DOWN, "lvds-power-down");
++	gpio_request(BABBAGE_LCD_3V3_ON, "lcd-3v3-on");
++	gpio_request(BABBAGE_LCD_5V_ON, "lcd-5v-on");
++	gpio_direction_output(BABBAGE_DISP_BRIGHTNESS_CTL, 0);
++	gpio_direction_output(BABBAGE_LVDS_POWER_DOWN, 0);
++	gpio_direction_output(BABBAGE_LCD_3V3_ON, 0);
++	gpio_direction_output(BABBAGE_LCD_5V_ON, 0);
++
++	/* DI0-LVDS */
++	gpio_set_value(BABBAGE_LVDS_POWER_DOWN, 0);
++	msleep(1);
++	gpio_set_value(BABBAGE_LVDS_POWER_DOWN, 1);
++	gpio_set_value(BABBAGE_LCD_3V3_ON, 1);
++	gpio_set_value(BABBAGE_LCD_5V_ON, 1);
++
++	/* DVI Detect */
++	gpio_request(BABBAGE_DVI_DET, "dvi-detect");
++	gpio_direction_input(BABBAGE_DVI_DET);
++	/* DVI Reset - Assert for i2c disabled mode */
++	gpio_request(BABBAGE_DVI_RESET, "dvi-reset");
++	gpio_direction_output(BABBAGE_DVI_RESET, 0);
++	/* DVI Power-down */
++	gpio_request(BABBAGE_DVI_POWER, "dvi-power");
++	gpio_direction_output(BABBAGE_DVI_POWER, 1);
++
++	/* WVGA Reset */
++	gpio_set_value(BABBAGE_DISP_BRIGHTNESS_CTL, 1);
+ }
+ 
+ static void __init mx51_babbage_timer_init(void)
+diff --git a/arch/arm/mach-mx5/devices-imx51.h b/arch/arm/mach-mx5/devices-imx51.h
+index c56cba3..740fdd4 100755
+--- a/arch/arm/mach-mx5/devices-imx51.h
++++ b/arch/arm/mach-mx5/devices-imx51.h
+@@ -60,3 +60,28 @@ extern const struct imx_mxc_scc2_data imx51_mxc_scc2_data __initconst;
+ #define imx51_add_mxc_scc2() \
+ 	imx_add_mxc_scc2(&imx51_mxc_scc2_data)
+ 
++extern const struct imx_mxc_pwm_data imx51_mxc_pwm_data[] __initconst;
++#define imx51_add_mxc_pwm(id)	\
++	imx_add_mxc_pwm(&imx51_mxc_pwm_data[id])
++
++#define imx51_add_mxc_pwm_backlight(id, pdata)                 \
++	platform_device_register_resndata(NULL, "pwm-backlight",\
++			id, NULL, 0, pdata, sizeof(*pdata));
++
++extern const struct imx_ipuv3_data imx51_ipuv3_data __initconst;
++#define imx51_add_ipuv3(pdata)	imx_add_ipuv3(&imx51_ipuv3_data, pdata)
++
++extern const struct imx_vpu_data imx51_vpu_data __initconst;
++#define imx51_add_vpu()	imx_add_vpu(&imx51_vpu_data)
++
++extern const struct imx_tve_data imx51_tve_data __initconst;
++#define imx51_add_tve(pdata)	\
++	imx_add_tve(&imx51_tve_data, pdata)
++
++#define imx51_add_v4l2_output(id)	\
++	platform_device_register_resndata(NULL, "mxc_v4l2_output",\
++			id, NULL, 0, NULL, 0);
++
++#define imx51_add_v4l2_capture(id)	\
++	platform_device_register_resndata(NULL, "mxc_v4l2_capture",\
++			id, NULL, 0, NULL, 0);
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-scc2.c b/arch/arm/plat-mxc/devices/platform-imx-scc2.c
+new file mode 100644
+index 0000000..f31b041
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx-scc2.c
+@@ -0,0 +1,279 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <asm/sizes.h>
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++#include <linux/mxc_scc2_driver.h>
++#include <linux/delay.h>
++
++#define imx_scc2_data_entry_single(soc)	\
++{						\
++	.iobase = soc ## _SCC_BASE_ADDR,	\
++	.ram_start = soc ## _SCC_RAM_BASE_ADDR,	\
++	.irq_smn = soc ## _INT_SCC_SMN,		\
++	.irq_scm = soc ## _INT_SCC_SCM,		\
++}
++
++#ifdef CONFIG_SOC_IMX51
++const struct imx_mxc_scc2_data imx51_mxc_scc2_data __initconst =
++	imx_scc2_data_entry_single(MX51);
++#endif /* ifdef CONFIG_SOC_IMX51 */
++
++#ifdef CONFIG_SOC_IMX53
++const struct imx_mxc_scc2_data imx53_mxc_scc2_data __initconst =
++	imx_scc2_data_entry_single(MX53);
++#endif /* ifdef CONFIG_SOC_IMX53 */
++
++#define SCM_RD_DELAY	1000000 /* in nanoseconds */
++#define SEC_TO_NANOSEC  1000000000 /*Second to nanoseconds */
++static __init void mxc_init_scc_iram(struct resource res[])
++{
++	uint32_t reg_value;
++	uint32_t reg_mask = 0;
++	uint8_t *UMID_base;
++	uint32_t *MAP_base;
++	uint8_t i;
++	uint32_t partition_no;
++	uint32_t scc_partno;
++	void *scm_ram_base;
++	void *scc_base;
++	uint32_t ram_partitions, ram_partition_size, ram_size;
++	uint32_t scm_version_register;
++	struct timespec stime;
++	struct timespec curtime;
++	long scm_rd_timeout = 0;
++	long cur_ns = 0;
++	long start_ns = 0;
++
++	scc_base = ioremap((uint32_t) res[0].start, 0x140);
++	if (scc_base == NULL) {
++		printk(KERN_ERR "FAILED TO MAP SCC REGS\n");
++		return;
++	}
++
++	scm_version_register = __raw_readl(scc_base + SCM_VERSION_REG);
++	ram_partitions = 1 + ((scm_version_register & SCM_VER_NP_MASK)
++		>> SCM_VER_NP_SHIFT);
++	ram_partition_size = (uint32_t) (1 <<
++		((scm_version_register & SCM_VER_BPP_MASK)
++		>> SCM_VER_BPP_SHIFT));
++
++	ram_size = (uint32_t)(ram_partitions * ram_partition_size);
++
++	scm_ram_base = ioremap((uint32_t) res[1].start, ram_size);
++
++	if (scm_ram_base == NULL) {
++		printk(KERN_ERR "FAILED TO MAP SCC RAM\n");
++		return;
++	}
++
++	/* Wait for any running SCC operations to finish or fail */
++	getnstimeofday(&stime);
++	do {
++		reg_value = __raw_readl(scc_base + SCM_STATUS_REG);
++		getnstimeofday(&curtime);
++		if (curtime.tv_nsec > stime.tv_nsec)
++			scm_rd_timeout = curtime.tv_nsec - stime.tv_nsec;
++		else{
++			/*Converted second to nanosecond and add to
++			nsec when current nanosec is less than
++			start time nanosec.*/
++			cur_ns = (curtime.tv_sec * SEC_TO_NANOSEC) +
++			curtime.tv_nsec;
++			start_ns = (stime.tv_sec * SEC_TO_NANOSEC) +
++				stime.tv_nsec;
++			scm_rd_timeout = cur_ns - start_ns;
++		}
++	} while (((reg_value & SCM_STATUS_SRS_MASK) != SCM_STATUS_SRS_READY)
++	&& ((reg_value & SCM_STATUS_SRS_MASK) != SCM_STATUS_SRS_FAIL));
++
++	/* Check for failures */
++	if ((reg_value & SCM_STATUS_SRS_MASK) != SCM_STATUS_SRS_READY) {
++		/* Special message for bad secret key fuses */
++		if (reg_value & SCM_STATUS_KST_BAD_KEY)
++			printk(KERN_ERR "INVALID SCC KEY FUSE PATTERN\n");
++		else
++		    printk(KERN_ERR "SECURE RAM FAILURE\n");
++
++		iounmap(scm_ram_base);
++		iounmap(scc_base);
++		return;
++	}
++
++	scm_rd_timeout = 0;
++
++	/* Release all partitions for SCC2 driver on MX53*/
++	if (cpu_is_mx53())
++		scc_partno = 0;
++	/* Release final two partitions for SCC2 driver on MX51 */
++	else
++		scc_partno = ram_partitions -
++			(MX51_SCC_RAM_SIZE / ram_partition_size);
++
++	for (partition_no = scc_partno; partition_no < ram_partitions;
++	     partition_no++) {
++		reg_value = (((partition_no << SCM_ZCMD_PART_SHIFT) &
++			SCM_ZCMD_PART_MASK) | ((0x03 << SCM_ZCMD_CCMD_SHIFT) &
++			SCM_ZCMD_CCMD_MASK));
++		__raw_writel(reg_value, scc_base + SCM_ZCMD_REG);
++		udelay(1);
++		/* Wait for zeroization to complete */
++		getnstimeofday(&stime);
++		do {
++			reg_value = __raw_readl(scc_base + SCM_STATUS_REG);
++			getnstimeofday(&curtime);
++			if (curtime.tv_nsec > stime.tv_nsec)
++				scm_rd_timeout = curtime.tv_nsec -
++				stime.tv_nsec;
++			else {
++				/*Converted second to nanosecond and add to
++				nsec when current nanosec is less than
++				start time nanosec.*/
++				cur_ns = (curtime.tv_sec * SEC_TO_NANOSEC) +
++				curtime.tv_nsec;
++				start_ns = (stime.tv_sec * SEC_TO_NANOSEC) +
++					stime.tv_nsec;
++				scm_rd_timeout = cur_ns - start_ns;
++			}
++		} while (((reg_value & SCM_STATUS_SRS_MASK) !=
++		SCM_STATUS_SRS_READY) && ((reg_value & SCM_STATUS_SRS_MASK) !=
++		SCM_STATUS_SRS_FAIL) && (scm_rd_timeout <= SCM_RD_DELAY));
++
++		if (scm_rd_timeout > SCM_RD_DELAY)
++			printk(KERN_ERR "SCM Status Register Read timeout"
++			"for Partition No:%d", partition_no);
++
++		if ((reg_value & SCM_STATUS_SRS_MASK) != SCM_STATUS_SRS_READY)
++			break;
++	}
++
++	/* 4 partitions on MX53 */
++	if (cpu_is_mx53())
++		reg_mask = 0xFF;
++
++	/*Check all expected partitions released */
++	reg_value = __raw_readl(scc_base + SCM_PART_OWNERS_REG);
++	if ((reg_value & reg_mask) != 0) {
++		printk(KERN_ERR "FAILED TO RELEASE IRAM PARTITION\n");
++		iounmap(scm_ram_base);
++		iounmap(scc_base);
++		return;
++	}
++
++	/* we are done if this is MX53, since no sharing of IRAM and SCC_RAM */
++	if (cpu_is_mx53())
++		goto exit;
++
++	reg_mask = 0;
++	scm_rd_timeout = 0;
++	/* Allocate remaining partitions for general use */
++	for (partition_no = 0; partition_no < scc_partno; partition_no++) {
++		/* Supervisor mode claims a partition for it's own use
++		by writing zero to SMID register.*/
++		__raw_writel(0, scc_base + (SCM_SMID0_REG + 8 * partition_no));
++
++		/* Wait for any zeroization to complete */
++		getnstimeofday(&stime);
++		do {
++			reg_value = __raw_readl(scc_base + SCM_STATUS_REG);
++			getnstimeofday(&curtime);
++			if (curtime.tv_nsec > stime.tv_nsec)
++				scm_rd_timeout = curtime.tv_nsec -
++				stime.tv_nsec;
++			else{
++				/*Converted second to nanosecond and add to
++				nsec when current nanosec is less than
++				start time nanosec.*/
++				cur_ns = (curtime.tv_sec * SEC_TO_NANOSEC) +
++				curtime.tv_nsec;
++				start_ns = (stime.tv_sec * SEC_TO_NANOSEC) +
++					stime.tv_nsec;
++				scm_rd_timeout = cur_ns - start_ns;
++			}
++		} while (((reg_value & SCM_STATUS_SRS_MASK) !=
++		SCM_STATUS_SRS_READY) && ((reg_value & SCM_STATUS_SRS_MASK) !=
++		SCM_STATUS_SRS_FAIL) && (scm_rd_timeout <= SCM_RD_DELAY));
++
++		if (scm_rd_timeout > SCM_RD_DELAY)
++			printk(KERN_ERR "SCM Status Register Read timeout"
++			"for Partition No:%d", partition_no);
++
++		if ((reg_value & SCM_STATUS_SRS_MASK) != SCM_STATUS_SRS_READY)
++			break;
++		/* Set UMID=0 and permissions for universal data
++		read/write access */
++		MAP_base = scm_ram_base +
++			(uint32_t) (partition_no * ram_partition_size);
++		UMID_base = (uint8_t *) MAP_base + 0x10;
++		for (i = 0; i < 16; i++)
++			UMID_base[i] = 0;
++
++		MAP_base[0] = (SCM_PERM_NO_ZEROIZE | SCM_PERM_HD_SUP_DISABLE |
++			SCM_PERM_HD_READ | SCM_PERM_HD_WRITE |
++			SCM_PERM_HD_EXECUTE | SCM_PERM_TH_READ |
++			SCM_PERM_TH_WRITE);
++		reg_mask |= (3 << (2 * (partition_no)));
++	}
++
++	/* Check all expected partitions allocated */
++	reg_value = __raw_readl(scc_base + SCM_PART_OWNERS_REG);
++	if ((reg_value & reg_mask) != reg_mask) {
++		printk(KERN_ERR "FAILED TO ACQUIRE IRAM PARTITION\n");
++		iounmap(scm_ram_base);
++		iounmap(scc_base);
++		return;
++	}
++
++exit:
++	iounmap(scm_ram_base);
++	iounmap(scc_base);
++	printk(KERN_INFO "IRAM READY\n");
++}
++
++
++struct platform_device *__init imx_add_mxc_scc2(
++		const struct imx_mxc_scc2_data *data)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + SZ_4K - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.start = data->ram_start,
++			.end = data->ram_start + SZ_128K - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.start = data->irq_smn,
++			.end = data->irq_smn,
++			.flags = IORESOURCE_IRQ,
++		}, {
++			.start = data->irq_scm,
++			.end = data->irq_scm,
++			.flags = IORESOURCE_IRQ,
++		},
++	};
++
++	mxc_init_scc_iram(res);
++
++	return imx_add_platform_device("mxc_scc", 0,
++			res, ARRAY_SIZE(res), NULL, 0);
++}
+-- 
+1.7.7.4
+

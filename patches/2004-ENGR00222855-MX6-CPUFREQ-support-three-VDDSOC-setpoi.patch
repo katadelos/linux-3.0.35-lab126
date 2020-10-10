@@ -1,0 +1,110 @@
+From 142359dbd9d5ee06adfe8be6470cea08817be984 Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Mon, 3 Sep 2012 15:17:01 +0800
+Subject: [PATCH 2004/2463] ENGR00222855 MX6 CPUFREQ: support three VDDSOC
+ setpoints
+
+On MX6Q/DL , there is only two set point of VDDSOC/VDDPU, one is 1.25V(1GHz),
+another is 1.175V.  And in arch/arm/plat-mxc/cpufreq.c will judge whether the
+current cpu frequency is the highest set point(1G) or not to set the right
+VDDSOC/VDDPU. The logic is also match to dynamic ldo bypass function, since the
+change point is the highest set point too. But there is three set points of
+VDDSOC/VDDPU in MX6SL , so the logic in cpufreq.c need to change. Now
+VDDSOC/VDDPU will track with VDDARM fully.
+
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ arch/arm/plat-mxc/cpufreq.c |   59 +++++++++++++++++++------------------------
+ 1 files changed, 26 insertions(+), 33 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index bdc89f0..7a06aae 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -42,7 +42,6 @@ static int cpu_freq_suspend_in;
+ static struct mutex set_cpufreq_lock;
+ #endif
+ 
+-static int soc_regulator_set;
+ static int cpu_freq_khz_min;
+ static int cpu_freq_khz_max;
+ 
+@@ -92,24 +91,21 @@ int set_cpu_freq(int freq)
+ 		/* Check if the bus freq needs to be increased first */
+ 		bus_freq_update(cpu_clk, true);
+ 
+-		if (freq == cpu_op_tbl[0].cpu_rate) {
+-			if (!IS_ERR(soc_regulator)) {
+-				ret = regulator_set_voltage(soc_regulator, soc_volt,
+-								soc_volt);
+-				if (ret < 0) {
+-					printk(KERN_DEBUG "COULD NOT SET SOC VOLTAGE!!!!\n");
+-					return ret;
+-				}
++		if (!IS_ERR(soc_regulator)) {
++			ret = regulator_set_voltage(soc_regulator, soc_volt,
++							soc_volt);
++			if (ret < 0) {
++				printk(KERN_DEBUG "COULD NOT SET SOC VOLTAGE!!!!\n");
++				return ret;
+ 			}
+-			if (!IS_ERR(pu_regulator)) {
+-				ret = regulator_set_voltage(pu_regulator, pu_volt,
+-								pu_volt);
+-				if (ret < 0) {
+-					printk(KERN_DEBUG "COULD NOT SET PU VOLTAGE!!!!\n");
+-					return ret;
+-				}
++		}
++		if (!IS_ERR(pu_regulator)) {
++			ret = regulator_set_voltage(pu_regulator, pu_volt,
++							pu_volt);
++			if (ret < 0) {
++				printk(KERN_DEBUG "COULD NOT SET PU VOLTAGE!!!!\n");
++				return ret;
+ 			}
+-			soc_regulator_set = 1;
+ 		}
+ 		ret = regulator_set_voltage(cpu_regulator, gp_volt,
+ 					    gp_volt);
+@@ -132,24 +128,21 @@ int set_cpu_freq(int freq)
+ 			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
+ 			return ret;
+ 		}
+-		if (soc_regulator_set) {
+-			if (!IS_ERR(soc_regulator)) {
+-				ret = regulator_set_voltage(soc_regulator, soc_volt,
+-								soc_volt);
+-				if (ret < 0) {
+-					printk(KERN_DEBUG "COULD NOT SET SOC VOLTAGE BACK!!!!\n");
+-					return ret;
+-				}
++		if (!IS_ERR(soc_regulator)) {
++			ret = regulator_set_voltage(soc_regulator, soc_volt,
++							soc_volt);
++			if (ret < 0) {
++				printk(KERN_DEBUG "COULD NOT SET SOC VOLTAGE BACK!!!!\n");
++				return ret;
+ 			}
+-			if (!IS_ERR(pu_regulator)) {
+-				ret = regulator_set_voltage(pu_regulator, pu_volt,
+-								pu_volt);
+-				if (ret < 0) {
+-					printk(KERN_DEBUG "COULD NOT SET PU VOLTAGE!!!!\n");
+-					return ret;
+-				}
++		}
++		if (!IS_ERR(pu_regulator)) {
++			ret = regulator_set_voltage(pu_regulator, pu_volt,
++							pu_volt);
++			if (ret < 0) {
++				printk(KERN_DEBUG "COULD NOT SET PU VOLTAGE!!!!\n");
++				return ret;
+ 			}
+-			soc_regulator_set = 0;
+ 		}
+ 		/* Check if the bus freq can be decreased.*/
+ 		bus_freq_update(cpu_clk, false);
+-- 
+1.7.7.4
+

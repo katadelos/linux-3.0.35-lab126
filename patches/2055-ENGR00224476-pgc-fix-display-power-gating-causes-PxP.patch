@@ -1,0 +1,56 @@
+From 255f866d0cd25eb84db977b0bf99d91755332321 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Wed, 12 Sep 2012 14:32:34 +0800
+Subject: [PATCH 2055/2463] ENGR00224476 pgc: fix display power gating causes
+ PxP processing timeout
+
+The root-cause is PxP need the clock to be on for synchronous reset.
+This patch turned on PXP axi clock, and EPDC/LCDIF pix clock, and
+EPDC/LCDIF axi clock before power up. The driver codes can guarantee
+the clock setting be restored to the one before suspend.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ arch/arm/mach-mx6/pm.c |   20 ++++++++++++++++++++
+ 1 files changed, 20 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index 650932d..ddce7be 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -266,12 +266,32 @@ static void disp_power_down(void)
+ 
+ 		__raw_writel(0x1, gpc_base + GPC_PGC_DISP_PGCR_OFFSET);
+ 		__raw_writel(0x10, gpc_base + GPC_CNTR_OFFSET);
++
++		/* Disable EPDC/LCDIF pix clock, and EPDC/LCDIF/PXP axi clock */
++		__raw_writel(ccgr3 &
++			~MXC_CCM_CCGRx_CG5_MASK &
++			~MXC_CCM_CCGRx_CG4_MASK &
++			~MXC_CCM_CCGRx_CG3_MASK &
++			~MXC_CCM_CCGRx_CG2_MASK &
++			~MXC_CCM_CCGRx_CG1_MASK, MXC_CCM_CCGR3);
++
+ 	}
+ }
+ 
+ static void disp_power_up(void)
+ {
+ 	if (cpu_is_mx6sl()) {
++		/*
++		 * Need to enable EPDC/LCDIF pix clock, and
++		 * EPDC/LCDIF/PXP axi clock before power up.
++		 */
++		__raw_writel(ccgr3 |
++			MXC_CCM_CCGRx_CG5_MASK |
++			MXC_CCM_CCGRx_CG4_MASK |
++			MXC_CCM_CCGRx_CG3_MASK |
++			MXC_CCM_CCGRx_CG2_MASK |
++			MXC_CCM_CCGRx_CG1_MASK, MXC_CCM_CCGR3);
++
+ 		__raw_writel(0x0, gpc_base + GPC_PGC_DISP_PGCR_OFFSET);
+ 		__raw_writel(0x20, gpc_base + GPC_CNTR_OFFSET);
+ 		__raw_writel(0x1, gpc_base + GPC_PGC_DISP_SR_OFFSET);
+-- 
+1.7.7.4
+

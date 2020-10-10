@@ -1,0 +1,93 @@
+From 6337b9566e2370efc95b979b1b3716e88b821a35 Mon Sep 17 00:00:00 2001
+From: Jack Lee <jack.lee@freescale.com>
+Date: Wed, 3 Oct 2012 13:31:47 +0800
+Subject: [PATCH 2146/2463] ENGR00223348 EPDC: Unable to enable DISPLAY
+ regulator
+
+In the maxim 17135 driver, the power good is confirmed by the
+power good GPIO polarity change when comparing the status at
+the beginning of driver probe and display regulator enabled.
+However, it is not reliable since the initial value of the GPIO
+is not constant. Normally, it is 1 but it can be 0 after system reset
+unexpectedly. Now, it is changed to POK bit checking in FAULT register.
+
+Signed-off-by: Jack Lee <jack.lee@freescale.com>
+---
+ drivers/regulator/max17135-regulator.c |   20 ++++++++++----------
+ include/linux/mfd/max17135.h           |    5 +----
+ 2 files changed, 11 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/regulator/max17135-regulator.c b/drivers/regulator/max17135-regulator.c
+index 45d4501..5ea70ef 100644
+--- a/drivers/regulator/max17135-regulator.c
++++ b/drivers/regulator/max17135-regulator.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2010-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -284,12 +284,14 @@ static int max17135_vcom_is_enabled(struct regulator_dev *reg)
+ 
+ static int max17135_is_power_good(struct max17135 *max17135)
+ {
+-	/*
+-	 * XOR of polarity (starting value) and current
+-	 * value yields whether power is good.
+-	 */
+-	return gpio_get_value(max17135->gpio_pmic_pwrgood) ^
+-		max17135->pwrgood_polarity;
++    unsigned int reg_val;
++    unsigned int fld_val;
++
++    max17135_reg_read(REG_MAX17135_FAULT, &reg_val);
++    fld_val = (reg_val & BITFMASK(FAULT_POK)) >> FAULT_POK_LSH;
++
++    /* Check the POK bit */
++    return fld_val;
+ }
+ 
+ static int max17135_wait_power_good(struct max17135 *max17135)
+@@ -302,6 +304,7 @@ static int max17135_wait_power_good(struct max17135 *max17135)
+ 
+ 		msleep(1);
+ 	}
++
+ 	return -ETIMEDOUT;
+ }
+ 
+@@ -622,9 +625,6 @@ int max17135_register_regulator(struct max17135 *max17135, int reg,
+ 		 */
+ 		max17135_setup_timings(max17135);
+ 
+-		max17135->pwrgood_polarity =
+-			gpio_get_value(max17135->gpio_pmic_pwrgood);
+-
+ 		max17135->init_done = true;
+ 	}
+ 
+diff --git a/include/linux/mfd/max17135.h b/include/linux/mfd/max17135.h
+index 265b158..5785ed4 100644
+--- a/include/linux/mfd/max17135.h
++++ b/include/linux/mfd/max17135.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2010-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -167,9 +167,6 @@ struct max17135 {
+ 
+ 	/* powerup/powerdown wait time */
+ 	int max_wait;
+-
+-	/* Dynamically determined polarity for PWRGOOD */
+-	int pwrgood_polarity;
+ };
+ 
+ enum {
+-- 
+1.7.7.4
+

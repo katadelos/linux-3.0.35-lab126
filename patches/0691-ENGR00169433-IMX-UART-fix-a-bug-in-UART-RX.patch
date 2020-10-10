@@ -1,0 +1,33 @@
+From f872dc1ad803c0e01377429da5455956dbb0972c Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Mon, 5 Dec 2011 18:53:47 +0800
+Subject: [PATCH 0691/2463] ENGR00169433 IMX/UART : fix a bug in UART RX
+
+The origin code did not check the running situation.
+It will cause a NULL pointer issue.
+
+This patch fixes it.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/tty/serial/imx.c |    4 +++-
+ 1 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/tty/serial/imx.c b/drivers/tty/serial/imx.c
+index b9e1694..f31fa1e 100644
+--- a/drivers/tty/serial/imx.c
++++ b/drivers/tty/serial/imx.c
+@@ -741,7 +741,9 @@ static void dma_rx_work(struct work_struct *w)
+ 		tty_flip_buffer_push(tty);
+ 		sport->rx_bytes = 0;
+ 	}
+-	start_rx_dma(sport);
++
++	if (sport->dma_is_rxing)
++		start_rx_dma(sport);
+ }
+ 
+ /*
+-- 
+1.7.7.4
+

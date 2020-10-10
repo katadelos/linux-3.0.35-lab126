@@ -1,0 +1,39 @@
+From f12adb66a7647fd58f360ad2c7662d5e9b88e782 Mon Sep 17 00:00:00 2001
+From: Xinyu Chen <b03824@freescale.com>
+Date: Fri, 9 Dec 2011 14:47:57 +0800
+Subject: [PATCH 0713/2463] ENGR00169891 v4l2 capture: avoid streamon with
+ only one buffer queued
+
+If user space only queue one buffer into ready list, and
+call streamon, camera csi enc ISR will crash.
+Since for CSI ENC, the ping pong buffer is initilized without
+checking ready buffer on streamon.
+The second buffer will be wrongly in cam_data struct, and causes
+DMA fill buffers into cam_data global variable.
+Here just add one sanity check for ready buffer.
+
+Signed-off-by: Xinyu Chen <xinyu.chen@freescale.com>
+---
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index a604506..e4108c2 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -382,6 +382,12 @@ static int mxc_streamon(cam_data *cam)
+ 			"queued yet\n");
+ 		return -EINVAL;
+ 	}
++	if (cam->enc_update_eba &&
++		cam->ready_q.prev == cam->ready_q.next) {
++		pr_err("ERROR: v4l2 capture: mxc_streamon buffer need ping pong "
++			"at least two buffers\n");
++		return -EINVAL;
++	}
+ 
+ 	cam->capture_pid = current->pid;
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,206 @@
+From 5afccd70dd903a0539f39e44aab8d9f666f90273 Mon Sep 17 00:00:00 2001
+From: Danny Nold <dannynold@freescale.com>
+Date: Thu, 3 Nov 2011 13:05:36 -0500
+Subject: [PATCH 0599/2463] ENGR00143921-1 - EPDC/MAX17135: Add controls for
+ V3P3 regulator
+
+- Added V3P3 regulator to max17135
+- Added calls to enable/disable V3P3 regulator from EPDC driver
+- Improved Kconfig detail for max17135 MFD and HWMON entries
+
+Signed-off-by: Danny Nold <dannynold@freescale.com>
+---
+ drivers/hwmon/Kconfig                  |    2 +-
+ drivers/mfd/Kconfig                    |    2 +-
+ drivers/regulator/max17135-regulator.c |   41 ++++++++++++++++++++++++++++++++
+ drivers/video/mxc/mxc_epdc_fb.c        |   25 +++++++++++++++++++
+ include/linux/mfd/max17135.h           |    3 ++
+ 5 files changed, 71 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/hwmon/Kconfig b/drivers/hwmon/Kconfig
+index 8589c13..6330789 100755
+--- a/drivers/hwmon/Kconfig
++++ b/drivers/hwmon/Kconfig
+@@ -766,7 +766,7 @@ config SENSORS_MAX6642
+ 	  will be called max6642.
+ 
+ config SENSORS_MAX17135
+-	tristate "Maxim MAX17135"
++	tristate "Maxim MAX17135 EPD temperature sensor"
+ 	depends on I2C
+ 	help
+ 	  If you say yes here you get support for MAX17135 PMIC sensor.
+diff --git a/drivers/mfd/Kconfig b/drivers/mfd/Kconfig
+index 1b43cf6d..97f3f9d 100755
+--- a/drivers/mfd/Kconfig
++++ b/drivers/mfd/Kconfig
+@@ -785,7 +785,7 @@ config TPS65911_COMPARATOR
+ 	tristate
+ 
+ config MFD_MAX17135
+-    tristate "MAX17135 PMIC core"
++    tristate "Maxim MAX17135 EPD PMIC core"
+ 	depends on I2C
+     help
+       This is the MAX17135 PMIC support. It includes
+diff --git a/drivers/regulator/max17135-regulator.c b/drivers/regulator/max17135-regulator.c
+index 97bf2af..45d4501 100644
+--- a/drivers/regulator/max17135-regulator.c
++++ b/drivers/regulator/max17135-regulator.c
+@@ -354,6 +354,33 @@ static int max17135_display_is_enabled(struct regulator_dev *reg)
+ 		return 1;
+ }
+ 
++static int max17135_v3p3_enable(struct regulator_dev *reg)
++{
++	struct max17135 *max17135 = rdev_get_drvdata(reg);
++
++	gpio_set_value(max17135->gpio_pmic_v3p3, 1);
++	return 0;
++}
++
++static int max17135_v3p3_disable(struct regulator_dev *reg)
++{
++	struct max17135 *max17135 = rdev_get_drvdata(reg);
++
++	gpio_set_value(max17135->gpio_pmic_v3p3, 0);
++	return 0;
++}
++
++static int max17135_v3p3_is_enabled(struct regulator_dev *reg)
++{
++	struct max17135 *max17135 = rdev_get_drvdata(reg);
++	int gpio = gpio_get_value(max17135->gpio_pmic_v3p3);
++
++	if (gpio == 0)
++		return 0;
++	else
++		return 1;
++}
++
+ /*
+  * Regulator operations
+  */
+@@ -394,6 +421,13 @@ static struct regulator_ops max17135_vneg_ops = {
+ static struct regulator_ops max17135_vpos_ops = {
+ };
+ 
++static struct regulator_ops max17135_v3p3_ops = {
++	.enable = max17135_v3p3_enable,
++	.disable = max17135_v3p3_disable,
++	.is_enabled = max17135_v3p3_is_enabled,
++};
++
++
+ /*
+  * Regulator descriptors
+  */
+@@ -454,6 +488,13 @@ static struct regulator_desc max17135_reg[MAX17135_NUM_REGULATORS] = {
+ 	.type = REGULATOR_VOLTAGE,
+ 	.owner = THIS_MODULE,
+ },
++{
++	.name = "V3P3",
++	.id = MAX17135_V3P3,
++	.ops = &max17135_v3p3_ops,
++	.type = REGULATOR_VOLTAGE,
++	.owner = THIS_MODULE,
++},
+ };
+ 
+ static void max17135_setup_timings(struct max17135 *max17135)
+diff --git a/drivers/video/mxc/mxc_epdc_fb.c b/drivers/video/mxc/mxc_epdc_fb.c
+index 6e7ac35..192264e 100644
+--- a/drivers/video/mxc/mxc_epdc_fb.c
++++ b/drivers/video/mxc/mxc_epdc_fb.c
+@@ -135,6 +135,7 @@ struct mxc_epdc_fb_data {
+ 	struct clk *epdc_clk_pix;
+ 	struct regulator *display_regulator;
+ 	struct regulator *vcom_regulator;
++	struct regulator *v3p3_regulator;
+ 	bool fw_default_load;
+ 
+ 	/* FB elements related to EPDC updates */
+@@ -866,6 +867,17 @@ static void epdc_powerup(struct mxc_epdc_fb_data *fb_data)
+ 
+ 	fb_data->updates_active = true;
+ 
++	/* Enable the v3p3 regulator */
++	ret = regulator_enable(fb_data->v3p3_regulator);
++	if (IS_ERR((void *)ret)) {
++		dev_err(fb_data->dev, "Unable to enable V3P3 regulator."
++			"err = 0x%x\n", ret);
++		mutex_unlock(&fb_data->power_mutex);
++		return;
++	}
++
++	msleep(1);
++
+ 	/* Enable pins used by EPDC */
+ 	if (fb_data->pdata->enable_pins)
+ 		fb_data->pdata->enable_pins();
+@@ -925,6 +937,9 @@ static void epdc_powerdown(struct mxc_epdc_fb_data *fb_data)
+ 	if (fb_data->pdata->disable_pins)
+ 		fb_data->pdata->disable_pins();
+ 
++	/* turn off the V3p3 */
++	regulator_disable(fb_data->v3p3_regulator);
++
+ 	fb_data->power_state = POWER_STATE_OFF;
+ 	fb_data->powering_down = false;
+ 
+@@ -3959,6 +3974,15 @@ int __devinit mxc_epdc_fb_probe(struct platform_device *pdev)
+ 		ret = -ENODEV;
+ 		goto out_irq;
+ 	}
++	fb_data->v3p3_regulator = regulator_get(NULL, "V3P3");
++	if (IS_ERR(fb_data->v3p3_regulator)) {
++		regulator_put(fb_data->vcom_regulator);
++		regulator_put(fb_data->display_regulator);
++		dev_err(&pdev->dev, "Unable to get V3P3 regulator."
++			"err = 0x%x\n", (int)fb_data->vcom_regulator);
++		ret = -ENODEV;
++		goto out_irq;
++	}
+ 
+ 	if (device_create_file(info->dev, &fb_attrs[0]))
+ 		dev_err(&pdev->dev, "Unable to create file from fb_attrs\n");
+@@ -4163,6 +4187,7 @@ static int mxc_epdc_fb_remove(struct platform_device *pdev)
+ 
+ 	regulator_put(fb_data->display_regulator);
+ 	regulator_put(fb_data->vcom_regulator);
++	regulator_put(fb_data->v3p3_regulator);
+ 
+ 	unregister_framebuffer(&fb_data->info);
+ 	free_irq(fb_data->epdc_irq, fb_data);
+diff --git a/include/linux/mfd/max17135.h b/include/linux/mfd/max17135.h
+index 0a8af30..265b158 100644
+--- a/include/linux/mfd/max17135.h
++++ b/include/linux/mfd/max17135.h
+@@ -154,6 +154,7 @@ struct max17135 {
+ 	int gpio_pmic_pwrgood;
+ 	int gpio_pmic_vcom_ctrl;
+ 	int gpio_pmic_wakeup;
++	int gpio_pmic_v3p3;
+ 	int gpio_pmic_intr;
+ 
+ 	/* MAX17135 part variables */
+@@ -181,6 +182,7 @@ enum {
+     MAX17135_VCOM,
+     MAX17135_VNEG,
+     MAX17135_VPOS,
++    MAX17135_V3P3,
+     MAX17135_NUM_REGULATORS,
+ };
+ 
+@@ -201,6 +203,7 @@ struct max17135_platform_data {
+ 	int gpio_pmic_pwrgood;
+ 	int gpio_pmic_vcom_ctrl;
+ 	int gpio_pmic_wakeup;
++	int gpio_pmic_v3p3;
+ 	int gpio_pmic_intr;
+ 	int pass_num;
+ 	int vcom_uV;
+-- 
+1.7.7.4
+

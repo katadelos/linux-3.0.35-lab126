@@ -1,0 +1,237 @@
+From 185cd22e0ff8da377fd5245c4655f095712fef87 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Thu, 27 Sep 2012 21:02:01 +0800
+Subject: [PATCH 2105/2463] ENGR00225981-3 csi: Add csi driver support on
+ MX6SL
+
+- re-use csi driver from mx25
+- set csi irq/baseaddr as platform resource
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ drivers/media/video/mxc/capture/Kconfig            |    2 +-
+ drivers/media/video/mxc/capture/csi_v4l2_capture.c |    8 ++--
+ drivers/media/video/mxc/capture/fsl_csi.c          |   58 ++++++++++++++++++--
+ drivers/media/video/mxc/capture/fsl_csi.h          |   35 ++++++------
+ 4 files changed, 75 insertions(+), 28 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/Kconfig b/drivers/media/video/mxc/capture/Kconfig
+index a7b14cb..febe9d8 100644
+--- a/drivers/media/video/mxc/capture/Kconfig
++++ b/drivers/media/video/mxc/capture/Kconfig
+@@ -13,7 +13,7 @@ config VIDEO_MXC_EMMA_CAMERA
+ 	default y
+ 
+ config VIDEO_MXC_CSI_CAMERA
+-	tristate "MX25 CSI camera support"
++	tristate "CSI camera support"
+ 	depends on !VIDEO_MXC_EMMA_CAMERA
+ 
+ config VIDEO_MXC_CSI_DMA
+diff --git a/drivers/media/video/mxc/capture/csi_v4l2_capture.c b/drivers/media/video/mxc/capture/csi_v4l2_capture.c
+index eb824dd..a4ce862 100644
+--- a/drivers/media/video/mxc/capture/csi_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/csi_v4l2_capture.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2009-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2009-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -15,7 +15,7 @@
+  * @file drivers/media/video/mxc/capture/csi_v4l2_capture.c
+  * This file is derived from mxc_v4l2_capture.c
+  *
+- * @brief MX25 Video For Linux 2 driver
++ * @brief Video For Linux 2 capture driver
+  *
+  * @ingroup MXC_V4L2_CAPTURE
+  */
+@@ -1186,8 +1186,8 @@ static void init_camera_struct(cam_data *cam)
+ 	/* Default everything to 0 */
+ 	memset(cam, 0, sizeof(cam_data));
+ 
+-	init_MUTEX(&cam->param_lock);
+-	init_MUTEX(&cam->busy_lock);
++	sema_init(&cam->param_lock, 1);
++	sema_init(&cam->busy_lock, 1);
+ 
+ 	cam->video_dev = video_device_alloc();
+ 	if (cam->video_dev == NULL)
+diff --git a/drivers/media/video/mxc/capture/fsl_csi.c b/drivers/media/video/mxc/capture/fsl_csi.c
+index dba35c4..33a8224 100644
+--- a/drivers/media/video/mxc/capture/fsl_csi.c
++++ b/drivers/media/video/mxc/capture/fsl_csi.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2009-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2009-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -20,6 +20,7 @@
+  */
+ #include <linux/types.h>
+ #include <linux/init.h>
++#include <linux/platform_device.h>
+ #include <linux/device.h>
+ #include <linux/err.h>
+ #include <linux/interrupt.h>
+@@ -27,11 +28,14 @@
+ #include <linux/delay.h>
+ #include <linux/module.h>
+ #include <linux/clk.h>
++#include <linux/sched.h>
+ #include <mach/clock.h>
+ 
+ #include "mxc_v4l2_capture.h"
+ #include "fsl_csi.h"
+ 
++void __iomem *csi_regbase;
++static int irq_nr;
+ static bool g_csi_mclk_on;
+ static csi_irq_callback_t g_callback;
+ static void *g_callback_data;
+@@ -164,7 +168,7 @@ void csi_start_callback(void *data)
+ {
+ 	cam_data *cam = (cam_data *) data;
+ 
+-	if (request_irq(MXC_INT_CSI, csi_irq_handler, 0, "csi", cam) < 0)
++	if (request_irq(irq_nr, csi_irq_handler, 0, "csi", cam) < 0)
+ 		pr_debug("CSI error: irq request fail\n");
+ 
+ }
+@@ -174,7 +178,7 @@ void csi_stop_callback(void *data)
+ {
+ 	cam_data *cam = (cam_data *) data;
+ 
+-	free_irq(MXC_INT_CSI, cam);
++	free_irq(irq_nr, cam);
+ }
+ EXPORT_SYMBOL(csi_stop_callback);
+ 
+@@ -254,10 +258,32 @@ void csi_mclk_disable(void)
+ 	__raw_writel(__raw_readl(CSI_CSICR1) & ~BIT_MCLKEN, CSI_CSICR1);
+ }
+ 
+-int32_t __init csi_init_module(void)
++static int __devinit csi_probe(struct platform_device *pdev)
+ {
+ 	int ret = 0;
+ 	struct clk *per_clk;
++	struct resource *res;
++
++	res = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
++	if (!res) {
++		dev_err(&pdev->dev, "No csi irq found.\n");
++		ret = -ENODEV;
++		goto err;
++	}
++	irq_nr = res->start;
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!res) {
++		dev_err(&pdev->dev, "No csi base address found.\n");
++		ret = -ENODEV;
++		goto err;
++	}
++	csi_regbase = ioremap(res->start, resource_size(res));
++	if (!csi_regbase) {
++		dev_err(&pdev->dev, "ioremap failed with csi base\n");
++		ret = -ENOMEM;
++		goto err;
++	}
+ 
+ 	csihw_reset();
+ 	csi_init_interface();
+@@ -271,12 +297,34 @@ int32_t __init csi_init_module(void)
+ 	clk_enable(per_clk);
+ 	csi_mclk_recalc(&csi_mclk);
+ 
++err:
+ 	return ret;
+ }
+ 
+-void __exit csi_cleanup_module(void)
++static int __devexit csi_remove(struct platform_device *pdev)
+ {
+ 	clk_disable(&csi_mclk);
++	iounmap(csi_regbase);
++
++	return 0;
++}
++
++static struct platform_driver csi_driver = {
++	.driver = {
++		   .name = "fsl_csi",
++		   },
++	.probe = csi_probe,
++	.remove = __devexit_p(csi_remove),
++};
++
++int32_t __init csi_init_module(void)
++{
++	return platform_driver_register(&csi_driver);
++}
++
++void __exit csi_cleanup_module(void)
++{
++	platform_driver_unregister(&csi_driver);
+ }
+ 
+ module_init(csi_init_module);
+diff --git a/drivers/media/video/mxc/capture/fsl_csi.h b/drivers/media/video/mxc/capture/fsl_csi.h
+index 00c3898..8dfce28 100644
+--- a/drivers/media/video/mxc/capture/fsl_csi.h
++++ b/drivers/media/video/mxc/capture/fsl_csi.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2009-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2009-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -102,23 +102,22 @@
+ #define CSI_MCLK_I2C		8
+ #endif
+ 
+-#define CSI_CSICR1		(IO_ADDRESS(CSI_BASE_ADDR))
+-#define CSI_CSICR2		(IO_ADDRESS(CSI_BASE_ADDR + 0x4))
+-#define CSI_CSICR3		(IO_ADDRESS(CSI_BASE_ADDR + 0x8))
+-#define CSI_STATFIFO		(IO_ADDRESS(CSI_BASE_ADDR + 0xC))
+-#define CSI_CSIRXFIFO		(IO_ADDRESS(CSI_BASE_ADDR + 0x10))
+-#define CSI_CSIRXCNT		(IO_ADDRESS(CSI_BASE_ADDR + 0x14))
+-#define CSI_CSISR		(IO_ADDRESS(CSI_BASE_ADDR + 0x18))
+-
+-#define CSI_CSIDBG		(IO_ADDRESS(CSI_BASE_ADDR + 0x1C))
+-#define CSI_CSIDMASA_STATFIFO	(IO_ADDRESS(CSI_BASE_ADDR + 0x20))
+-#define CSI_CSIDMATS_STATFIFO	(IO_ADDRESS(CSI_BASE_ADDR + 0x24))
+-#define CSI_CSIDMASA_FB1	(IO_ADDRESS(CSI_BASE_ADDR + 0x28))
+-#define CSI_CSIDMASA_FB2	(IO_ADDRESS(CSI_BASE_ADDR + 0x2C))
+-#define CSI_CSIFBUF_PARA	(IO_ADDRESS(CSI_BASE_ADDR + 0x30))
+-#define CSI_CSIIMAG_PARA	(IO_ADDRESS(CSI_BASE_ADDR + 0x34))
+-
+-#define CSI_CSIRXFIFO_PHYADDR	(CSI_BASE_ADDR + 0x10)
++extern void __iomem *csi_regbase;
++#define CSI_CSICR1		(csi_regbase)
++#define CSI_CSICR2		(csi_regbase + 0x4)
++#define CSI_CSICR3		(csi_regbase + 0x8)
++#define CSI_STATFIFO		(csi_regbase + 0xC)
++#define CSI_CSIRXFIFO		(csi_regbase + 0x10)
++#define CSI_CSIRXCNT		(csi_regbase + 0x14)
++#define CSI_CSISR		(csi_regbase + 0x18)
++
++#define CSI_CSIDBG		(csi_regbase + 0x1C)
++#define CSI_CSIDMASA_STATFIFO	(csi_regbase + 0x20)
++#define CSI_CSIDMATS_STATFIFO	(csi_regbase + 0x24)
++#define CSI_CSIDMASA_FB1	(csi_regbase + 0x28)
++#define CSI_CSIDMASA_FB2	(csi_regbase + 0x2C)
++#define CSI_CSIFBUF_PARA	(csi_regbase + 0x30)
++#define CSI_CSIIMAG_PARA	(csi_regbase + 0x34)
+ 
+ static inline void csi_clear_status(unsigned long status)
+ {
+-- 
+1.7.7.4
+

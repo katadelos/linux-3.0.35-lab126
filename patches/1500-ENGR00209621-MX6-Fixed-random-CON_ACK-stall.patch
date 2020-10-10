@@ -1,0 +1,42 @@
+From 256e6e5de6cd80f9da165dd8323c4605a19cf276 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Mon, 7 May 2012 14:28:49 -0500
+Subject: [PATCH 1500/2463] ENGR00209621 MX6-Fixed random CON_ACK stall
+
+DLL ON/OFF code randomly hangs waiting for the CON_ACK bit
+to be set when a CON_REQ is asserted.
+Fix this by adding a delay after the MMDC automatic power savings
+mode is disabled.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/mx6_ddr_freq.S |   13 +++++++++++++
+ 1 files changed, 13 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mx6_ddr_freq.S b/arch/arm/mach-mx6/mx6_ddr_freq.S
+index 80600dd..fbaa44d 100644
+--- a/arch/arm/mach-mx6/mx6_ddr_freq.S
++++ b/arch/arm/mach-mx6/mx6_ddr_freq.S
+@@ -389,6 +389,19 @@ ddr_freq_change:
+ 	bic    r0, r0, #0xff00
+ 	str    r0, [r5, #0x4]
+ 
++/* Delay for a while */
++	ldr      r1, =4
++delay1:
++	ldr      r2, =0
++cont1:
++	ldr      r0, [r5, r2]
++	add     r2, r2, #4
++	cmp    r2, #16
++	bne     cont1
++	sub     r1, r1, #1
++	cmp    r1, #0
++	bgt     delay1
++
+ 	/* set CON_REG */
+ 	ldr     r0, =0x8000
+ 	str     r0, [r5, #0x1C]
+-- 
+1.7.7.4
+

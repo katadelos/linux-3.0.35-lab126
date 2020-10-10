@@ -1,0 +1,777 @@
+From b505bf0f15b64fbafe34fafcddb21a31ba8fc560 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Wed, 13 Jul 2011 12:02:43 +0800
+Subject: [PATCH 0223/2463] ENGR00152845-1 MSL plat-mxc: ipuv3 display support
+ in imx6q
+
+1. work for multiple ipu instance
+
+2. add mxc_dispdrv support
+ A display device driver could call mxc_dispdrv_register(drv) in its
+ dev_probe() function.
+ - Move all dev_probe() things into mxc_dispdrv_driver->init(), init()
+   function should init and feedback setting;
+ - Move all dev_remove() things into mxc_dispdrv_driver->deinit();
+ - Move all dev_suspend() things into fb_notifier for SUSPEND, if there is;
+ - Move all dev_resume() things into fb_notifier for RESUME, if there is;
+
+ ipuv3 fb driver would call mxc_dispdrv_init(drv_name, setting) before a
+ fb need be added, with fbi param passing by setting, after mxc_dispdrv_init()
+ return, FB driver should get the basic setting about fbi info and ipuv3-hw
+ (ipu_id and disp_id).
+
+ there are many display interfaces on imx5x or imx6x platform, all of them
+ are connected with ipuv3-DI, mxc_dispdrv can register display device as:
+
+	 "lcd"	--	display extend port for lcdif
+	 "ldb"	--	lvds bridge on chip (imx5x or imx6x)
+	 "tve"	--	tve for tveout on chip (imx5x)
+	 "vga"	--	vga through tve on chip (imx5x)
+	 "hdmi"	--	hdmi on platform with ddc support
+			(sii902x on imx53 - not enable yet)
+			hdmi on chip with ddc support
+			(imx6x - not enable yet)
+	 "dvi"	--	dvi port with ddc support (not enable yet)
+
+ take tvout as example, a dispdrv structure and register flow could like below:
+
+	 static struct mxc_dispdrv_driver tve_drv = {
+	       .name   = "tve",
+	       .init   = tvout_init,
+	       .deinit = tvout_deinit,
+	 };
+
+ 	mxc_dispdrv_register(&tve_drv);
+
+ in ipuv3 fb driver could init tve driver like below:
+
+	 setting.if_fmt = interface_pix_fmt;
+	 setting.dft_mode_str = mode_str;
+	 setting.default_bpp = default_bpp;
+	 setting.fbi = fbi;
+	 mxc_dispdrv_init("tve", &setting);
+
+ based on mxc_dispdrv framework, display cmdline option will become
+ as below (take mx53 loco board as example -- fb0 for wvga lcd, fb1 for
+ XGA vga):
+
+ 	video=mxcfb0:dev=lcd,800x480M@55,if=RGB565
+	video=mxcfb1:dev=vga,VGA-XGA,if=GBR24
+
+ "mxcfb0" means setting for fb0 device, ipuv3 fb driver will request setting
+ from registered dispdrv, these setting include what's the ipu and what's the
+ DI number this dev used. Normally, if one IPU is first used, ipuv3 fb driver
+ will create one overlay fb right after current fb driver create.
+ Take above cmdline as an example,
+ /dev/fb0 will be first fb device on 800x480 lcd.
+ /dev/fb1 will be overlay fb device on 800x480 lcd.
+ /dev/fb2 will be second fb device on VGA-XGA vga.
+
+ "dev=" means which display device(lcd,ldb,vga etc) you want choose for this fb.
+ "800x480M@55 or VGA-XGA" means the mode_str of video mode you want.
+ "if=" means the display device hw interface format.
+
+ such setting could be passed by platform data as a default value, cmdline
+ option will replace these values if there are.
+
+3. modify ldb/tve driver and add mxc_lcdif driver.
+ For ldb driver, there are below modes could be set by cmdline options:
+
+ "ldb=spl0/1"	--	split mode on DI0/1
+ "ldb=dul0/1"	--	dual mode on DI0/1
+ "ldb=sin0/1"	--	single mode on DI0/1
+ "ldb=sep"	--	separate mode
+
+ there are two LVDS channels(LVDS0 and LVDS1) which can transfer video datas,
+ there two channels can be used as split/dual/single/separate mode.
+
+ split mode means display data from DI0 or DI1 will send to both channels
+ LVDS0+LVDS1.
+ dual mode means display data from DI0 or DI1 will be duplicated on LVDS0 and
+ LVDS1, it said, LVDS0 and LVDS1 has the same content.
+ single mode means only work for DI0->LVDS0 or DI1->LVDS1.
+ separate mode means you can make DI0->LVDS0 and DI1->LVDS1 work at the same
+ time.
+
+Signed-off-by: Jason Chen <jason.chen@freescale.com>
+---
+ arch/arm/plat-mxc/devices/platform-imx_ipuv3.c  |   94 +++++++++++++++---
+ arch/arm/plat-mxc/devices/platform-imx_ldb.c    |    5 +
+ arch/arm/plat-mxc/include/mach/devices-common.h |    8 ++-
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h     |  116 ++++++++++++-----------
+ arch/arm/plat-mxc/include/mach/ipu-v3.h         |   17 ++--
+ arch/arm/plat-mxc/include/mach/irqs.h           |    9 ++-
+ arch/arm/plat-mxc/include/mach/mx6.h            |   18 ++--
+ 7 files changed, 173 insertions(+), 94 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c b/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c
+index 6da2c34..311c28d 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c
++++ b/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c
+@@ -27,6 +27,18 @@
+ 		.iobase = soc ## _IPU_CTRL_BASE_ADDR,			\
+ 		.irq_err = soc ## _INT_IPU_ERR,				\
+ 		.irq = soc ## _INT_IPU_SYN,				\
++		.irq_start = MXC_IPU_IRQ_START, 			\
++		.iosize = size,						\
++		.init = ipu_init,					\
++		.pg = ipu_pg,						\
++	}
++
++#define imx6_ipuv3_data_entry_single(soc, id, size, ipu_init, ipu_pg)	\
++	{								\
++		.iobase = soc ## _IPU ## id ## _ARB_BASE_ADDR,			\
++		.irq_err = soc ## _INT_IPU ## id ## _ERR,			\
++		.irq = soc ## _INT_IPU ## id ## _SYN,				\
++		.irq_start = MXC_IPU_IRQ_START, 			\
+ 		.iosize = size,						\
+ 		.init = ipu_init,					\
+ 		.pg = ipu_pg,						\
+@@ -56,10 +68,10 @@ static int __init ipu_mipi_setup(void)
+ 	clk_enable(hsc_clk);
+ 
+ 	/* setup MIPI module to legacy mode */
+-	__raw_writel(0xF00, hsc_addr);
++	writel(0xF00, hsc_addr);
+ 
+ 	/* CSI mode: reserved; DI control mode: legacy (from Freescale BSP) */
+-	__raw_writel(__raw_readl(hsc_addr + 0x800) | 0x30ff,
++	writel(readl(hsc_addr + 0x800) | 0x30ff,
+ 			hsc_addr + 0x800);
+ 
+ 	clk_disable(hsc_clk);
+@@ -70,7 +82,7 @@ unmap:
+ 	return ret;
+ }
+ 
+-int __init mx51_ipuv3_init(void)
++int __init mx51_ipuv3_init(int id)
+ {
+ 	int ret = 0;
+ 	u32 val;
+@@ -88,13 +100,13 @@ int __init mx51_ipuv3_init(void)
+ void mx51_ipuv3_pg(int enable)
+ {
+ 	if (enable) {
+-		__raw_writel(MXC_PGCR_PCR, MX51_PGC_IPU_PGCR);
+-		__raw_writel(MXC_PGSR_PSR, MX51_PGC_IPU_PGSR);
++		writel(MXC_PGCR_PCR, MX51_PGC_IPU_PGCR);
++		writel(MXC_PGSR_PSR, MX51_PGC_IPU_PGSR);
+ 	} else {
+-		__raw_writel(0x0, MX51_PGC_IPU_PGCR);
+-		if (__raw_readl(MX51_PGC_IPU_PGSR) & MXC_PGSR_PSR)
++		writel(0x0, MX51_PGC_IPU_PGCR);
++		if (readl(MX51_PGC_IPU_PGSR) & MXC_PGSR_PSR)
+ 			printk(KERN_DEBUG "power gating successful\n");
+-		__raw_writel(MXC_PGSR_PSR, MX51_PGC_IPU_PGSR);
++		writel(MXC_PGSR_PSR, MX51_PGC_IPU_PGSR);
+ 	}
+ }
+ 
+@@ -104,7 +116,7 @@ const struct imx_ipuv3_data imx51_ipuv3_data __initconst =
+ #endif
+ 
+ #ifdef CONFIG_SOC_IMX53
+-int __init mx53_ipuv3_init(void)
++int __init mx53_ipuv3_init(int id)
+ {
+ 	int ret = 0;
+ 	u32 val;
+@@ -120,13 +132,13 @@ int __init mx53_ipuv3_init(void)
+ void mx53_ipuv3_pg(int enable)
+ {
+ 	if (enable) {
+-		__raw_writel(MXC_PGCR_PCR, MX53_PGC_IPU_PGCR);
+-		__raw_writel(MXC_PGSR_PSR, MX53_PGC_IPU_PGSR);
++		writel(MXC_PGCR_PCR, MX53_PGC_IPU_PGCR);
++		writel(MXC_PGSR_PSR, MX53_PGC_IPU_PGSR);
+ 	} else {
+-		__raw_writel(0x0, MX53_PGC_IPU_PGCR);
+-		if (__raw_readl(MX53_PGC_IPU_PGSR) & MXC_PGSR_PSR)
++		writel(0x0, MX53_PGC_IPU_PGCR);
++		if (readl(MX53_PGC_IPU_PGSR) & MXC_PGSR_PSR)
+ 			printk(KERN_DEBUG "power gating successful\n");
+-		__raw_writel(MXC_PGSR_PSR, MX53_PGC_IPU_PGSR);
++		writel(MXC_PGSR_PSR, MX53_PGC_IPU_PGSR);
+ 	}
+ }
+ 
+@@ -135,7 +147,38 @@ const struct imx_ipuv3_data imx53_ipuv3_data __initconst =
+ 					mx53_ipuv3_init, mx53_ipuv3_pg);
+ #endif
+ 
++#ifdef CONFIG_SOC_IMX6Q
++int __init mx6q_ipuv3_init(int id)
++{
++	int ret = 0;
++	u32 val;
++
++	/* hard reset the IPU */
++	val = readl(MX6_IO_ADDRESS(SRC_BASE_ADDR));
++	if (id == 0)
++		val |= 1 << 3;
++	else
++		val |= 1 << 12;
++	writel(val, MX6_IO_ADDRESS(SRC_BASE_ADDR));
++
++	return ret;
++}
++
++void mx6q_ipuv3_pg(int enable)
++{
++	/*TODO*/
++}
++
++const struct imx_ipuv3_data imx6q_ipuv3_data[] __initconst = {
++	imx6_ipuv3_data_entry_single(MX6Q, 1, SZ_4M,
++			mx6q_ipuv3_init, mx6q_ipuv3_pg),
++	imx6_ipuv3_data_entry_single(MX6Q, 2, SZ_4M,
++			mx6q_ipuv3_init, mx6q_ipuv3_pg),
++};
++#endif
++
+ struct platform_device *__init imx_add_ipuv3(
++		const int id,
+ 		const struct imx_ipuv3_data *data,
+ 		struct imx_ipuv3_platform_data *pdata)
+ {
+@@ -158,7 +201,28 @@ struct platform_device *__init imx_add_ipuv3(
+ 	pdata->init = data->init;
+ 	pdata->pg = data->pg;
+ 
+-	return imx_add_platform_device("imx-ipuv3", -1,
++	return imx_add_platform_device("imx-ipuv3", id,
+ 			res, ARRAY_SIZE(res), pdata, sizeof(*pdata));
+ }
+ 
++struct platform_device *__init imx_add_ipuv3_fb(
++		const int id,
++		const struct ipuv3_fb_platform_data *pdata)
++{
++	if (pdata->res_size > 0) {
++		struct resource res[] = {
++			{
++				.start = pdata->res_base,
++				.end = pdata->res_base + pdata->res_size - 1,
++				.flags = IORESOURCE_MEM,
++			},
++		};
++
++		return imx_add_platform_device_dmamask("mxc_sdc_fb",
++				id, res, ARRAY_SIZE(res), pdata,
++				sizeof(*pdata), DMA_BIT_MASK(32));
++	} else
++		return imx_add_platform_device_dmamask("mxc_sdc_fb", id,
++				NULL, 0, pdata, sizeof(*pdata),
++				DMA_BIT_MASK(32));
++}
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_ldb.c b/arch/arm/plat-mxc/devices/platform-imx_ldb.c
+index 93de74d..a0919a7 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx_ldb.c
++++ b/arch/arm/plat-mxc/devices/platform-imx_ldb.c
+@@ -33,6 +33,11 @@ const struct imx_ldb_data imx53_ldb_data __initconst =
+ 			imx_ldb_data_entry_single(MX53, SZ_4K);
+ #endif
+ 
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_ldb_data imx6q_ldb_data __initconst =
++			imx_ldb_data_entry_single(MX6Q, SZ_4K);
++#endif
++
+ struct platform_device *__init imx_add_ldb(
+ 		const struct imx_ldb_data *data,
+ 		struct fsl_mxc_ldb_platform_data *pdata)
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index f941299..87de01f 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -314,13 +314,19 @@ struct imx_ipuv3_data {
+ 	resource_size_t iosize;
+ 	resource_size_t irq_err;
+ 	resource_size_t irq;
+-	int (*init) (void);
++	unsigned int irq_start;
++	int (*init) (int);
+ 	void (*pg) (int);
+ };
+ struct platform_device *__init imx_add_ipuv3(
++		const int id,
+ 		const struct imx_ipuv3_data *data,
+ 		struct imx_ipuv3_platform_data *pdata);
+ 
++struct platform_device *__init imx_add_ipuv3_fb(
++		const int id,
++		const struct ipuv3_fb_platform_data *pdata);
++
+ #include <mach/mxc_vpu.h>
+ struct imx_vpu_data {
+ 	resource_size_t iobase;
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index 7d403e1..75e3728 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -42,6 +42,7 @@ typedef enum iomux_config {
+ #define NON_MUX_I       0x3FF
+ #define NON_PAD_I       0x7FF
+ 
++#define MX6Q_HIGH_DRV	(PAD_CTL_DSE_240ohm)
+ #define MX6Q_UART_PAD_CTRL	(PAD_CTL_PKE | PAD_CTL_PUE |	\
+ 		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED |	\
+ 		PAD_CTL_DSE_40ohm | PAD_CTL_SRE_FAST | PAD_CTL_HYS)
+@@ -54,6 +55,7 @@ typedef enum iomux_config {
+ 		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED |	\
+ 		PAD_CTL_DSE_40ohm | PAD_CTL_HYS)
+ 
++#define MX6Q_DISP_PAD_CLT	MX6Q_HIGH_DRV
+ #define MX6Q_I2C_PAD_CTRL      (PAD_CTL_SRE_FAST | PAD_CTL_ODE | \
+ 		PAD_CTL_PKE | PAD_CTL_PUE | PAD_CTL_DSE_40ohm | \
+ 		PAD_CTL_PUS_100K_UP | PAD_CTL_HYS | PAD_CTL_SPEED_MED)
+@@ -4682,9 +4684,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_EIM_BCLK__TPSMP_HDATA_31 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DI0_DISP_CLK__IPU1_DI0_DISP_CLK		\
+-		(_MX6Q_PAD_DI0_DISP_CLK__IPU1_DI0_DISP_CLK | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DI0_DISP_CLK__IPU1_DI0_DISP_CLK | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DI0_DISP_CLK__IPU2_DI0_DISP_CLK		\
+-		(_MX6Q_PAD_DI0_DISP_CLK__IPU2_DI0_DISP_CLK | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DI0_DISP_CLK__IPU2_DI0_DISP_CLK | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DI0_DISP_CLK__MIPI_CORE_DPHY_TEST_OUT_28		\
+ 		(_MX6Q_PAD_DI0_DISP_CLK__MIPI_CORE_DPHY_TEST_OUT_28 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DI0_DISP_CLK__SDMA_DEBUG_CORE_STATE_0		\
+@@ -4695,9 +4697,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DI0_DISP_CLK__MMDC_MMDC_DEBUG_0 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DI0_PIN15__IPU1_DI0_PIN15		\
+-		(_MX6Q_PAD_DI0_PIN15__IPU1_DI0_PIN15 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DI0_PIN15__IPU1_DI0_PIN15 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DI0_PIN15__IPU2_DI0_PIN15		\
+-		(_MX6Q_PAD_DI0_PIN15__IPU2_DI0_PIN15 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DI0_PIN15__IPU2_DI0_PIN15 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DI0_PIN15__AUDMUX_AUD6_TXC		\
+ 		(_MX6Q_PAD_DI0_PIN15__AUDMUX_AUD6_TXC | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DI0_PIN15__MIPI_CORE_DPHY_TEST_OUT_29		\
+@@ -4710,9 +4712,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DI0_PIN15__MMDC_MMDC_DEBUG_1 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DI0_PIN2__IPU1_DI0_PIN2		\
+-		(_MX6Q_PAD_DI0_PIN2__IPU1_DI0_PIN2 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DI0_PIN2__IPU1_DI0_PIN2 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DI0_PIN2__IPU2_DI0_PIN2		\
+-		(_MX6Q_PAD_DI0_PIN2__IPU2_DI0_PIN2 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DI0_PIN2__IPU2_DI0_PIN2 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DI0_PIN2__AUDMUX_AUD6_TXD		\
+ 		(_MX6Q_PAD_DI0_PIN2__AUDMUX_AUD6_TXD | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DI0_PIN2__MIPI_CORE_DPHY_TEST_OUT_30		\
+@@ -4727,9 +4729,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DI0_PIN2__PL301_MX6QPER1_HADDR_9 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DI0_PIN3__IPU1_DI0_PIN3		\
+-		(_MX6Q_PAD_DI0_PIN3__IPU1_DI0_PIN3 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DI0_PIN3__IPU1_DI0_PIN3 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DI0_PIN3__IPU2_DI0_PIN3		\
+-		(_MX6Q_PAD_DI0_PIN3__IPU2_DI0_PIN3 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DI0_PIN3__IPU2_DI0_PIN3 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DI0_PIN3__AUDMUX_AUD6_TXFS		\
+ 		(_MX6Q_PAD_DI0_PIN3__AUDMUX_AUD6_TXFS | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DI0_PIN3__MIPI_CORE_DPHY_TEST_OUT_31		\
+@@ -4761,9 +4763,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DI0_PIN4__PL301_MX6QPER1_HADDR_11 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT0__IPU1_DISP0_DAT_0		\
+-		(_MX6Q_PAD_DISP0_DAT0__IPU1_DISP0_DAT_0 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT0__IPU1_DISP0_DAT_0 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT0__IPU2_DISP0_DAT_0		\
+-		(_MX6Q_PAD_DISP0_DAT0__IPU2_DISP0_DAT_0 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT0__IPU2_DISP0_DAT_0 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT0__ECSPI3_SCLK		\
+ 		(_MX6Q_PAD_DISP0_DAT0__ECSPI3_SCLK | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT0__USDHC1_USDHC_DEBUG_0		\
+@@ -4776,9 +4778,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT0__MMDC_MMDC_DEBUG_5 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT1__IPU1_DISP0_DAT_1		\
+-		(_MX6Q_PAD_DISP0_DAT1__IPU1_DISP0_DAT_1 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT1__IPU1_DISP0_DAT_1 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT1__IPU2_DISP0_DAT_1		\
+-		(_MX6Q_PAD_DISP0_DAT1__IPU2_DISP0_DAT_1 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT1__IPU2_DISP0_DAT_1 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT1__ECSPI3_MOSI		\
+ 		(_MX6Q_PAD_DISP0_DAT1__ECSPI3_MOSI | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT1__USDHC1_USDHC_DEBUG_1		\
+@@ -4793,9 +4795,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT1__PL301_MX6QPER1_HADDR_12 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT2__IPU1_DISP0_DAT_2		\
+-		(_MX6Q_PAD_DISP0_DAT2__IPU1_DISP0_DAT_2 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT2__IPU1_DISP0_DAT_2 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT2__IPU2_DISP0_DAT_2		\
+-		(_MX6Q_PAD_DISP0_DAT2__IPU2_DISP0_DAT_2 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT2__IPU2_DISP0_DAT_2 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT2__ECSPI3_MISO		\
+ 		(_MX6Q_PAD_DISP0_DAT2__ECSPI3_MISO | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT2__USDHC1_USDHC_DEBUG_2		\
+@@ -4810,9 +4812,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT2__PL301_MX6QPER1_HADDR_13 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT3__IPU1_DISP0_DAT_3		\
+-		(_MX6Q_PAD_DISP0_DAT3__IPU1_DISP0_DAT_3 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT3__IPU1_DISP0_DAT_3 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT3__IPU2_DISP0_DAT_3		\
+-		(_MX6Q_PAD_DISP0_DAT3__IPU2_DISP0_DAT_3 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT3__IPU2_DISP0_DAT_3 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT3__ECSPI3_SS0		\
+ 		(_MX6Q_PAD_DISP0_DAT3__ECSPI3_SS0 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT3__USDHC1_USDHC_DEBUG_3		\
+@@ -4827,9 +4829,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT3__PL301_MX6QPER1_HADDR_14 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT4__IPU1_DISP0_DAT_4		\
+-		(_MX6Q_PAD_DISP0_DAT4__IPU1_DISP0_DAT_4 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT4__IPU1_DISP0_DAT_4 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT4__IPU2_DISP0_DAT_4		\
+-		(_MX6Q_PAD_DISP0_DAT4__IPU2_DISP0_DAT_4 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT4__IPU2_DISP0_DAT_4 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT4__ECSPI3_SS1		\
+ 		(_MX6Q_PAD_DISP0_DAT4__ECSPI3_SS1 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT4__USDHC1_USDHC_DEBUG_4		\
+@@ -4844,9 +4846,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT4__PL301_MX6QPER1_HADDR_15 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT5__IPU1_DISP0_DAT_5		\
+-		(_MX6Q_PAD_DISP0_DAT5__IPU1_DISP0_DAT_5 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT5__IPU1_DISP0_DAT_5 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT5__IPU2_DISP0_DAT_5		\
+-		(_MX6Q_PAD_DISP0_DAT5__IPU2_DISP0_DAT_5 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT5__IPU2_DISP0_DAT_5 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT5__ECSPI3_SS2		\
+ 		(_MX6Q_PAD_DISP0_DAT5__ECSPI3_SS2 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT5__AUDMUX_AUD6_RXFS		\
+@@ -4861,9 +4863,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT5__PL301_MX6QPER1_HADDR_16 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT6__IPU1_DISP0_DAT_6		\
+-		(_MX6Q_PAD_DISP0_DAT6__IPU1_DISP0_DAT_6 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT6__IPU1_DISP0_DAT_6 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT6__IPU2_DISP0_DAT_6		\
+-		(_MX6Q_PAD_DISP0_DAT6__IPU2_DISP0_DAT_6 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT6__IPU2_DISP0_DAT_6 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT6__ECSPI3_SS3		\
+ 		(_MX6Q_PAD_DISP0_DAT6__ECSPI3_SS3 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT6__AUDMUX_AUD6_RXC		\
+@@ -4878,9 +4880,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT6__PL301_MX6QPER1_HADDR_17 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT7__IPU1_DISP0_DAT_7		\
+-		(_MX6Q_PAD_DISP0_DAT7__IPU1_DISP0_DAT_7 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT7__IPU1_DISP0_DAT_7 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT7__IPU2_DISP0_DAT_7		\
+-		(_MX6Q_PAD_DISP0_DAT7__IPU2_DISP0_DAT_7 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT7__IPU2_DISP0_DAT_7 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT7__ECSPI3_RDY		\
+ 		(_MX6Q_PAD_DISP0_DAT7__ECSPI3_RDY | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT7__USDHC1_USDHC_DEBUG_5		\
+@@ -4895,9 +4897,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT7__PL301_MX6QPER1_HADDR_18 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT8__IPU1_DISP0_DAT_8		\
+-		(_MX6Q_PAD_DISP0_DAT8__IPU1_DISP0_DAT_8 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT8__IPU1_DISP0_DAT_8 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT8__IPU2_DISP0_DAT_8		\
+-		(_MX6Q_PAD_DISP0_DAT8__IPU2_DISP0_DAT_8 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT8__IPU2_DISP0_DAT_8 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT8__PWM1_PWMO		\
+ 		(_MX6Q_PAD_DISP0_DAT8__PWM1_PWMO | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT8__WDOG1_WDOG_B		\
+@@ -4912,9 +4914,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT8__PL301_MX6QPER1_HADDR_19 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT9__IPU1_DISP0_DAT_9		\
+-		(_MX6Q_PAD_DISP0_DAT9__IPU1_DISP0_DAT_9 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT9__IPU1_DISP0_DAT_9 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT9__IPU2_DISP0_DAT_9		\
+-		(_MX6Q_PAD_DISP0_DAT9__IPU2_DISP0_DAT_9 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT9__IPU2_DISP0_DAT_9 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT9__PWM2_PWMO		\
+ 		(_MX6Q_PAD_DISP0_DAT9__PWM2_PWMO | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT9__WDOG2_WDOG_B		\
+@@ -4929,9 +4931,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT9__PL301_MX6QPER1_HADDR_20 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT10__IPU1_DISP0_DAT_10		\
+-		(_MX6Q_PAD_DISP0_DAT10__IPU1_DISP0_DAT_10 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT10__IPU1_DISP0_DAT_10 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT10__IPU2_DISP0_DAT_10		\
+-		(_MX6Q_PAD_DISP0_DAT10__IPU2_DISP0_DAT_10 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT10__IPU2_DISP0_DAT_10 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT10__USDHC1_USDHC_DEBUG_6		\
+ 		(_MX6Q_PAD_DISP0_DAT10__USDHC1_USDHC_DEBUG_6 | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT10__SDMA_DEBUG_EVENT_CHANNEL_3		\
+@@ -4944,9 +4946,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT10__PL301_MX6QPER1_HADDR_21 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT11__IPU1_DISP0_DAT_11		\
+-		(_MX6Q_PAD_DISP0_DAT11__IPU1_DISP0_DAT_11 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT11__IPU1_DISP0_DAT_11 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT11__IPU2_DISP0_DAT_11		\
+-		(_MX6Q_PAD_DISP0_DAT11__IPU2_DISP0_DAT_11 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT11__IPU2_DISP0_DAT_11 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT11__USDHC1_USDHC_DEBUG_7		\
+ 		(_MX6Q_PAD_DISP0_DAT11__USDHC1_USDHC_DEBUG_7 | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT11__SDMA_DEBUG_EVENT_CHANNEL_4		\
+@@ -4959,9 +4961,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT11__PL301_MX6QPER1_HADDR_22 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT12__IPU1_DISP0_DAT_12		\
+-		(_MX6Q_PAD_DISP0_DAT12__IPU1_DISP0_DAT_12 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT12__IPU1_DISP0_DAT_12 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT12__IPU2_DISP0_DAT_12		\
+-		(_MX6Q_PAD_DISP0_DAT12__IPU2_DISP0_DAT_12 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT12__IPU2_DISP0_DAT_12 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT12__RESERVED_RESERVED		\
+ 		(_MX6Q_PAD_DISP0_DAT12__RESERVED_RESERVED | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT12__SDMA_DEBUG_EVENT_CHANNEL_5		\
+@@ -4974,9 +4976,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT12__PL301_MX6QPER1_HADDR_23 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT13__IPU1_DISP0_DAT_13		\
+-		(_MX6Q_PAD_DISP0_DAT13__IPU1_DISP0_DAT_13 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT13__IPU1_DISP0_DAT_13 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT13__IPU2_DISP0_DAT_13		\
+-		(_MX6Q_PAD_DISP0_DAT13__IPU2_DISP0_DAT_13 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT13__IPU2_DISP0_DAT_13 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT13__AUDMUX_AUD5_RXFS		\
+ 		(_MX6Q_PAD_DISP0_DAT13__AUDMUX_AUD5_RXFS | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT13__SDMA_DEBUG_EVT_CHN_LINES_0		\
+@@ -4989,9 +4991,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT13__PL301_MX6QPER1_HADDR_24 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT14__IPU1_DISP0_DAT_14		\
+-		(_MX6Q_PAD_DISP0_DAT14__IPU1_DISP0_DAT_14 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT14__IPU1_DISP0_DAT_14 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT14__IPU2_DISP0_DAT_14		\
+-		(_MX6Q_PAD_DISP0_DAT14__IPU2_DISP0_DAT_14 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT14__IPU2_DISP0_DAT_14 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT14__AUDMUX_AUD5_RXC		\
+ 		(_MX6Q_PAD_DISP0_DAT14__AUDMUX_AUD5_RXC | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT14__SDMA_DEBUG_EVT_CHN_LINES_1		\
+@@ -5002,9 +5004,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT14__MMDC_MMDC_DEBUG_19 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT15__IPU1_DISP0_DAT_15		\
+-		(_MX6Q_PAD_DISP0_DAT15__IPU1_DISP0_DAT_15 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT15__IPU1_DISP0_DAT_15 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT15__IPU2_DISP0_DAT_15		\
+-		(_MX6Q_PAD_DISP0_DAT15__IPU2_DISP0_DAT_15 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT15__IPU2_DISP0_DAT_15 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT15__ECSPI1_SS1		\
+ 		(_MX6Q_PAD_DISP0_DAT15__ECSPI1_SS1 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT15__ECSPI2_SS1		\
+@@ -5019,9 +5021,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT15__PL301_MX6QPER1_HADDR_25 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT16__IPU1_DISP0_DAT_16		\
+-		(_MX6Q_PAD_DISP0_DAT16__IPU1_DISP0_DAT_16 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT16__IPU1_DISP0_DAT_16 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT16__IPU2_DISP0_DAT_16		\
+-		(_MX6Q_PAD_DISP0_DAT16__IPU2_DISP0_DAT_16 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT16__IPU2_DISP0_DAT_16 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT16__ECSPI2_MOSI		\
+ 		(_MX6Q_PAD_DISP0_DAT16__ECSPI2_MOSI | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT16__AUDMUX_AUD5_TXC		\
+@@ -5036,9 +5038,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT16__PL301_MX6QPER1_HADDR_26 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT17__IPU1_DISP0_DAT_17		\
+-		(_MX6Q_PAD_DISP0_DAT17__IPU1_DISP0_DAT_17 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT17__IPU1_DISP0_DAT_17 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT17__IPU2_DISP0_DAT_17		\
+-		(_MX6Q_PAD_DISP0_DAT17__IPU2_DISP0_DAT_17 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT17__IPU2_DISP0_DAT_17 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT17__ECSPI2_MISO		\
+ 		(_MX6Q_PAD_DISP0_DAT17__ECSPI2_MISO | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT17__AUDMUX_AUD5_TXD		\
+@@ -5053,9 +5055,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT17__PL301_MX6QPER1_HADDR_27 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT18__IPU1_DISP0_DAT_18		\
+-		(_MX6Q_PAD_DISP0_DAT18__IPU1_DISP0_DAT_18 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT18__IPU1_DISP0_DAT_18 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT18__IPU2_DISP0_DAT_18		\
+-		(_MX6Q_PAD_DISP0_DAT18__IPU2_DISP0_DAT_18 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT18__IPU2_DISP0_DAT_18 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT18__ECSPI2_SS0		\
+ 		(_MX6Q_PAD_DISP0_DAT18__ECSPI2_SS0 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT18__AUDMUX_AUD5_TXFS		\
+@@ -5070,9 +5072,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT18__WEIM_WEIM_CS_2 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT19__IPU1_DISP0_DAT_19		\
+-		(_MX6Q_PAD_DISP0_DAT19__IPU1_DISP0_DAT_19 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT19__IPU1_DISP0_DAT_19 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT19__IPU2_DISP0_DAT_19		\
+-		(_MX6Q_PAD_DISP0_DAT19__IPU2_DISP0_DAT_19 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT19__IPU2_DISP0_DAT_19 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT19__ECSPI2_SCLK		\
+ 		(_MX6Q_PAD_DISP0_DAT19__ECSPI2_SCLK | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT19__AUDMUX_AUD5_RXD		\
+@@ -5087,9 +5089,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT19__WEIM_WEIM_CS_3 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT20__IPU1_DISP0_DAT_20		\
+-		(_MX6Q_PAD_DISP0_DAT20__IPU1_DISP0_DAT_20 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT20__IPU1_DISP0_DAT_20 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT20__IPU2_DISP0_DAT_20		\
+-		(_MX6Q_PAD_DISP0_DAT20__IPU2_DISP0_DAT_20 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT20__IPU2_DISP0_DAT_20 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT20__ECSPI1_SCLK		\
+ 		(_MX6Q_PAD_DISP0_DAT20__ECSPI1_SCLK | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT20__AUDMUX_AUD4_TXC		\
+@@ -5104,9 +5106,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT20__PL301_MX6QPER1_HADDR_28 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT21__IPU1_DISP0_DAT_21		\
+-		(_MX6Q_PAD_DISP0_DAT21__IPU1_DISP0_DAT_21 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT21__IPU1_DISP0_DAT_21 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT21__IPU2_DISP0_DAT_21		\
+-		(_MX6Q_PAD_DISP0_DAT21__IPU2_DISP0_DAT_21 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT21__IPU2_DISP0_DAT_21 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT21__ECSPI1_MOSI		\
+ 		(_MX6Q_PAD_DISP0_DAT21__ECSPI1_MOSI | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT21__AUDMUX_AUD4_TXD		\
+@@ -5121,9 +5123,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT21__PL301_MX6QPER1_HADDR_29 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT22__IPU1_DISP0_DAT_22		\
+-		(_MX6Q_PAD_DISP0_DAT22__IPU1_DISP0_DAT_22 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT22__IPU1_DISP0_DAT_22 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT22__IPU2_DISP0_DAT_22		\
+-		(_MX6Q_PAD_DISP0_DAT22__IPU2_DISP0_DAT_22 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT22__IPU2_DISP0_DAT_22 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT22__ECSPI1_MISO		\
+ 		(_MX6Q_PAD_DISP0_DAT22__ECSPI1_MISO | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT22__AUDMUX_AUD4_TXFS		\
+@@ -5138,9 +5140,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_DISP0_DAT22__PL301_MX6QPER1_HADDR_30 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_DISP0_DAT23__IPU1_DISP0_DAT_23		\
+-		(_MX6Q_PAD_DISP0_DAT23__IPU1_DISP0_DAT_23 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT23__IPU1_DISP0_DAT_23 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT23__IPU2_DISP0_DAT_23		\
+-		(_MX6Q_PAD_DISP0_DAT23__IPU2_DISP0_DAT_23 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_DISP0_DAT23__IPU2_DISP0_DAT_23 | MUX_PAD_CTRL(MX6Q_DISP_PAD_CLT))
+ #define  MX6Q_PAD_DISP0_DAT23__ECSPI1_SS0		\
+ 		(_MX6Q_PAD_DISP0_DAT23__ECSPI1_SS0 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_DISP0_DAT23__AUDMUX_AUD4_RXD		\
+@@ -5854,7 +5856,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_GPIO_9__PWM1_PWMO		\
+ 		(_MX6Q_PAD_GPIO_9__PWM1_PWMO | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_9__GPIO_1_9		\
+-		(_MX6Q_PAD_GPIO_9__GPIO_1_9 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_GPIO_9__GPIO_1_9 | MUX_PAD_CTRL(MX6Q_HIGH_DRV))
+ #define  MX6Q_PAD_GPIO_9__USDHC1_WP		\
+ 		(_MX6Q_PAD_GPIO_9__USDHC1_WP | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_9__SRC_EARLY_RST		\
+diff --git a/arch/arm/plat-mxc/include/mach/ipu-v3.h b/arch/arm/plat-mxc/include/mach/ipu-v3.h
+index f1a062b..8ef0dd3 100755
+--- a/arch/arm/plat-mxc/include/mach/ipu-v3.h
++++ b/arch/arm/plat-mxc/include/mach/ipu-v3.h
+@@ -17,10 +17,11 @@
+ #define __MACH_IPU_V3_H_
+ 
+ struct ipuv3_fb_platform_data {
+-	const struct fb_videomode	*modes;
+-	int				num_modes;
+-	char				*mode_str;
++	char				disp_dev[32];
+ 	u32				interface_pix_fmt;
++	char				*mode_str;
++	int				default_bpp;
++	bool				int_clk;
+ 
+ 	/* reserved mem */
+ 	resource_size_t 		res_base;
+@@ -29,14 +30,10 @@ struct ipuv3_fb_platform_data {
+ 
+ struct imx_ipuv3_platform_data {
+ 	int rev;
+-	int (*init) (void);
++	int (*init) (int);
+ 	void (*pg) (int);
+-	struct ipuv3_fb_platform_data	*fb_head0_platform_data;
+-	struct ipuv3_fb_platform_data	*fb_head1_platform_data;
+-#define MXC_PRI_DI0	1
+-#define MXC_PRI_DI1	2
+-	int primary_di;
+-	struct clk  *csi_clk[2];
++
++	char *csi_clk[2];
+ };
+ 
+ #endif /* __MACH_IPU_V3_H_ */
+diff --git a/arch/arm/plat-mxc/include/mach/irqs.h b/arch/arm/plat-mxc/include/mach/irqs.h
+index 835708c..9e44eaa 100644
+--- a/arch/arm/plat-mxc/include/mach/irqs.h
++++ b/arch/arm/plat-mxc/include/mach/irqs.h
+@@ -65,9 +65,14 @@
+ #else
+ #define MX3_IPU_IRQS 0
+ #endif
+-/* REVISIT: Add IPU irqs on IMX51 */
+ 
+-#define NR_IRQS			(MXC_IPU_IRQ_START + MX3_IPU_IRQS)
++#ifdef CONFIG_ARCH_MX5
++#define MX5_IPU_IRQS (32*15)
++#else
++#define MX5_IPU_IRQS 0
++#endif
++
++#define NR_IRQS	(MXC_IPU_IRQ_START + MX3_IPU_IRQS + MX5_IPU_IRQS)
+ 
+ extern int imx_irq_set_priority(unsigned char irq, unsigned char prio);
+ 
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index fe95cc0..35aa726 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -105,10 +105,10 @@
+ #define OPENVG_ARB_END_ADDR             0x02207FFF
+ #define HSI_ARB_BASE_ADDR               0x02208000
+ #define HSI_ARB_END_ADDR                0x0220BFFF
+-#define IPU1_ARB_BASE_ADDR              0x02400000
+-#define IPU1_ARB_END_ADDR               0x027FFFFF
+-#define IPU2_ARB_BASE_ADDR              0x02800000
+-#define IPU2_ARB_END_ADDR               0x02BFFFFF
++#define MX6Q_IPU1_ARB_BASE_ADDR         0x02400000
++#define MX6Q_IPU1_ARB_END_ADDR          0x027FFFFF
++#define MX6Q_IPU2_ARB_BASE_ADDR         0x02800000
++#define MX6Q_IPU2_ARB_END_ADDR          0x02BFFFFF
+ #define WEIM_ARB_BASE_ADDR              0x08000000
+ #define WEIM_ARB_END_ADDR               0x0FFFFFFF
+ 
+@@ -171,7 +171,7 @@
+ #define EPIT2_BASE_ADDR             (AIPS1_OFF_BASE_ADDR + 0x54000)
+ #define SRC_BASE_ADDR               (AIPS1_OFF_BASE_ADDR + 0x58000)
+ #define GPC_BASE_ADDR               (AIPS1_OFF_BASE_ADDR + 0x5C000)
+-#define IOMUXC_BASE_ADDR            (AIPS1_OFF_BASE_ADDR + 0x60000)
++#define MX6Q_IOMUXC_BASE_ADDR       (AIPS1_OFF_BASE_ADDR + 0x60000)
+ #define DCIC1_BASE_ADDR             (AIPS1_OFF_BASE_ADDR + 0x64000)
+ #define DCIC2_BASE_ADDR             (AIPS1_OFF_BASE_ADDR + 0x68000)
+ #define MX6Q_SDMA_BASE_ADDR			(AIPS1_OFF_BASE_ADDR + 0x6C000)
+@@ -269,10 +269,10 @@
+ #define MX6Q_INT_SDMA                              34
+ #define MXC_INT_VPU_JPG                            35
+ #define MXC_INT_INTERRUPT_36_NUM                   36
+-#define MXC_INT_IPU1_ERR                           37
+-#define MXC_INT_IPU1_FUNC                          38
+-#define MXC_INT_IPU2_ERR                           39
+-#define MXC_INT_IPU2_FUNC                          40
++#define MX6Q_INT_IPU1_ERR                          37
++#define MX6Q_INT_IPU1_SYN                          38
++#define MX6Q_INT_IPU2_ERR                          39
++#define MX6Q_INT_IPU2_SYN                          40
+ #define MXC_INT_GPU3D_IRQ                          41
+ #define MXC_INT_GPU2D_IRQ                          42
+ #define MXC_INT_OPENVG_XAQ2                        43
+-- 
+1.7.7.4
+

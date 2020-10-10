@@ -1,0 +1,45 @@
+From fbd07a2cc1959b74616548492e4c54e293560b21 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <b42378@freescale.com>
+Date: Thu, 15 Nov 2012 11:28:19 +0800
+Subject: [PATCH 2254/2463] ENGR00233731 ALSA: add DMABUF allocating for
+ different driver
+
+ Patch ENGR00233056 added DMABUF size setting for hw_param and changed SSI's
+buffer allocating size.
+ But didn't add allocation for ESAI and SPDIF, which might cause some dma
+transmitting issue.
+ This Patch add new allocation code that detects the driver before allocating
+its DMABUF.
+
+Signed-off-by: Nicolin Chen <b42378@freescale.com>
+---
+ sound/soc/imx/imx-ssi.c |   12 +++++++++++-
+ 1 files changed, 11 insertions(+), 1 deletions(-)
+
+diff --git a/sound/soc/imx/imx-ssi.c b/sound/soc/imx/imx-ssi.c
+index b4c3aea..060d093 100644
+--- a/sound/soc/imx/imx-ssi.c
++++ b/sound/soc/imx/imx-ssi.c
+@@ -439,8 +439,18 @@ EXPORT_SYMBOL_GPL(snd_imx_pcm_mmap);
+ static int imx_pcm_preallocate_dma_buffer(struct snd_pcm *pcm, int stream)
+ {
+ 	struct snd_pcm_substream *substream = pcm->streams[stream].substream;
++	struct snd_soc_pcm_runtime *rtd = pcm->private_data;
+ 	struct snd_dma_buffer *buf = &substream->dma_buffer;
+-	size_t size = IMX_SSI_DMABUF_SIZE;
++	size_t size;
++
++	if (!strncmp(rtd->cpu_dai->name, "imx-ssi", strlen("imx-ssi")))
++		size = IMX_SSI_DMABUF_SIZE;
++	else if (!strncmp(rtd->cpu_dai->name, "imx-esai", strlen("imx-esai")))
++		size = IMX_ESAI_DMABUF_SIZE;
++	else if (!strncmp(rtd->cpu_dai->name, "imx-spdif", strlen("imx-spdif")))
++		size = IMX_SPDIF_DMABUF_SIZE;
++	else
++		size = IMX_DEFAULT_DMABUF_SIZE;
+ 
+ 	buf->dev.type = SNDRV_DMA_TYPE_DEV;
+ 	buf->dev.dev = pcm->card->dev;
+-- 
+1.7.7.4
+

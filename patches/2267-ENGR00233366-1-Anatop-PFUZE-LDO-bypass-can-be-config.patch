@@ -1,0 +1,685 @@
+From 868d21a7fce9dc90808837e06b0d5e71e38b3b1b Mon Sep 17 00:00:00 2001
+From: Robin Gong <b38343@freescale.com>
+Date: Mon, 19 Nov 2012 10:21:00 +0800
+Subject: [PATCH 2267/2463] ENGR00233366-1 Anatop PFUZE: LDO bypass can be
+ configed by cmdline
+
+Currently, use CONFIG_MX6_INTER_LDO_BYPASS to enable/disable LDO bypass, and
+use the same macro in u-boot too. It's not very friendly ,it will be more
+flexible if use dynamic configure by command line input by u-boot.
+Two ways to enable LDO bypass:
+1. use command line:
+You can set "ldo_active=on" or "ldo_active=off" in command line to enable/
+disable LDO bypass.
+2. set enable_ldo_mode value in board file:
+If you didn't set the param in command line, every board
+will use its default value, for example, you can find below code in arch/arm/
+mach-mx6/mx6q_sabresd_pmic_pfuze100.c:
+static int pfuze100_init(struct mc_pfuze *pfuze)
+{
+	        ....
+		        /*use default mode(ldo bypass) if no param from cmdline*/
+			        if (enable_ldo_mode == LDO_MODE_DEFAULT)
+					                enable_ldo_mode = LDO_MODE_BYPASSED;
+							        ....
+}
+
+Note:
+1.You should know clearly ldo bypass can be only enabled in the board
+that mounted with external pmic to supply VDDARM_IN/VDDSOC_IN power rail, and
+you should implement related external regulator firstly, such as:
+in arch/arm/mach-mx6/board-mx6q_sabresd.c
+static struct mxc_dvfs_platform_data sabresd_dvfscore_data = {
+	                .reg_id = "VDDCORE",
+			                .soc_id = "VDDSOC",
+					                ....
+}
+otherwise, you have to use internal ldo which is the default configuration.
+2.one special case, if the chip is 1.2Ghz, it can't be set LDO bypass.
+
+Signed-off-by: Robin Gong <b38343@freescale.com>
+---
+ arch/arm/mach-mx6/cpu.c                  |   15 ++++
+ arch/arm/mach-mx6/cpu_regulator-mx6.c    |   45 +++++++++-
+ arch/arm/mach-mx6/irq.c                  |    9 --
+ arch/arm/mach-mx6/mx6_anatop_regulator.c |   27 +++---
+ arch/arm/mach-mx6/mx6_suspend.S          |   33 +++++---
+ arch/arm/mach-mx6/pm.c                   |   16 ----
+ arch/arm/plat-mxc/cpufreq.c              |  129 +++++++++++------------------
+ arch/arm/plat-mxc/include/mach/system.h  |    3 +
+ arch/arm/plat-mxc/system.c               |   10 +-
+ 9 files changed, 149 insertions(+), 138 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index 37f125a..029e39d 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -25,6 +25,7 @@
+ #include <linux/delay.h>
+ 
+ #include <mach/hardware.h>
++#include <mach/system.h>
+ #include <asm/io.h>
+ #include <asm/mach/map.h>
+ 
+@@ -33,6 +34,7 @@
+ 
+ struct cpu_op *(*get_cpu_op)(int *op);
+ bool enable_wait_mode = true;
+++u32 enable_ldo_mode = LDO_MODE_DEFAULT;
+ u32 arm_max_freq = CPU_AT_1_2GHz;
+ bool mem_clk_on_in_wait;
+ int chip_rev;
+@@ -245,6 +247,19 @@ static int __init arm_core_max(char *p)
+ 
+ early_param("arm_freq", arm_core_max);
+ 
++static int __init enable_ldo(char *p)
++{
++	if (memcmp(p, "on", 2) == 0) {
++		enable_ldo_mode = LDO_MODE_ENABLED;
++		p += 2;
++	} else if (memcmp(p, "off", 3) == 0) {
++		enable_ldo_mode = LDO_MODE_BYPASSED;
++		p += 3;
++	}
++	return 0;
++}
++early_param("ldo_active", enable_ldo);
++
+ static int __init enable_mem_clk_in_wait(char *p)
+ {
+ 	mem_clk_on_in_wait = true;
+diff --git a/arch/arm/mach-mx6/cpu_regulator-mx6.c b/arch/arm/mach-mx6/cpu_regulator-mx6.c
+index 8eb976d..d905132 100644
+--- a/arch/arm/mach-mx6/cpu_regulator-mx6.c
++++ b/arch/arm/mach-mx6/cpu_regulator-mx6.c
+@@ -20,11 +20,14 @@
+ #if defined(CONFIG_CPU_FREQ)
+ #include <linux/cpufreq.h>
+ #endif
++#include <linux/io.h>
+ #include <asm/cpu.h>
+ 
+ #include <mach/clock.h>
+ #include <mach/hardware.h>
+-
++#include <mach/system.h>
++#include "regs-anadig.h"
++#include "crm_regs.h"
+ struct regulator *cpu_regulator;
+ struct regulator *soc_regulator;
+ struct regulator *pu_regulator;
+@@ -37,6 +40,7 @@ static struct cpu_op *cpu_op_tbl;
+ extern struct cpu_op *(*get_cpu_op)(int *op);
+ 
+ extern unsigned long loops_per_jiffy;
++extern u32 enable_ldo_mode;
+ int external_pureg;
+ 
+ static inline unsigned long mx6_cpu_jiffies(unsigned long old, u_int div,
+@@ -57,15 +61,31 @@ static inline unsigned long mx6_cpu_jiffies(unsigned long old, u_int div,
+ #endif
+ }
+ 
+-
+ void mx6_cpu_regulator_init(void)
+ {
+ 	int cpu;
+ 	u32 curr_cpu = 0;
++	unsigned int reg;
+ #ifndef CONFIG_SMP
+ 	unsigned long old_loops_per_jiffy;
+ #endif
++	void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ 	external_pureg = 0;
++	/*If internal ldo actived, use internal cpu_* regulator to replace the
++	*regulator ids from board file. If internal ldo bypassed, use the
++	*regulator ids which defined in board file and source from extern pmic
++	*power rails.
++	*If you want to use ldo bypass,you should do:
++	*1.set enable_ldo_mode=LDO_MODE_BYPASSED in your board file by default
++	*   or set in commandline from u-boot
++	*2.set your extern pmic regulator name in your board file.
++	*/
++	if (enable_ldo_mode != LDO_MODE_BYPASSED) {
++		gp_reg_id = "cpu_vddgp";
++		soc_reg_id = "cpu_vddsoc";
++		pu_reg_id = "cpu_vddgpu";
++	}
++	printk(KERN_INFO "cpu regulator init ldo=%x\n", enable_ldo_mode);
+ 	cpu_regulator = regulator_get(NULL, gp_reg_id);
+ 	if (IS_ERR(cpu_regulator))
+ 		printk(KERN_ERR "%s: failed to get cpu regulator\n", __func__);
+@@ -81,6 +101,21 @@ void mx6_cpu_regulator_init(void)
+ 			regulator_set_voltage(cpu_regulator,
+ 					      cpu_op_tbl[0].cpu_voltage,
+ 					      cpu_op_tbl[0].cpu_voltage);
++			if (enable_ldo_mode == LDO_MODE_BYPASSED) {
++				/*digital bypass VDDPU/VDDSOC/VDDARM*/
++				reg = __raw_readl(ANADIG_REG_CORE);
++				reg &= ~BM_ANADIG_REG_CORE_REG0_TRG;
++				reg |= BF_ANADIG_REG_CORE_REG0_TRG(0x1f);
++				reg &= ~BM_ANADIG_REG_CORE_REG1_TRG;
++				reg |= BF_ANADIG_REG_CORE_REG1_TRG(0x1f);
++				reg &= ~BM_ANADIG_REG_CORE_REG2_TRG;
++				reg |= BF_ANADIG_REG_CORE_REG2_TRG(0x1f);
++				__raw_writel(reg, ANADIG_REG_CORE);
++				/* Mask the ANATOP brown out interrupt in the GPC. */
++				reg = __raw_readl(gpc_base + 0x14);
++				reg |= 0x80000000;
++				__raw_writel(reg, gpc_base + 0x14);
++			}
+ 			clk_set_rate(cpu_clk, cpu_op_tbl[0].cpu_rate);
+ 
+ 			/*Fix loops-per-jiffy */
+@@ -112,7 +147,7 @@ void mx6_cpu_regulator_init(void)
+ 	pu_regulator = regulator_get(NULL, pu_reg_id);
+ 	if (IS_ERR(pu_regulator))
+ 		printk(KERN_ERR "%s: failed to get pu regulator\n", __func__);
+-	/*If enable CONFIG_MX6_INTER_LDO_BYPASS and VDDPU_IN is single supplied
++	/*If use ldo bypass and VDDPU_IN is single supplied
+ 	*by external pmic, it means VDDPU_IN can be turned off if GPU/VPU driver
+ 	*not running.In this case we should set external_pureg which can be used
+ 	*in pu_enable/pu_disable of arch/arm/mach-mx6/mx6_anatop_regulator.c to
+@@ -122,11 +157,11 @@ void mx6_cpu_regulator_init(void)
+ 	*In this case external_pureg should be 0 and can't turn off extern pmic
+ 	*regulator, but can turn off VDDPU by internal anatop power gate.
+ 	*
+-	*If disable CONFIG_MX6_INTER_LDO_BYPASS, external_pureg will be 0, and
++	*If enable internal ldo , external_pureg will be 0, and
+ 	*VDDPU can be turned off by internal anatop anatop power gate.
+ 	*
+ 	*/
+-	else if (!IS_ERR(pu_regulator) && strcmp(pu_reg_id, "cpu_vddvpu"))
++	else if (!IS_ERR(pu_regulator) && strcmp(pu_reg_id, "cpu_vddgpu"))
+ 		external_pureg = 1;
+ }
+ 
+diff --git a/arch/arm/mach-mx6/irq.c b/arch/arm/mach-mx6/irq.c
+index e865b45..3281693 100644
+--- a/arch/arm/mach-mx6/irq.c
++++ b/arch/arm/mach-mx6/irq.c
+@@ -103,9 +103,6 @@ void mx6_init_irq(void)
+ 	void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ 	struct irq_desc *desc;
+ 	unsigned int i;
+-#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+-	u32 reg;
+-#endif
+ 
+ 	/* start offset if private timer irq id, which is 29.
+ 	 * ID table:
+@@ -124,12 +121,6 @@ void mx6_init_irq(void)
+ 		__raw_writel(0x20000000, gpc_base + 0x10);
+ 	}
+ 
+-#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+-	/* Mask the ANATOP brown out interrupt in the GPC. */
+-	reg = __raw_readl(gpc_base + 0x14);
+-	reg |= 0x80000000;
+-	__raw_writel(reg, gpc_base + 0x14);
+-#endif
+ 
+ 	for (i = MXC_INT_START; i <= MXC_INT_END; i++) {
+ 		desc = irq_to_desc(i);
+diff --git a/arch/arm/mach-mx6/mx6_anatop_regulator.c b/arch/arm/mach-mx6/mx6_anatop_regulator.c
+index 9599a54..02ee982 100644
+--- a/arch/arm/mach-mx6/mx6_anatop_regulator.c
++++ b/arch/arm/mach-mx6/mx6_anatop_regulator.c
+@@ -34,6 +34,7 @@
+ #include <linux/clk.h>
+ 
+ #include <mach/clock.h>
++#include <mach/system.h>
+ 
+ #include "crm_regs.h"
+ #include "regs-anadig.h"
+@@ -55,6 +56,7 @@ static struct clk *gpu3d_clk, *gpu3d_shade_clk, *gpu2d_clk, *gpu2d_axi_clk;
+ static struct clk *openvg_axi_clk, *vpu_clk;
+ extern int external_pureg;
+ extern struct regulator *pu_regulator;
++extern u32 enable_ldo_mode;
+ 
+ 
+ static int get_voltage(struct anatop_regulator *sreg)
+@@ -185,13 +187,12 @@ static int pu_enable(struct anatop_regulator *sreg)
+ 	reg = __raw_readl(ANA_MISC2_BASE_ADDR);
+ 	reg |= ANADIG_ANA_MISC2_REG1_BO_EN;
+ 	__raw_writel(reg, ANA_MISC2_BASE_ADDR);
+-
+-#ifndef CONFIG_MX6_INTER_LDO_BYPASS
+-	/* Unmask the ANATOP brown out interrupt in the GPC. */
+-	reg = __raw_readl(gpc_base + 0x14);
+-	reg &= ~0x80000000;
+-	__raw_writel(reg, gpc_base + 0x14);
+-#endif
++	if (enable_ldo_mode != LDO_MODE_BYPASSED) {
++		/* Unmask the ANATOP brown out interrupt in the GPC. */
++		reg = __raw_readl(gpc_base + 0x14);
++		reg &= ~0x80000000;
++		__raw_writel(reg, gpc_base + 0x14);
++	}
+ 	pu_is_enabled = 1;
+ 	if (get_clk) {
+ 		if (!cpu_is_mx6sl()) {
+@@ -229,12 +230,12 @@ static int pu_disable(struct anatop_regulator *sreg)
+ 	/* Wait for power down to complete. */
+ 	while (__raw_readl(gpc_base + GPC_CNTR_OFFSET) & 0x1)
+ 			;
+-#ifndef CONFIG_MX6_INTER_LDO_BYPASS
+-	/* Mask the ANATOP brown out interrupt in the GPC. */
+-	reg = __raw_readl(gpc_base + 0x14);
+-	reg |= 0x80000000;
+-	__raw_writel(reg, gpc_base + 0x14);
+-#endif
++	if (enable_ldo_mode != LDO_MODE_BYPASSED) {
++		/* Mask the ANATOP brown out interrupt in the GPC. */
++		reg = __raw_readl(gpc_base + 0x14);
++		reg |= 0x80000000;
++		__raw_writel(reg, gpc_base + 0x14);
++	}
+ 
+ 	if (external_pureg) {
+ 		/*disable extern PU regulator*/
+diff --git a/arch/arm/mach-mx6/mx6_suspend.S b/arch/arm/mach-mx6/mx6_suspend.S
+index f712700..e8642f8 100644
+--- a/arch/arm/mach-mx6/mx6_suspend.S
++++ b/arch/arm/mach-mx6/mx6_suspend.S
+@@ -1105,11 +1105,9 @@ set ddr iomux to low power mode
+ 	ldr	r1, =CCM_BASE_ADDR
+ 	add	r1, r1, #PERIPBASE_VIRT
+ 	ldr	r0, [r1]
+-#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	ldr	r1, =ANATOP_BASE_ADDR
+ 	add	r1, r1, #PERIPBASE_VIRT
+ 	ldr	r0, [r1]
+-#endif
+ 
+ 	/* Do a DSB to drain the buffers. */
+ 	dsb
+@@ -1239,14 +1237,21 @@ rbc_loop:
+ 	cmp	r4, #0x0
+ 	bne	rbc_loop
+ 
+-#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++	/*if internal ldo(VDDARM) bypassed,analog bypass it for DSM(0x1e) and
++	*restore it when resume(0x1f).
++	*/
+ 	ldr	r1, =ANATOP_BASE_ADDR
+ 	add	r1, r1, #PERIPBASE_VIRT
+ 	ldr	r4, [r1, #0x140]
++	and	r4, r4, #0x1f
++	cmp	r4, #0x1f
++	bne	ldo_check_done1
++ldo_analog_bypass:
++	ldr	r4, [r1, #0x140]
+ 	bic	r4, r4, #0x1f
+ 	orr	r4, r4, #0x1e
+ 	str	r4, [r1, #0x140]
+-#endif
++ldo_check_done1:
+ /****************************************************************
+ execute a wfi instruction to let SOC go into stop mode.
+ ****************************************************************/
+@@ -1261,14 +1266,18 @@ execute a wfi instruction to let SOC go into stop mode.
+ if go here, means there is a wakeup irq pending, we should resume
+ system immediately.
+ ****************************************************************/
+-#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++	/*restore it with 0x1f if use ldo bypass mode.*/
+ 	ldr	r1, =ANATOP_BASE_ADDR
+ 	add	r1, r1, #PERIPBASE_VIRT
+ 	ldr	r3, [r1, #0x140]
++	and	r3, r3, #0x1f
++	cmp	r3, #0x1e
++	bne	ldo_check_done2
++ldo_bypass_restore:
++	ldr	r3, [r1, #0x140]
+ 	orr	r3, r3, #0x1f
+ 	str	r3, [r1, #0x140]
+-#endif
+-
++ldo_check_done2:
+ 	mov	r0, r2 		/* get suspend_iram_base */
+ 	add	r0, r0, #IRAM_SUSPEND_SIZE	/* 8K */
+ 
+@@ -1387,19 +1396,23 @@ poll_dvfs_clear_1:
+ 	mcr	p15, 0, r1, c1, c0, 0
+ 
+ 	b 	out	/* exit standby */
++	.ltorg
+ 
+ /****************************************************************
+ when SOC exit stop mode, arm core restart from here, currently
+ are running with MMU off.
+ ****************************************************************/
+ resume:
+-
+-#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++	/*restore it with 0x1f if use ldo bypass mode.*/
+ 	ldr	r1, =ANATOP_BASE_ADDR
+ 	ldr	r3, [r1, #0x140]
++	and	r3, r3, #0x1f
++	cmp	r3, #0x1e
++	bne	ldo_check_done3
++	ldr	r3, [r1, #0x140]
+ 	orr	r3, r3, #0x1f
+ 	str	r3, [r1, #0x140]
+-#endif
++ldo_check_done3:
+ 	/* Invalidate L1 I-cache first */
+ 	mov	r1,	#0x0
+ 	mcr	p15, 0, r1, c7, c5, 0	@ Invalidate I-Cache
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index a2a2798..998051d 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -79,10 +79,6 @@ static struct regulator *vdd3p0_regulator;
+ static struct pm_platform_data *pm_data;
+ 
+ 
+-#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+-void mxc_cpufreq_suspend(void);
+-void mxc_cpufreq_resume(void);
+-#endif
+ #if defined(CONFIG_CPU_FREQ)
+ extern int set_cpu_freq(int wp);
+ #endif
+@@ -436,23 +432,14 @@ static void mx6_suspend_finish(void)
+ 	}
+ }
+ 
+-#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ static int mx6_suspend_begin(suspend_state_t state)
+ {
+-	mxc_cpufreq_suspend();
+ 	return 0;
+ }
+-#endif
+ 
+ /*
+  * Called after devices are re-setup, but before processes are thawed.
+  */
+-static void mx6_suspend_end(void)
+-{
+-#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+-	mxc_cpufreq_resume();
+-#endif
+-}
+ 
+ static int mx6_pm_valid(suspend_state_t state)
+ {
+@@ -461,13 +448,10 @@ static int mx6_pm_valid(suspend_state_t state)
+ 
+ struct platform_suspend_ops mx6_suspend_ops = {
+ 	.valid = mx6_pm_valid,
+-#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	.begin = mx6_suspend_begin,
+-#endif
+ 	.prepare = mx6_suspend_prepare,
+ 	.enter = mx6_suspend_enter,
+ 	.finish = mx6_suspend_finish,
+-	.end = mx6_suspend_end,
+ };
+ 
+ static int __devinit mx6_pm_probe(struct platform_device *pdev)
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index e6dc591..12334d5 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -23,6 +23,7 @@
+ #include <linux/regulator/consumer.h>
+ #include <linux/delay.h>
+ #include <linux/io.h>
++#include <linux/suspend.h>
+ #include <asm/smp_plat.h>
+ #include <asm/cpu.h>
+ 
+@@ -32,15 +33,6 @@
+ #define CLK32_FREQ	32768
+ #define NANOSECOND	(1000 * 1000 * 1000)
+ 
+-/*If using cpu internal ldo bypass,we need config pmic by I2C in suspend
+-interface, but cpufreq driver as sys_dev is more later to suspend than I2C
+-driver, so we should implement another I2C operate function which isolated
+-with kernel I2C driver, these code is copied from u-boot*/
+-#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+-/*0:normal; 1: in the middle of suspend or resume; 2: suspended*/
+-static int cpu_freq_suspend_in;
+-static struct mutex set_cpufreq_lock;
+-#endif
+ 
+ static int cpu_freq_khz_min;
+ static int cpu_freq_khz_max;
+@@ -51,6 +43,8 @@ static struct cpufreq_frequency_table *imx_freq_table;
+ static int cpu_op_nr;
+ static struct cpu_op *cpu_op_tbl;
+ static u32 pre_suspend_rate;
++static bool cpufreq_suspend;
++static struct mutex set_cpufreq_lock;
+ 
+ extern struct regulator *cpu_regulator;
+ extern struct regulator *soc_regulator;
+@@ -58,6 +52,8 @@ extern struct regulator *pu_regulator;
+ extern int dvfs_core_is_active;
+ extern struct cpu_op *(*get_cpu_op)(int *op);
+ extern void bus_freq_update(struct clk *clk, bool flag);
++extern void mx6_arm_regulator_bypass(void);
++extern void mx6_soc_pu_regulator_bypass(void);
+ 
+ int set_cpu_freq(int freq)
+ {
+@@ -81,11 +77,6 @@ int set_cpu_freq(int freq)
+ 
+ 	if (gp_volt == 0)
+ 		return ret;
+-#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+-	/*Do not change cpufreq if system enter suspend flow*/
+-	if (cpu_freq_suspend_in == 2)
+-		return -1;
+-#endif
+ 	/*Set the voltage for the GP domain. */
+ 	if (freq > org_cpu_rate) {
+ 		/* Check if the bus freq needs to be increased first */
+@@ -187,7 +178,6 @@ static int mxc_set_target(struct cpufreq_policy *policy,
+ 	num_cpus = num_possible_cpus();
+ 	if (policy->cpu > num_cpus)
+ 		return 0;
+-
+ 	if (dvfs_core_is_active) {
+ 		struct cpufreq_freqs freqs;
+ 
+@@ -215,13 +205,16 @@ static int mxc_set_target(struct cpufreq_policy *policy,
+ 		freqs.cpu = i;
+ 		cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
+ 	}
+-	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	mutex_lock(&set_cpufreq_lock);
++	if (cpufreq_suspend) {
++		mutex_unlock(&set_cpufreq_lock);
++		return ret;
++	}
+ 	ret = set_cpu_freq(freq_Hz);
+-	mutex_unlock(&set_cpufreq_lock);
+-	#else
+-	ret = set_cpu_freq(freq_Hz);
+-	#endif
++	if (ret) {
++		mutex_unlock(&set_cpufreq_lock);
++		return ret;
++	}
+ #ifdef CONFIG_SMP
+ 	/* Loops per jiffy is not updated by the CPUFREQ driver for SMP systems.
+ 	  * So update it for all CPUs.
+@@ -235,6 +228,7 @@ static int mxc_set_target(struct cpufreq_policy *policy,
+ 	 * as all CPUs are running at same freq */
+ 	loops_per_jiffy = per_cpu(cpu_data, 0).loops_per_jiffy;
+ #endif
++	mutex_unlock(&set_cpufreq_lock);
+ 	for (i = 0; i < num_cpus; i++) {
+ 		freqs.cpu = i;
+ 		cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
+@@ -242,60 +236,6 @@ static int mxc_set_target(struct cpufreq_policy *policy,
+ 
+ 	return ret;
+ }
+-#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+-void mxc_cpufreq_suspend(void)
+-{
+-	mutex_lock(&set_cpufreq_lock);
+-	pre_suspend_rate = clk_get_rate(cpu_clk);
+-	/*set flag and raise up cpu frequency if needed*/
+-	cpu_freq_suspend_in = 1;
+-	if (pre_suspend_rate != (imx_freq_table[0].frequency * 1000)) {
+-			set_cpu_freq(imx_freq_table[0].frequency * 1000);
+-			loops_per_jiffy = cpufreq_scale(loops_per_jiffy,
+-				pre_suspend_rate / 1000, imx_freq_table[0].frequency);
+-	}
+-	cpu_freq_suspend_in = 2;
+-	mutex_unlock(&set_cpufreq_lock);
+-
+-}
+-
+-void mxc_cpufreq_resume(void)
+-{
+-	mutex_lock(&set_cpufreq_lock);
+-	cpu_freq_suspend_in = 1;
+-	if (clk_get_rate(cpu_clk) != pre_suspend_rate) {
+-		set_cpu_freq(pre_suspend_rate);
+-		loops_per_jiffy = cpufreq_scale(loops_per_jiffy,
+-			imx_freq_table[0].frequency, pre_suspend_rate / 1000);
+-	}
+-	cpu_freq_suspend_in = 0;
+-	mutex_unlock(&set_cpufreq_lock);
+-}
+-
+-
+-#else
+-static int mxc_cpufreq_suspend(struct cpufreq_policy *policy)
+-{
+-	pre_suspend_rate = clk_get_rate(cpu_clk);
+-	if (pre_suspend_rate != (imx_freq_table[0].frequency * 1000)) {
+-		set_cpu_freq(imx_freq_table[0].frequency * 1000);
+-		loops_per_jiffy = cpufreq_scale(loops_per_jiffy,
+-			pre_suspend_rate / 1000, imx_freq_table[0].frequency);
+-	}
+-
+-	return 0;
+-}
+-
+-static int mxc_cpufreq_resume(struct cpufreq_policy *policy)
+-{
+-	if (clk_get_rate(cpu_clk) != pre_suspend_rate) {
+-		set_cpu_freq(pre_suspend_rate);
+-		loops_per_jiffy = cpufreq_scale(loops_per_jiffy,
+-			imx_freq_table[0].frequency, pre_suspend_rate / 1000);
+-	}
+-	return 0;
+-}
+-#endif
+ 
+ static int __devinit mxc_cpufreq_init(struct cpufreq_policy *policy)
+ {
+@@ -399,21 +339,50 @@ static struct cpufreq_driver mxc_driver = {
+ 	.get = mxc_get_speed,
+ 	.init = mxc_cpufreq_init,
+ 	.exit = mxc_cpufreq_exit,
+-#ifndef CONFIG_MX6_INTER_LDO_BYPASS
+-	.suspend = mxc_cpufreq_suspend,
+-	.resume = mxc_cpufreq_resume,
+-#endif
+ 	.name = "imx",
+ 	.attr = imx_cpufreq_attr,
+ };
+ 
++static int cpufreq_pm_notify(struct notifier_block *nb, unsigned long event,
++	void *dummy)
++{
++#ifdef CONFIG_SMP
++	unsigned int i;
++#endif
++	int ret;
++	mutex_lock(&set_cpufreq_lock);
++	if (event == PM_SUSPEND_PREPARE) {
++		pre_suspend_rate = clk_get_rate(cpu_clk);
++		if (pre_suspend_rate != (imx_freq_table[0].frequency * 1000)) {
++			ret = set_cpu_freq(imx_freq_table[0].frequency * 1000);
++			if (ret)
++				return NOTIFY_OK;/*if update freq error,return*/
++#ifdef CONFIG_SMP
++			for_each_possible_cpu(i)
++				per_cpu(cpu_data, i).loops_per_jiffy =
++					cpufreq_scale(per_cpu(cpu_data, i).loops_per_jiffy,
++					pre_suspend_rate / 1000, imx_freq_table[0].frequency);
++			loops_per_jiffy = per_cpu(cpu_data, 0).loops_per_jiffy;
++#else
++			loops_per_jiffy = cpufreq_scale(loops_per_jiffy,
++				pre_suspend_rate / 1000, imx_freq_table[0].frequency);
++#endif
++		}
++		cpufreq_suspend = true;
++	} else if (event == PM_POST_SUSPEND)
++		cpufreq_suspend = false;
++	mutex_unlock(&set_cpufreq_lock);
++	return NOTIFY_OK;
++}
++static struct notifier_block imx_cpufreq_pm_notifier = {
++	.notifier_call = cpufreq_pm_notify,
++};
+ extern void mx6_cpu_regulator_init(void);
+ static int __init mxc_cpufreq_driver_init(void)
+ {
+-	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	mx6_cpu_regulator_init();
+ 	mutex_init(&set_cpufreq_lock);
+-	#endif
++	register_pm_notifier(&imx_cpufreq_pm_notifier);
+ 	return cpufreq_register_driver(&mxc_driver);
+ }
+ 
+diff --git a/arch/arm/plat-mxc/include/mach/system.h b/arch/arm/plat-mxc/include/mach/system.h
+index c1dfe25..649a97c 100755
+--- a/arch/arm/plat-mxc/include/mach/system.h
++++ b/arch/arm/plat-mxc/include/mach/system.h
+@@ -20,6 +20,9 @@
+ #include <mach/hardware.h>
+ #include <mach/common.h>
+ 
++#define LDO_MODE_DEFAULT	0
++#define LDO_MODE_BYPASSED	1
++#define LDO_MODE_ENABLED	2
+ extern void mx5_cpu_lp_set(enum mxc_cpu_pwr_mode mode);
+ 
+ void arch_idle(void);
+diff --git a/arch/arm/plat-mxc/system.c b/arch/arm/plat-mxc/system.c
+index d2a999b..ccb91b3 100644
+--- a/arch/arm/plat-mxc/system.c
++++ b/arch/arm/plat-mxc/system.c
+@@ -33,6 +33,7 @@
+ #include <asm/mach-types.h>
+ 
+ static void __iomem *wdog_base;
++extern u32 enable_ldo_mode;
+ 
+ 
+ static void arch_reset_special_mode(char mode, const char *cmd)
+@@ -56,11 +57,10 @@ void arch_reset(char mode, const char *cmd)
+ 
+ #ifdef CONFIG_ARCH_MX6
+ 	/* wait for reset to assert... */
+-	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+-	wcr_enable = 0x14; /*reset system by extern pmic*/
+-	#else
+-	wcr_enable = (1 << 2);
+-	#endif
++	if (enable_ldo_mode == LDO_MODE_BYPASSED)
++		wcr_enable = 0x14; /*reset system by extern pmic*/
++	else
++		wcr_enable = (1 << 2);
+ 	__raw_writew(wcr_enable, wdog_base);
+ 	/* errata TKT039676, SRS bit may be missed when
+ 	SRC sample it, need to write the wdog controller
+-- 
+1.7.7.4
+

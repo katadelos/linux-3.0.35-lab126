@@ -1,0 +1,151 @@
+From aba84c3f2d420d725e6481d5b7252498fdac9832 Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Fri, 17 Feb 2012 13:34:53 -0600
+Subject: [PATCH 1053/2463] ENGR00173964 make hdmi audio init dependent on
+ hdmi video init
+
+Don't show hdmi as an audio playback device if hdmi isn't
+configured on the command line.
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ drivers/mfd/mxc-hdmi-core.c       |   14 ++++++++++++++
+ drivers/video/mxc_hdmi.c          |    2 ++
+ include/linux/mfd/mxc-hdmi-core.h |    3 +++
+ sound/soc/codecs/mxc_hdmi.c       |    3 +++
+ sound/soc/imx/imx-hdmi-dai.c      |    5 ++++-
+ sound/soc/imx/imx-hdmi.c          |    5 ++++-
+ 6 files changed, 30 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mfd/mxc-hdmi-core.c b/drivers/mfd/mxc-hdmi-core.c
+index 1aa92a0..18fd1a6 100644
+--- a/drivers/mfd/mxc-hdmi-core.c
++++ b/drivers/mfd/mxc-hdmi-core.c
+@@ -63,6 +63,7 @@ static int hdmi_ratio;
+ int mxc_hdmi_ipu_id;
+ int mxc_hdmi_disp_id;
+ static struct mxc_edid_cfg hdmi_core_edid_cfg;
++static int hdmi_core_init;
+ 
+ u8 hdmi_readb(unsigned int reg)
+ {
+@@ -487,6 +488,16 @@ void hdmi_get_edid_cfg(struct mxc_edid_cfg *cfg)
+ 	spin_unlock_irqrestore(&edid_spinlock, flags);
+ }
+ 
++void hdmi_set_registered(int registered)
++{
++	hdmi_core_init = registered;
++}
++
++int hdmi_get_registered(void)
++{
++	return hdmi_core_init;
++}
++
+ static int mxc_hdmi_core_probe(struct platform_device *pdev)
+ {
+ 	struct fsl_mxc_hdmi_core_platform_data *pdata = pdev->dev.platform_data;
+@@ -498,6 +509,9 @@ static int mxc_hdmi_core_probe(struct platform_device *pdev)
+ 	overflow_lo = false;
+ 	overflow_hi = false;
+ #endif
++
++	hdmi_core_init = 0;
++
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (!res)
+ 		return -ENOENT;
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index 0462f09..9d95e94 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -2060,11 +2060,13 @@ static int mxc_hdmi_fb_event(struct notifier_block *nb,
+ 	case FB_EVENT_FB_REGISTERED:
+ 		dev_dbg(&hdmi->pdev->dev, "event=FB_EVENT_FB_REGISTERED\n");
+ 		mxc_hdmi_fb_registered(hdmi);
++		hdmi_set_registered(1);
+ 		break;
+ 
+ 	case FB_EVENT_FB_UNREGISTERED:
+ 		dev_dbg(&hdmi->pdev->dev, "event=FB_EVENT_FB_UNREGISTERED\n");
+ 		hdmi->fb_reg = false;
++		hdmi_set_registered(0);
+ 		break;
+ 
+ 	case FB_EVENT_MODE_CHANGE:
+diff --git a/include/linux/mfd/mxc-hdmi-core.h b/include/linux/mfd/mxc-hdmi-core.h
+index b607fee..0b24183 100644
+--- a/include/linux/mfd/mxc-hdmi-core.h
++++ b/include/linux/mfd/mxc-hdmi-core.h
+@@ -46,4 +46,7 @@ void hdmi_get_edid_cfg(struct mxc_edid_cfg *cfg);
+ extern int mxc_hdmi_ipu_id;
+ extern int mxc_hdmi_disp_id;
+ 
++void hdmi_set_registered(int registered);
++int hdmi_get_registered(void);
++
+ #endif
+diff --git a/sound/soc/codecs/mxc_hdmi.c b/sound/soc/codecs/mxc_hdmi.c
+index 70c9b8c..4d9a571 100644
+--- a/sound/soc/codecs/mxc_hdmi.c
++++ b/sound/soc/codecs/mxc_hdmi.c
+@@ -348,6 +348,9 @@ static int mxc_hdmi_codec_soc_probe(struct snd_soc_codec *codec)
+ 	struct mxc_hdmi_priv *hdmi_priv;
+ 	int ret = 0;
+ 
++	if (!hdmi_get_registered())
++		return -ENOMEM;
++
+ 	hdmi_priv = kzalloc(sizeof(struct mxc_hdmi_priv), GFP_KERNEL);
+ 	if (hdmi_priv == NULL)
+ 		return -ENOMEM;
+diff --git a/sound/soc/imx/imx-hdmi-dai.c b/sound/soc/imx/imx-hdmi-dai.c
+index 71cb3a5..0a1686b 100644
+--- a/sound/soc/imx/imx-hdmi-dai.c
++++ b/sound/soc/imx/imx-hdmi-dai.c
+@@ -1,7 +1,7 @@
+ /*
+  * ALSA SoC HDMI Audio Layer for MXS
+  *
+- * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+  *
+  * Based on stmp3xxx_spdif_dai.c
+  * Vladimir Barinov <vbarinov@embeddedalley.com>
+@@ -42,6 +42,9 @@ static int imx_hdmi_dai_probe(struct platform_device *pdev)
+ 	struct imx_hdmi *hdmi_data;
+ 	int ret = 0;
+ 
++	if (!hdmi_get_registered())
++		return -ENOMEM;
++
+ 	hdmi_data = kzalloc(sizeof(*hdmi_data), GFP_KERNEL);
+ 	if (!hdmi_data)
+ 		return -ENOMEM;
+diff --git a/sound/soc/imx/imx-hdmi.c b/sound/soc/imx/imx-hdmi.c
+index f2316c1..a30d478 100644
+--- a/sound/soc/imx/imx-hdmi.c
++++ b/sound/soc/imx/imx-hdmi.c
+@@ -1,7 +1,7 @@
+ /*
+  * ASoC HDMI Transmitter driver for IMX development boards
+  *
+- * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+  *
+  * based on stmp3780_devb_spdif.c
+  *
+@@ -57,6 +57,9 @@ static int __init imx_hdmi_init(void)
+ {
+ 	int ret = 0;
+ 
++	if (!hdmi_get_registered())
++		return -ENOMEM;
++
+ 	imx_hdmi_snd_device = platform_device_alloc("soc-audio", 4);
+ 	if (!imx_hdmi_snd_device) {
+ 		pr_err("%s - failed platform_device_alloc\n", __func__);
+-- 
+1.7.7.4
+

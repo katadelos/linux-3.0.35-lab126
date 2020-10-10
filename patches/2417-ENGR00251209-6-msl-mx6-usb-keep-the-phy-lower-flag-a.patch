@@ -1,0 +1,33 @@
+From 979c093284052967ef16e7842b6717ca4274f684 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Mon, 4 Mar 2013 17:35:02 +0800
+Subject: [PATCH 2417/2463] ENGR00251209-6 msl-mx6: usb: keep the phy lower
+ flag as true defaultly
+
+Keep the phy lower flag as true defaultly, the driver should mark
+it as false when the driver begins to use PHY.
+This fixes one bug that when build both host and gadget as loadable
+modules, the phy lower flag is false if the related module is not
+loaded, then, the wakeup interrupt will not be treated as happened
+if host module is loaded, but gadget is not loaded, or vice verse.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ arch/arm/mach-mx6/usb_dr.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index 372253e..7c8ef2f 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -65,6 +65,7 @@ static struct fsl_usb2_platform_data dr_utmi_config = {
+ 	.transceiver       = "utmi",
+ 	.phy_regs = USB_PHY0_BASE_ADDR,
+ 	.dr_discharge_line = _dr_discharge_line,
++	.lowpower	   = true, /* Default driver low power is true */
+ };
+ 
+ /* Platform data for wakeup operation */
+-- 
+1.7.7.4
+

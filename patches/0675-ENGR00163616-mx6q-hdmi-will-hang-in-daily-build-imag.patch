@@ -1,0 +1,46 @@
+From 5e090fc9af4445b85b15094b2f046f2746f5c1c2 Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Wed, 30 Nov 2011 16:17:15 +0800
+Subject: [PATCH 0675/2463] ENGR00163616 [mx6q]hdmi will hang in daily build
+ image
+
+make sure the pointer is valid before accessing
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ drivers/video/mxc_hdmi.c |   10 ++++++----
+ 1 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index 0298c24..0993015 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -1359,9 +1359,10 @@ static int mxc_hdmi_cable_connected(struct mxc_hdmi *hdmi)
+ 		fb_var_to_videomode(&m, &hdmi->fbi->var);
+ 		mode = fb_find_nearest_mode(&m,
+ 				&hdmi->fbi->modelist);
++		if (mode)
++			fb_videomode_to_var(&hdmi->fbi->var, mode);
+ 
+-		fb_videomode_to_var(&hdmi->fbi->var, mode);
+-		hdmi->need_mode_change = true;
++		hdmi->need_mode_change = mode ? true : false;
+ 	} else {
+ 		/* If not EDID data readed, setup default modelist  */
+ 		dev_info(&hdmi->pdev->dev, "No modes read from edid\n");
+@@ -1370,9 +1371,10 @@ static int mxc_hdmi_cable_connected(struct mxc_hdmi *hdmi)
+ 		fb_var_to_videomode(&m, &hdmi->fbi->var);
+ 		mode = fb_find_nearest_mode(&m,
+ 				&hdmi->fbi->modelist);
++		if (mode)
++			fb_videomode_to_var(&hdmi->fbi->var, mode);
+ 
+-		fb_videomode_to_var(&hdmi->fbi->var, mode);
+-		hdmi->need_mode_change = true;
++		hdmi->need_mode_change = mode ? true : false;
+ 	}
+ 
+ 
+-- 
+1.7.7.4
+

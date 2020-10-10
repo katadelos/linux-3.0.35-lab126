@@ -1,0 +1,302 @@
+From 2bdd40302343541b27a97b4dc5a4fc2603699900 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Tue, 19 Apr 2011 16:35:36 +0800
+Subject: [PATCH 0127/2463] ENGR00141152-3 make default display option for
+ drivers
+
+make default display option for tve/vga/hdmi/ddc
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c     |   19 +++++++++++----
+ drivers/video/mxc/ldb.c           |   28 +++++++++++++++++++---
+ drivers/video/mxc/mxc_edid.c      |   20 +++++++++++++---
+ drivers/video/mxc/mxcfb_sii902x.c |   21 ++++++++++++++---
+ drivers/video/mxc/tve.c           |   45 +++++++++++++++++++++++++++++-------
+ 5 files changed, 107 insertions(+), 26 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index bc49778..9d99f55 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -18,7 +18,6 @@
+  *
+  * @ingroup IPU
+  */
+-#define DEBUG
+ #include <linux/types.h>
+ #include <linux/init.h>
+ #include <linux/platform_device.h>
+@@ -243,12 +242,19 @@ static struct clk pixel_clk[] = {
+ };
+ 
+ int __initdata primary_di = { 0 };
+-static int __init di_setup(char *__unused)
++static int __init di1_setup(char *__unused)
+ {
+-	primary_di = 1;
++	primary_di = MXC_PRI_DI1;
+ 	return 1;
+ }
+-__setup("di1_primary", di_setup);
++__setup("di1_primary", di1_setup);
++
++static int __init di0_setup(char *__unused)
++{
++	primary_di = MXC_PRI_DI0;
++	return 1;
++}
++__setup("di0_primary", di0_setup);
+ 
+ struct platform_device *__init imx_add_ipuv3_fb(
+ 		const struct ipuv3_fb_platform_data *pdata, int id)
+@@ -279,7 +285,10 @@ static int __init register_fb_device(struct platform_device *pdev)
+ {
+ 	struct imx_ipuv3_platform_data *plat_data = pdev->dev.platform_data;
+ 
+-	if (primary_di) {
++	if (!primary_di)
++		primary_di = plat_data->primary_di;
++
++	if (primary_di == MXC_PRI_DI1) {
+ 		dev_info(g_ipu_dev, "DI1 is primary\n");
+ 		/* DI1 -> DP-BG channel: */
+ 		imx_add_ipuv3_fb(plat_data->fb_head1_platform_data, 1);
+diff --git a/drivers/video/mxc/ldb.c b/drivers/video/mxc/ldb.c
+index f044d04..24ad8e6 100644
+--- a/drivers/video/mxc/ldb.c
++++ b/drivers/video/mxc/ldb.c
+@@ -106,7 +106,9 @@ static struct device *g_ldb_dev;
+ static u32 *ldb_reg;
+ static int g_chan_mode_opt = LDB_NO_MODE;
+ static int g_chan_bit_map[2];
+-static bool g_enable_ldb;
++#define MXC_ENABLE	1
++#define MXC_DISABLE	2
++static int g_enable_ldb;
+ static bool g_di0_used;
+ static bool g_di1_used;
+ 
+@@ -1244,8 +1246,22 @@ static int ldb_probe(struct platform_device *pdev)
+ 	int mxc_ldb_major;
+ 	struct class *mxc_ldb_class;
+ 
+-	if (g_enable_ldb == false)
+-		return -ENODEV;
++	if ((plat_data->boot_enable & (MXC_LDBDI0 | MXC_LDBDI1))
++		&& !g_enable_ldb) {
++		g_enable_ldb = MXC_ENABLE;
++		if (plat_data->boot_enable & MXC_LDBDI0)
++			g_di0_used = true;
++		if (plat_data->boot_enable & MXC_LDBDI1)
++			g_di1_used = true;
++	}
++
++	if (!g_enable_ldb)
++		g_enable_ldb = MXC_DISABLE;
++
++	if (g_enable_ldb == MXC_DISABLE) {
++		printk(KERN_WARNING "By setting, LDB driver will not be enabled\n");
++		return 0;
++	}
+ 
+ 	spin_lock_init(&ldb_lock);
+ 
+@@ -1425,7 +1441,11 @@ static struct platform_driver mxcldb_driver = {
+  */
+ static int __init ldb_setup(char *options)
+ {
+-	g_enable_ldb = true;
++	if (!strcmp(options, "=off")) {
++		g_enable_ldb = MXC_DISABLE;
++		return 1;
++	} else
++		g_enable_ldb = MXC_ENABLE;
+ 
+ 	if (!strlen(options))
+ 		return 1;
+diff --git a/drivers/video/mxc/mxc_edid.c b/drivers/video/mxc/mxc_edid.c
+index 3a171c7..50355b5 100644
+--- a/drivers/video/mxc/mxc_edid.c
++++ b/drivers/video/mxc/mxc_edid.c
+@@ -64,7 +64,9 @@ struct mxc_ddc_data {
+ 	struct regulator *analog_reg;
+ } mxc_ddc;
+ 
+-static bool g_enable_ddc;
++#define MXC_ENABLE	1
++#define MXC_DISABLE	2
++static int g_enable_ddc;
+ 
+ void mxc_edid_parse_ext_blk(unsigned char *edid,
+ 		struct mxc_edid_cfg *cfg,
+@@ -292,8 +294,15 @@ static int __devinit mxc_ddc_probe(struct i2c_client *client,
+ 	struct fb_info edid_fbi;
+ 	struct fsl_mxc_ddc_platform_data *plat = client->dev.platform_data;
+ 
+-	if (g_enable_ddc == false)
+-		return -EPERM;
++	if (plat->boot_enable && !g_enable_ddc)
++		g_enable_ddc = MXC_ENABLE;
++	if (!g_enable_ddc)
++		g_enable_ddc = MXC_DISABLE;
++
++	if (g_enable_ddc == MXC_DISABLE) {
++		printk(KERN_WARNING "By setting, DDC driver will not be enabled\n");
++		return 0;
++	}
+ 
+ 	mxc_ddc.client = client;
+ 	mxc_ddc.di = plat->di;
+@@ -368,7 +377,10 @@ static int __devexit mxc_ddc_remove(struct i2c_client *client)
+ 
+ static int __init enable_ddc_setup(char *options)
+ {
+-	g_enable_ddc = true;
++	if (!strcmp(options, "=off"))
++		g_enable_ddc = MXC_DISABLE;
++	else
++		g_enable_ddc = MXC_ENABLE;
+ 
+ 	return 1;
+ }
+diff --git a/drivers/video/mxc/mxcfb_sii902x.c b/drivers/video/mxc/mxcfb_sii902x.c
+index 2128d22..08d8c2c 100644
+--- a/drivers/video/mxc/mxcfb_sii902x.c
++++ b/drivers/video/mxc/mxcfb_sii902x.c
+@@ -52,7 +52,9 @@
+ 
+ #define IPU_DISP_PORT 0
+ #define SII_EDID_LEN	256
+-static bool g_enable_hdmi;
++#define MXC_ENABLE	1
++#define MXC_DISABLE	2
++static int g_enable_hdmi;
+ 
+ struct sii902x_data {
+ 	struct platform_device *pdev;
+@@ -324,8 +326,16 @@ static int __devinit sii902x_probe(struct i2c_client *client,
+ 	struct fsl_mxc_lcd_platform_data *plat = client->dev.platform_data;
+ 	struct fb_info edid_fbi;
+ 
+-	if (g_enable_hdmi == false)
+-		return -EPERM;
++	if (plat->boot_enable &&
++		!g_enable_hdmi)
++		g_enable_hdmi = MXC_ENABLE;
++	if (!g_enable_hdmi)
++		g_enable_hdmi = MXC_DISABLE;
++
++	if (g_enable_hdmi == MXC_DISABLE) {
++		printk(KERN_WARNING "By setting, SII driver will not be enabled\n");
++		return 0;
++	}
+ 
+ 	sii902x.client = client;
+ 
+@@ -497,7 +507,10 @@ static void __exit sii902x_exit(void)
+ 
+ static int __init enable_hdmi_setup(char *options)
+ {
+-	g_enable_hdmi = true;
++	if (!strcmp(options, "=off"))
++		g_enable_hdmi = MXC_DISABLE;
++	else
++		g_enable_hdmi = MXC_ENABLE;
+ 
+ 	return 1;
+ }
+diff --git a/drivers/video/mxc/tve.c b/drivers/video/mxc/tve.c
+index 34084a3..8e01f05 100644
+--- a/drivers/video/mxc/tve.c
++++ b/drivers/video/mxc/tve.c
+@@ -104,8 +104,10 @@ static int enabled;		/* enable power on or not */
+ DEFINE_SPINLOCK(tve_lock);
+ 
+ static struct fb_info *tve_fbi;
+-static bool g_enable_tve;
+-static bool g_enable_vga;
++#define MXC_ENABLE	1
++#define MXC_DISABLE	2
++static int g_enable_tve;
++static int g_enable_vga;
+ 
+ struct tve_data {
+ 	struct platform_device *pdev;
+@@ -1123,8 +1125,27 @@ static int tve_probe(struct platform_device *pdev)
+ 	struct fsl_mxc_tve_platform_data *plat_data = pdev->dev.platform_data;
+ 	u32 conf_reg;
+ 
+-	if (g_enable_tve == false && g_enable_vga == false)
+-		return -EPERM;
++	/*
++	 * tve/vga can be enabled by platform data when there is
++	 * no setting from cmdline setup
++	 */
++	if ((plat_data->boot_enable & MXC_TVE_TVOUT)
++		&& !g_enable_tve)
++		g_enable_tve = MXC_ENABLE;
++	if (!g_enable_tve)
++		g_enable_tve = MXC_DISABLE;
++
++	if ((plat_data->boot_enable & MXC_TVE_VGA) &&
++		!g_enable_vga)
++		g_enable_vga = MXC_ENABLE;
++	if (!g_enable_vga)
++		g_enable_vga = MXC_DISABLE;
++
++	if (g_enable_tve == MXC_DISABLE &&
++		g_enable_vga == MXC_DISABLE) {
++		printk(KERN_WARNING "By setting, TVE driver will not be enabled\n");
++		return 0;
++	}
+ 
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (res == NULL)
+@@ -1196,16 +1217,16 @@ static int tve_probe(struct platform_device *pdev)
+ 
+ 	/* TVE is on disp port 1 */
+ 	if (tve.revision == 1) {
+-		if (g_enable_tve)
++		if (g_enable_tve == MXC_ENABLE)
+ 			mxcfb_register_mode(IPU_DISP_PORT, video_modes,
+ 					3, MXC_DISP_SPEC_DEV);
+ 	} else {
+-		if (g_enable_tve)
++		if (g_enable_tve == MXC_ENABLE)
+ 			mxcfb_register_mode(IPU_DISP_PORT, video_modes,
+ 					ARRAY_SIZE(video_modes),
+ 					MXC_DISP_SPEC_DEV);
+ 
+-		if (cpu_is_mx53() && g_enable_vga)
++		if (cpu_is_mx53() && (g_enable_vga == MXC_ENABLE))
+ 			mxcfb_register_mode(IPU_DISP_PORT, video_modes_vga,
+ 					ARRAY_SIZE(video_modes_vga),
+ 					MXC_DISP_SPEC_DEV);
+@@ -1269,7 +1290,10 @@ static struct platform_driver tve_driver = {
+ 
+ static int __init enable_tve_setup(char *options)
+ {
+-	g_enable_tve = true;
++	if (!strcmp(options, "=off"))
++		g_enable_tve = MXC_DISABLE;
++	else
++		g_enable_tve = MXC_ENABLE;
+ 
+ 	return 1;
+ }
+@@ -1277,7 +1301,10 @@ __setup("tve", enable_tve_setup);
+ 
+ static int __init enable_vga_setup(char *options)
+ {
+-	g_enable_vga = true;
++	if (!strcmp(options, "=off"))
++		g_enable_vga = MXC_DISABLE;
++	else
++		g_enable_vga = MXC_ENABLE;
+ 
+ 	return 1;
+ }
+-- 
+1.7.7.4
+

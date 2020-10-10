@@ -1,0 +1,410 @@
+From 957bc47ffbad8532f0e8f6463946e8c04bc3176f Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Thu, 11 Aug 2011 12:55:59 +0800
+Subject: [PATCH 0354/2463] ENGR00154650-2 ESAI: add mx53 playback/record
+ support
+
+add driver codes for mx53 ard.
+close esai clk when not used.
+add delay when power on cs42888 to avoid noise
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ sound/soc/codecs/cs42888.c  |   49 ++++++++++++-----
+ sound/soc/imx/Kconfig       |    2 +-
+ sound/soc/imx/imx-cs42888.c |  122 +++++++++++++++++++++++++++++-------------
+ sound/soc/imx/imx-esai.c    |   35 ++++++++----
+ 4 files changed, 142 insertions(+), 66 deletions(-)
+
+diff --git a/sound/soc/codecs/cs42888.c b/sound/soc/codecs/cs42888.c
+index dcaa65e..e06eb30 100644
+--- a/sound/soc/codecs/cs42888.c
++++ b/sound/soc/codecs/cs42888.c
+@@ -22,6 +22,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/fsl_devices.h>
++#include <mach/hardware.h>
+ 
+ #include <sound/core.h>
+ #include <sound/pcm.h>
+@@ -32,6 +33,7 @@
+ #include <sound/initval.h>
+ #include <asm/div64.h>
+ #include "cs42888.h"
++
+ #define CS42888_NUM_SUPPLIES 4
+ static const char *cs42888_supply_names[CS42888_NUM_SUPPLIES] = {
+ 	"VA",
+@@ -696,6 +698,7 @@ static int cs42888_hw_params(struct snd_pcm_substream *substream,
+ 		pr_err("i2c write failed\n");
+ 		return ret;
+ 	}
++	 msleep(400);
+ 
+ 	ret = cs42888_fill_cache(codec);
+ 	if (ret < 0) {
+@@ -747,22 +750,35 @@ static struct snd_soc_dai_ops cs42888_dai_ops = {
+ 	.shutdown	= cs42888_shutdown,
+ };
+ 
++
+ struct snd_soc_dai_driver cs42888_dai = {
+ 	.name = "CS42888",
+ 	.playback = {
+ 		.stream_name = "Playback",
+ 		.channels_min = 1,
+ 		.channels_max = 8,
++#ifdef CONFIG_SOC_IMX53
++		.rates = (SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_96000 |\
++			SNDRV_PCM_RATE_192000),
++#endif
++#ifdef CONFIG_SOC_IMX6Q
+ 		.rates = (SNDRV_PCM_RATE_44100 | SNDRV_PCM_RATE_88200 |\
+ 			SNDRV_PCM_RATE_176400),
++#endif
+ 		.formats = CS42888_FORMATS,
+ 	},
+ 	.capture = {
+ 		.stream_name = "Capture",
+ 		.channels_min = 1,
+ 		.channels_max = 4,
++#ifdef CONFIG_SOC_IMX53
++		.rates = (SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_96000 |\
++			SNDRV_PCM_RATE_192000),
++#endif
++#ifdef CONFIG_SOC_IMX6Q
+ 		.rates = (SNDRV_PCM_RATE_44100 | SNDRV_PCM_RATE_88200 |\
+ 			SNDRV_PCM_RATE_176400),
++#endif
+ 		.formats = CS42888_FORMATS,
+ 	},
+ 	.ops = &cs42888_dai_ops,
+@@ -790,22 +806,25 @@ static int cs42888_probe(struct snd_soc_codec *codec)
+ 		dev_err(codec->dev, "Failed to set cache I/O: %d\n", ret);
+ 		return ret;
+ 	}
++	if (cpu_is_mx6q()) {
++		for (i = 0; i < ARRAY_SIZE(cs42888->supplies); i++)
++			cs42888->supplies[i].supply = cs42888_supply_names[i];
++
++		ret = regulator_bulk_get(codec->dev,
++			ARRAY_SIZE(cs42888->supplies), cs42888->supplies);
++		if (ret != 0) {
++			dev_err(codec->dev, "Failed to request supplies: %d\n",
++				ret);
++			return ret;
++		}
+ 
+-	for (i = 0; i < ARRAY_SIZE(cs42888->supplies); i++)
+-		cs42888->supplies[i].supply = cs42888_supply_names[i];
+-
+-	ret = regulator_bulk_get(codec->dev, ARRAY_SIZE(cs42888->supplies),
+-				 cs42888->supplies);
+-	if (ret != 0) {
+-		dev_err(codec->dev, "Failed to request supplies: %d\n", ret);
+-		return ret;
+-	}
+-
+-	ret = regulator_bulk_enable(ARRAY_SIZE(cs42888->supplies),
+-				    cs42888->supplies);
+-	if (ret != 0) {
+-		dev_err(codec->dev, "Failed to enable supplies: %d\n", ret);
+-		goto err;
++		ret = regulator_bulk_enable(ARRAY_SIZE(cs42888->supplies),
++				cs42888->supplies);
++		if (ret != 0) {
++			dev_err(codec->dev, "Failed to enable supplies: %d\n",
++				ret);
++			goto err;
++		}
+ 	}
+ 	msleep(1);
+ 
+diff --git a/sound/soc/imx/Kconfig b/sound/soc/imx/Kconfig
+index 67b7739..63bf841 100644
+--- a/sound/soc/imx/Kconfig
++++ b/sound/soc/imx/Kconfig
+@@ -61,7 +61,7 @@ config SND_SOC_IMX_SGTL5000
+ 
+ config SND_SOC_IMX_CS42888
+ 	tristate "SoC Audio support for i.MX boards with cs42888"
+-	depends on MACH_MX6Q_SABREAUTO
++	depends on MACH_MX6Q_SABREAUTO || MACH_MX53_ARD
+ 	select SND_SOC_CS42888
+ 	select SND_MXC_SOC_MX2
+ 	help
+diff --git a/sound/soc/imx/imx-cs42888.c b/sound/soc/imx/imx-cs42888.c
+index d9de9e6..8943534 100644
+--- a/sound/soc/imx/imx-cs42888.c
++++ b/sound/soc/imx/imx-cs42888.c
+@@ -64,40 +64,73 @@ static int imx_3stack_surround_hw_params(struct snd_pcm_substream *substream,
+ 	unsigned int lrclk_ratio = 0;
+ 	if (clk_state.lr_clk_active > 1)
+ 		return 0;
+-
+-	switch (rate) {
+-	case 32000:
+-		lrclk_ratio = 5;
+-		break;
+-	case 48000:
+-		lrclk_ratio = 5;
+-		break;
+-	case 64000:
+-		lrclk_ratio = 2;
+-		break;
+-	case 96000:
+-		lrclk_ratio = 2;
+-		break;
+-	case 128000:
+-		lrclk_ratio = 2;
+-		break;
+-	case 44100:
+-		lrclk_ratio = 5;
+-		break;
+-	case 88200:
+-		lrclk_ratio = 2;
+-		break;
+-	case 176400:
+-		lrclk_ratio = 0;
+-		break;
+-	case 192000:
+-		lrclk_ratio = 0;
+-		break;
+-	default:
+-		pr_info("Rate not support.\n");
+-		return -EINVAL;;
++	if (cpu_is_mx53()) {
++		switch (rate) {
++		case 32000:
++			lrclk_ratio = 3;
++			break;
++		case 48000:
++			lrclk_ratio = 3;
++			break;
++		case 64000:
++			lrclk_ratio = 1;
++			break;
++		case 96000:
++			lrclk_ratio = 1;
++			break;
++		case 128000:
++			lrclk_ratio = 1;
++			break;
++		case 44100:
++			lrclk_ratio = 3;
++			break;
++		case 88200:
++			lrclk_ratio = 1;
++			break;
++		case 176400:
++			lrclk_ratio = 0;
++			break;
++		case 192000:
++			lrclk_ratio = 0;
++			break;
++		default:
++			pr_info("Rate not support.\n");
++			return -EINVAL;;
++		}
++	} else if (cpu_is_mx6q()) {
++		switch (rate) {
++		case 32000:
++			lrclk_ratio = 5;
++			break;
++		case 48000:
++			lrclk_ratio = 5;
++			break;
++		case 64000:
++			lrclk_ratio = 2;
++			break;
++		case 96000:
++			lrclk_ratio = 2;
++			break;
++		case 128000:
++			lrclk_ratio = 2;
++			break;
++		case 44100:
++			lrclk_ratio = 5;
++			break;
++		case 88200:
++			lrclk_ratio = 2;
++			break;
++		case 176400:
++			lrclk_ratio = 0;
++			break;
++		case 192000:
++			lrclk_ratio = 0;
++			break;
++		default:
++			pr_info("Rate not support.\n");
++			return -EINVAL;;
++		}
+ 	}
+-
+ 	dai_format = SND_SOC_DAIFMT_LEFT_J | SND_SOC_DAIFMT_NB_NF |
+ 	    SND_SOC_DAIFMT_CBS_CFS;
+ 
+@@ -107,11 +140,19 @@ static int imx_3stack_surround_hw_params(struct snd_pcm_substream *substream,
+ 	/* set i.MX active slot mask */
+ 	snd_soc_dai_set_tdm_slot(cpu_dai, 0x3, 0x3, 2, 32);
+ 	/* set the ESAI system clock as output */
+-	snd_soc_dai_set_sysclk(cpu_dai, ESAI_CLK_EXTAL_DIV,
+-		mclk_freq, SND_SOC_CLOCK_OUT);
++	if (cpu_is_mx53()) {
++		snd_soc_dai_set_sysclk(cpu_dai, ESAI_CLK_EXTAL,
++			mclk_freq, SND_SOC_CLOCK_OUT);
++	} else if (cpu_is_mx6q()) {
++		snd_soc_dai_set_sysclk(cpu_dai, ESAI_CLK_EXTAL_DIV,
++			mclk_freq, SND_SOC_CLOCK_OUT);
++	}
+ 	/* set the ratio */
+ 	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_PSR, 1);
+-	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_PM, 2);
++	if (cpu_is_mx53())
++		snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_PM, 0);
++	else if (cpu_is_mx6q())
++		snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_PM, 2);
+ 	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_FP, lrclk_ratio);
+ 	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_PSR, 1);
+ 	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_PM, 0);
+@@ -171,7 +212,12 @@ static struct snd_soc_dai_link imx_3stack_dai[] = {
+ 	.name = "HiFi",
+ 	.stream_name = "HiFi",
+ 	.codec_dai_name = "CS42888",
++#ifdef CONFIG_SOC_IMX53
++	.codec_name = "cs42888.1-0048",
++#endif
++#ifdef CONFIG_SOC_IMX6Q
+ 	.codec_name = "cs42888.0-0048",
++#endif
+ 	.cpu_dai_name = "imx-esai.0",
+ 	.platform_name = "imx-pcm-audio.0",
+ 	.init = imx_3stack_cs42888_init,
+@@ -180,7 +226,7 @@ static struct snd_soc_dai_link imx_3stack_dai[] = {
+ };
+ 
+ static struct snd_soc_card snd_soc_card_imx_3stack = {
+-	.name = "imx-3stack",
++	.name = "cs42888-audio",
+ 	.dai_link = imx_3stack_dai,
+ 	.num_links = ARRAY_SIZE(imx_3stack_dai),
+ };
+@@ -219,7 +265,7 @@ static int __init imx_3stack_asoc_init(void)
+ 	if (ret < 0)
+ 		goto exit;
+ 
+-	imx_3stack_snd_device = platform_device_alloc("soc-audio", 1);
++	imx_3stack_snd_device = platform_device_alloc("soc-audio", 2);
+ 	if (!imx_3stack_snd_device)
+ 		goto err_device_alloc;
+ 	platform_set_drvdata(imx_3stack_snd_device, &snd_soc_card_imx_3stack);
+diff --git a/sound/soc/imx/imx-esai.c b/sound/soc/imx/imx-esai.c
+index c07b69b..3a31d07 100644
+--- a/sound/soc/imx/imx-esai.c
++++ b/sound/soc/imx/imx-esai.c
+@@ -246,14 +246,14 @@ static int imx_esai_set_dai_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
+ 	}
+ 
+ 	/* sync */
+-	if (esai->flags == IMX_ESAI_SYN)
++	if (esai->flags & IMX_ESAI_SYN)
+ 		saicr |= ESAI_SAICR_SYNC;
+ 	else
+ 		saicr &= ~ESAI_SAICR_SYNC;
+ 
+ 	tcr &= ESAI_TCR_TMOD_MASK;
+ 	rcr &= ESAI_RCR_RMOD_MASK;
+-	if (esai->flags == IMX_ESAI_NET) {
++	if (esai->flags & IMX_ESAI_NET) {
+ 		tcr |= ESAI_TCR_TMOD_NETWORK;
+ 		rcr |= ESAI_RCR_RMOD_NETWORK;
+ 	} else {
+@@ -277,6 +277,8 @@ static int imx_esai_startup(struct snd_pcm_substream *substream,
+ {
+ 	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
+ 
++	clk_enable(esai->clk);
++
+ 	writel(ESAI_ECR_ERST, esai->base + ESAI_ECR);
+ 	writel(ESAI_ECR_ESAIEN, esai->base + ESAI_ECR);
+ 
+@@ -303,14 +305,6 @@ static int imx_esai_hw_tx_params(struct snd_pcm_substream *substream,
+ 	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
+ 	u32 tcr, tfcr;
+ 	unsigned int channels;
+-	struct imx_pcm_dma_params *dma_data;
+-	/* Tx/Rx config */
+-	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
+-		dma_data = &esai->dma_params_tx;
+-	else
+-		dma_data = &esai->dma_params_rx;
+-
+-	snd_soc_dai_set_dma_data(cpu_dai, substream, dma_data);
+ 
+ 	tcr = readl(esai->base + ESAI_TCR);
+ 	tfcr = readl(esai->base + ESAI_TFCR);
+@@ -403,18 +397,36 @@ static int imx_esai_hw_params(struct snd_pcm_substream *substream,
+ 			      struct snd_soc_dai *cpu_dai)
+ {
+ 	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
++	struct imx_pcm_dma_params *dma_data;
++
+ 	/* Tx/Rx config */
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+ 		if (readl(esai->base + ESAI_TCR) & ESAI_TCR_TE0)
+ 			return 0;
++
++		dma_data = &esai->dma_params_tx;
++		snd_soc_dai_set_dma_data(cpu_dai, substream, dma_data);
+ 		return imx_esai_hw_tx_params(substream, params, cpu_dai);
+ 	} else {
+ 		if (readl(esai->base + ESAI_RCR) & ESAI_RCR_RE1)
+ 			return 0;
++
++		dma_data = &esai->dma_params_rx;
++		snd_soc_dai_set_dma_data(cpu_dai, substream, dma_data);
+ 		return imx_esai_hw_rx_params(substream, params, cpu_dai);
+ 	}
+ }
+ 
++static void imx_esai_shutdown(struct snd_pcm_substream *substream,
++			      struct snd_soc_dai *cpu_dai)
++{
++	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
++
++	/* close easi clock */
++	clk_disable(esai->clk);
++
++}
++
+ static int imx_esai_trigger(struct snd_pcm_substream *substream, int cmd,
+ 			    struct snd_soc_dai *cpu_dai)
+ {
+@@ -508,6 +520,7 @@ static int imx_esai_resume(struct snd_soc_dai *cpu_dai)
+ 
+ static struct snd_soc_dai_ops imx_esai_dai_ops = {
+ 	.startup = imx_esai_startup,
++	.shutdown = imx_esai_shutdown,
+ 	.trigger = imx_esai_trigger,
+ 	.hw_params = imx_esai_hw_params,
+ 	.set_sysclk = imx_esai_set_dai_sysclk,
+@@ -568,7 +581,6 @@ static int imx_esai_probe(struct platform_device *pdev)
+ 			ret);
+ 		goto failed_clk;
+ 	}
+-	clk_enable(esai->clk);
+ 
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (!res) {
+@@ -672,7 +684,6 @@ static int __devexit imx_esai_remove(struct platform_device *pdev)
+ 
+ 	iounmap(esai->base);
+ 	release_mem_region(res->start, resource_size(res));
+-	clk_disable(esai->clk);
+ 	clk_put(esai->clk);
+ 	kfree(esai);
+ 
+-- 
+1.7.7.4
+

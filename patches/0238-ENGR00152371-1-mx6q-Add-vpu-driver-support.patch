@@ -1,0 +1,143 @@
+From e40039616be8fb4f247ca449e84a4e7b9f6c97ba Mon Sep 17 00:00:00 2001
+From: Sammy He <r62914@freescale.com>
+Date: Fri, 1 Jul 2011 23:02:52 +0800
+Subject: [PATCH 0238/2463] ENGR00152371-1 mx6q: Add vpu driver support
+
+Add vpu driver support for mx6q.
+
+Signed-off-by: Sammy He <r62914@freescale.com>
+---
+ drivers/mxc/vpu/Kconfig   |    2 +-
+ drivers/mxc/vpu/mxc_vpu.c |   56 ++++++++++++++++++++++++++++++++++++++++-----
+ 2 files changed, 51 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/mxc/vpu/Kconfig b/drivers/mxc/vpu/Kconfig
+index 144a4c20..dada204 100644
+--- a/drivers/mxc/vpu/Kconfig
++++ b/drivers/mxc/vpu/Kconfig
+@@ -6,7 +6,7 @@ menu "MXC VPU(Video Processing Unit) support"
+ 
+ config MXC_VPU
+ 	  tristate "Support for MXC VPU(Video Processing Unit)"
+-	  depends on (ARCH_MX3 || ARCH_MX27 || ARCH_MX37 || ARCH_MX5)
++	  depends on (ARCH_MX3 || ARCH_MX27 || ARCH_MX37 || ARCH_MX5 || ARCH_MX6)
+ 	  default y
+ 	---help---
+ 	  The VPU codec device provides codec function for H.264/MPEG4/H.263,
+diff --git a/drivers/mxc/vpu/mxc_vpu.c b/drivers/mxc/vpu/mxc_vpu.c
+index da2ae53..c43102d 100644
+--- a/drivers/mxc/vpu/mxc_vpu.c
++++ b/drivers/mxc/vpu/mxc_vpu.c
+@@ -77,7 +77,7 @@ static struct vpu_mem_desc user_data_mem = { 0 };
+ static struct vpu_mem_desc share_mem = { 0 };
+ 
+ static void __iomem *vpu_base;
+-static int vpu_irq;
++static int vpu_ipi_irq;
+ static u32 phy_vpu_base_addr;
+ static struct mxc_vpu_platform_data *vpu_plat;
+ 
+@@ -93,6 +93,14 @@ static u32 rd_ptr_regsave[4];
+ static u32 wr_ptr_regsave[4];
+ static u32 dis_flag_regsave[4];
+ 
++#ifdef CONFIG_SOC_IMX6Q
++#define MXC_VPU_HAS_JPU
++#endif
++
++#ifdef MXC_VPU_HAS_JPU
++static int vpu_jpu_irq;
++#endif
++
+ #define	READ_REG(x)		__raw_readl(vpu_base + x)
+ #define	WRITE_REG(val, x)	__raw_writel(val, vpu_base + x)
+ #define	SAVE_WORK_REGS	do {					\
+@@ -215,7 +223,7 @@ static inline void vpu_worker_callback(struct work_struct *w)
+ /*!
+  * @brief vpu interrupt handler
+  */
+-static irqreturn_t vpu_irq_handler(int irq, void *dev_id)
++static irqreturn_t vpu_ipi_irq_handler(int irq, void *dev_id)
+ {
+ 	struct vpu_priv *dev = dev_id;
+ 
+@@ -228,6 +236,22 @@ static irqreturn_t vpu_irq_handler(int irq, void *dev_id)
+ }
+ 
+ /*!
++ * @brief vpu jpu interrupt handler
++ */
++#ifdef MXC_VPU_HAS_JPU
++static irqreturn_t vpu_jpu_irq_handler(int irq, void *dev_id)
++{
++	struct vpu_priv *dev = dev_id;
++
++	WRITE_REG(0, MJPEG_PIC_STATUS_REG);
++
++	queue_work(dev->workqueue, &dev->work);
++
++	return IRQ_HANDLED;
++}
++#endif
++
++/*!
+  * @brief open function for vpu file operation
+  *
+  * @return  0 on success or negative error code on error
+@@ -585,13 +609,30 @@ static int vpu_dev_probe(struct platform_device *pdev)
+ 		err = -ENXIO;
+ 		goto err_out_class;
+ 	}
+-	vpu_irq = res->start;
++	vpu_ipi_irq = res->start;
+ 
+-	err = request_irq(vpu_irq, vpu_irq_handler, 0, "VPU_CODEC_IRQ",
++	err = request_irq(vpu_ipi_irq, vpu_ipi_irq_handler, 0, "VPU_CODEC_IRQ",
+ 			  (void *)(&vpu_data));
+ 	if (err)
+ 		goto err_out_class;
+ 
++#ifdef MXC_VPU_HAS_JPU
++	res = platform_get_resource(pdev, IORESOURCE_IRQ, 1);
++	if (!res) {
++		printk(KERN_ERR "vpu: unable to get vpu jpu interrupt\n");
++		err = -ENXIO;
++		free_irq(vpu_ipi_irq, &vpu_data);
++		goto err_out_class;
++	}
++	vpu_jpu_irq = res->start;
++	err = request_irq(vpu_jpu_irq, vpu_jpu_irq_handler, 0, "VPU_JPG_IRQ",
++			  (void *)(&vpu_data));
++	if (err) {
++		free_irq(vpu_ipi_irq, &vpu_data);
++		goto err_out_class;
++	}
++#endif
++
+ 	vpu_data.workqueue = create_workqueue("vpu_wq");
+ 	INIT_WORK(&vpu_data.work, vpu_worker_callback);
+ 	printk(KERN_INFO "VPU initialized\n");
+@@ -610,7 +651,10 @@ static int vpu_dev_probe(struct platform_device *pdev)
+ 
+ static int vpu_dev_remove(struct platform_device *pdev)
+ {
+-	free_irq(vpu_irq, &vpu_data);
++	free_irq(vpu_ipi_irq, &vpu_data);
++#ifdef MXC_VPU_HAS_JPU
++	free_irq(vpu_jpu_irq, &vpu_data);
++#endif
+ 	cancel_work_sync(&vpu_data.work);
+ 	flush_workqueue(vpu_data.workqueue);
+ 	destroy_workqueue(vpu_data.workqueue);
+@@ -677,7 +721,7 @@ static int vpu_resume(struct platform_device *pdev)
+ {
+ 	int i;
+ 
+-	if (cpu_is_mx53())
++	if (!cpu_is_mx51())
+ 		goto recover_clk;
+ 
+ 	if (vpu_plat->pg)
+-- 
+1.7.7.4
+

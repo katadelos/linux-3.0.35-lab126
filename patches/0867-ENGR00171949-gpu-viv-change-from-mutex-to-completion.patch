@@ -1,0 +1,100 @@
+From e43b1d0ede5689cda07bb696f2a45565e0c7ed79 Mon Sep 17 00:00:00 2001
+From: wu guoxing <b39297@freescale.com>
+Date: Fri, 13 Jan 2012 09:57:41 +0800
+Subject: [PATCH 0867/2463] ENGR00171949:gpu-viv: change from mutex to
+ completion for waiting pm events
+
+viv code is using mutex to wait for pm events,
+kernel will see this as a dead lock and give a warrning, as the mutex
+can be hold for a long time.
+
+Signed-off-by: Wu Guoxing <b39297@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c  |   11 +++++------
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h  |    2 +-
+ .../hal/os/linux/kernel/gc_hal_kernel_device.c     |    4 ++--
+ 3 files changed, 8 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+index edf4354..416021a 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+@@ -510,8 +510,7 @@ gckHARDWARE_Construct(
+     gcmkONERROR(gckOS_CreateSemaphore(Os, &hardware->globalSemaphore));
+ 
+ #if gcdPOWEROFF_TIMEOUT
+-    gcmkONERROR(gckOS_CreateMutex(Os, &hardware->powerOffSema));
+-    gcmkONERROR(gckOS_AcquireMutex(Os, hardware->powerOffSema, gcvINFINITE));
++    gcmkONERROR(gckOS_CreateSignal(Os, gcvFALSE, &hardware->powerOffSignal));
+     hardware->powerOffTimeout = gcdPOWEROFF_TIMEOUT;
+ #endif
+ 
+@@ -543,9 +542,9 @@ OnError:
+         }
+ 
+ #if gcdPOWEROFF_TIMEOUT
+-        if (hardware->powerOffSema != gcvNULL)
++        if (hardware->powerOffSignal != gcvNULL)
+         {
+-            gcmkVERIFY_OK(gckOS_DeleteMutex(Os, &hardware->powerOffSema));
++            gcmkVERIFY_OK(gckOS_DestroySignal(Os, hardware->powerOffSignal));
+         }
+ #endif
+ 
+@@ -595,7 +594,7 @@ gckHARDWARE_Destroy(
+     gcmkVERIFY_OK(gckOS_DeleteMutex(Hardware->os, Hardware->powerMutex));
+ 
+ #if gcdPOWEROFF_TIMEOUT
+-    gcmkVERIFY_OK(gckOS_DeleteMutex(Hardware->os, Hardware->powerOffSema));
++    gcmkVERIFY_OK(gckOS_DestroySignal(Hardware->os, Hardware->powerOffSignal));
+ #endif
+ 
+     /* Mark the object as unknown. */
+@@ -4054,7 +4053,7 @@ gckHARDWARE_SetPowerManagementState(
+ 
+     if (State == gcvPOWER_IDLE)
+     {
+-        gcmkONERROR(gckOS_ReleaseMutex(os, Hardware->powerOffSema));
++        gcmkONERROR(gckOS_Signal(os, Hardware->powerOffSignal, gcvTRUE));
+     }
+ #endif
+ 
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h
+index 37f6825..cd74c07 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h
+@@ -78,7 +78,7 @@ struct _gckHARDWARE
+ 
+ #if gcdPOWEROFF_TIMEOUT
+     gctUINT32                   powerOffTime;
+-    gctPOINTER                  powerOffSema;
++    gctSIGNAL                   powerOffSignal;
+     gctUINT32                   powerOffTimeout;
+ #endif
+ };
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+index d619b79..8b25b9f 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+@@ -272,7 +272,7 @@ static int threadRoutinePM(void *ctxt)
+     {
+         /* wait for idle */
+         gcmkVERIFY_OK(
+-            gckOS_AcquireMutex(device->os, hardware->powerOffSema, gcvINFINITE));
++            gckOS_WaitSignal(device->os, hardware->powerOffSignal, gcvINFINITE));
+ 
+         /* We try to power off every 200 ms, until GPU is not idle */
+         do
+@@ -1487,7 +1487,7 @@ gckGALDEVICE_Stop_Threads(
+     {
+         gckHARDWARE hardware = Device->kernels[gcvCORE_MAJOR]->hardware;
+         Device->killThread = gcvTRUE;
+-        gckOS_ReleaseSemaphore(Device->os, hardware->powerOffSema);
++        gckOS_Signal(Device->os, hardware->powerOffSignal, gcvTRUE);
+ 
+         kthread_stop(Device->pmThreadCtxts);
+         Device->pmThreadCtxts        = gcvNULL;
+-- 
+1.7.7.4
+

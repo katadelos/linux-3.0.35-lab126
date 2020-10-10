@@ -1,0 +1,63 @@
+From b2381e992bea2d1c367ab27202831782e6bc60f3 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Fri, 4 Jan 2013 11:49:43 +0800
+Subject: [PATCH 2341/2463] ENGR00238813 ASRC: add check before release ASRC
+ pair
+
+Add check before relase ASRC pair to prevent ASRC register operation
+while clock is not enabled. The ASRC clock is disable while index is not
+applied.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/mxc/asrc/mxc_asrc.c |    9 ++++++++-
+ include/linux/mxc_asrc.h    |    3 ++-
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index 8746bcc..ecfd236 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -1535,6 +1535,13 @@ static long asrc_ioctl(struct file *file,
+ 				err = -EFAULT;
+ 				break;
+ 			}
++
++			if (index < 0) {
++				pr_err("unvalid index: %d!\n", index);
++				err = -EFAULT;
++				break;
++			}
++
+ 			params->asrc_active = 0;
+ 
+ 			spin_lock_irqsave(&pair_lock, lock_flags);
+diff --git a/include/linux/mxc_asrc.h b/include/linux/mxc_asrc.h
+index 37c64b7..7594ee6 100644
+--- a/include/linux/mxc_asrc.h
++++ b/include/linux/mxc_asrc.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -34,6 +34,7 @@
+ #define ASRC_FLUSH	_IOW(ASRC_IOC_MAGIC, 7, enum asrc_pair_index)
+ 
+ enum asrc_pair_index {
++	ASRC_UNVALID_PAIR = -1,
+ 	ASRC_PAIR_A,
+ 	ASRC_PAIR_B,
+ 	ASRC_PAIR_C
+-- 
+1.7.7.4
+

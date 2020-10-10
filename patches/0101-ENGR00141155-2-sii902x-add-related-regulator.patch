@@ -1,0 +1,54 @@
+From c5fc64e962e89a679a5a73e3894ce430c747fdd7 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Fri, 15 Apr 2011 15:05:38 +0800
+Subject: [PATCH 0101/2463] ENGR00141155-2 sii902x: add related regulator
+
+Add related regulator.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/video/mxc/mxcfb_sii902x.c |   14 ++++++++++++++
+ 1 files changed, 14 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/video/mxc/mxcfb_sii902x.c b/drivers/video/mxc/mxcfb_sii902x.c
+index 7e1080f..2128d22 100644
+--- a/drivers/video/mxc/mxcfb_sii902x.c
++++ b/drivers/video/mxc/mxcfb_sii902x.c
+@@ -41,6 +41,7 @@
+ #include <linux/fb.h>
+ #include <linux/init.h>
+ #include <linux/platform_device.h>
++#include <linux/regulator/consumer.h>
+ #include <linux/i2c.h>
+ #include <linux/mxcfb.h>
+ #include <linux/fsl_devices.h>
+@@ -56,6 +57,8 @@ static bool g_enable_hdmi;
+ struct sii902x_data {
+ 	struct platform_device *pdev;
+ 	struct i2c_client *client;
++	struct regulator *io_reg;
++	struct regulator *analog_reg;
+ 	struct delayed_work det_work;
+ 	struct fb_info *fbi;
+ 	struct mxc_edid_cfg edid_cfg;
+@@ -326,6 +329,17 @@ static int __devinit sii902x_probe(struct i2c_client *client,
+ 
+ 	sii902x.client = client;
+ 
++	sii902x.io_reg = regulator_get(&sii902x.client->dev, plat->io_reg);
++	if (!IS_ERR(sii902x.io_reg)) {
++		regulator_set_voltage(sii902x.io_reg, 3300000, 3300000);
++		regulator_enable(sii902x.io_reg);
++	}
++	sii902x.analog_reg = regulator_get(&sii902x.client->dev, plat->analog_reg);
++	if (!IS_ERR(sii902x.analog_reg)) {
++		regulator_set_voltage(sii902x.analog_reg, 1300000, 1300000);
++		regulator_enable(sii902x.analog_reg);
++	}
++
+ 	if (plat->reset) {
+ 		sii902x_reset = plat->reset;
+ 		sii902x_reset();
+-- 
+1.7.7.4
+

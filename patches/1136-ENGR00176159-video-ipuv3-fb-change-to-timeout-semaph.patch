@@ -1,0 +1,58 @@
+From f8b7b7e144ffb3e7a22a4ec5a731f0bb346f8ad1 Mon Sep 17 00:00:00 2001
+From: Zhang Jiejing <jiejing.zhang@freescale.com>
+Date: Tue, 6 Mar 2012 14:47:57 +0800
+Subject: [PATCH 1136/2463] ENGR00176159 video: ipuv3-fb: change to timeout
+ semaphore to wait on irq.
+
+change to timeout semaphore to wait on irq.
+
+use no timeout semaphore have below issues:
+1. since fbmem.c will hold the console_lock() before call PAN_DISPLAY ioictl,
+ if have wrong happens on IPU, IRQ not come, any log printk will not ouput,
+ it will become like a system hang, and developer don't know what's wrong.
+
+2. semaphore don't have timeout, here we can't know irq not come,
+  so hang it infintly.
+3. semaphore lock and unlock in different context is a dangous operation.
+
+To fix these issue, use timedout version to wait on irq.
+But for better coding stly to align Kernel Coding Style Doc,
+better use complete to wait on irq, use semaphre little ugly.
+
+Signed-off-by: Zhang Jiejing <jiejing.zhang@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |   11 +++++++++--
+ 1 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 6434d82..9252537 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -925,7 +925,11 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 			else
+ 				ipu_alp_ch_irq = IPU_IRQ_BG_ALPHA_SYNC_EOF;
+ 
+-			down(&mxc_fbi->alpha_flip_sem);
++			if (down_timeout(&mxc_fbi->alpha_flip_sem, HZ/2)) {
++				dev_err(fbi->device, "timeout when waitting for alpha flip irq\n");
++				retval = -ETIMEDOUT;
++				break;
++			}
+ 
+ 			mxc_fbi->cur_ipu_alpha_buf =
+ 						!mxc_fbi->cur_ipu_alpha_buf;
+@@ -1317,7 +1321,10 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 		}
+ 	}
+ 
+-	down(&mxc_fbi->flip_sem);
++	if (down_timeout(&mxc_fbi->flip_sem, HZ/2)) {
++		dev_err(info->device, "timeout when waitting for flip irq\n");
++		return -ETIMEDOUT;
++	}
+ 
+ 	mxc_fbi->cur_ipu_buf = (++mxc_fbi->cur_ipu_buf) % 3;
+ 	mxc_fbi->cur_ipu_alpha_buf = !mxc_fbi->cur_ipu_alpha_buf;
+-- 
+1.7.7.4
+

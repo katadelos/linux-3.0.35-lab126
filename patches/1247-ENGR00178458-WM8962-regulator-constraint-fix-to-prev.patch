@@ -1,0 +1,38 @@
+From 9e12055f061ba1e7b166088ff3fd0c7a7981ca04 Mon Sep 17 00:00:00 2001
+From: Danny Nold <dannynold@freescale.com>
+Date: Thu, 29 Mar 2012 21:28:14 -0500
+Subject: [PATCH 1247/2463] ENGR00178458 - WM8962 regulator constraint fix to
+ prevent unwanted disable
+
+SPKVDD regulator was being disabled whenever EPDC was included in the
+image, because the EPD PMIC initialization code includes an invocation
+of regulator_has_full_constraints().  This causes all regulators with
+zero ref count to be disabled as part of a late_initcall.  To prevent
+this disable (which breaks ethernet and DHCP), set regulator to
+have boot_on attribute, so that it will not be disabled at end of
+driver loading sequence.
+
+Signed-off-by: Danny Nold <dannynold@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |    5 +++++
+ 1 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 90b222c..27a5a89 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -397,6 +397,11 @@ static struct regulator_consumer_supply sabresd_vwm8962_consumers[] = {
+ };
+ 
+ static struct regulator_init_data sabresd_vwm8962_init = {
++	.constraints = {
++		.name = "SPKVDD",
++		.valid_ops_mask =  REGULATOR_CHANGE_STATUS,
++		.boot_on = 1,
++	},
+ 	.num_consumer_supplies = ARRAY_SIZE(sabresd_vwm8962_consumers),
+ 	.consumer_supplies = sabresd_vwm8962_consumers,
+ };
+-- 
+1.7.7.4
+

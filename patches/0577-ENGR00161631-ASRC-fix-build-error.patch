@@ -1,0 +1,49 @@
+From 519487eb221925c7331c6c9f4001df2fbccfaf3e Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Tue, 8 Nov 2011 16:46:14 +0800
+Subject: [PATCH 0577/2463] ENGR00161631 [ASRC]fix build error
+
+if kernel hacking -> Big Kernel Lock is deselected, ASRC will build fail as:
+
+drivers/mxc/asrc/mxc_asrc.c: In function 'asrc_input_dma_callback':
+drivers/mxc/asrc/mxc_asrc.c:873: error: 'TASK_INTERRUPTIBLE'
+	undeclared (first use in this function)
+drivers/mxc/asrc/mxc_asrc.c:873: error: (Each undeclared identifier
+	is reported only once
+drivers/mxc/asrc/mxc_asrc.c:873: error: for each function it appears in.)
+drivers/mxc/asrc/mxc_asrc.c: In function 'asrc_output_dma_callback':
+drivers/mxc/asrc/mxc_asrc.c:915: error: 'TASK_INTERRUPTIBLE' undeclared
+	(first use in this function)
+drivers/mxc/asrc/mxc_asrc.c: In function 'asrc_ioctl':
+drivers/mxc/asrc/mxc_asrc.c:1259: error: 'TASK_INTERRUPTIBLE' undeclared
+	(first use in this function)
+drivers/mxc/asrc/mxc_asrc.c:1259: error: implicit declaration of function
+	'signal_pending'
+drivers/mxc/asrc/mxc_asrc.c:1259: error: implicit declaration of function
+	'schedule_timeout'
+CC      fs/ext4/symlink.o
+drivers/mxc/asrc/mxc_asrc.c: In function 'mxc_asrc_close':
+drivers/mxc/asrc/mxc_asrc.c:1554: error: 'TASK_INTERRUPTIBLE' undeclared
+	(first use in this function)
+make[3]: *** [drivers/mxc/asrc/mxc_asrc.o] Error 1
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ drivers/mxc/asrc/mxc_asrc.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index 7898f90..37528eb9 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -36,6 +36,7 @@
+ #include <linux/dma-mapping.h>
+ #include <linux/mxc_asrc.h>
+ #include <linux/fsl_devices.h>
++#include <linux/sched.h>
+ #include <asm/irq.h>
+ #include <asm/memory.h>
+ #include <mach/dma.h>
+-- 
+1.7.7.4
+

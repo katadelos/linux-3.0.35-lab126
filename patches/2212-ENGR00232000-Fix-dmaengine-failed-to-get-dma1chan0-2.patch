@@ -1,0 +1,67 @@
+From 985b79c51659a890ba4ee483feebc2c053fe76cd Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Fri, 2 Nov 2012 15:58:40 +0800
+Subject: [PATCH 2212/2463] ENGR00232000: Fix "dmaengine: failed to get
+ dma1chan0: (-22)" when boot
+
+The log from [MX6DL/S_SD]:
+...
+mxc_sdc_fb mxc_sdc_fb.1: register mxc display driver ldb
+dmaengine: failed to get dma1chan0: (-22)
+dmaengine: failed to get dma1chan1: (-22)
+dmaengine: failed to get dma1chan2: (-22)
+dmaengine: failed to get dma1chan3: (-22)
+dmaengine: failed to get dma1chan4: (-22)
+dmaengine: failed to get dma1chan5: (-22)
+dmaengine: failed to get dma1chan6: (-22)
+dmaengine: failed to get dma1chan7: (-22)
+dmaengine: failed to get dma1chan8: (-22)
+dmaengine: failed to get dma1chan9: (-22)
+dmaengine: failed to get dma1chan10: (-22)
+dmaengine: failed to get dma1chan11: (-22)
+dmaengine: failed to get dma1chan12: (-22)
+dmaengine: failed to get dma1chan13: (-22)
+dmaengine: failed to get dma1chan14: (-22)
+dmaengine: failed to get dma1chan15: (-22)
+...
+
+It happens when there are many DMA-engine drivers in the system and
+dmaengine_get() is called. dmaengine_get() will call dma_chan_get(), which will
+call device_alloc_chan_resources() literally on channels of available dma
+drivers unless reach -ENODEV. device_alloc_chan_resources() is implemented
+in the individual dma drivers, which could return -EINVAL rather than -ENODEV,
+then the above messages print out (doesn't hurt, however).
+
+Indeed, the dmaengine_get() and dmaengine_put() is not needed and thus removed.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ drivers/dma/pxp/pxp_device.c |    5 -----
+ 1 files changed, 0 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/dma/pxp/pxp_device.c b/drivers/dma/pxp/pxp_device.c
+index 6b3d7aa..5981fa6 100644
+--- a/drivers/dma/pxp/pxp_device.c
++++ b/drivers/dma/pxp/pxp_device.c
+@@ -477,9 +477,6 @@ static int __devinit pxp_device_probe(struct platform_device *pdev)
+ {
+ 	int ret;
+ 
+-	/* PxP DMA interface */
+-	dmaengine_get();
+-
+ 	ret = misc_register(&pxp_device_miscdev);
+ 	if (ret)
+ 		return ret;
+@@ -492,8 +489,6 @@ static int __devexit pxp_device_remove(struct platform_device *pdev)
+ {
+ 	misc_deregister(&pxp_device_miscdev);
+ 
+-	dmaengine_put();
+-
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

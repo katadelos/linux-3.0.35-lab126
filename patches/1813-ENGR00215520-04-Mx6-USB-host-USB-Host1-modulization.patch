@@ -1,0 +1,51 @@
+From a2e83d72015573aaf77d4e675ce3a22176617673 Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Wed, 25 Jul 2012 10:12:45 +0800
+Subject: [PATCH 1813/2463] ENGR00215520-04 Mx6:USB host: USB Host1
+ modulization
+
+Disable the host wakeup and put phy to low power mode When the
+module be removed, and the requested pre irq should be free.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ drivers/usb/host/ehci-arc.c |   11 +++++++++--
+ 1 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index 471998a..787374a 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -337,6 +337,7 @@ static void usb_hcd_fsl_remove(struct usb_hcd *hcd,
+ 	struct ehci_hcd *ehci = hcd_to_ehci(hcd);
+ 	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
+ 	u32 tmp;
++	unsigned long flags;
+ 
+ 	if (!test_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags)) {
+ 		/* Need open clock for register access */
+@@ -363,13 +364,19 @@ static void usb_hcd_fsl_remove(struct usb_hcd *hcd,
+ 	} else {
+ 		release_mem_region(hcd->rsrc_start, hcd->rsrc_len);
+ 	}
+-
++	/*disable the host wakeup and put phy to low power mode */
++	usb_host_set_wakeup(hcd->self.controller, false);
++	spin_lock_irqsave(&ehci->lock, flags);
++	fsl_usb_lowpower_mode(pdata, true);
++	spin_unlock_irqrestore(&ehci->lock, flags);
++	/*free the ehci_fsl_pre_irq  */
++	free_irq(hcd->irq, (void *)pdev);
+ 	usb_remove_hcd(hcd);
+ 	usb_put_hcd(hcd);
+ 
+ 	/*
+ 	 * do platform specific un-initialization:
+-	 * release iomux pins, etc.
++	 * release iomux pins clocks, etc.
+ 	 */
+ 	if (pdata->exit)
+ 		pdata->exit(pdata->pdev);
+-- 
+1.7.7.4
+

@@ -1,0 +1,522 @@
+From 32b09b4a07edfe749994963a189681494e81813c Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Mon, 19 Dec 2011 17:57:38 +0800
+Subject: [PATCH 0779/2463] ENGR00170255-1 MX6Q PFUZE100: add board level
+ support for pfuze100
+
+1.modify some pins for support pfuze100
+2.add mx6q_sabreauto_pmic_pfuze100.c to support regulator of pfuze100
+3.modify imx6_defconfig to enable pfuze driver and regulator driver
+
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig                  |    2 +
+ arch/arm/mach-mx6/Makefile                       |    2 +-
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c         |   16 +-
+ arch/arm/mach-mx6/mx6q_sabreauto_pmic_pfuze100.c |  400 ++++++++++++++++++++++
+ 4 files changed, 416 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 4b6496f..5fc5463 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1222,6 +1222,7 @@ CONFIG_MFD_CORE=y
+ # CONFIG_MFD_MC13XXX is not set
+ # CONFIG_MFD_MC_PMIC is not set
+ # CONFIG_MFD_MC34708 is not set
++CONFIG_MFD_PFUZE=y
+ # CONFIG_ABX500_CORE is not set
+ # CONFIG_EZX_PCAP is not set
+ # CONFIG_MFD_TPS6586X is not set
+@@ -1242,6 +1243,7 @@ CONFIG_REGULATOR_FIXED_VOLTAGE=y
+ # CONFIG_REGULATOR_LP3971 is not set
+ # CONFIG_REGULATOR_LP3972 is not set
+ # CONFIG_REGULATOR_MC34708 is not set
++CONFIG_REGULATOR_PFUZE100=y
+ # CONFIG_REGULATOR_TPS65023 is not set
+ # CONFIG_REGULATOR_TPS6507X is not set
+ # CONFIG_REGULATOR_ISL6271A is not set
+diff --git a/arch/arm/mach-mx6/Makefile b/arch/arm/mach-mx6/Makefile
+index 1bb1cd4..e84d819 100644
+--- a/arch/arm/mach-mx6/Makefile
++++ b/arch/arm/mach-mx6/Makefile
+@@ -8,6 +8,6 @@ obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o usb_dr.o
+ obj-$(CONFIG_ARCH_MX6) += clock.o mx6q_suspend.o
+ obj-$(CONFIG_MACH_MX6Q_ARM2) += board-mx6q_arm2.o
+ obj-$(CONFIG_MACH_MX6Q_SABRELITE) += board-mx6q_sabrelite.o
+-obj-$(CONFIG_MACH_MX6Q_SABREAUTO) += board-mx6q_sabreauto.o
++obj-$(CONFIG_MACH_MX6Q_SABREAUTO) += board-mx6q_sabreauto.o mx6q_sabreauto_pmic_pfuze100.o
+ obj-$(CONFIG_SMP) += plat_hotplug.o platsmp.o headsmp.o
+ obj-$(CONFIG_LOCAL_TIMERS) += localtimer.o
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 8ffb2c5..3dfbb39 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -106,6 +106,8 @@
+ #define MX6Q_SMD_CSI0_RST		IMX_GPIO_NR(4, 5)
+ #define MX6Q_SMD_CSI0_PWN		IMX_GPIO_NR(5, 23)
+ 
++#define MX6Q_SABREAUTO_PMIC_INT		IMX_GPIO_NR(5, 16)
++
+ void __init early_console_setup(unsigned long base, struct clk *clk);
+ static struct clk *sata_clk;
+ static int esai_record;
+@@ -115,6 +117,7 @@ extern struct regulator *(*get_cpu_regulator)(void);
+ extern void (*put_cpu_regulator)(void);
+ extern char *gp_reg_id;
+ extern void mx6_cpu_regulator_init(void);
++extern int __init mx6q_sabreauto_init_pfuze100(u32 int_gpio);
+ 
+ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 
+@@ -196,7 +199,6 @@ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 	MX6Q_PAD_SD4_DAT7__USDHC4_DAT7_50MHZ,
+ 	MX6Q_PAD_NANDF_ALE__USDHC4_RST,
+ 	/* eCSPI1 */
+-	MX6Q_PAD_EIM_EB2__ECSPI1_SS0,
+ 	MX6Q_PAD_EIM_D16__ECSPI1_SCLK,
+ 	MX6Q_PAD_EIM_D17__ECSPI1_MISO,
+ 	MX6Q_PAD_EIM_D18__ECSPI1_MOSI,
+@@ -249,8 +251,9 @@ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 	MX6Q_PAD_DISP0_DAT19__IPU1_DISP0_DAT_19,
+ 	MX6Q_PAD_DISP0_DAT20__IPU1_DISP0_DAT_20,
+ 	MX6Q_PAD_DISP0_DAT21__IPU1_DISP0_DAT_21,
+-	MX6Q_PAD_DISP0_DAT22__IPU1_DISP0_DAT_22,
+ 	MX6Q_PAD_DISP0_DAT23__IPU1_DISP0_DAT_23,
++	/*PMIC INT*/
++	MX6Q_PAD_DISP0_DAT22__GPIO_5_16,
+ 
+ 	/* ipu1 csi0 */
+ 	MX6Q_PAD_CSI0_DAT12__IPU1_CSI0_D_12,
+@@ -512,7 +515,6 @@ static struct fec_platform_data fec_data __initdata = {
+ };
+ 
+ static int mx6q_sabreauto_spi_cs[] = {
+-	MX6Q_SABREAUTO_ECSPI1_CS0,
+ 	MX6Q_SABREAUTO_ECSPI1_CS1,
+ };
+ 
+@@ -1299,6 +1301,14 @@ static void __init mx6_board_init(void)
+ 	i2c_register_board_info(2, mxc_i2c2_board_info,
+ 			ARRAY_SIZE(mxc_i2c2_board_info));
+ 
++	ret = gpio_request(MX6Q_SABREAUTO_PMIC_INT, "pFUZE-int");
++	if (ret) {
++		printk(KERN_ERR"request pFUZE-int error!!\n");
++		return;
++	} else {
++		gpio_direction_input(MX6Q_SABREAUTO_PMIC_INT);
++		mx6q_sabreauto_init_pfuze100(MX6Q_SABREAUTO_PMIC_INT);
++	}
+ 	/* SPI */
+ 	imx6q_add_ecspi(0, &mx6q_sabreauto_spi_data);
+ 	spi_device_init();
+diff --git a/arch/arm/mach-mx6/mx6q_sabreauto_pmic_pfuze100.c b/arch/arm/mach-mx6/mx6q_sabreauto_pmic_pfuze100.c
+new file mode 100644
+index 0000000..42a6bc6
+--- /dev/null
++++ b/arch/arm/mach-mx6/mx6q_sabreauto_pmic_pfuze100.c
+@@ -0,0 +1,400 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/err.h>
++#include <linux/i2c.h>
++#include <linux/gpio.h>
++#include <linux/regulator/machine.h>
++#include <linux/mfd/pfuze.h>
++#include <mach/irqs.h>
++
++/*
++ * Convenience conversion.
++ * Here atm, maybe there is somewhere better for this.
++ */
++#define mV_to_uV(mV) (mV * 1000)
++#define uV_to_mV(uV) (uV / 1000)
++#define V_to_uV(V) (mV_to_uV(V * 1000))
++#define uV_to_V(uV) (uV_to_mV(uV) / 1000)
++
++#define PFUZE100_I2C_DEVICE_NAME  "pfuze100"
++/* 7-bit I2C bus slave address */
++#define PFUZE100_I2C_ADDR         (0x08)
++
++static struct regulator_consumer_supply sw1a_consumers[] = {
++	{
++	 .supply = "P1V325_VDDARM_SW1AB",
++	 }
++};
++
++static struct regulator_consumer_supply sw1c_consumers[] = {
++	{
++	 .supply = "P1V325_VDDSOC_SW1C",
++	 }
++};
++
++static struct regulator_consumer_supply sw2_consumers[] = {
++	{
++	 .supply = "P3V0_VDDHIGH_SW2",
++	 }
++};
++
++static struct regulator_consumer_supply sw3_consumers[] = {
++	{
++	 .supply = "P1V5_DDR_SW3",
++	 }
++};
++
++static struct regulator_consumer_supply sw4_consumers[] = {
++	{
++	 .supply = "P1V8_SW4",
++	 }
++};
++
++static struct regulator_consumer_supply swbst_consumers[] = {
++	{
++	 .supply = "P5V0_SWBST",
++	 }
++};
++
++static struct regulator_consumer_supply vsnvs_consumers[] = {
++	{
++	 .supply = "P3V0_STBY",
++	 }
++};
++
++static struct regulator_consumer_supply vgen1_consumers[] = {
++	{
++	 .supply = "P1V2_VGEN1",
++	 }
++};
++
++static struct regulator_consumer_supply vgen2_consumers[] = {
++	{
++	 .supply = "P1V5_VGEN2",
++	 }
++};
++
++static struct regulator_consumer_supply vgen3_consumers[] = {
++	{
++	 .supply = "P1V8_VGEN3",
++	 }
++};
++
++static struct regulator_consumer_supply vgen4_consumers[] = {
++	{
++	 .supply = "P1V8_VGEN4",
++	 }
++};
++
++static struct regulator_consumer_supply vgen5_consumers[] = {
++	{
++	 .supply = "P2V5_VGEN5",
++	 }
++};
++
++static struct regulator_consumer_supply vgen6_consumers[] = {
++	{
++	 .supply = "P2V8_VGEN6",
++	 }
++};
++
++static struct regulator_init_data sw1a_init = {
++	.constraints = {
++			.name = "SW1A",
++#ifdef PFUZE100_FIRST_VERSION
++			.min_uV = 650000,
++			.max_uV = 1437500,
++#else
++			.min_uV = 300000,
++			.max_uV = 1875000,
++#endif
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++			.valid_modes_mask = 0,
++			.boot_on = 1,
++			.always_on = 1,
++			},
++	.num_consumer_supplies = ARRAY_SIZE(sw1a_consumers),
++	.consumer_supplies = sw1a_consumers,
++};
++
++static struct regulator_init_data sw1b_init = {
++	.constraints = {
++			.name = "SW1B",
++			.min_uV = 300000,
++			.max_uV = 1875000,
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++			.valid_modes_mask = 0,
++			.always_on = 1,
++			.boot_on = 1,
++			},
++};
++
++static struct regulator_init_data sw1c_init = {
++	.constraints = {
++			.name = "SW1C",
++			.min_uV = 300000,
++			.max_uV = 1875000,
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++			.valid_modes_mask = 0,
++			.always_on = 1,
++			.boot_on = 1,
++			},
++	.num_consumer_supplies = ARRAY_SIZE(sw1c_consumers),
++	.consumer_supplies = sw1c_consumers,
++};
++
++static struct regulator_init_data sw2_init = {
++	.constraints = {
++			.name = "SW2",
++#if PFUZE100_SW2_VOL6
++			.min_uV = 800000,
++			.max_uV = 3950000,
++#else
++			.min_uV = 400000,
++			.max_uV = 1975000,
++#endif
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++			.valid_modes_mask = 0,
++			.always_on = 1,
++			.boot_on = 1,
++			},
++	.num_consumer_supplies = ARRAY_SIZE(sw2_consumers),
++	.consumer_supplies = sw2_consumers,
++};
++
++static struct regulator_init_data sw3a_init = {
++	.constraints = {
++			.name = "SW3A",
++#if PFUZE100_SW3_VOL6
++			.min_uV = 800000,
++			.max_uV = 3950000,
++#else
++			.min_uV = 400000,
++			.max_uV = 1975000,
++#endif
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++			.valid_modes_mask = 0,
++			.always_on = 1,
++			.boot_on = 1,
++			},
++	.num_consumer_supplies = ARRAY_SIZE(sw3_consumers),
++	.consumer_supplies = sw3_consumers,
++};
++
++static struct regulator_init_data sw3b_init = {
++	.constraints = {
++			.name = "SW3B",
++#if PFUZE100_SW3_VOL6
++			.min_uV = 800000,
++			.max_uV = 3950000,
++#else
++			.min_uV = 400000,
++			.max_uV = 1975000,
++#endif
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++			.valid_modes_mask = 0,
++			.always_on = 1,
++			.boot_on = 1,
++			},
++};
++
++static struct regulator_init_data sw4_init = {
++	.constraints = {
++			.name = "SW4",
++#if PFUZE100_SW4_VOL6
++			.min_uV = 800000,
++			.max_uV = 3950000,
++#else
++			.min_uV = 400000,
++			.max_uV = 1975000,
++#endif
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++			.valid_modes_mask = 0,
++			},
++	.num_consumer_supplies = ARRAY_SIZE(sw4_consumers),
++	.consumer_supplies = sw4_consumers,
++};
++
++static struct regulator_init_data swbst_init = {
++	.constraints = {
++			.name = "SWBST",
++			.min_uV = 5000000,
++			.max_uV = 5150000,
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++			.valid_modes_mask = 0,
++			.always_on = 0,
++			.boot_on = 0,
++			},
++	.num_consumer_supplies = ARRAY_SIZE(swbst_consumers),
++	.consumer_supplies = swbst_consumers,
++};
++
++static struct regulator_init_data vsnvs_init = {
++	.constraints = {
++			.name = "VSNVS",
++			.min_uV = 1200000,
++			.max_uV = 3000000,
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++			.valid_modes_mask = 0,
++			.always_on = 1,
++			.boot_on = 1,
++			},
++	.num_consumer_supplies = ARRAY_SIZE(vsnvs_consumers),
++	.consumer_supplies = vsnvs_consumers,
++};
++
++static struct regulator_init_data vrefddr_init = {
++	.constraints = {
++			.name = "VREFDDR",
++			.always_on = 1,
++			.boot_on = 1,
++			},
++};
++
++static struct regulator_init_data vgen1_init = {
++	.constraints = {
++			.name = "VGEN1",
++#ifdef PFUZE100_FIRST_VERSION
++			.min_uV = 1200000,
++			.max_uV = 1550000,
++#else
++			.min_uV = 800000,
++			.max_uV = 1550000,
++#endif
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE |
++			REGULATOR_CHANGE_STATUS,
++			.valid_modes_mask = 0,
++			.always_on = 0,
++			.boot_on = 0,
++			},
++	.num_consumer_supplies = ARRAY_SIZE(vgen1_consumers),
++	.consumer_supplies = vgen1_consumers,
++};
++
++static struct regulator_init_data vgen2_init = {
++	.constraints = {
++			.name = "VGEN2",
++#ifdef PFUZE100_FIRST_VERSION
++			.min_uV = 1200000,
++			.max_uV = 1550000,
++#else
++			.min_uV = 800000,
++			.max_uV = 1550000,
++#endif
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE |
++			REGULATOR_CHANGE_STATUS,
++			.valid_modes_mask = 0,
++			},
++	.num_consumer_supplies = ARRAY_SIZE(vgen2_consumers),
++	.consumer_supplies = vgen2_consumers,
++
++};
++
++static struct regulator_init_data vgen3_init = {
++	.constraints = {
++			.name = "VGEN3",
++			.min_uV = 1800000,
++			.max_uV = 3300000,
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE |
++			REGULATOR_CHANGE_STATUS,
++			.valid_modes_mask = 0,
++			.always_on = 0,
++			.boot_on = 0,
++			},
++	.num_consumer_supplies = ARRAY_SIZE(vgen3_consumers),
++	.consumer_supplies = vgen3_consumers,
++};
++
++static struct regulator_init_data vgen4_init = {
++	.constraints = {
++			.name = "VGEN4",
++			.min_uV = 1800000,
++			.max_uV = 3300000,
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE |
++			REGULATOR_CHANGE_STATUS,
++			.valid_modes_mask = 0,
++			},
++	.num_consumer_supplies = ARRAY_SIZE(vgen4_consumers),
++	.consumer_supplies = vgen4_consumers,
++};
++
++static struct regulator_init_data vgen5_init = {
++	.constraints = {
++			.name = "VGEN5",
++			.min_uV = 1800000,
++			.max_uV = 3300000,
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE |
++			REGULATOR_CHANGE_STATUS,
++			.valid_modes_mask = 0,
++			},
++	.num_consumer_supplies = ARRAY_SIZE(vgen5_consumers),
++	.consumer_supplies = vgen5_consumers,
++};
++
++static struct regulator_init_data vgen6_init = {
++	.constraints = {
++			.name = "VGEN6",
++			.min_uV = 1800000,
++			.max_uV = 3300000,
++			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE |
++			REGULATOR_CHANGE_STATUS,
++			.valid_modes_mask = 0,
++			},
++	.num_consumer_supplies = ARRAY_SIZE(vgen6_consumers),
++	.consumer_supplies = vgen6_consumers,
++};
++
++static struct pfuze_regulator_init_data mx6q_arm2_pfuze100_regulators[] = {
++	{.id = PFUZE100_SW1A,	.init_data = &sw1a_init},
++	{.id = PFUZE100_SW1B,	.init_data = &sw1b_init},
++	{.id = PFUZE100_SW1C,	.init_data = &sw1c_init},
++	{.id = PFUZE100_SW2,	.init_data = &sw2_init},
++	{.id = PFUZE100_SW3A,	.init_data = &sw3a_init},
++	{.id = PFUZE100_SW3B,	.init_data = &sw3b_init},
++	{.id = PFUZE100_SW4,	.init_data = &sw4_init},
++	{.id = PFUZE100_SWBST,	.init_data = &swbst_init},
++	{.id = PFUZE100_VSNVS,	.init_data = &vsnvs_init},
++	{.id = PFUZE100_VREFDDR,	.init_data = &vrefddr_init},
++	{.id = PFUZE100_VGEN1,	.init_data = &vgen1_init},
++	{.id = PFUZE100_VGEN2,	.init_data = &vgen2_init},
++	{.id = PFUZE100_VGEN3,	.init_data = &vgen3_init},
++	{.id = PFUZE100_VGEN4,	.init_data = &vgen4_init},
++	{.id = PFUZE100_VGEN5,	.init_data = &vgen5_init},
++	{.id = PFUZE100_VGEN6,	.init_data = &vgen6_init},
++};
++
++static struct pfuze_platform_data pfuze100_plat = {
++	.flags = PFUZE_USE_REGULATOR,
++	.num_regulators = ARRAY_SIZE(mx6q_arm2_pfuze100_regulators),
++	.regulators = mx6q_arm2_pfuze100_regulators,
++};
++
++static struct i2c_board_info __initdata pfuze100_i2c_device = {
++	I2C_BOARD_INFO(PFUZE100_I2C_DEVICE_NAME, PFUZE100_I2C_ADDR),
++	.platform_data = &pfuze100_plat,
++};
++
++int __init mx6q_sabreauto_init_pfuze100(u32 int_gpio)
++{
++	pfuze100_i2c_device.irq = gpio_to_irq(int_gpio); /*update INT gpio */
++	return i2c_register_board_info(1, &pfuze100_i2c_device, 1);
++}
+-- 
+1.7.7.4
+

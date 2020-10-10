@@ -1,0 +1,74 @@
+From 647445e489e589dffdf321c2cd0ac13d373c01af Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Tue, 5 Jun 2012 17:26:35 +0800
+Subject: [PATCH 1572/2463] ENGR00212492 GPU: fix a macro error
+
+The default .config defines the GPU as a module:
+  "CONFIG_MXC_GPU_VIV=m"
+
+In this case, we actually can not find the CONFIG_MXC_GPU_VIV.
+We should find CONFIG_MXC_GPU_VIV_MODULE instead.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c      |    2 +-
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    2 +-
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |    2 +-
+ arch/arm/mach-mx6/board-mx6q_sabresd.c   |    2 +-
+ 4 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index deecf7a..0d9c847 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -2219,7 +2219,7 @@ static struct sys_timer mxc_timer = {
+ 
+ static void __init mx6_arm2_reserve(void)
+ {
+-#ifdef CONFIG_MXC_GPU_VIV
++#if defined(CONFIG_MXC_GPU_VIV) || defined(CONFIG_MXC_GPU_VIV_MODULE)
+ 	phys_addr_t phys;
+ 
+ 	if (imx6_gpu_pdata.reserved_mem_size) {
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 29eda27..354b6fb 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -1549,7 +1549,7 @@ static struct sys_timer mxc_timer = {
+ 
+ static void __init mx6q_reserve(void)
+ {
+-#ifdef CONFIG_MXC_GPU_VIV
++#ifdef defined(CONFIG_MXC_GPU_VIV) || defined(CONFIG_MXC_GPU_VIV_MODULE)
+ 	phys_addr_t phys;
+ 
+ 	if (imx6q_gpu_pdata.reserved_mem_size) {
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index 7fd9fbab..693c0e6 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -1202,7 +1202,7 @@ static struct sys_timer mx6_sabrelite_timer = {
+ 
+ static void __init mx6q_sabrelite_reserve(void)
+ {
+-#ifdef CONFIG_MXC_GPU_VIV
++#if defined(CONFIG_MXC_GPU_VIV) || defined(CONFIG_MXC_GPU_VIV_MODULE)
+ 	phys_addr_t phys;
+ 
+ 	if (imx6q_gpu_pdata.reserved_mem_size) {
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 1af9aa6..bc1f4d1 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1839,7 +1839,7 @@ static struct sys_timer mx6_sabresd_timer = {
+ 
+ static void __init mx6q_sabresd_reserve(void)
+ {
+-#ifdef CONFIG_MXC_GPU_VIV
++#if defined(CONFIG_MXC_GPU_VIV) || defined(CONFIG_MXC_GPU_VIV_MODULE)
+ 	phys_addr_t phys;
+ 
+ 	if (imx6q_gpu_pdata.reserved_mem_size) {
+-- 
+1.7.7.4
+

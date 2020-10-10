@@ -1,0 +1,62 @@
+From 61c1326b0899e7f7cf30014a50db5641d04d68a8 Mon Sep 17 00:00:00 2001
+From: Rong Dian <b38775@freescale.com>
+Date: Thu, 26 Apr 2012 15:00:18 +0800
+Subject: [PATCH 1367/2463] ENGR00180647-1: MX6 SABRESD: Add pin config for
+ max11801
+
+Configure PINMUX for max11801 driver on SABRESD_rev.B board.
+
+Signed-off-by: Rong Dian <b38775@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig        |    2 +-
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |    7 ++++++-
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index b0a4445..6a8a55c 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1064,7 +1064,7 @@ CONFIG_TOUCHSCREEN_EGALAX=y
+ # CONFIG_TOUCHSCREEN_GUNZE is not set
+ # CONFIG_TOUCHSCREEN_ELO is not set
+ # CONFIG_TOUCHSCREEN_WACOM_W8001 is not set
+-# CONFIG_TOUCHSCREEN_MAX11801 is not set
++CONFIG_TOUCHSCREEN_MAX11801=y
+ # CONFIG_TOUCHSCREEN_MCS5000 is not set
+ # CONFIG_TOUCHSCREEN_MTOUCH is not set
+ # CONFIG_TOUCHSCREEN_INEXIO is not set
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index bf3ac5f..a4b96cd 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -196,6 +196,8 @@ static struct clk *sata_clk;
+ static int mma8451_position = 3;
+ static int mag3110_position;
+ static int disable_ldb;
++static int max11801_mode = 1;
++
+ 
+ extern char *gp_reg_id;
+ extern int epdc_enabled;
+@@ -761,6 +763,10 @@ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+ 		I2C_BOARD_INFO("egalax_ts", 0x4),
+ 		.irq = gpio_to_irq(SABRESD_CAP_TCH_INT0),
+ 	},
++	{
++		I2C_BOARD_INFO("max11801", 0x48),
++		.platform_data = (void *)&max11801_mode,
++	},
+ };
+ 
+ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+@@ -1566,7 +1572,6 @@ static void __init mx6_sabresd_board_init(void)
+ 		gpio_direction_input(SABRESD_PFUZE_INT);
+ 		mx6q_sabresd_init_pfuze100(SABRESD_PFUZE_INT);
+ 	}
+-
+ 	/* SPI */
+ 	imx6q_add_ecspi(0, &mx6q_sabresd_spi_data);
+ 	spi_device_init();
+-- 
+1.7.7.4
+

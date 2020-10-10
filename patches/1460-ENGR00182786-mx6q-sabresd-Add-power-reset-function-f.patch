@@ -1,0 +1,71 @@
+From e1d495d094360db12ed5d9ad2af7bf156969adf7 Mon Sep 17 00:00:00 2001
+From: Xinyu Chen <xinyu.chen@freescale.com>
+Date: Tue, 15 May 2012 17:16:33 +0800
+Subject: [PATCH 1460/2463] ENGR00182786 mx6q sabresd: Add power/reset
+ function for 3G modem
+
+Add PCIE 3V3 power up/down routing if we do not have
+pcie driver selected. And power up 3V3 in board init.
+As the reset function of the hw board cannot reset the
+modem power. So on kernel boot up, we must make sure
+the 3g modem is reset correctly by gpio reset.
+
+Signed-off-by: guoyin.chen <guoyin.chen@freescale.com>
+Signed-off-by: Xinyu Chen <xinyu.chen@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |   32 ++++++++++++++++++++++++++++++++
+ 1 files changed, 32 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 47e9211..a52cc42 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1364,6 +1364,31 @@ static int __init imx6q_init_audio(void)
+ 	return 0;
+ }
+ 
++#ifndef CONFIG_IMX_PCIE
++static void pcie_3v3_power(void)
++{
++	/* disable PCIE_3V3 first */
++	gpio_request(SABRESD_PCIE_PWR_EN, "pcie_3v3_en");
++	gpio_direction_output(SABRESD_PCIE_PWR_EN, 0);
++	mdelay(10);
++	/* enable PCIE_3V3 again */
++	gpio_set_value(SABRESD_PCIE_PWR_EN, 1);
++	gpio_free(SABRESD_PCIE_PWR_EN);
++}
++
++static void pcie_3v3_reset(void)
++{
++	/* reset miniPCIe */
++	gpio_request(SABRESD_PCIE_RST_B_REVB, "pcie_reset_rebB");
++	gpio_direction_output(SABRESD_PCIE_RST_B_REVB, 0);
++	/* The PCI Express Mini CEM specification states that PREST# is
++	deasserted minimum 1ms after 3.3vVaux has been applied and stable*/
++	mdelay(1);
++	gpio_set_value(SABRESD_PCIE_RST_B_REVB, 1);
++	gpio_free(SABRESD_PCIE_RST_B_REVB);
++}
++#endif
++
+ static void gps_power_on(bool on)
+ {
+ 	/* Enable/disable aux_3v15 */
+@@ -1727,6 +1752,13 @@ static void __init mx6_sabresd_board_init(void)
+ 	gpio_direction_output(SABRESD_AUX_5V_EN, 1);
+ 	gpio_set_value(SABRESD_AUX_5V_EN, 1);
+ 
++#ifndef CONFIG_IMX_PCIE
++	/* enable pcie 3v3 power without pcie driver */
++	pcie_3v3_power();
++	mdelay(10);
++	pcie_3v3_reset();
++#endif
++
+ 	gps_power_on(true);
+ 	/* Register charger chips */
+ 	platform_device_register(&sabresd_max8903_charger_1);
+-- 
+1.7.7.4
+

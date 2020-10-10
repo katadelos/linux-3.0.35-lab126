@@ -1,0 +1,97 @@
+From 85456adaaff5ca60141ef1d9ebf045870fd3c785 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Mon, 16 Jan 2012 15:01:55 +0800
+Subject: [PATCH 0875/2463] ENGR00169906-5 GPMI : change the code for new
+ interface
+
+If we do not set the WAIT4END in the middle DMA command structure
+of the long DMA command chain, a DMA timeout may occurs.
+
+The reason of the DMA timeout is:
+	[1] We do not set the WAIT4END in the DMA command structure
+	    which do the ECC READ PAGE by the BCH.
+	[2] So the following DMA command structure (maybe in other DMA
+		CHAIN)may disable the BCH module.
+	[3] If the time delay between [2] and [1] is long enough,
+	    it's ok. But if the time delay is not long enough, the BCH
+	    module may become unnormal, so it can not finish its job.
+	    The DMA will timeout in this case.
+
+We have changed the DMA interface to fix the bug, now use the new
+interface.
+
+Acked-by: Jason Liu <r64343@freescale.com>
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/mtd/nand/gpmi-nfc/hal-mx50.c |   19 +++++++++++++------
+ 1 files changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/mtd/nand/gpmi-nfc/hal-mx50.c b/drivers/mtd/nand/gpmi-nfc/hal-mx50.c
+index c8238b2..55c4f85 100644
+--- a/drivers/mtd/nand/gpmi-nfc/hal-mx50.c
++++ b/drivers/mtd/nand/gpmi-nfc/hal-mx50.c
+@@ -616,7 +616,8 @@ static int send_command(struct gpmi_nfc_data *this)
+ 	sg_init_one(sgl, mil->cmd_buffer, mil->command_length);
+ 	dma_map_sg(this->dev, sgl, 1, DMA_TO_DEVICE);
+ 	desc = channel->device->device_prep_slave_sg(channel,
+-					sgl, 1, DMA_TO_DEVICE, 1);
++					sgl, 1, DMA_TO_DEVICE,
++					MXS_DMA_F_APPEND | MXS_DMA_F_WAIT4END);
+ 	if (!desc) {
+ 		pr_info("error");
+ 		return -1;
+@@ -658,7 +659,8 @@ static int send_data(struct gpmi_nfc_data *this)
+ 	/* [2]  send DMA request */
+ 	prepare_data_dma(this, DMA_TO_DEVICE);
+ 	desc = channel->device->device_prep_slave_sg(channel, &mil->data_sgl,
+-						1, DMA_TO_DEVICE, 1);
++					1, DMA_TO_DEVICE,
++					MXS_DMA_F_APPEND | MXS_DMA_F_WAIT4END);
+ 	if (!desc) {
+ 		pr_info("step 2 error");
+ 		return -1;
+@@ -694,7 +696,8 @@ static int read_data(struct gpmi_nfc_data *this)
+ 	/* [2] : send DMA request */
+ 	prepare_data_dma(this, DMA_FROM_DEVICE);
+ 	desc = channel->device->device_prep_slave_sg(channel, &mil->data_sgl,
+-						1, DMA_FROM_DEVICE, 1);
++					1, DMA_FROM_DEVICE,
++					MXS_DMA_F_APPEND | MXS_DMA_F_WAIT4END);
+ 	if (!desc) {
+ 		pr_info("step 2 error");
+ 		return -1;
+@@ -753,7 +756,8 @@ static int send_page(struct gpmi_nfc_data *this,
+ 
+ 	desc = channel->device->device_prep_slave_sg(channel,
+ 					(struct scatterlist *)pio,
+-					ARRAY_SIZE(pio), DMA_NONE, 0);
++					ARRAY_SIZE(pio), DMA_NONE,
++					MXS_DMA_F_APPEND | MXS_DMA_F_WAIT4END);
+ 	if (!desc) {
+ 		pr_info("step 2 error");
+ 		return -1;
+@@ -826,7 +830,8 @@ static int read_page(struct gpmi_nfc_data *this,
+ 	pio[5] = auxiliary;
+ 	desc = channel->device->device_prep_slave_sg(channel,
+ 					(struct scatterlist *)pio,
+-					ARRAY_SIZE(pio), DMA_NONE, 1);
++					ARRAY_SIZE(pio), DMA_NONE,
++					MXS_DMA_F_APPEND | MXS_DMA_F_WAIT4END);
+ 	if (!desc) {
+ 		pr_info("step 2 error");
+ 		return -1;
+@@ -842,8 +847,10 @@ static int read_page(struct gpmi_nfc_data *this,
+ 		| BF_GPMI_CTRL0_ADDRESS(address)
+ 		| BF_GPMI_CTRL0_XFER_COUNT(page_size);
+ 	pio[1] = 0;
++	pio[2] = 0;
+ 	desc = channel->device->device_prep_slave_sg(channel,
+-				(struct scatterlist *)pio, 2, DMA_NONE, 1);
++				(struct scatterlist *)pio, 3, DMA_NONE,
++				MXS_DMA_F_APPEND | MXS_DMA_F_WAIT4END);
+ 	if (!desc) {
+ 		pr_info("step 3 error");
+ 		return -1;
+-- 
+1.7.7.4
+

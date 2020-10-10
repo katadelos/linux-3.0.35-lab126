@@ -1,0 +1,38 @@
+From 440a9ece91e8449289e7726b773099c6215dd217 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Wed, 29 Feb 2012 13:59:07 +0800
+Subject: [PATCH 1104/2463] ENGR00175692-01 [MX6DL] SD3.0: can not recognize
+ SD3.0 cards on some boards.
+
+Improve compatibility by doing the following:
+	- Change DSE to 34ohm for 200MHz
+	- Reset host controller before changing clk tuning ctrl reg
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/core/sd.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
+index b7291e0..5d9d752 100644
+--- a/drivers/mmc/core/sd.c
++++ b/drivers/mmc/core/sd.c
+@@ -637,11 +637,13 @@ static int mmc_sd_init_uhs_card(struct mmc_card *card)
+ 			min += card->host->tuning_step;
+ 		}
+ 
+-		max = min;
++		max = min + card->host->tuning_step;
+ 		while (max < card->host->tuning_max) {
+ 			mmc_set_tuning(card->host, max);
+-			if (!mmc_send_tuning_cmd(card))
++			if (mmc_send_tuning_cmd(card)) {
++				max -= card->host->tuning_step;
+ 				break;
++			}
+ 			max += card->host->tuning_step;
+ 		}
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,32 @@
+From 4bb10787adce61664ab95675e962689c29a07588 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Fri, 9 Dec 2011 15:13:56 +0800
+Subject: [PATCH 0711/2463] ENGR00162181-4 MX6Q/GPMI : only decrease the DMA
+ clock when GPMI is enabled.
+
+Do not decrease the DMA clock if GPMI is not enabled.
+just for workaround.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 67d86b3..dca5b11 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4888,8 +4888,10 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	/* set the GPMI clock to : 11MHz */
+ 	clk_set_rate(&enfc_clk, enfc_clk.round_rate(&enfc_clk, 11000000));
+ 
++#ifdef CONFIG_MTD_NAND_GPMI_NFC
+ 	/* set the DMA clock */
+ 	clk_set_rate(&usdhc3_clk, usdhc3_clk.round_rate(&usdhc3_clk, 11000000));
++#endif
+ 
+ 	mx6_cpu_op_init();
+ 	cpu_op_tbl = get_cpu_op(&cpu_op_nr);
+-- 
+1.7.7.4
+

@@ -1,0 +1,60 @@
+From 3af1a34430331eea0ee808621f6a2329405c0660 Mon Sep 17 00:00:00 2001
+From: Xinyu Chen <xinyu.chen@freescale.com>
+Date: Tue, 13 Dec 2011 15:29:59 +0800
+Subject: [PATCH 0732/2463] ENGR00170145-1 ipuv3: add resource for overlay fb
+ buffer reservation
+
+We have already had framebuffer reservation for BG display
+by set the base/size resource in fb platform data.
+But we may also have FG fb buffer reserve requirement.
+So add addtional base/size resource in fb plaform data,
+add a IORESROUCE_MEM resource when fb device register
+to meet such requirement.
+
+Signed-off-by: Xinyu Chen <xinyu.chen@freescale.com>
+---
+ arch/arm/plat-mxc/devices/platform-imx_ipuv3.c |   10 +++++++---
+ arch/arm/plat-mxc/include/mach/ipu-v3.h        |    4 ++--
+ 2 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c b/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c
+index 4c3ebaf..0750265 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c
++++ b/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c
+@@ -210,11 +210,15 @@ struct platform_device *__init imx_add_ipuv3_fb(
+ 		const int id,
+ 		const struct ipuv3_fb_platform_data *pdata)
+ {
+-	if (pdata->res_size > 0) {
++	if (pdata->res_size[0] > 0) {
+ 		struct resource res[] = {
+ 			{
+-				.start = pdata->res_base,
+-				.end = pdata->res_base + pdata->res_size - 1,
++				.start = pdata->res_base[0],
++				.end = pdata->res_base[0] + pdata->res_size[0] - 1,
++				.flags = IORESOURCE_MEM,
++			}, {
++				.start = pdata->res_base[1],
++				.end = pdata->res_base[1] + pdata->res_size[1] - 1,
+ 				.flags = IORESOURCE_MEM,
+ 			},
+ 		};
+diff --git a/arch/arm/plat-mxc/include/mach/ipu-v3.h b/arch/arm/plat-mxc/include/mach/ipu-v3.h
+index a38b465..02c699d 100755
+--- a/arch/arm/plat-mxc/include/mach/ipu-v3.h
++++ b/arch/arm/plat-mxc/include/mach/ipu-v3.h
+@@ -716,8 +716,8 @@ struct ipuv3_fb_platform_data {
+ 	bool				int_clk;
+ 
+ 	/* reserved mem */
+-	resource_size_t 		res_base;
+-	resource_size_t 		res_size;
++	resource_size_t 		res_base[2];
++	resource_size_t 		res_size[2];
+ };
+ 
+ struct imx_ipuv3_platform_data {
+-- 
+1.7.7.4
+

@@ -1,0 +1,49 @@
+From bdf495dd67e9c3bc0bbf2a8ac435fdec8310db25 Mon Sep 17 00:00:00 2001
+From: Larry Li <b20787@freescale.com>
+Date: Tue, 10 Apr 2012 17:12:51 +0800
+Subject: [PATCH 1299/2463] ENGR00178597 [MX6DL/S] Multi-instance test in
+ GC880 cause system hang
+
+In our code 3d sharder clock uses 3d core clock CCGR field as its
+enable bit. That works for MX6Q. But MX6DL uses 3d sharder clock
+as 2d core clock, while disable 2d core clock, it will disable 3d
+core by mistake.
+To fix it, remove the enable bit setting of 3d shader clock in
+clock.c file.
+
+Signed-off-by: Larry Li <b20787@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |   10 ++++++----
+ 1 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 2c49585..5372dac 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4491,10 +4491,6 @@ static struct clk gpu3d_shader_clk = {
+ 	__INIT_CLK_DEBUG(gpu3d_shader_clk)
+ 	.parent = &pll3_pfd_720M,
+ 	.secondary = &mmdc_ch0_axi_clk[0],
+-	.enable = _clk_enable,
+-	.enable_reg = MXC_CCM_CCGR1,
+-	.enable_shift = MXC_CCM_CCGRx_CG13_OFFSET,
+-	.disable = _clk_disable,
+ 	.set_parent = _clk_gpu3d_shader_set_parent,
+ 	.set_rate = _clk_gpu3d_shader_set_rate,
+ 	.get_rate = _clk_gpu3d_shader_get_rate,
+@@ -5204,6 +5200,12 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	clk_set_parent(&emi_clk, &pll2_pfd_400M);
+ 	clk_set_rate(&emi_clk, 200000000);
+ 
++	/*
++	* on mx6dl, 2d core clock sources from 3d shader core clock,
++	* but 3d shader clock multiplexer of mx6dl is different from
++	* mx6q. For instance the equivalent of pll2_pfd_594M on mc6q
++	* is pll2_pfd_528M on mx6dl. Make a note here.
++	*/
+ 	clk_set_parent(&gpu3d_shader_clk, &pll2_pfd_594M);
+ 	clk_set_rate(&gpu3d_shader_clk, 594000000);
+ 	clk_set_parent(&gpu3d_core_clk[0], &mmdc_ch0_axi_clk[0]);
+-- 
+1.7.7.4
+

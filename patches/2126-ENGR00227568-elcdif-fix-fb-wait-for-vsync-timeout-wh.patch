@@ -1,0 +1,81 @@
+From 3df2bb594f6355bfd6cfdb5f9f298ea4efe739d9 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Tue, 9 Oct 2012 19:59:25 +0800
+Subject: [PATCH 2126/2463] ENGR00227568 elcdif: fix fb wait for vsync timeout
+ when suspend and resume
+
+When suspend, the lcdif and panel will be stopped. When resume, fb_set_par()
+will be called, in which the lcdif and the panel will be re-initialized.
+However, fb_set_par() also checks the parameters via mxc_elcdif_fb_par_equal(),
+which will probably make fb_set_par() just return with them un-initialized.
+And thus, the interrupt will not come. This patch added a varible to check
+whether they're running along with mxc_elcdif_fb_par_equal() checking to
+fix the issue. If not running, re-initialization will be forcely done.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ drivers/video/mxc/mxc_elcdif_fb.c |   13 +++++++++----
+ 1 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_elcdif_fb.c b/drivers/video/mxc/mxc_elcdif_fb.c
+index f34d3ac..83a62db 100644
+--- a/drivers/video/mxc/mxc_elcdif_fb.c
++++ b/drivers/video/mxc/mxc_elcdif_fb.c
+@@ -72,6 +72,7 @@ struct mxc_elcdif_fb_data {
+ 	bool wait4vsync;
+ 	bool wait4framedone;
+ 	bool panning;
++	bool running;
+ 	struct completion vsync_complete;
+ 	struct completion frame_done_complete;
+ 	struct semaphore flip_sem;
+@@ -615,7 +616,7 @@ static inline void mxc_elcdif_dma_release(void)
+ 	return;
+ }
+ 
+-static inline void mxc_elcdif_run(void)
++static inline void mxc_elcdif_run(struct mxc_elcdif_fb_data *data)
+ {
+ 	if (!g_elcdif_axi_clk_enable) {
+ 		clk_enable(g_elcdif_axi_clk);
+@@ -626,6 +627,9 @@ static inline void mxc_elcdif_run(void)
+ 		     elcdif_base + HW_ELCDIF_CTRL_SET);
+ 	__raw_writel(BM_ELCDIF_CTRL_RUN,
+ 		     elcdif_base + HW_ELCDIF_CTRL_SET);
++
++	data->running = true;
++
+ 	return;
+ }
+ 
+@@ -880,8 +884,8 @@ static int mxc_elcdif_fb_set_par(struct fb_info *fbi)
+ 	dev_dbg(fbi->device, "Reconfiguring framebuffer\n");
+ 
+ 	/* If parameter no change, don't reconfigure. */
+-	if (mxc_elcdif_fb_par_equal(fbi, data))
+-	    return 0;
++	if (mxc_elcdif_fb_par_equal(fbi, data) && (data->running == true))
++		return 0;
+ 
+ 	sema_init(&data->flip_sem, 1);
+ 
+@@ -949,7 +953,7 @@ static int mxc_elcdif_fb_set_par(struct fb_info *fbi)
+ 			   sig_cfg,
+ 			   1);
+ 	mxc_elcdif_frame_addr_setup(fbi->fix.smem_start);
+-	mxc_elcdif_run();
++	mxc_elcdif_run(data);
+ 	mxc_elcdif_blank_panel(FB_BLANK_UNBLANK);
+ 
+ 	fbi->mode = (struct fb_videomode *)fb_match_mode(&fbi->var,
+@@ -1548,6 +1552,7 @@ static int mxc_elcdif_fb_suspend(struct platform_device *pdev,
+ 		clk_disable(g_elcdif_axi_clk);
+ 		g_elcdif_axi_clk_enable = false;
+ 	}
++	data->running = false;
+ 	console_unlock();
+ 	return 0;
+ }
+-- 
+1.7.7.4
+

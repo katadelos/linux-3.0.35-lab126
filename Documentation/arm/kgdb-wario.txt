@@ -1,0 +1,40 @@
+Build
+------
+In the kernel jam directory run kgdbconfig.py  before starting a build
+It builds default config file with kgdb configs. The file is based on the default config which is
+ammended with kgdb configs
+
+If you want to restore default config to the original version, run kgdbconfig.py --o
+
+Run target
+-----------
+Ammend boot with kgdb arguments:  kgdboc=ttymxc0,115200 kgdbwait 
+where kgdbwait tells boot to stop and wat for gdb connection 
+
+You can do it at uboot, for example:
+setenv bootargs rootwait console=ttymxc0,115200 root=/dev/mmcblk0p1 rw ip=off debug video=mxcepdcfb:E60,bpp=8,x_mem=4M kgdboc=ttymxc0,115200 kgdbwait
+
+boot the target
+boot stops waiting for gdb connection
+Since single uart is shared between minicom and gdb connection, exit minicom to free the serial line
+
+you can implant kgdb_breakpoint () in the code as well, need to include #include <linux/kgdb.h>
+
+To see console output in the gdb window, add kgdbcon to the boot arguments but in the Warior configuration the primary tty console is the only console and combination of kgdbcon with kgdboc is illegal. 
+To debug post boot from user space use echo ttymxc0 > /sys/module/kgdboc/parameters/kgdboc
+
+Run host
+--------
+From scratchbox start gdb like:
+gdb vmlinux
+
+From gdb prompt :
+set remotebaud  115200
+target remote /dev/ttyUSB0 (or whatever serial port you connected to the host)
+You get connected to target and see gdb breakpoint prompt.
+Use normal gdb commands from this point on.
+
+Once you passed your last breakpoint and user space is up, disconnect from gdb (ctr C) and reconnect your minicom
+
+You can use graphical gdb, e.g., emacs to have source code automatically open, since its a general x86, you would need to setup proper architecture and abi options (TBD)
+

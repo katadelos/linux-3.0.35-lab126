@@ -1,0 +1,53 @@
+From a60a365d89fdf7e05788dab6cac2bd98c7997f19 Mon Sep 17 00:00:00 2001
+From: Mahesh Mahadevan <r9aadq@freescale.com>
+Date: Tue, 25 Oct 2011 08:29:34 -0500
+Subject: [PATCH 0483/2463] ENGR00160709-3 Move board specific code out of FEC
+ driver
+
+Move the board specific code out of the FEC driver to the platform
+layer
+
+Signed-off-by: Mahesh Mahadevan <r9aadq@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   24 ++++++++++++++++++++++++
+ 1 files changed, 24 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 9149cb6..9f56e92 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -422,7 +422,31 @@ static inline void mx6q_sabreauto_init_uart(void)
+ 	imx6q_add_imx_uart(3, NULL);
+ }
+ 
++static int mx6q_sabreauto_fec_phy_init(struct phy_device *phydev)
++{
++	unsigned short val;
++
++	/* To enable AR8031 ouput a 125MHz clk from CLK_25M */
++	phy_write(phydev, 0xd, 0x7);
++	phy_write(phydev, 0xe, 0x8016);
++	phy_write(phydev, 0xd, 0x4007);
++	val = phy_read(phydev, 0xe);
++
++	val &= 0xffe3;
++	val |= 0x18;
++	phy_write(phydev, 0xe, val);
++
++	/* introduce tx clock delay */
++	phy_write(phydev, 0x1d, 0x5);
++	val = phy_read(phydev, 0x1e);
++	val |= 0x0100;
++	phy_write(phydev, 0x1e, val);
++
++	return 0;
++}
++
+ static struct fec_platform_data fec_data __initdata = {
++	.init = mx6q_sabreauto_fec_phy_init,
+ 	.phy = PHY_INTERFACE_MODE_RGMII,
+ };
+ 
+-- 
+1.7.7.4
+

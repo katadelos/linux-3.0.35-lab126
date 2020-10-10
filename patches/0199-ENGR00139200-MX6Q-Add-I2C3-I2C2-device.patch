@@ -1,0 +1,360 @@
+From 6c46f836ffbd83f3ea29b15dcfc957d9caff79ca Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Thu, 16 Jun 2011 01:16:17 +0800
+Subject: [PATCH 0199/2463] ENGR00139200 MX6Q: Add I2C3,I2C2 device
+
+Add I2C3 device and MAX7310
+Add I2C2 device
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+Signed-off-by: Jason Liu <r64343@freescale.com>
+Signed-off-by: Frank Li <Frank.Li@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig                    |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c     |   54 ++++++++++++++++++++++++++
+ arch/arm/mach-mx6/devices-imx6q.h            |    3 +
+ arch/arm/plat-mxc/devices/platform-imx-i2c.c |   10 +++++
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h  |   40 ++++++++++---------
+ arch/arm/plat-mxc/include/mach/mx6.h         |   12 +++---
+ 6 files changed, 96 insertions(+), 24 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index af2c7e5..2b00fe3 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -24,6 +24,7 @@ config MACH_MX6Q_SABREAUTO
+ 	select IMX_HAVE_PLATFORM_FEC
+ 	select IMX_HAVE_PLATFORM_SDHCI_ESDHC_IMX
+ 	select IMX_HAVE_PLATFORM_SPI_IMX
++	select IMX_HAVE_PLATFORM_IMX_I2C
+ 	help
+ 	  Include support for i.MX 6Quad SABRE Automotive Infotainment platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index a7e5af1..be0fbbb 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -63,6 +63,8 @@
+ #define MX6Q_SABREAUTO_ECSPI1_CS1	IMX_GPIO_NR(3, 19)
+ #define MX6Q_SABREAUTO_SD3_CD	IMX_GPIO_NR(6, 11)
+ #define MX6Q_SABREAUTO_SD3_WP	IMX_GPIO_NR(6, 14)
++#define MX6Q_SABREAUTO_MAX7310_1_BASE_ADDR	IMX_GPIO_NR(8, 0)
++#define MX6Q_SABREAUTO_CAP_TCH_INT	IMX_GPIO_NR(3, 31)
+ 
+ void __init early_console_setup(unsigned long base, struct clk *clk);
+ 
+@@ -127,6 +129,14 @@ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 	MX6Q_PAD_EIM_D16__ECSPI1_SCLK,
+ 	MX6Q_PAD_EIM_D17__ECSPI1_MISO,
+ 	MX6Q_PAD_EIM_D18__ECSPI1_MOSI,
++
++	/* I2C2 */
++	MX6Q_PAD_KEY_COL3__I2C2_SCL,
++	MX6Q_PAD_KEY_ROW3__I2C2_SDA,
++
++	/* I2C3 */
++	MX6Q_PAD_GPIO_5__I2C3_SCL,
++	MX6Q_PAD_GPIO_16__I2C3_SDA,
+ };
+ 
+ static const struct esdhc_platform_data mx6q_sabreauto_sd3_data __initconst = {
+@@ -162,6 +172,46 @@ static const struct spi_imx_master mx6q_sabreauto_spi_data __initconst = {
+ 	.num_chipselect = ARRAY_SIZE(mx6q_sabreauto_spi_cs),
+ };
+ 
++static int max7310_1_setup(struct i2c_client *client,
++	unsigned gpio_base, unsigned ngpio,
++	void *context)
++{
++	static int max7310_gpio_value[] = {
++		0, 1, 0, 0, 0, 0, 0, 0,
++	};
++
++	int n;
++
++	 for (n = 0; n < ARRAY_SIZE(max7310_gpio_value); ++n) {
++		gpio_request(gpio_base + n, "MAX7310 1 GPIO Expander");
++		if (max7310_gpio_value[n] < 0)
++			gpio_direction_input(gpio_base + n);
++		else
++			gpio_direction_output(gpio_base + n,
++						max7310_gpio_value[n]);
++		gpio_export(gpio_base + n, 0);
++	}
++
++	return 0;
++}
++
++static struct pca953x_platform_data max7310_platdata = {
++	.gpio_base	= MX6Q_SABREAUTO_MAX7310_1_BASE_ADDR,
++	.invert		= 0,
++	.setup		= max7310_1_setup,
++};
++
++static struct imxi2c_platform_data mx6q_sabreauto_i2c_data = {
++	.bitrate = 400000,
++};
++
++static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
++	{
++		I2C_BOARD_INFO("max7310", 0x1F),
++		.platform_data = &max7310_platdata,
++	},
++};
++
+ /*!
+  * Board specific initialization.
+  */
+@@ -171,6 +221,10 @@ static void __init mx6_board_init(void)
+ 					ARRAY_SIZE(mx6q_sabreauto_pads));
+ 
+ 	mx6q_sabreauto_init_uart();
++	imx6q_add_imx_i2c(1, &mx6q_sabreauto_i2c_data);
++	imx6q_add_imx_i2c(2, &mx6q_sabreauto_i2c_data);
++	i2c_register_board_info(2, mxc_i2c2_board_info,
++			ARRAY_SIZE(mxc_i2c2_board_info));
+ 
+ 	imx6q_add_sdhci_usdhc_imx(3, &mx6q_sabreauto_sd4_data);
+ }
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 2f1886f..5fbf73a 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -38,3 +38,6 @@ extern const struct imx_spi_imx_data imx6q_ecspi_data[] __initconst;
+ #define imx6q_add_ecspi(id, pdata)	\
+ 	imx_add_spi_imx(&imx6q_ecspi_data[id], pdata)
+ 
++extern const struct imx_imx_i2c_data imx6q_imx_i2c_data[] __initconst;
++#define imx6q_add_imx_i2c(id, pdata)	\
++	imx_add_imx_i2c(&imx6q_imx_i2c_data[id], pdata)
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-i2c.c b/arch/arm/plat-mxc/devices/platform-imx-i2c.c
+index 9073895..d11f52d 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx-i2c.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-i2c.c
+@@ -98,6 +98,16 @@ const struct imx_imx_i2c_data imx53_imx_i2c_data[] __initconst = {
+ };
+ #endif /* ifdef CONFIG_SOC_IMX51 */
+ 
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_imx_i2c_data imx6q_imx_i2c_data[] __initconst = {
++#define imx6q_imx_i2c_data_entry(_id, _hwid)				\
++	imx_imx_i2c_data_entry(MX6Q, _id, _hwid, SZ_4K)
++	imx6q_imx_i2c_data_entry(0, 1),
++	imx6q_imx_i2c_data_entry(1, 2),
++	imx6q_imx_i2c_data_entry(2, 3),
++};
++#endif /* ifdef CONFIG_SOC_IMX6Q */
++
+ struct platform_device *__init imx_add_imx_i2c(
+ 		const struct imx_imx_i2c_data *data,
+ 		const struct imxi2c_platform_data *pdata)
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index e1310e6..8548b08 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -54,6 +54,10 @@ typedef enum iomux_config {
+ 		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED |	\
+ 		PAD_CTL_DSE_40ohm | PAD_CTL_HYS)
+ 
++#define MX6Q_I2C_PAD_CTRL      (PAD_CTL_SRE_FAST | PAD_CTL_ODE | \
++		PAD_CTL_PKE | PAD_CTL_PUE | PAD_CTL_DSE_40ohm | \
++		PAD_CTL_PUS_100K_UP | PAD_CTL_HYS | PAD_CTL_SPEED_MED)
++
+ #define _MX6Q_PAD_SD2_DAT1__USDHC2_DAT1				\
+ 		IOMUX_PAD(0x0360, 0x004C, 0, 0x0000, 0, 0)
+ #define _MX6Q_PAD_SD2_DAT1__ECSPI5_SS0				\
+@@ -253,7 +257,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_EIM_EB2__GPIO_2_30				\
+ 		IOMUX_PAD(0x03A0, 0x008C, 5, 0x0000, 0, 0)
+ #define _MX6Q_PAD_EIM_EB2__I2C2_SCL				\
+-		IOMUX_PAD(0x03A0, 0x008C, 6, 0x08A0, 0, 0)
++		IOMUX_PAD(0x03A0, 0x008C, 6 | IOMUX_CONFIG_SION, 0x08A0, 0, 0)
+ #define _MX6Q_PAD_EIM_EB2__SRC_BT_CFG_30			\
+ 		IOMUX_PAD(0x03A0, 0x008C, 7, 0x0000, 0, 0)
+ 
+@@ -270,7 +274,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_EIM_D16__GPIO_3_16				\
+ 		IOMUX_PAD(0x03A4, 0x0090, 5, 0x0000, 0, 0)
+ #define _MX6Q_PAD_EIM_D16__I2C2_SDA				\
+-		IOMUX_PAD(0x03A4, 0x0090, 6, 0x08A4, 0, 0)
++		IOMUX_PAD(0x03A4, 0x0090, 6 | IOMUX_CONFIG_SION, 0x08A4, 0, 0)
+ 
+ #define _MX6Q_PAD_EIM_D17__WEIM_WEIM_D_17			\
+ 		IOMUX_PAD(0x03A8, 0x0094, 0, 0x0000, 0, 0)
+@@ -285,7 +289,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_EIM_D17__GPIO_3_17				\
+ 		IOMUX_PAD(0x03A8, 0x0094, 5, 0x0000, 0, 0)
+ #define _MX6Q_PAD_EIM_D17__I2C3_SCL				\
+-		IOMUX_PAD(0x03A8, 0x0094, 6, 0x08A8, 0, 0)
++		IOMUX_PAD(0x03A8, 0x0094, 6 | IOMUX_CONFIG_SION, 0x08A8, 0, 0)
+ #define _MX6Q_PAD_EIM_D17__PL301_MX6QPER1_HBURST_1		\
+ 		IOMUX_PAD(0x03A8, 0x0094, 7, 0x0000, 0, 0)
+ 
+@@ -302,7 +306,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_EIM_D18__GPIO_3_18				\
+ 		IOMUX_PAD(0x03AC, 0x0098, 5, 0x0000, 0, 0)
+ #define _MX6Q_PAD_EIM_D18__I2C3_SDA				\
+-		IOMUX_PAD(0x03AC, 0x0098, 6, 0x08AC, 0, 0)
++		IOMUX_PAD(0x03AC, 0x0098, 6 | IOMUX_CONFIG_SION, 0x08AC, 0, 0)
+ #define _MX6Q_PAD_EIM_D18__PL301_MX6QPER1_HBURST_2		\
+ 		IOMUX_PAD(0x03AC, 0x0098, 7, 0x0000, 0, 0)
+ 
+@@ -353,7 +357,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_EIM_D21__GPIO_3_21			\
+ 		IOMUX_PAD(0x03B8, 0x00A4, 5, 0x0000, 0, 0)
+ #define _MX6Q_PAD_EIM_D21__I2C1_SCL			\
+-		IOMUX_PAD(0x03B8, 0x00A4, 6, 0x0898, 0, 0)
++		IOMUX_PAD(0x03B8, 0x00A4, 6 | IOMUX_CONFIG_SION, 0x0898, 0, 0)
+ #define _MX6Q_PAD_EIM_D21__SPDIF_IN1			\
+ 		IOMUX_PAD(0x03B8, 0x00A4, 7, 0x0914, 0, 0)
+ 
+@@ -489,7 +493,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_EIM_D28__WEIM_WEIM_D_28				\
+ 		IOMUX_PAD(0x03D8, 0x00C4, 0, 0x0000, 0, 0)
+ #define _MX6Q_PAD_EIM_D28__I2C1_SDA			\
+-		IOMUX_PAD(0x03D8, 0x00C4, 1, 0x089C, 0, 0)
++		IOMUX_PAD(0x03D8, 0x00C4, 1 | IOMUX_CONFIG_SION, 0x089C, 0, 0)
+ #define _MX6Q_PAD_EIM_D28__ECSPI4_MOSI			\
+ 		IOMUX_PAD(0x03D8, 0x00C4, 2, 0x0000, 0, 0)
+ #define _MX6Q_PAD_EIM_D28__IPU2_CSI1_D_12				\
+@@ -2153,7 +2157,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_KEY_COL3__KPP_COL_3			\
+ 		IOMUX_PAD(0x05E0, 0x0210, 3, 0x0000, 0, 0)
+ #define _MX6Q_PAD_KEY_COL3__I2C2_SCL			\
+-		IOMUX_PAD(0x05E0, 0x0210, 4, 0x08A0, 1, 0)
++		IOMUX_PAD(0x05E0, 0x0210, 4 | IOMUX_CONFIG_SION, 0x08A0, 1, 0)
+ #define _MX6Q_PAD_KEY_COL3__GPIO_4_12			\
+ 		IOMUX_PAD(0x05E0, 0x0210, 5, 0x0000, 0, 0)
+ #define _MX6Q_PAD_KEY_COL3__SPDIF_IN1			\
+@@ -2170,7 +2174,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_KEY_ROW3__KPP_ROW_3			\
+ 		IOMUX_PAD(0x05E4, 0x0214, 3, 0x0000, 0, 0)
+ #define _MX6Q_PAD_KEY_ROW3__I2C2_SDA			\
+-		IOMUX_PAD(0x05E4, 0x0214, 4, 0x08A4, 1, 0)
++		IOMUX_PAD(0x05E4, 0x0214, 4 | IOMUX_CONFIG_SION, 0x08A4, 1, 0)
+ #define _MX6Q_PAD_KEY_ROW3__GPIO_4_13			\
+ 		IOMUX_PAD(0x05E4, 0x0214, 5, 0x0000, 0, 0)
+ #define _MX6Q_PAD_KEY_ROW3__USDHC1_VSELECT		\
+@@ -2266,7 +2270,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_GPIO_3__OBSERVE_MUX_OBSRV_INT_OUT0		\
+ 		IOMUX_PAD(0x05FC, 0x022C, 1, 0x0000, 0, 0)
+ #define _MX6Q_PAD_GPIO_3__I2C3_SCL			\
+-		IOMUX_PAD(0x05FC, 0x022C, 2, 0x08A8, 1, 0)
++		IOMUX_PAD(0x05FC, 0x022C, 2 | IOMUX_CONFIG_SION, 0x08A8, 1, 0)
+ #define _MX6Q_PAD_GPIO_3__ANATOP_ANATOP_24M_OUT		\
+ 		IOMUX_PAD(0x05FC, 0x022C, 3, 0x0000, 0, 0)
+ #define _MX6Q_PAD_GPIO_3__CCM_CLKO2			\
+@@ -2283,7 +2287,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_GPIO_6__OBSERVE_MUX_OBSRV_INT_OUT1		\
+ 		IOMUX_PAD(0x0600, 0x0230, 1, 0x0000, 0, 0)
+ #define _MX6Q_PAD_GPIO_6__I2C3_SDA			\
+-		IOMUX_PAD(0x0600, 0x0230, 2, 0x08AC, 1, 0)
++		IOMUX_PAD(0x0600, 0x0230, 2 | IOMUX_CONFIG_SION, 0x08AC, 1, 0)
+ #define _MX6Q_PAD_GPIO_6__CCM_CCM_OUT_0			\
+ 		IOMUX_PAD(0x0600, 0x0230, 3, 0x0000, 0, 0)
+ #define _MX6Q_PAD_GPIO_6__CSU_CSU_INT_DEB				\
+@@ -2342,7 +2346,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_GPIO_5__GPIO_1_5			\
+ 		IOMUX_PAD(0x060C, 0x023C, 5, 0x0000, 0, 0)
+ #define _MX6Q_PAD_GPIO_5__I2C3_SCL			\
+-		IOMUX_PAD(0x060C, 0x023C, 6, 0x08A8, 2, 0)
++		IOMUX_PAD(0x060C, 0x023C, 6 | IOMUX_CONFIG_SION, 0x08A8, 2, 0)
+ #define _MX6Q_PAD_GPIO_5__CHEETAH_EVENTI				\
+ 		IOMUX_PAD(0x060C, 0x023C, 7, 0x0000, 0, 0)
+ 
+@@ -2397,7 +2401,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_GPIO_16__GPIO_7_11			\
+ 		IOMUX_PAD(0x0618, 0x0248, 5, 0x0000, 0, 0)
+ #define _MX6Q_PAD_GPIO_16__I2C3_SDA			\
+-		IOMUX_PAD(0x0618, 0x0248, 6, 0x08AC, 2, 0)
++		IOMUX_PAD(0x0618, 0x0248, 6 | IOMUX_CONFIG_SION, 0x08AC, 2, 0)
+ #define _MX6Q_PAD_GPIO_16__SJC_DE_B			\
+ 		IOMUX_PAD(0x0618, 0x0248, 7, 0x0000, 0, 0)
+ 
+@@ -2585,7 +2589,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_CSI0_DAT8__KPP_COL_7			\
+ 		IOMUX_PAD(0x0648, 0x0278, 3, 0x08F0, 2, 0)
+ #define _MX6Q_PAD_CSI0_DAT8__I2C1_SDA			\
+-		IOMUX_PAD(0x0648, 0x0278, 4, 0x089C, 1, 0)
++		IOMUX_PAD(0x0648, 0x0278, 4 | IOMUX_CONFIG_SION, 0x089C, 1, 0)
+ #define _MX6Q_PAD_CSI0_DAT8__GPIO_5_26			\
+ 		IOMUX_PAD(0x0648, 0x0278, 5, 0x0000, 0, 0)
+ #define _MX6Q_PAD_CSI0_DAT8__MMDC_MMDC_DEBUG_47		\
+@@ -2602,7 +2606,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_CSI0_DAT9__KPP_ROW_7			\
+ 		IOMUX_PAD(0x064C, 0x027C, 3, 0x08FC, 2, 0)
+ #define _MX6Q_PAD_CSI0_DAT9__I2C1_SCL			\
+-		IOMUX_PAD(0x064C, 0x027C, 4, 0x0898, 1, 0)
++		IOMUX_PAD(0x064C, 0x027C, 4 | IOMUX_CONFIG_SION, 0x0898, 1, 0)
+ #define _MX6Q_PAD_CSI0_DAT9__GPIO_5_27			\
+ 		IOMUX_PAD(0x064C, 0x027C, 5, 0x0000, 0, 0)
+ #define _MX6Q_PAD_CSI0_DAT9__MMDC_MMDC_DEBUG_48		\
+@@ -5746,7 +5750,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_KEY_COL3__KPP_COL_3		\
+ 		(_MX6Q_PAD_KEY_COL3__KPP_COL_3 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_KEY_COL3__I2C2_SCL		\
+-		(_MX6Q_PAD_KEY_COL3__I2C2_SCL | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_KEY_COL3__I2C2_SCL | MUX_PAD_CTRL(MX6Q_I2C_PAD_CTRL))
+ #define  MX6Q_PAD_KEY_COL3__GPIO_4_12		\
+ 		(_MX6Q_PAD_KEY_COL3__GPIO_4_12 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_KEY_COL3__SPDIF_IN1		\
+@@ -5763,7 +5767,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_KEY_ROW3__KPP_ROW_3		\
+ 		(_MX6Q_PAD_KEY_ROW3__KPP_ROW_3 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_KEY_ROW3__I2C2_SDA		\
+-		(_MX6Q_PAD_KEY_ROW3__I2C2_SDA | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_KEY_ROW3__I2C2_SDA | MUX_PAD_CTRL(MX6Q_I2C_PAD_CTRL))
+ #define  MX6Q_PAD_KEY_ROW3__GPIO_4_13		\
+ 		(_MX6Q_PAD_KEY_ROW3__GPIO_4_13 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_KEY_ROW3__USDHC1_VSELECT		\
+@@ -5935,7 +5939,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_GPIO_5__GPIO_1_5		\
+ 		(_MX6Q_PAD_GPIO_5__GPIO_1_5 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_5__I2C3_SCL		\
+-		(_MX6Q_PAD_GPIO_5__I2C3_SCL | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_GPIO_5__I2C3_SCL |  MUX_PAD_CTRL(MX6Q_I2C_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_5__CHEETAH_EVENTI		\
+ 		(_MX6Q_PAD_GPIO_5__CHEETAH_EVENTI | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+@@ -5990,7 +5994,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_GPIO_16__GPIO_7_11		\
+ 		(_MX6Q_PAD_GPIO_16__GPIO_7_11 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_16__I2C3_SDA		\
+-		(_MX6Q_PAD_GPIO_16__I2C3_SDA | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_GPIO_16__I2C3_SDA | MUX_PAD_CTRL(MX6Q_I2C_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_16__SJC_DE_B		\
+ 		(_MX6Q_PAD_GPIO_16__SJC_DE_B | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 55e0641..202f1ae 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -197,9 +197,9 @@
+ #define MX6Q_USDHC2_BASE_ADDR                (AIPS2_OFF_BASE_ADDR + 0x14000)
+ #define MX6Q_USDHC3_BASE_ADDR                (AIPS2_OFF_BASE_ADDR + 0x18000)
+ #define MX6Q_USDHC4_BASE_ADDR                (AIPS2_OFF_BASE_ADDR + 0x1C000)
+-#define I2C1_BASE_ADDR                  (AIPS2_OFF_BASE_ADDR + 0x20000)
+-#define I2C2_BASE_ADDR                  (AIPS2_OFF_BASE_ADDR + 0x24000)
+-#define I2C3_BASE_ADDR                  (AIPS2_OFF_BASE_ADDR + 0x28000)
++#define MX6Q_I2C1_BASE_ADDR                  (AIPS2_OFF_BASE_ADDR + 0x20000)
++#define MX6Q_I2C2_BASE_ADDR                  (AIPS2_OFF_BASE_ADDR + 0x24000)
++#define MX6Q_I2C3_BASE_ADDR                  (AIPS2_OFF_BASE_ADDR + 0x28000)
+ #define ROMCP_BASE_ADDR                 (AIPS2_OFF_BASE_ADDR + 0x2C000)
+ #define MMDC_P0_BASE_ADDR               (AIPS2_OFF_BASE_ADDR + 0x30000)
+ #define MMDC_P1_BASE_ADDR               (AIPS2_OFF_BASE_ADDR + 0x34000)
+@@ -303,9 +303,9 @@
+ #define MX6Q_INT_ECSPI3                             65
+ #define MX6Q_INT_ECSPI4                             66
+ #define MX6Q_INT_ECSPI5                             67
+-#define MXC_INT_I2C1                               68
+-#define MXC_INT_I2C2                               69
+-#define MXC_INT_I2C3                               70
++#define MX6Q_INT_I2C1                               68
++#define MX6Q_INT_I2C2                               69
++#define MX6Q_INT_I2C3                               70
+ #define MXC_INT_SATA                               71
+ #define MXC_INT_USBOH3_UH1                         72
+ #define MXC_INT_USBOH3_UH2                         73
+-- 
+1.7.7.4
+

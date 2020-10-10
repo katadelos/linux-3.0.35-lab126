@@ -1,0 +1,59 @@
+From c2fabda1905bc83fef6c2334c0f2c994699f4c1f Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Thu, 30 Aug 2012 14:15:39 -0700
+Subject: [PATCH 2003/2463] ENGR00215875-2: caam: fix descriptor buffer
+ overrun in hash_digest_key()
+
+HMAC keys often need to be reduced to under the size of a digest to
+be used. The driver does this psuedo-synchronously through the use of
+hash_digest_key(), which builds a sequence pointered job descriptor to
+perform this function.
+
+When this function built the job descriptor, it correctly accounted for the
+number of instructions and number of pointers that would go into its
+construction. However, it failed to account for the fact that both the
+sequence in and out pointers used extended lengths, adding 8 more bytes to
+the required job descriptor. This caused the descriptor to overrun the
+allocated buffer by that amount, resulting in memory corruptions.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/crypto/caam/caamhash.c    |    8 +++++++-
+ drivers/crypto/caam/desc_constr.h |    1 +
+ 2 files changed, 8 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/crypto/caam/caamhash.c b/drivers/crypto/caam/caamhash.c
+index b8cf42b..ee06515 100644
+--- a/drivers/crypto/caam/caamhash.c
++++ b/drivers/crypto/caam/caamhash.c
+@@ -441,7 +441,13 @@ static u32 hash_digest_key(struct caam_hash_ctx *ctx, const u8 *key_in,
+ 	dma_addr_t src_dma, dst_dma;
+ 	int ret = 0;
+ 
+-	desc = kmalloc(CAAM_CMD_SZ * 6 + CAAM_PTR_SZ * 2, GFP_KERNEL | GFP_DMA);
++	/*
++	 * Hashing descriptor is 6 commands (including header), 2 pointers,
++	 * and 2 extended lengths
++	 */
++	desc = kmalloc((CAAM_CMD_SZ * 6 + CAAM_PTR_SZ * 2 +
++			CAAM_EXTLEN_SZ * 2),
++			GFP_KERNEL | GFP_DMA);
+ 
+ 	init_job_desc(desc, 0);
+ 
+diff --git a/drivers/crypto/caam/desc_constr.h b/drivers/crypto/caam/desc_constr.h
+index c85c1f0..0393c98 100644
+--- a/drivers/crypto/caam/desc_constr.h
++++ b/drivers/crypto/caam/desc_constr.h
+@@ -9,6 +9,7 @@
+ #define IMMEDIATE (1 << 23)
+ #define CAAM_CMD_SZ sizeof(u32)
+ #define CAAM_PTR_SZ sizeof(dma_addr_t)
++#define CAAM_EXTLEN_SZ sizeof(u32)
+ #define CAAM_DESC_BYTES_MAX (CAAM_CMD_SZ * MAX_CAAM_DESCSIZE)
+ 
+ #ifdef DEBUG
+-- 
+1.7.7.4
+

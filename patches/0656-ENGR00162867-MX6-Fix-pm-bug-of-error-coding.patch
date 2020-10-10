@@ -1,0 +1,37 @@
+From a34a601c9e1086ebe1d0e149a1d558f4ad8ffc50 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 22 Nov 2011 18:26:57 +0800
+Subject: [PATCH 0656/2463] ENGR00162867 [MX6]Fix pm bug of error coding
+
+Before suspend, we need to check whether there
+is wakeup source's irq pending via GPC_ISR1~4,
+previous coding checked for set of irq status
+of GPC_ISR1, should be GPC_ISR1~4.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/pm.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index a93963b..df0f06e 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -136,11 +136,11 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 	wake_irq_isr[0] = __raw_readl(gpc_base +
+ 			GPC_ISR1_OFFSET) & gpc_wake_irq[0];
+ 	wake_irq_isr[1] = __raw_readl(gpc_base +
+-			GPC_ISR1_OFFSET) & gpc_wake_irq[1];
++			GPC_ISR2_OFFSET) & gpc_wake_irq[1];
+ 	wake_irq_isr[2] = __raw_readl(gpc_base +
+-			GPC_ISR1_OFFSET) & gpc_wake_irq[2];
++			GPC_ISR3_OFFSET) & gpc_wake_irq[2];
+ 	wake_irq_isr[3] = __raw_readl(gpc_base +
+-			GPC_ISR1_OFFSET) & gpc_wake_irq[3];
++			GPC_ISR4_OFFSET) & gpc_wake_irq[3];
+ 	if (wake_irq_isr[0] | wake_irq_isr[1] |
+ 			wake_irq_isr[2] | wake_irq_isr[3]) {
+ 		printk(KERN_INFO "There are wakeup irq pending,system resume!\n");
+-- 
+1.7.7.4
+

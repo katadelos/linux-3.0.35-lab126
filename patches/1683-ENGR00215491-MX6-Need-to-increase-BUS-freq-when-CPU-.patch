@@ -1,0 +1,53 @@
+From 9a843ecb662cdefccbec3e89559930e16bead08a Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Mon, 2 Jul 2012 19:23:23 +0800
+Subject: [PATCH 1683/2463] ENGR00215491 [MX6]Need to increase BUS freq when
+ CPU freq is increased
+
+When BUS freq is running at DLL off mode(24M or 50M), when CPU
+freq is increased, we need to increase BUS freq to 400M setpoint
+in order to achieve high performance when CPU is busy.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/bus_freq.c |    2 +-
+ arch/arm/plat-mxc/cpufreq.c  |    3 ++-
+ 2 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index cd53fde..6ebd76c 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -408,7 +408,7 @@ static ssize_t bus_freq_scaling_enable_store(struct device *dev,
+ 
+ static int busfreq_suspend(struct platform_device *pdev, pm_message_t message)
+ {
+-	if (low_bus_freq_mode)
++	if (low_bus_freq_mode || audio_bus_freq_mode)
+ 		set_high_bus_freq(1);
+ 	busfreq_suspended = 1;
+ 	return 0;
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index b31970c..2627327 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -56,6 +56,7 @@ extern struct regulator *cpu_regulator;
+ extern int dvfs_core_is_active;
+ extern struct cpu_op *(*get_cpu_op)(int *op);
+ extern int low_bus_freq_mode;
++extern int audio_bus_freq_mode;
+ extern int high_bus_freq_mode;
+ extern int set_low_bus_freq(void);
+ extern int set_high_bus_freq(int high_bus_speed);
+@@ -85,7 +86,7 @@ int set_cpu_freq(int freq)
+ #endif
+ 	/*Set the voltage for the GP domain. */
+ 	if (freq > org_cpu_rate) {
+-		if (low_bus_freq_mode)
++		if (low_bus_freq_mode || audio_bus_freq_mode)
+ 			set_high_bus_freq(0);
+ 		ret = regulator_set_voltage(cpu_regulator, gp_volt,
+ 					    gp_volt);
+-- 
+1.7.7.4
+

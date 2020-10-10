@@ -1,0 +1,277 @@
+From 4adda3f11b5430bcad1972d413e32d26963a4c99 Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Wed, 25 Jan 2012 09:01:36 -0600
+Subject: [PATCH 0889/2463] ENGR00172752-2 Remove usless code in pfuze100
+ regulator driver
+
+Remove usless code in pfuze100 regulator driver
+
+Signed-off-by: Robin Gong <b38343@freescale.com>
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ drivers/mfd/pfuze-core.c               |    6 +-
+ drivers/regulator/pfuze-regulator.h    |    2 +-
+ drivers/regulator/pfuze100-regulator.c |  106 +-------------------------------
+ include/linux/mfd/pfuze.h              |    5 +-
+ 4 files changed, 10 insertions(+), 109 deletions(-)
+
+diff --git a/drivers/mfd/pfuze-core.c b/drivers/mfd/pfuze-core.c
+index 93d5e56..96b6292 100644
+--- a/drivers/mfd/pfuze-core.c
++++ b/drivers/mfd/pfuze-core.c
+@@ -348,8 +348,9 @@ static int pfuze_identify(struct mc_pfuze *mc_pfuze, enum pfuze_id *id)
+ 	ret = pfuze_reg_read(mc_pfuze, PFUZE_REG_REVISION_ID, &value);
+ 	if (ret)
+ 		return ret;
+-	dev_info(&mc_pfuze->i2c_client->dev, "Full lay: %x ,Metal lay: %x\n",
+-		 (value & 0xf0) >> 4, value & 0x0f);
++	dev_info(&mc_pfuze->i2c_client->dev,
++		 "ID: %d,Full lay: %x ,Metal lay: %x\n",
++		 *id, (value & 0xf0) >> 4, value & 0x0f);
+ 	ret = pfuze_reg_read(mc_pfuze, PFUZE_REG_FAB_ID, &value);
+ 	if (ret)
+ 		return ret;
+@@ -516,6 +517,7 @@ static int pfuze_probe(struct i2c_client *client,
+ 		struct pfuze_regulator_platform_data regulator_pdata = {
+ 			.num_regulators = pdata->num_regulators,
+ 			.regulators = pdata->regulators,
++			.pfuze_init = pdata->pfuze_init,
+ 		};
+ 		pfuze_add_subdevice_pdata(mc_pfuze, "%s-regulator",
+ 					  &regulator_pdata,
+diff --git a/drivers/regulator/pfuze-regulator.h b/drivers/regulator/pfuze-regulator.h
+index 0ce1c8b..20d4766 100644
+--- a/drivers/regulator/pfuze-regulator.h
++++ b/drivers/regulator/pfuze-regulator.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+diff --git a/drivers/regulator/pfuze100-regulator.c b/drivers/regulator/pfuze100-regulator.c
+index 2cd755a..34ca0fb4 100644
+--- a/drivers/regulator/pfuze100-regulator.c
++++ b/drivers/regulator/pfuze100-regulator.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -167,10 +167,6 @@ static struct regulator_ops pfuze100_sw_regulator_ops;
+ #define PFUZE100_SW1AVOL_VSEL	0
+ #define PFUZE100_SW1AVOL_VSEL_M	(0x3f<<0)
+ 
+-#define PFUZE100_SW1ASTANDBY	33
+-#define PFUZE100_SW1ASTANDBY_STBY_VAL	(0x14)
+-#define PFUZE100_SW1ASTANDBY_STBY_M	(0x3f<<0)
+-
+ #define PFUZE100_SW1AOFF	34
+ #define PFUZE100_SW1AOFF_OFF_VAL	(0x0<<0)
+ #define PFUZE100_SW1AOFF_OFF_M	(0x3f<<0)
+@@ -196,10 +192,6 @@ static struct regulator_ops pfuze100_sw_regulator_ops;
+ #define PFUZE100_SW1BVOL_VSEL	0
+ #define PFUZE100_SW1BVOL_VSEL_M	(0x3f<<0)
+ 
+-#define PFUZE100_SW1BSTANDBY	40
+-#define PFUZE100_SW1BSTANDBY_STBY_VAL	(0x14)
+-#define PFUZE100_SW1BSTANDBY_STBY_M	(0x3f<<0)
+-
+ #define PFUZE100_SW1BOFF	41
+ #define PFUZE100_SW1BOFF_OFF_VAL	0x0
+ #define PFUZE100_SW1BOFF_OFF_M	(0x3f<<0)
+@@ -225,10 +217,6 @@ static struct regulator_ops pfuze100_sw_regulator_ops;
+ #define PFUZE100_SW1CVOL_VSEL	0
+ #define PFUZE100_SW1CVOL_VSEL_M	(0x3f<<0)
+ 
+-#define PFUZE100_SW1CSTANDBY	47
+-#define PFUZE100_SW1CSTANDBY_STBY_VAL	(0x14)
+-#define PFUZE100_SW1CSTANDBY_STBY_M	(0x3f<<0)
+-
+ #define PFUZE100_SW1COFF	48
+ #define PFUZE100_SW1COFF_OFF_VAL	0x0
+ #define PFUZE100_SW1COFF_OFF_M	(0x3f<<0)
+@@ -254,10 +242,6 @@ static struct regulator_ops pfuze100_sw_regulator_ops;
+ #define PFUZE100_SW2VOL_VSEL	0
+ #define PFUZE100_SW2VOL_VSEL_M	(0x3f<<0)
+ 
+-#define PFUZE100_SW2STANDBY	54
+-#define PFUZE100_SW2STANDBY_STBY_VAL	0x0
+-#define PFUZE100_SW2STANDBY_STBY_M	(0x3f<<0)
+-
+ #define PFUZE100_SW2OFF	55
+ #define PFUZE100_SW2OFF_OFF_VAL	0x0
+ #define PFUZE100_SW2OFF_OFF_M	(0x7f<<0)
+@@ -283,10 +267,6 @@ static struct regulator_ops pfuze100_sw_regulator_ops;
+ #define PFUZE100_SW3AVOL_VSEL	0
+ #define PFUZE100_SW3AVOL_VSEL_M	(0x3f<<0)
+ 
+-#define PFUZE100_SW3ASTANDBY	61
+-#define PFUZE100_SW3ASTANDBY_STBY_VAL	0x0
+-#define PFUZE100_SW3ASTANDBY_STBY_M	(0x3f<<0)
+-
+ #define PFUZE100_SW3AOFF	62
+ #define PFUZE100_SW3AOFF_OFF_VAL	0x0
+ #define PFUZE100_SW3AOFF_OFF_M	(0x3f<<0)
+@@ -312,10 +292,6 @@ static struct regulator_ops pfuze100_sw_regulator_ops;
+ #define PFUZE100_SW3BVOL_VSEL	0
+ #define PFUZE100_SW3BVOL_VSEL_M	(0x3f<<0)
+ 
+-#define PFUZE100_SW3BSTANDBY	68
+-#define PFUZE100_SW3BSTANDBY_STBY_VAL	0x0
+-#define PFUZE100_SW3BSTANDBY_STBY_M	(0x3f<<0)
+-
+ #define PFUZE100_SW3BOFF	69
+ #define PFUZE100_SW3BOFF_OFF_VAL	0x0
+ #define PFUZE100_SW3BOFF_OFF_M	(0x3f<<0)
+@@ -341,10 +317,6 @@ static struct regulator_ops pfuze100_sw_regulator_ops;
+ #define PFUZE100_SW4VOL_VSEL	0
+ #define PFUZE100_SW4VOL_VSEL_M	(0x3f<<0)
+ 
+-#define PFUZE100_SW4STANDBY	75
+-#define PFUZE100_SW4STANDBY_STBY_VAL	0
+-#define PFUZE100_SW4STANDBY_STBY_M	(0x3f<<0)
+-
+ #define PFUZE100_SW4OFF		76
+ #define PFUZE100_SW4OFF_OFF_VAL	0x0
+ #define PFUZE100_SW4OFF_OFF_M	(0x3f<<0)
+@@ -634,7 +606,6 @@ static int __devinit pfuze100_regulator_probe(struct platform_device *pdev)
+ 	    dev_get_platdata(&pdev->dev);
+ 	struct pfuze_regulator_init_data *init_data;
+ 	int i, ret;
+-	struct regulator *enabled_regulator;
+ 
+ 	priv = kzalloc(sizeof(*priv) +
+ 		       pdata->num_regulators * sizeof(priv->regulators[0]),
+@@ -644,24 +615,7 @@ static int __devinit pfuze100_regulator_probe(struct platform_device *pdev)
+ 	priv->pfuze_regulators = pfuze100_regulators;
+ 	priv->pfuze = pfuze100;
+ 	pfuze_lock(pfuze100);
+-	ret = pfuze_reg_rmw(pfuze100, PFUZE100_SWBSTCON1,
+-			    PFUZE100_SWBSTCON1_SWBSTMOD_M,
+-			    PFUZE100_SWBSTCON1_SWBSTMOD_VAL);
+-	if (ret)
+-		goto err_free;
+-	ret = pfuze_reg_rmw(pfuze100, PFUZE100_SW1ASTANDBY,
+-			    PFUZE100_SW1ASTANDBY_STBY_M,
+-			    PFUZE100_SW1ASTANDBY_STBY_VAL);
+-	if (ret)
+-		goto err_free;
+-	ret = pfuze_reg_rmw(pfuze100, PFUZE100_SW1BSTANDBY,
+-			    PFUZE100_SW1BSTANDBY_STBY_M,
+-			    PFUZE100_SW1BSTANDBY_STBY_VAL);
+-	if (ret)
+-		goto err_free;
+-	ret = pfuze_reg_rmw(pfuze100, PFUZE100_SW1CSTANDBY,
+-			    PFUZE100_SW1CSTANDBY_STBY_M,
+-			    PFUZE100_SW1CSTANDBY_STBY_VAL);
++	ret = pdata->pfuze_init(pfuze100);
+ 	if (ret)
+ 		goto err_free;
+ 	pfuze_unlock(pfuze100);
+@@ -677,61 +631,6 @@ static int __devinit pfuze100_regulator_probe(struct platform_device *pdev)
+ 			goto err;
+ 		}
+ 	}
+-
+-	enabled_regulator = regulator_get(&pdev->dev, "P1V325_VDDARM_SW1AB");
+-	if (enabled_regulator)
+-		regulator_set_voltage(enabled_regulator, 1325000, 1325000);
+-	enabled_regulator = regulator_get(&pdev->dev, "P1V325_VDDSOC_SW1C");
+-	if (enabled_regulator)
+-		regulator_set_voltage(enabled_regulator, 1325000, 1325000);
+-#if 0
+-	test_regulator = regulator_get(&pdev->dev, "P3V0_VDDHIGH_SW2");
+-	if (test_regulator)
+-		regulator_set_voltage(test_regulator, 3000000, 3000000);
+-	test_regulator = regulator_get(&pdev->dev, "P1V5_DDR_SW3");
+-	if (test_regulator)
+-		regulator_set_voltage(test_regulator, 1500000, 1500000);
+-	test_regulator = regulator_get(&pdev->dev, "P1V8_SW4");
+-	if (test_regulator)
+-		regulator_set_voltage(test_regulator, 1800000, 1800000);
+-	test_regulator = regulator_get(&pdev->dev, "P5V0_SWBST");
+-	if (test_regulator)
+-		regulator_set_voltage(test_regulator, 5000000, 5000000);
+-	test_regulator = regulator_get(&pdev->dev, "P3V0_STBY");
+-	if (test_regulator)
+-		regulator_set_voltage(test_regulator, 3000000, 3000000);
+-	test_regulator = regulator_get(&pdev->dev, "P1V2_VGEN1");
+-	if (test_regulator) {
+-		regulator_set_voltage(test_regulator, 1200000, 1200000);
+-		regulator_enable(test_regulator);
+-	}
+-	test_regulator = regulator_get(&pdev->dev, "P1V5_VGEN2");
+-	if (test_regulator) {
+-		regulator_set_voltage(test_regulator, 1500000, 1500000);
+-		regulator_enable(test_regulator);
+-	}
+-	test_regulator = regulator_get(&pdev->dev, "P1V8_VGEN3");
+-	if (test_regulator) {
+-		regulator_set_voltage(test_regulator, 1800000, 1800000);
+-		regulator_enable(test_regulator);
+-	}
+-	test_regulator = regulator_get(&pdev->dev, "P1V8_VGEN4");
+-	if (test_regulator) {
+-		regulator_set_voltage(test_regulator, 1800000, 1800000);
+-		regulator_enable(test_regulator);
+-	}
+-	test_regulator = regulator_get(&pdev->dev, "P2V5_VGEN5");
+-	if (test_regulator) {
+-		regulator_set_voltage(test_regulator, 2500000, 2500000);
+-		regulator_enable(test_regulator);
+-	}
+-	test_regulator = regulator_get(&pdev->dev, "P2V8_VGEN6");
+-	if (test_regulator) {
+-		regulator_set_voltage(test_regulator, 2800000, 2800000);
+-		regulator_enable(test_regulator);
+-	}
+-#endif
+-
+ 	platform_set_drvdata(pdev, priv);
+ 	return 0;
+ err:
+@@ -773,7 +672,6 @@ static int __init pfuze100_regulator_init(void)
+ }
+ 
+ subsys_initcall(pfuze100_regulator_init);
+-
+ static void __exit pfuze100_regulator_exit(void)
+ {
+ 	platform_driver_unregister(&pfuze100_regulator_driver);
+diff --git a/include/linux/mfd/pfuze.h b/include/linux/mfd/pfuze.h
+index 4297642..38c4e24 100644
+--- a/include/linux/mfd/pfuze.h
++++ b/include/linux/mfd/pfuze.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -95,10 +95,10 @@ struct pfuze_regulator_init_data {
+ 	int id;
+ 	struct regulator_init_data *init_data;
+ };
+-
+ struct pfuze_regulator_platform_data {
+ 	int num_regulators;
+ 	struct pfuze_regulator_init_data *regulators;
++	int (*pfuze_init)(struct mc_pfuze *pfuze);
+ };
+ 
+ struct pfuze_platform_data {
+@@ -106,5 +106,6 @@ struct pfuze_platform_data {
+ 	unsigned int flags;
+ 	int num_regulators;
+ 	struct pfuze_regulator_init_data *regulators;
++	int (*pfuze_init)(struct mc_pfuze *pfuze);
+ };
+ #endif
+-- 
+1.7.7.4
+

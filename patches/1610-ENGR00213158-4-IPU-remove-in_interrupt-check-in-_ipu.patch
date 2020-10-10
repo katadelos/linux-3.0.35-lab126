@@ -1,0 +1,39 @@
+From de18a8310ed8e0bd81d000da8953f03bea20b711 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Tue, 12 Jun 2012 15:02:42 +0800
+Subject: [PATCH 1610/2463] ENGR00213158-4 IPU: remove in_interrupt() check in
+ _ipu_get/_ipu_put
+
+Remove in_interrupt() check in _ipu_get/_ipu_put, since clk_enable and
+clk_disable should not happen in interrupt context.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c |    4 ----
+ 1 files changed, 0 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index b1fb4ca..561433f 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -373,8 +373,6 @@ void _ipu_get(struct ipu_soc *ipu)
+ {
+ 	int ret;
+ 
+-	if (in_interrupt())
+-		return;
+ 	ret = clk_enable(ipu->ipu_clk);
+ 	if (ret < 0)
+ 		BUG();
+@@ -382,8 +380,6 @@ void _ipu_get(struct ipu_soc *ipu)
+ 
+ void _ipu_put(struct ipu_soc *ipu)
+ {
+-	if (in_interrupt())
+-		return;
+ 	clk_disable(ipu->ipu_clk);
+ }
+ 
+-- 
+1.7.7.4
+

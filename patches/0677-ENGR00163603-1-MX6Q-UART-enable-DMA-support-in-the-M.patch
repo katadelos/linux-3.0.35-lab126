@@ -1,0 +1,49 @@
+From f1363780ea943d1ff816da35a977c814307b2ab7 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Fri, 18 Nov 2011 14:05:50 +0800
+Subject: [PATCH 0677/2463] ENGR00163603-1 MX6Q/UART : enable DMA support in
+ the MX6Q-ARM2 board
+
+add the DMA feature to the MX6Q-ARM2 board.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c       |    3 +--
+ arch/arm/plat-mxc/include/mach/imx-uart.h |    1 +
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index c806999..1ad09f8 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -480,14 +480,13 @@ static const struct anatop_thermal_platform_data
+ };
+ 
+ static const struct imxuart_platform_data mx6q_uart1_data __initconst = {
+-	.flags = IMXUART_HAVE_RTSCTS | IMXUART_USE_DCEDTE,
++	.flags = IMXUART_HAVE_RTSCTS | IMXUART_USE_DCEDTE | IMXUART_SDMA,
+ };
+ 
+ static inline void mx6q_arm2_init_uart(void)
+ {
+ 	imx6q_add_imx_uart(0, NULL);
+ 	imx6q_add_imx_uart(1, &mx6q_uart1_data);
+-	imx6q_add_imx_uart(3, NULL);
+ }
+ 
+ static int mx6q_arm2_fec_phy_init(struct phy_device *phydev)
+diff --git a/arch/arm/plat-mxc/include/mach/imx-uart.h b/arch/arm/plat-mxc/include/mach/imx-uart.h
+index 15b1a6c..45a13ab 100644
+--- a/arch/arm/plat-mxc/include/mach/imx-uart.h
++++ b/arch/arm/plat-mxc/include/mach/imx-uart.h
+@@ -22,6 +22,7 @@
+ #define IMXUART_HAVE_RTSCTS (1<<0)
+ #define IMXUART_IRDA        (1<<1)
+ #define IMXUART_USE_DCEDTE  (1<<2)
++#define IMXUART_SDMA        (1<<3)
+ 
+ struct imxuart_platform_data {
+ 	int (*init)(struct platform_device *pdev);
+-- 
+1.7.7.4
+

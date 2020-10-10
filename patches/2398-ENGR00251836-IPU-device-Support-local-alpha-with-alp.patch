@@ -1,0 +1,32 @@
+From 4316456edd187dcf5ff0b814c26c7bb39855bf40 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Fri, 23 Nov 2012 16:18:58 +0800
+Subject: [PATCH 2398/2463] ENGR00251836 IPU device: Support local alpha with
+ alpha value in each pixel
+
+Add local alpha support with alpha value in each pixel,
+such as RGBA pixel format.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_device.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_device.c b/drivers/mxc/ipu3/ipu_device.c
+index 8c58ba1..b3509ba 100644
+--- a/drivers/mxc/ipu3/ipu_device.c
++++ b/drivers/mxc/ipu3/ipu_device.c
+@@ -1900,8 +1900,9 @@ static int init_ic(struct ipu_soc *ipu, struct ipu_task_entry *t)
+ 		params.mem_prp_vf_mem.graphics_combine_en = 1;
+ 		if (t->overlay.alpha.mode == IPU_ALPHA_MODE_GLOBAL)
+ 			params.mem_prp_vf_mem.global_alpha_en = 1;
+-		else
++		else if (t->overlay.alpha.loc_alp_paddr)
+ 			params.mem_prp_vf_mem.alpha_chan_en = 1;
++		/* otherwise, alpha bending per pixel is used. */
+ 		params.mem_prp_vf_mem.alpha = t->overlay.alpha.gvalue;
+ 		if (t->overlay.colorkey.enable) {
+ 			params.mem_prp_vf_mem.key_color_en = 1;
+-- 
+1.7.7.4
+

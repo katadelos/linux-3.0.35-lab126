@@ -1,0 +1,61 @@
+From 14076c9a64ab80d5fe7006e6cf51eec33fd818ea Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Tue, 14 Aug 2012 20:14:17 +0800
+Subject: [PATCH 1900/2463] ENGR00180117 HDMI: No audio output in 1080P on
+ some TV
+
+Some TV support specific video mode that different with
+CEA standard, and it's pixel clock not comply CEA standard.
+But audio configuration paramter N and CTS should follow CEA standard.
+So audio may not work in these specific video mode.
+Filter video mode get from EDID, only keep standard CEA video mode
+in the modelist.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ drivers/video/mxc_hdmi.c |   14 +++++++++-----
+ 1 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index 87a1af1..ec50d19 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -1543,6 +1543,7 @@ static void mxc_hdmi_notify_fb(struct mxc_hdmi *hdmi)
+ static void mxc_hdmi_edid_rebuild_modelist(struct mxc_hdmi *hdmi)
+ {
+ 	int i;
++	struct fb_videomode *mode;
+ 
+ 	dev_dbg(&hdmi->pdev->dev, "%s\n", __func__);
+ 
+@@ -1554,10 +1555,14 @@ static void mxc_hdmi_edid_rebuild_modelist(struct mxc_hdmi *hdmi)
+ 	for (i = 0; i < hdmi->fbi->monspecs.modedb_len; i++) {
+ 		/*
+ 		 * We might check here if mode is supported by HDMI.
+-		 * We do not currently support interlaced modes
++		 * We do not currently support interlaced modes.
++		 * And add CEA modes in the modelist.
+ 		 */
+-		if (!(hdmi->fbi->monspecs.modedb[i].vmode &
+-				FB_VMODE_INTERLACED)) {
++		mode = &hdmi->fbi->monspecs.modedb[i];
++
++		if (!(mode->vmode & FB_VMODE_INTERLACED) &&
++				(mxc_edid_mode_to_vic(mode) != 0)) {
++
+ 			dev_dbg(&hdmi->pdev->dev, "Added mode %d:", i);
+ 			dev_dbg(&hdmi->pdev->dev,
+ 				"xres = %d, yres = %d, freq = %d, vmode = %d, flag = %d\n",
+@@ -1567,8 +1572,7 @@ static void mxc_hdmi_edid_rebuild_modelist(struct mxc_hdmi *hdmi)
+ 				hdmi->fbi->monspecs.modedb[i].vmode,
+ 				hdmi->fbi->monspecs.modedb[i].flag);
+ 
+-			fb_add_videomode(&hdmi->fbi->monspecs.modedb[i],
+-					 &hdmi->fbi->modelist);
++			fb_add_videomode(mode, &hdmi->fbi->modelist);
+ 		}
+ 	}
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,62 @@
+From 49f744921cfa19f2250d5f55cda6157aad6b8234 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Fri, 18 May 2012 18:45:41 +0800
+Subject: [PATCH 1497/2463] ENGR00210003: imx6sl: add SPI support
+
+- configure the pinmux for SPI module working.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_arm2.c |   10 ++++++++++
+ arch/arm/mach-mx6/board-mx6sl_arm2.h |    7 +++++++
+ 2 files changed, 17 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 72220c0..0cea2c8 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -78,6 +78,7 @@
+ #define MX6_ARM2_LCD_PWR_EN	IMX_GPIO_NR(4, 3)	/* KEY_ROW5 */
+ #define MX6_ARM2_SD1_WP		IMX_GPIO_NR(4, 6)	/* KEY_COL7 */
+ #define MX6_ARM2_SD1_CD		IMX_GPIO_NR(4, 7)	/* KEY_ROW7 */
++#define MX6_ARM2_ECSPI1_CS0	IMX_GPIO_NR(4, 11)	/* ECSPI1_SS0 */
+ #define MX6_ARM2_SD2_WP		IMX_GPIO_NR(4, 29)	/* SD2_DAT6 */
+ #define MX6_ARM2_SD2_CD		IMX_GPIO_NR(5, 0)	/* SD2_DAT7 */
+ #define MX6_ARM2_SD3_CD		IMX_GPIO_NR(3, 22)	/* REF_CLK_32K */
+@@ -315,6 +316,15 @@ static int __init max17135_regulator_init(struct max17135 *max17135)
+ 	return 0;
+ }
+ 
++static int mx6_arm2_spi_cs[] = {
++	MX6_ARM2_ECSPI1_CS0,
++};
++
++static const struct spi_imx_master mx6_arm2_spi_data __initconst = {
++	.chipselect     = mx6_arm2_spi_cs,
++	.num_chipselect = ARRAY_SIZE(mx6_arm2_spi_cs),
++};
++
+ static struct imxi2c_platform_data mx6_arm2_i2c0_data = {
+ 	.bitrate = 100000,
+ };
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.h b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+index 376e7d4..36fa5f0 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.h
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+@@ -91,6 +91,13 @@ static iomux_v3_cfg_t mx6sl_arm2_pads[] = {
+ 	MX6SL_PAD_I2C2_SCL__I2C2_SCL,
+ 	MX6SL_PAD_I2C2_SDA__I2C2_SDA,
+ 
++	/* ECSPI1 */
++	MX6SL_PAD_ECSPI1_MISO__ECSPI1_MISO,
++	MX6SL_PAD_ECSPI1_MOSI__ECSPI1_MOSI,
++	MX6SL_PAD_ECSPI1_SCLK__ECSPI1_SCLK,
++	MX6SL_PAD_ECSPI1_SS0__ECSPI1_SS0,
++	MX6SL_PAD_ECSPI1_SS0__GPIO_4_11,	/* SS0 */
++
+ 	/* LCD */
+ 	MX6SL_PAD_LCD_CLK__LCDIF_CLK,
+ 	MX6SL_PAD_LCD_ENABLE__LCDIF_ENABLE,
+-- 
+1.7.7.4
+

@@ -1,0 +1,35 @@
+From 26225cbf0e071e0133308ae462c4423c39c8b6c9 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Wed, 17 Oct 2012 09:01:35 +0800
+Subject: [PATCH 2178/2463] ENGR00229938 pxp/v4l2: check return value of
+ kmalloc against NULL
+
+This is needed sanity check, because on Ubuntu it's likely that low memory
+will happen. This patch also makes this memory allocated from dma zone.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_pxp_v4l2.c |    7 ++++++-
+ 1 files changed, 6 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_pxp_v4l2.c b/drivers/media/video/mxc/output/mxc_pxp_v4l2.c
+index c17f9f1..08d16b9 100644
+--- a/drivers/media/video/mxc/output/mxc_pxp_v4l2.c
++++ b/drivers/media/video/mxc/output/mxc_pxp_v4l2.c
+@@ -396,7 +396,12 @@ static int pxp_s_output(struct file *file, void *fh,
+ 		bpp = 2;
+ 
+ 	pxp->outb_size = fmt->width * fmt->height * bpp;
+-	pxp->outb = kmalloc(fmt->width * fmt->height * bpp, GFP_KERNEL);
++	pxp->outb = kmalloc(fmt->width * fmt->height * bpp,
++				GFP_KERNEL | GFP_DMA);
++	if (pxp->outb == NULL) {
++		dev_err(&pxp->pdev->dev, "No enough memory!\n");
++		return -ENOMEM;
++	}
+ 	pxp->outb_phys = virt_to_phys(pxp->outb);
+ 	dma_map_single(NULL, pxp->outb,
+ 			fmt->width * fmt->height * bpp, DMA_TO_DEVICE);
+-- 
+1.7.7.4
+

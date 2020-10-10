@@ -1,0 +1,31 @@
+From 577257aed61a733ab69c1eb551117f1c76c76f41 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Mon, 18 Jul 2011 12:44:25 +0800
+Subject: [PATCH 0256/2463] ENGR00153218 mxc gpio: tzic should not disable
+ gpio interrupt line
+
+For SOC using TZIC, gpio_irq_handler should not call tzic chip ack
+funtion, cause it will disable this interrupt line.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/plat-mxc/gpio.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/gpio.c b/arch/arm/plat-mxc/gpio.c
+index a287e50..0a4743a 100755
+--- a/arch/arm/plat-mxc/gpio.c
++++ b/arch/arm/plat-mxc/gpio.c
+@@ -177,7 +177,9 @@ static void mx3_gpio_irq_handler(u32 irq, struct irq_desc *desc)
+ 	u32 irq_stat;
+ 	struct mxc_gpio_port *port = irq_get_handler_data(irq);
+ 
++#ifndef CONFIG_MXC_TZIC
+ 	desc->irq_data.chip->irq_ack(&desc->irq_data);
++#endif
+ 
+ 	irq_stat = __raw_readl(port->base + GPIO_ISR) &
+ 			__raw_readl(port->base + GPIO_IMR);
+-- 
+1.7.7.4
+

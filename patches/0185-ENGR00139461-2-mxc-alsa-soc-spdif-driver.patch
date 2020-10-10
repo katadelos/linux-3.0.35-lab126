@@ -1,0 +1,1927 @@
+From 542b15335364f70865d50130ecd322e111221d30 Mon Sep 17 00:00:00 2001
+From: Alan Tull <alan.tull@freescale.com>
+Date: Tue, 7 Jun 2011 12:59:03 -0500
+Subject: [PATCH 0185/2463] ENGR00139461-2 mxc alsa soc spdif driver
+
+S/PDIF tx and rx using ASoC layer.
+
+Signed-off-by: Alan Tull <alan.tull@freescale.com>
+---
+ include/linux/fsl_devices.h     |   11 +
+ sound/soc/codecs/Kconfig        |    3 +
+ sound/soc/codecs/Makefile       |    2 +
+ sound/soc/codecs/mxc_spdif.c    | 1272 +++++++++++++++++++++++++++++++++++++++
+ sound/soc/codecs/mxc_spdif.h    |  164 +++++
+ sound/soc/imx/Kconfig           |   13 +
+ sound/soc/imx/Makefile.rej      |   25 +
+ sound/soc/imx/imx-pcm-dma-mx2.c |    2 +-
+ sound/soc/imx/imx-spdif-dai.c   |  137 +++++
+ sound/soc/imx/imx-spdif.c       |  144 +++++
+ sound/soc/imx/imx-ssi.c         |    3 +
+ sound/soc/imx/imx-ssi.h         |    6 -
+ 12 files changed, 1775 insertions(+), 7 deletions(-)
+
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index a2d6574..35e5ff7 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -297,6 +297,17 @@ struct mxc_pwm_platform_data {
+ 	void (*disable_pwm_pad) (void);
+ };
+ 
++struct mxc_spdif_platform_data {
++	int spdif_tx;		/* S/PDIF tx enabled for this board */
++	int spdif_rx;		/* S/PDIF rx enabled for this board */
++	int spdif_clk_44100;	/* tx clk mux in SPDIF_REG_STC; -1 for none */
++	int spdif_clk_48000;	/* tx clk mux in SPDIF_REG_STC; -1 for none */
++	int spdif_clkid;	/* rx clk mux select in SPDIF_REG_SRPC */
++	struct clk *spdif_clk;
++	struct clk *spdif_core_clk;
++	struct clk *spdif_audio_clk;
++};
++
+ /* Returns non-zero if the current suspend operation would
+  * lead to a deep sleep (i.e. power removed from the core,
+  * instead of just the clock).
+diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
+index 98175a0..f4470c7 100644
+--- a/sound/soc/codecs/Kconfig
++++ b/sound/soc/codecs/Kconfig
+@@ -200,6 +200,9 @@ config SND_SOC_MAX98095
+ config SND_SOC_MAX9850
+ 	tristate
+ 
++config SND_SOC_MXC_SPDIF
++       tristate
++
+ config SND_SOC_PCM3008
+        tristate
+ 
+diff --git a/sound/soc/codecs/Makefile b/sound/soc/codecs/Makefile
+index fd85584..7f4b288 100644
+--- a/sound/soc/codecs/Makefile
++++ b/sound/soc/codecs/Makefile
+@@ -17,6 +17,7 @@ snd-soc-cs4271-objs := cs4271.o
+ snd-soc-cx20442-objs := cx20442.o
+ snd-soc-da7210-objs := da7210.o
+ snd-soc-dfbmcs320-objs := dfbmcs320.o
++snd-soc-mxc-spdif-objs := mxc_spdif.o
+ snd-soc-dmic-objs := dmic.o
+ snd-soc-l3-objs := l3.o
+ snd-soc-max98088-objs := max98088.o
+@@ -98,6 +99,7 @@ obj-$(CONFIG_SND_SOC_AD73311) += snd-soc-ad73311.o
+ obj-$(CONFIG_SND_SOC_ADS117X)	+= snd-soc-ads117x.o
+ obj-$(CONFIG_SND_SOC_AK4104)	+= snd-soc-ak4104.o
+ obj-$(CONFIG_SND_SOC_AK4535)	+= snd-soc-ak4535.o
++obj-$(CONFIG_SND_SOC_MXC_SPDIF)	+= snd-soc-mxc-spdif.o
+ obj-$(CONFIG_SND_SOC_AK4641)	+= snd-soc-ak4641.o
+ obj-$(CONFIG_SND_SOC_AK4642)	+= snd-soc-ak4642.o
+ obj-$(CONFIG_SND_SOC_AK4671)	+= snd-soc-ak4671.o
+diff --git a/sound/soc/codecs/mxc_spdif.c b/sound/soc/codecs/mxc_spdif.c
+new file mode 100644
+index 0000000..6774ed9
+--- /dev/null
++++ b/sound/soc/codecs/mxc_spdif.c
+@@ -0,0 +1,1272 @@
++/*
++ * MXC SPDIF ALSA Soc Codec Driver
++ *
++ * Copyright (C) 2007-2011 Freescale Semiconductor, Inc.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/slab.h>
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/init.h>
++#include <linux/delay.h>
++#include <linux/pm.h>
++#include <linux/clk.h>
++#include <linux/platform_device.h>
++#include <linux/interrupt.h>
++#include <linux/fsl_devices.h>
++#include <linux/io.h>
++
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/asoundef.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++#include <sound/soc-dapm.h>
++#include <sound/initval.h>
++#include <mach/hardware.h>
++
++#include "mxc_spdif.h"
++
++#define MXC_SPDIF_DEBUG 0
++
++static unsigned int gainsel_multi[GAINSEL_MULTI_MAX] = {
++	24 * 1024, 16 * 1024, 12 * 1024,
++	8 * 1024, 6 * 1024, 4 * 1024,
++	3 * 1024,
++};
++
++/*
++ * SPDIF control structure
++ * Defines channel status, subcode and Q sub
++ */
++struct spdif_mixer_control {
++	/* spinlock to access control data */
++	spinlock_t ctl_lock;
++	/* IEC958 channel tx status bit */
++	unsigned char ch_status[4];
++	/* User bits */
++	unsigned char subcode[2 * SPDIF_UBITS_SIZE];
++	/* Q subcode part of user bits */
++	unsigned char qsub[2 * SPDIF_QSUB_SIZE];
++	/* buffer ptrs for writer */
++	unsigned int upos;
++	unsigned int qpos;
++	/* ready buffer index of the two buffers */
++	unsigned int ready_buf;
++};
++
++struct mxc_spdif_priv {
++	struct snd_soc_codec codec;
++	struct mxc_spdif_platform_data *plat_data;
++	unsigned long __iomem *reg_base;
++	unsigned long reg_phys_base;
++	struct snd_card *card;	/* ALSA SPDIF sound card handle */
++	struct snd_pcm *pcm;	/* ALSA spdif driver type handle */
++	atomic_t dpll_locked;	/* DPLL locked status */
++};
++
++struct spdif_mixer_control mxc_spdif_control;
++
++static unsigned long spdif_base_addr;
++
++#if MXC_SPDIF_DEBUG
++static void dumpregs(void)
++{
++	unsigned int value, i;
++
++	for (i = 0 ; i <= 0x38 ; i += 4) {
++		value = readl(spdif_base_addr + i) & 0xffffff;
++		pr_debug("reg 0x%02x = 0x%06x\n", i, value);
++	}
++
++	i = 0x44;
++	value = readl(spdif_base_addr + i) & 0xffffff;
++	pr_debug("reg 0x%02x = 0x%06x\n", i, value);
++
++	i = 0x50;
++	value = readl(spdif_base_addr + i) & 0xffffff;
++	pr_debug("reg 0x%02x = 0x%06x\n", i, value);
++}
++#else
++static void dumpregs(void) {}
++#endif
++
++/* define each spdif interrupt handlers */
++typedef void (*spdif_irq_func_t) (unsigned int bit, void *desc);
++
++/* spdif irq functions declare */
++static void spdif_irq_fifo(unsigned int bit, void *devid);
++static void spdif_irq_dpll_lock(unsigned int bit, void *devid);
++static void spdif_irq_uq(unsigned int bit, void *devid);
++static void spdif_irq_bit_error(unsigned int bit, void *devid);
++static void spdif_irq_sym_error(unsigned int bit, void *devid);
++static void spdif_irq_valnogood(unsigned int bit, void *devid);
++static void spdif_irq_cnew(unsigned int bit, void *devid);
++
++/* irq function list */
++static spdif_irq_func_t spdif_irq_handlers[] = {
++	spdif_irq_fifo,
++	spdif_irq_fifo,
++	spdif_irq_dpll_lock,
++	NULL,
++	spdif_irq_fifo,
++	spdif_irq_uq,
++	spdif_irq_uq,
++	spdif_irq_uq,
++	spdif_irq_uq,
++	spdif_irq_uq,
++	spdif_irq_uq,
++	NULL,
++	NULL,
++	NULL,
++	spdif_irq_bit_error,
++	spdif_irq_sym_error,
++	spdif_irq_valnogood,
++	spdif_irq_cnew,
++	NULL,
++	spdif_irq_fifo,
++	spdif_irq_dpll_lock,
++};
++
++static void spdif_intr_enable(unsigned long intr, int enable)
++{
++	unsigned long value;
++
++	value = __raw_readl(spdif_base_addr + SPDIF_REG_SIE) & 0xffffff;
++
++	if (enable)
++		value |= intr;
++	else
++		value &= ~intr;
++
++	__raw_writel(value, spdif_base_addr + SPDIF_REG_SIE);
++}
++
++/*
++ * Get spdif interrupt status and clear the interrupt
++ */
++static int spdif_intr_status(void)
++{
++	unsigned long value;
++
++	value = __raw_readl(SPDIF_REG_SIS + spdif_base_addr) & 0xffffff;
++	value &= __raw_readl(spdif_base_addr + SPDIF_REG_SIE);
++	__raw_writel(value, SPDIF_REG_SIC + spdif_base_addr);
++
++	return value;
++}
++
++static irqreturn_t spdif_isr(int irq, void *dev_id)
++{
++	unsigned long int_stat;
++	int line;
++
++	int_stat = spdif_intr_status();
++
++	while ((line = ffs(int_stat)) != 0) {
++		int_stat &= ~(1UL << (line - 1));
++		if (spdif_irq_handlers[line - 1] != NULL)
++			spdif_irq_handlers[line - 1] (line - 1, dev_id);
++	}
++
++	return IRQ_HANDLED;
++}
++
++/*
++ * Rx FIFO Full, Underrun/Overrun interrupts
++ * Tx FIFO Empty, Underrun/Overrun interrupts
++ */
++static void spdif_irq_fifo(unsigned int bit, void *devid)
++{
++	pr_debug("irq %s\n", __func__);
++}
++
++/*
++ * DPLL locked and lock loss interrupt handler
++ */
++static void spdif_irq_dpll_lock(unsigned int bit, void *devid)
++{
++	struct mxc_spdif_priv *spdif_priv = (struct mxc_spdif_priv *)devid;
++	unsigned int locked = __raw_readl(spdif_base_addr + SPDIF_REG_SRPC);
++
++	if (locked & SRPC_DPLL_LOCKED) {
++		pr_debug("SPDIF Rx dpll locked\n");
++		atomic_set(&spdif_priv->dpll_locked, 1);
++	} else {
++		/* INT_LOSS_LOCK */
++		pr_debug("SPDIF Rx dpll loss lock\n");
++		atomic_set(&spdif_priv->dpll_locked, 0);
++	}
++}
++
++/*
++ * U/Q channel related interrupts handler
++ *
++ * U/QChannel full, overrun interrupts
++ * U/QChannel sync error and frame error interrupts
++ */
++static void spdif_irq_uq(unsigned int bit, void *devid)
++{
++	unsigned long val;
++	int index;
++	struct spdif_mixer_control *ctrl = &mxc_spdif_control;
++
++	bit = 1 << bit;
++	/* get U/Q channel datas */
++	switch (bit) {
++
++	case INT_URX_OV:	/* read U data */
++		pr_debug("User bit receive overrun\n");
++	case INT_URX_FUL:
++		pr_debug("U bit receive full\n");
++
++		if (ctrl->upos >= SPDIF_UBITS_SIZE * 2) {
++			ctrl->upos = 0;
++		} else if (unlikely((ctrl->upos % SPDIF_UBITS_SIZE) + 3
++				    > SPDIF_UBITS_SIZE)) {
++			pr_err("User bit receivce buffer overflow\n");
++			break;
++		}
++		val = __raw_readl(spdif_base_addr + SPDIF_REG_SQU);
++		ctrl->subcode[ctrl->upos++] = val >> 16;
++		ctrl->subcode[ctrl->upos++] = val >> 8;
++		ctrl->subcode[ctrl->upos++] = val;
++
++		break;
++
++	case INT_QRX_OV:	/* read Q data */
++		pr_debug("Q bit receive overrun\n");
++	case INT_QRX_FUL:
++		pr_debug("Q bit receive full\n");
++
++		if (ctrl->qpos >= SPDIF_QSUB_SIZE * 2) {
++			ctrl->qpos = 0;
++		} else if (unlikely((ctrl->qpos % SPDIF_QSUB_SIZE) + 3
++				    > SPDIF_QSUB_SIZE)) {
++			pr_debug("Q bit receivce buffer overflow\n");
++			break;
++		}
++		val = __raw_readl(spdif_base_addr + SPDIF_REG_SRQ);
++		ctrl->qsub[ctrl->qpos++] = val >> 16;
++		ctrl->qsub[ctrl->qpos++] = val >> 8;
++		ctrl->qsub[ctrl->qpos++] = val;
++
++		break;
++
++	case INT_UQ_ERR:	/* read U/Q data and do buffer reset */
++		pr_debug("U/Q bit receive error\n");
++		val = __raw_readl(spdif_base_addr + SPDIF_REG_SQU);
++		val = __raw_readl(spdif_base_addr + SPDIF_REG_SRQ);
++		/* drop this U/Q buffer */
++		ctrl->ready_buf = 0;
++		ctrl->upos = 0;
++		ctrl->qpos = 0;
++		break;
++
++	case INT_UQ_SYNC:	/* U/Q buffer reset */
++		pr_debug("U/Q sync receive\n");
++
++		if (ctrl->qpos == 0)
++			break;
++		index = (ctrl->qpos - 1) / SPDIF_QSUB_SIZE;
++		/* set ready to this buffer */
++		ctrl->ready_buf = index + 1;
++		break;
++	}
++}
++
++/*
++ * SPDIF receiver found parity bit error interrupt handler
++ */
++static void spdif_irq_bit_error(unsigned int bit, void *devid)
++{
++	pr_debug("SPDIF interrupt parity bit error\n");
++}
++
++/*
++ * SPDIF receiver found illegal symbol interrupt handler
++ */
++static void spdif_irq_sym_error(unsigned int bit, void *devid)
++{
++	pr_debug("SPDIF interrupt symbol error\n");
++}
++
++/*
++ * SPDIF validity flag no good interrupt handler
++ */
++static void spdif_irq_valnogood(unsigned int bit, void *devid)
++{
++	pr_debug("SPDIF interrupt validate is not good\n");
++}
++
++/*
++ * SPDIF receive change in value of control channel
++ */
++static void spdif_irq_cnew(unsigned int bit, void *devid)
++{
++	pr_debug("SPDIF interrupt cstatus new\n");
++}
++
++static void spdif_softreset(void)
++{
++	unsigned long value = 1;
++	int cycle = 0;
++
++	__raw_writel(SCR_SOFT_RESET, spdif_base_addr + SPDIF_REG_SCR);
++
++	while (value && (cycle++ < 10))
++		value = __raw_readl(spdif_base_addr + SPDIF_REG_SCR) & 0x1000;
++}
++
++static int spdif_set_clk_accuracy(enum spdif_clk_accuracy level)
++{
++	unsigned long value;
++
++	value = __raw_readl(SPDIF_REG_STCSCL + spdif_base_addr) & 0xffffcf;
++	value |= (level << 4);
++	__raw_writel(value, SPDIF_REG_STCSCL + spdif_base_addr);
++
++	pr_debug("STCSCL: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_STCSCL));
++
++	return 0;
++}
++
++/*
++ * set SPDIF PhaseConfig register for rx clock
++ */
++static int spdif_set_rx_clksrc(enum spdif_clk_src clksrc,
++			       enum spdif_gainsel gainsel, int dpll_locked)
++{
++	unsigned long value;
++
++	if (clksrc > SPDIF_CLK_SRC5 || gainsel > GAINSEL_MULTI_3)
++		return 1;
++
++	if (dpll_locked)
++		value = clksrc;
++	else
++		value = clksrc + SRPC_CLKSRC_SEL_LOCKED;
++
++	value = (value << SRPC_CLKSRC_SEL_OFFSET) |
++		(gainsel << SRPC_GAINSEL_OFFSET);
++
++	__raw_writel(value, spdif_base_addr + SPDIF_REG_SRPC);
++
++	return 0;
++}
++
++/*
++ * Get RX data clock rate given the SPDIF bus_clk
++ */
++static int spdif_get_rxclk_rate(struct clk *bus_clk, enum spdif_gainsel gainsel)
++{
++	unsigned long freqmeas, phaseconf, busclk_freq = 0;
++	u64 tmpval64;
++	enum spdif_clk_src clksrc;
++
++	freqmeas = __raw_readl(spdif_base_addr + SPDIF_REG_SRFM);
++	phaseconf = __raw_readl(spdif_base_addr + SPDIF_REG_SRPC);
++
++	clksrc = (phaseconf >> SRPC_CLKSRC_SEL_OFFSET) & 0x0F;
++	if (clksrc < 5 && (phaseconf & SRPC_DPLL_LOCKED)) {
++		/* get bus clock from system */
++		busclk_freq = clk_get_rate(bus_clk);
++	}
++
++	/* FreqMeas_CLK = (BUS_CLK*FreqMeas[23:0])/2^10/GAINSEL/128 */
++	tmpval64 = (u64) busclk_freq * freqmeas;
++	do_div(tmpval64, gainsel_multi[gainsel]);
++	do_div(tmpval64, 128 * 1024);
++
++	pr_debug("FreqMeas:    %d\n", (int)freqmeas);
++	pr_debug("busclk_freq: %d\n", (int)busclk_freq);
++	pr_debug("rx rate:     %d\n", (int)tmpval64);
++
++	return (int)tmpval64;
++}
++
++static int spdif_set_sample_rate(int src_44100, int src_48000, int sample_rate)
++{
++	unsigned long cstatus, stc;
++	int ret = 0;
++
++	cstatus = __raw_readl(SPDIF_REG_STCSCL + spdif_base_addr) & 0xfffff0;
++	stc = __raw_readl(SPDIF_REG_STC + spdif_base_addr) & ~0x7FF;
++
++	switch (sample_rate) {
++	case 44100:
++		if (src_44100 < 0) {
++			pr_info("%s: no defined 44100 clk src\n", __func__);
++			ret = -1;
++		} else {
++			__raw_writel(cstatus, SPDIF_REG_STCSCL + spdif_base_addr);
++			stc |= (src_44100 << 8) | 0x07;
++			__raw_writel(stc, SPDIF_REG_STC + spdif_base_addr);
++			pr_debug("set sample rate to 44100\n");
++		}
++		break;
++	case 48000:
++		if (src_48000 < 0) {
++			pr_info("%s: no defined 48000 clk src\n", __func__);
++			ret = -1;
++		} else {
++			cstatus |= 0x04;
++			__raw_writel(cstatus, SPDIF_REG_STCSCL + spdif_base_addr);
++			stc |= (src_48000 << 8) | 0x07;
++			__raw_writel(stc, SPDIF_REG_STC + spdif_base_addr);
++			pr_debug("set sample rate to 48000\n");
++		}
++		break;
++	case 32000:
++		if (src_48000 < 0) {
++			pr_info("%s: no defined 48000 clk src\n", __func__);
++			ret = -1;
++		} else {
++			cstatus |= 0x0c;
++			__raw_writel(cstatus, SPDIF_REG_STCSCL + spdif_base_addr);
++			stc |= (src_48000 << 8) | 0x0b;
++			__raw_writel(stc, SPDIF_REG_STC + spdif_base_addr);
++			pr_debug("set sample rate to 32000\n");
++		}
++		break;
++	}
++
++	pr_debug("STCSCL: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_STCSCL));
++
++	return ret;
++}
++
++static int spdif_set_channel_status(int value, unsigned long reg)
++{
++	__raw_writel(value & 0xffffff, reg + spdif_base_addr);
++
++	return 0;
++}
++
++static unsigned int spdif_playback_rates[] = { 32000, 44100, 48000 };
++
++static unsigned int spdif_capture_rates[] = {
++	16000, 32000, 44100, 48000, 64000, 96000
++};
++
++static struct snd_pcm_hw_constraint_list hw_playback_rates_stereo = {
++	.count = ARRAY_SIZE(spdif_playback_rates),
++	.list = spdif_playback_rates,
++	.mask = 0,
++};
++
++static struct snd_pcm_hw_constraint_list hw_capture_rates_stereo = {
++	.count = ARRAY_SIZE(spdif_capture_rates),
++	.list = spdif_capture_rates,
++	.mask = 0,
++};
++
++static int mxc_spdif_playback_startup(struct snd_pcm_substream *substream,
++					       struct snd_soc_dai *dai)
++{
++	struct snd_soc_codec *codec = dai->codec;
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
++	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
++	int err;
++
++	if (!plat_data->spdif_tx)
++		return -EINVAL;
++
++	clk_enable(plat_data->spdif_clk);
++	clk_enable(plat_data->spdif_audio_clk);
++
++	err = snd_pcm_hw_constraint_list(runtime, 0,
++					 SNDRV_PCM_HW_PARAM_RATE,
++					 &hw_playback_rates_stereo);
++	if (err < 0)
++		goto failed;
++	err = snd_pcm_hw_constraint_integer(runtime,
++					    SNDRV_PCM_HW_PARAM_PERIODS);
++	if (err < 0)
++		goto failed;
++
++	return 0;
++failed:
++	clk_disable(plat_data->spdif_clk);
++	return err;
++}
++
++static int mxc_spdif_playback_prepare(struct snd_pcm_substream *substream,
++					  struct snd_soc_dai *dai)
++{
++	struct snd_soc_codec *codec = dai->codec;
++	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
++	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	unsigned int ch_status;
++	unsigned long regval;
++	int err;
++
++	if (!plat_data->spdif_tx)
++		return -EINVAL;
++
++	regval = __raw_readl(spdif_base_addr + SPDIF_REG_SCR);
++	regval &= 0xfc33e3;
++	regval &= ~SCR_LOW_POWER;
++	regval |= SCR_TXFIFO_AUTOSYNC | SCR_TXFIFO_NORMAL |
++	    SCR_TXSEL_NORMAL | SCR_USRC_SEL_CHIP | (2 << SCR_TXFIFO_ESEL_BIT);
++	__raw_writel(regval, SPDIF_REG_SCR + spdif_base_addr);
++
++	/* Default clock source from EXTAL, divider by 8, generate 44.1kHz
++	   sample rate */
++	__raw_writel(0x07, SPDIF_REG_STC + spdif_base_addr);
++
++	ch_status = ((mxc_spdif_control.ch_status[2] << 16) |
++		     (mxc_spdif_control.ch_status[1] << 8) |
++		     mxc_spdif_control.ch_status[0]);
++	spdif_set_channel_status(ch_status, SPDIF_REG_STCSCH);
++	ch_status = mxc_spdif_control.ch_status[3];
++	spdif_set_channel_status(ch_status, SPDIF_REG_STCSCL);
++	spdif_intr_enable(INT_TXFIFO_RESYNC, 1);
++	err = spdif_set_sample_rate(plat_data->spdif_clk_44100,
++				    plat_data->spdif_clk_48000,
++				    runtime->rate);
++	if (err < 0) {
++		pr_info("%s - err < 0\n", __func__);
++		return err;
++	}
++	spdif_set_clk_accuracy(SPDIF_CLK_ACCURACY_LEV2);
++
++	pr_debug("SCR: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_SCR));
++	pr_debug("SIE: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_SIE));
++	pr_debug("STC: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_STC));
++
++	pr_debug("STCSCH: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_STCSCH));
++	pr_debug("STCSCL: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_STCSCL));
++
++	regval = __raw_readl(SPDIF_REG_SCR + spdif_base_addr);
++	regval |= SCR_DMA_TX_EN;
++	__raw_writel(regval, SPDIF_REG_SCR + spdif_base_addr);
++
++	dumpregs();
++	return 0;
++}
++
++static int mxc_spdif_playback_shutdown(struct snd_pcm_substream *substream,
++						struct snd_soc_dai *dai)
++{
++	struct snd_soc_codec *codec = dai->codec;
++	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
++	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
++	unsigned long regval;
++
++	if (!plat_data->spdif_tx)
++		return -EINVAL;
++
++	dumpregs();
++	pr_debug("SIS: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_SIS));
++
++	spdif_intr_status();
++	spdif_intr_enable(INT_TXFIFO_RESYNC, 0);
++
++	regval = __raw_readl(SPDIF_REG_SCR + spdif_base_addr) & 0xffffe3;
++	regval |= SCR_TXSEL_OFF;
++	__raw_writel(regval, SPDIF_REG_SCR + spdif_base_addr);
++	regval = __raw_readl(SPDIF_REG_STC + spdif_base_addr) & ~0x7FF;
++	regval |= (0x7 << STC_TXCLK_SRC_OFFSET);
++	__raw_writel(regval, SPDIF_REG_STC + spdif_base_addr);
++
++	regval = __raw_readl(SPDIF_REG_SCR + spdif_base_addr);
++	regval &= ~SCR_DMA_TX_EN;
++	regval |= SCR_LOW_POWER;
++	__raw_writel(regval, SPDIF_REG_SCR + spdif_base_addr);
++
++	clk_disable(plat_data->spdif_audio_clk);
++	clk_disable(plat_data->spdif_clk);
++
++	return 0;
++}
++
++static int mxc_spdif_capture_startup(struct snd_pcm_substream *substream,
++					      struct snd_soc_dai *dai)
++{
++	struct snd_soc_codec *codec = dai->codec;
++	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
++	int err = 0;
++
++	if (!plat_data->spdif_rx)
++		return -EINVAL;
++
++	/* enable rx bus clock */
++	clk_enable(plat_data->spdif_clk);
++
++	/* set hw param constraints */
++	err = snd_pcm_hw_constraint_list(runtime, 0,
++					 SNDRV_PCM_HW_PARAM_RATE,
++					 &hw_capture_rates_stereo);
++	if (err < 0)
++		goto failed;
++
++	err = snd_pcm_hw_constraint_integer(runtime,
++					    SNDRV_PCM_HW_PARAM_PERIODS);
++	if (err < 0)
++		goto failed;
++
++	/* enable spdif dpll lock interrupt */
++	spdif_intr_enable(INT_DPLL_LOCKED, 1);
++
++	return 0;
++
++failed:
++	clk_disable(plat_data->spdif_clk);
++	return err;
++}
++
++static int mxc_spdif_capture_prepare(struct snd_pcm_substream *substream,
++					 struct snd_soc_dai *dai)
++{
++	struct snd_soc_codec *codec = dai->codec;
++	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
++	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
++	unsigned long regval;
++
++	if (!plat_data->spdif_rx)
++		return -EINVAL;
++
++	regval = __raw_readl(spdif_base_addr + SPDIF_REG_SCR);
++	/*
++	 * initial and reset SPDIF configuration:
++	 * RxFIFO off
++	 * RxFIFO sel to 8 sample
++	 * Autosync
++	 * Valid bit set
++	 */
++	regval &= ~(SCR_RXFIFO_OFF | SCR_RXFIFO_CTL_ZERO | SCR_LOW_POWER);
++	regval |= (2 << SCR_RXFIFO_FSEL_BIT) | SCR_RXFIFO_AUTOSYNC;
++	__raw_writel(regval, spdif_base_addr + SPDIF_REG_SCR);
++
++	/* enable interrupts, include DPLL lock */
++	spdif_intr_enable(INT_SYM_ERR | INT_BIT_ERR | INT_URX_FUL |
++			  INT_URX_OV | INT_QRX_FUL | INT_QRX_OV |
++			  INT_UQ_SYNC | INT_UQ_ERR | INT_RX_RESYNC |
++			  INT_LOSS_LOCK, 1);
++
++	/* setup rx clock source */
++	spdif_set_rx_clksrc(plat_data->spdif_clkid, SPDIF_DEFAULT_GAINSEL, 1);
++
++	regval = __raw_readl(SPDIF_REG_SCR + spdif_base_addr);
++	regval |= SCR_DMA_RX_EN;
++	__raw_writel(regval, SPDIF_REG_SCR + spdif_base_addr);
++
++	/* Debug: dump registers */
++	pr_debug("SCR: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_SCR));
++	pr_debug("SIE: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_SIE));
++	pr_debug("SRPC: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_SRPC));
++	pr_debug("FreqMeas: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_SRFM));
++
++	return 0;
++}
++
++static int mxc_spdif_capture_shutdown(struct snd_pcm_substream *substream,
++					       struct snd_soc_dai *dai)
++{
++	struct snd_soc_codec *codec = dai->codec;
++	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
++	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
++	unsigned long regval;
++
++	if (!plat_data->spdif_rx)
++		return -EINVAL;
++
++	pr_debug("SIS: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_SIS));
++	pr_debug("SRPC: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_SRPC));
++	pr_debug("FreqMeas: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_SRFM));
++
++	spdif_intr_enable(INT_DPLL_LOCKED | INT_SYM_ERR | INT_BIT_ERR |
++			  INT_URX_FUL | INT_URX_OV | INT_QRX_FUL | INT_QRX_OV |
++			  INT_UQ_SYNC | INT_UQ_ERR | INT_RX_RESYNC |
++			  INT_LOSS_LOCK, 0);
++
++	regval = __raw_readl(SPDIF_REG_SCR + spdif_base_addr);
++	regval &= SCR_DMA_RX_EN;
++	__raw_writel(regval, SPDIF_REG_SCR + spdif_base_addr);
++
++	/* turn off RX fifo, disable dma and autosync */
++	regval = __raw_readl(spdif_base_addr + SPDIF_REG_SCR);
++	regval |= SCR_RXFIFO_OFF | SCR_RXFIFO_CTL_ZERO | SCR_LOW_POWER;
++	regval &= ~(SCR_DMA_RX_EN | SCR_RXFIFO_AUTOSYNC);
++	__raw_writel(regval, spdif_base_addr + SPDIF_REG_SCR);
++
++	clk_disable(plat_data->spdif_clk);
++
++	return 0;
++}
++
++/*
++ * MXC SPDIF IEC958 controller(mixer) functions
++ *
++ *	Channel status get/put control
++ *	User bit value get/put control
++ *	Valid bit value get control
++ *	DPLL lock status get control
++ *	User bit sync mode selection control
++ */
++static int mxc_pb_spdif_info(struct snd_kcontrol *kcontrol,
++			     struct snd_ctl_elem_info *uinfo)
++{
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_IEC958;
++	uinfo->count = 1;
++	return 0;
++}
++
++static int mxc_pb_spdif_get(struct snd_kcontrol *kcontrol,
++			    struct snd_ctl_elem_value *uvalue)
++{
++	uvalue->value.iec958.status[0] = mxc_spdif_control.ch_status[0];
++	uvalue->value.iec958.status[1] = mxc_spdif_control.ch_status[1];
++	uvalue->value.iec958.status[2] = mxc_spdif_control.ch_status[2];
++	uvalue->value.iec958.status[3] = mxc_spdif_control.ch_status[3];
++	return 0;
++}
++
++static int mxc_pb_spdif_put(struct snd_kcontrol *kcontrol,
++			    struct snd_ctl_elem_value *uvalue)
++{
++	unsigned int ch_status;
++	mxc_spdif_control.ch_status[0] = uvalue->value.iec958.status[0];
++	mxc_spdif_control.ch_status[1] = uvalue->value.iec958.status[1];
++	mxc_spdif_control.ch_status[2] = uvalue->value.iec958.status[2];
++	mxc_spdif_control.ch_status[3] = uvalue->value.iec958.status[3];
++	ch_status =
++	    ((mxc_spdif_control.ch_status[2] << 16) |
++	     (mxc_spdif_control.ch_status[1] << 8) |
++	     mxc_spdif_control.ch_status[0]);
++	spdif_set_channel_status(ch_status, SPDIF_REG_STCSCH);
++	ch_status = mxc_spdif_control.ch_status[3];
++	spdif_set_channel_status(ch_status, SPDIF_REG_STCSCL);
++
++	pr_debug("STCSCH: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_STCSCH));
++	pr_debug("STCSCL: 0x%08x\n", __raw_readl(spdif_base_addr + SPDIF_REG_STCSCL));
++
++	return 0;
++}
++
++static int mxc_spdif_info(struct snd_kcontrol *kcontrol,
++			  struct snd_ctl_elem_info *uinfo)
++{
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_IEC958;
++	uinfo->count = 1;
++	return 0;
++}
++
++/*
++ * Get channel status from SPDIF_RX_CCHAN register
++ */
++static int mxc_spdif_capture_get(struct snd_kcontrol *kcontrol,
++				 struct snd_ctl_elem_value *ucontrol)
++{
++	unsigned int cstatus;
++
++	if (!(__raw_readl(spdif_base_addr + SPDIF_REG_SIS) & INT_CNEW))
++		return -EAGAIN;
++
++	cstatus = __raw_readl(spdif_base_addr + SPDIF_REG_SRCSLH);
++	ucontrol->value.iec958.status[0] = (cstatus >> 16) & 0xFF;
++	ucontrol->value.iec958.status[1] = (cstatus >> 8) & 0xFF;
++	ucontrol->value.iec958.status[2] = cstatus & 0xFF;
++	cstatus = __raw_readl(spdif_base_addr + SPDIF_REG_SRCSLL);
++	ucontrol->value.iec958.status[3] = (cstatus >> 16) & 0xFF;
++	ucontrol->value.iec958.status[4] = (cstatus >> 8) & 0xFF;
++	ucontrol->value.iec958.status[5] = cstatus & 0xFF;
++
++	/* clear intr */
++	__raw_writel(INT_CNEW, spdif_base_addr + SPDIF_REG_SIC);
++
++	return 0;
++}
++
++/*
++ * Get User bits (subcode) from chip value which readed out
++ * in UChannel register.
++ */
++static int mxc_spdif_subcode_get(struct snd_kcontrol *kcontrol,
++				 struct snd_ctl_elem_value *ucontrol)
++{
++	unsigned long flags;
++	int ret = 0;
++
++	spin_lock_irqsave(&mxc_spdif_control.ctl_lock, flags);
++	if (mxc_spdif_control.ready_buf) {
++		memcpy(&ucontrol->value.iec958.subcode[0],
++		       &mxc_spdif_control.subcode[(mxc_spdif_control.ready_buf -
++						   1) * SPDIF_UBITS_SIZE],
++		       SPDIF_UBITS_SIZE);
++	} else {
++		ret = -EAGAIN;
++	}
++	spin_unlock_irqrestore(&mxc_spdif_control.ctl_lock, flags);
++
++	return ret;
++}
++
++/*
++ * Q-subcode infomation.
++ * the byte size is SPDIF_UBITS_SIZE/8
++ */
++static int mxc_spdif_qinfo(struct snd_kcontrol *kcontrol,
++			   struct snd_ctl_elem_info *uinfo)
++{
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_BYTES;
++	uinfo->count = SPDIF_QSUB_SIZE;
++	return 0;
++}
++
++/*
++ * Get Q subcode from chip value which readed out
++ * in QChannel register.
++ */
++static int mxc_spdif_qget(struct snd_kcontrol *kcontrol,
++			  struct snd_ctl_elem_value *ucontrol)
++{
++	unsigned long flags;
++	int ret = 0;
++
++	spin_lock_irqsave(&mxc_spdif_control.ctl_lock, flags);
++	if (mxc_spdif_control.ready_buf) {
++		memcpy(&ucontrol->value.bytes.data[0],
++		       &mxc_spdif_control.qsub[(mxc_spdif_control.ready_buf -
++						1) * SPDIF_QSUB_SIZE],
++		       SPDIF_QSUB_SIZE);
++	} else {
++		ret = -EAGAIN;
++	}
++	spin_unlock_irqrestore(&mxc_spdif_control.ctl_lock, flags);
++
++	return ret;
++}
++
++/*
++ * Valid bit infomation.
++ */
++static int mxc_spdif_vbit_info(struct snd_kcontrol *kcontrol,
++			       struct snd_ctl_elem_info *uinfo)
++{
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
++	uinfo->count = 1;
++	uinfo->value.integer.min = 0;
++	uinfo->value.integer.max = 1;
++	return 0;
++}
++
++/*
++ * Get valid good bit from interrupt status register.
++ */
++static int mxc_spdif_vbit_get(struct snd_kcontrol *kcontrol,
++			      struct snd_ctl_elem_value *ucontrol)
++{
++	unsigned int int_val;
++
++	int_val = __raw_readl(spdif_base_addr + SPDIF_REG_SIS);
++	ucontrol->value.integer.value[0] = (int_val & INT_VAL_NOGOOD) != 0;
++	__raw_writel(INT_VAL_NOGOOD, spdif_base_addr + SPDIF_REG_SIC);
++
++	return 0;
++}
++
++/*
++ * DPLL lock infomation.
++ */
++static int mxc_spdif_rxrate_info(struct snd_kcontrol *kcontrol,
++				 struct snd_ctl_elem_info *uinfo)
++{
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
++	uinfo->count = 1;
++	uinfo->value.integer.min = 16000;
++	uinfo->value.integer.max = 96000;
++	return 0;
++}
++
++/*
++ * Get DPLL lock or not info from stable interrupt status register.
++ * User application must use this control to get locked,
++ * then can do next PCM operation
++ */
++static int mxc_spdif_rxrate_get(struct snd_kcontrol *kcontrol,
++				struct snd_ctl_elem_value *ucontrol)
++{
++	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
++	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
++
++	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
++
++	if (atomic_read(&spdif_priv->dpll_locked)) {
++		ucontrol->value.integer.value[0] =
++		    spdif_get_rxclk_rate(plat_data->spdif_clk,
++					 SPDIF_DEFAULT_GAINSEL);
++	} else {
++		ucontrol->value.integer.value[0] = 0;
++	}
++	return 0;
++}
++
++/*
++ * User bit sync mode info
++ */
++static int mxc_spdif_usync_info(struct snd_kcontrol *kcontrol,
++				struct snd_ctl_elem_info *uinfo)
++{
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_BOOLEAN;
++	uinfo->count = 1;
++	uinfo->value.integer.min = 0;
++	uinfo->value.integer.max = 1;
++	return 0;
++}
++
++/*
++ * User bit sync mode:
++ * 1 CD User channel subcode
++ * 0 Non-CD data
++ */
++static int mxc_spdif_usync_get(struct snd_kcontrol *kcontrol,
++			       struct snd_ctl_elem_value *ucontrol)
++{
++	unsigned int int_val;
++	int_val = __raw_readl(spdif_base_addr + SPDIF_REG_SRCD);
++	ucontrol->value.integer.value[0] = (int_val & SRCD_CD_USER) != 0;
++	return 0;
++}
++
++/*
++ * User bit sync mode:
++ * 1 CD User channel subcode
++ * 0 Non-CD data
++ */
++static int mxc_spdif_usync_put(struct snd_kcontrol *kcontrol,
++				   struct snd_ctl_elem_value *ucontrol)
++{
++	unsigned int int_val;
++
++	int_val = ucontrol->value.integer.value[0] << SRCD_CD_USER_OFFSET;
++	__raw_writel(int_val, spdif_base_addr + SPDIF_REG_SRCD);
++	return 0;
++}
++
++/*
++ * MXC SPDIF IEC958 controller defines
++ */
++static struct snd_kcontrol_new mxc_spdif_ctrls[] = {
++	/* status cchanel controller */
++	{
++	 .iface = SNDRV_CTL_ELEM_IFACE_MIXER,
++	 .name = SNDRV_CTL_NAME_IEC958("", PLAYBACK, DEFAULT),
++	 .access = SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_WRITE |
++	 SNDRV_CTL_ELEM_ACCESS_VOLATILE,
++	 .info = mxc_pb_spdif_info,
++	 .get = mxc_pb_spdif_get,
++	 .put = mxc_pb_spdif_put,
++	 },
++	{
++	 .iface = SNDRV_CTL_ELEM_IFACE_PCM,
++	 .name = SNDRV_CTL_NAME_IEC958("", CAPTURE, DEFAULT),
++	 .access = SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE,
++	 .info = mxc_spdif_info,
++	 .get = mxc_spdif_capture_get,
++	 },
++	/* user bits controller */
++	{
++	 .iface = SNDRV_CTL_ELEM_IFACE_PCM,
++	 .name = "IEC958 Subcode Capture Default",
++	 .access = SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE,
++	 .info = mxc_spdif_info,
++	 .get = mxc_spdif_subcode_get,
++	 },
++	{
++	 .iface = SNDRV_CTL_ELEM_IFACE_PCM,
++	 .name = "IEC958 Q-subcode Capture Default",
++	 .access = SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE,
++	 .info = mxc_spdif_qinfo,
++	 .get = mxc_spdif_qget,
++	 },
++	/* valid bit error controller */
++	{
++	 .iface = SNDRV_CTL_ELEM_IFACE_PCM,
++	 .name = "IEC958 V-Bit Errors",
++	 .access = SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE,
++	 .info = mxc_spdif_vbit_info,
++	 .get = mxc_spdif_vbit_get,
++	 },
++	/* DPLL lock info get controller */
++	{
++	 .iface = SNDRV_CTL_ELEM_IFACE_PCM,
++	 .name = "RX Sample Rate",
++	 .access = SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_VOLATILE,
++	 .info = mxc_spdif_rxrate_info,
++	 .get = mxc_spdif_rxrate_get,
++	 },
++	/* User bit sync mode set/get controller */
++	{
++	 .iface = SNDRV_CTL_ELEM_IFACE_PCM,
++	 .name = "IEC958 USyncMode CDText",
++	 .access =
++	 SNDRV_CTL_ELEM_ACCESS_READ | SNDRV_CTL_ELEM_ACCESS_WRITE |
++	 SNDRV_CTL_ELEM_ACCESS_VOLATILE,
++	 .info = mxc_spdif_usync_info,
++	 .get = mxc_spdif_usync_get,
++	 .put = mxc_spdif_usync_put,
++	 },
++};
++
++static int mxc_spdif_startup(struct snd_pcm_substream *substream,
++			     struct snd_soc_dai *dai)
++{
++	int ret;
++
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++		ret = mxc_spdif_playback_startup(substream, dai);
++	else
++		ret = mxc_spdif_capture_startup(substream, dai);
++
++	return ret;
++}
++
++static void mxc_spdif_shutdown(struct snd_pcm_substream *substream,
++			       struct snd_soc_dai *dai)
++{
++	int ret;
++
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++		ret = mxc_spdif_playback_shutdown(substream, dai);
++	else
++		ret = mxc_spdif_capture_shutdown(substream, dai);
++}
++
++static int mxc_spdif_prepare(struct snd_pcm_substream *substream,
++			     struct snd_soc_dai *dai)
++{
++	int ret;
++
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++		ret = mxc_spdif_playback_prepare(substream, dai);
++	else
++		ret = mxc_spdif_capture_prepare(substream, dai);
++
++	return ret;
++}
++
++struct snd_soc_dai_ops mxc_spdif_codec_dai_ops = {
++	.startup = mxc_spdif_startup,
++	.prepare = mxc_spdif_prepare,
++	.shutdown = mxc_spdif_shutdown,
++};
++
++struct snd_soc_dai_driver mxc_spdif_codec_dai = {
++	.name = "mxc-spdif",
++	.ops = &mxc_spdif_codec_dai_ops,
++};
++
++static int mxc_spdif_soc_probe(struct snd_soc_codec *codec)
++{
++	snd_soc_add_controls(codec, mxc_spdif_ctrls,
++			     ARRAY_SIZE(mxc_spdif_ctrls));
++	return 0;
++}
++
++static int mxc_spdif_soc_remove(struct snd_soc_codec *codec)
++{
++	/* all done in mxc_spdif_remove */
++	return 0;
++}
++
++#ifdef CONFIG_PM
++static int mxc_spdif_soc_suspend(struct snd_soc_codec *codec,
++				 pm_message_t state)
++{
++	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
++	struct mxc_spdif_platform_data *plat_data;
++
++	if (codec == NULL)
++		return -EINVAL;
++
++	plat_data = spdif_priv->plat_data;
++	clk_disable(plat_data->spdif_clk);
++	clk_disable(plat_data->spdif_core_clk);
++
++	return 0;
++}
++
++static int mxc_spdif_soc_resume(struct snd_soc_codec *codec)
++{
++	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
++	struct mxc_spdif_platform_data *plat_data;
++
++	if (codec == NULL)
++		return -EINVAL;
++
++	plat_data = spdif_priv->plat_data;
++
++	clk_enable(plat_data->spdif_core_clk);
++	clk_enable(plat_data->spdif_clk);
++	spdif_softreset();
++
++	return 0;
++}
++#else
++#define mxc_spdif_soc_suspend	NULL
++#define mxc_spdif_soc_resume	NULL
++#endif /* CONFIG_PM */
++
++struct snd_soc_codec_driver soc_codec_dev_spdif = {
++	.probe = mxc_spdif_soc_probe,
++	.remove = mxc_spdif_soc_remove,
++	.suspend = mxc_spdif_soc_suspend,
++	.resume = mxc_spdif_soc_resume,
++};
++
++static int __devinit mxc_spdif_probe(struct platform_device *pdev)
++{
++	struct mxc_spdif_platform_data *plat_data =
++	    (struct mxc_spdif_platform_data *)pdev->dev.platform_data;
++	struct resource *res;
++	struct mxc_spdif_priv *spdif_priv;
++	int err, irq;
++	int ret = 0;
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!res)
++		return -ENOENT;
++
++	dev_info(&pdev->dev, "MXC SPDIF Audio\n");
++
++	spdif_priv = kzalloc(sizeof(struct mxc_spdif_priv), GFP_KERNEL);
++	if (spdif_priv == NULL)
++		return -ENOMEM;
++
++	if (plat_data->spdif_tx) {
++		mxc_spdif_codec_dai.playback.stream_name = "Playback";
++		mxc_spdif_codec_dai.playback.channels_min = 2;
++		mxc_spdif_codec_dai.playback.channels_max = 2;
++		mxc_spdif_codec_dai.playback.rates = MXC_SPDIF_RATES_PLAYBACK;
++		mxc_spdif_codec_dai.playback.formats = MXC_SPDIF_FORMATS_PLAYBACK;
++	}
++
++	if (plat_data->spdif_rx) {
++		mxc_spdif_codec_dai.capture.stream_name = "Capture";
++		mxc_spdif_codec_dai.capture.channels_min = 2;
++		mxc_spdif_codec_dai.capture.channels_max = 2;
++		mxc_spdif_codec_dai.capture.rates = MXC_SPDIF_RATES_CAPTURE;
++		mxc_spdif_codec_dai.capture.formats = MXC_SPDIF_FORMATS_CAPTURE;
++	}
++
++	platform_set_drvdata(pdev, spdif_priv);
++
++	spdif_priv->reg_phys_base = res->start;
++	spdif_priv->reg_base = ioremap(res->start, res->end - res->start + 1);
++	spdif_priv->plat_data = plat_data;
++
++	spdif_base_addr = (unsigned long)spdif_priv->reg_base;
++
++	/* initial spinlock for control data */
++	spin_lock_init(&mxc_spdif_control.ctl_lock);
++
++	if (plat_data->spdif_tx) {
++		/* init tx channel status default value */
++		mxc_spdif_control.ch_status[0] =
++		    IEC958_AES0_CON_NOT_COPYRIGHT |
++		    IEC958_AES0_CON_EMPHASIS_5015;
++		mxc_spdif_control.ch_status[1] = IEC958_AES1_CON_DIGDIGCONV_ID;
++		mxc_spdif_control.ch_status[2] = 0x00;
++		mxc_spdif_control.ch_status[3] =
++		    IEC958_AES3_CON_FS_44100 | IEC958_AES3_CON_CLOCK_1000PPM;
++	}
++
++	plat_data->spdif_clk = clk_get(&pdev->dev, NULL);
++
++	atomic_set(&spdif_priv->dpll_locked, 0);
++
++	/* spdif_xtal_clk */
++	clk_enable(plat_data->spdif_core_clk);
++	spdif_softreset();
++
++	/* disable all the interrupts */
++	spdif_intr_enable(0xffffff, 0);
++
++	/* spdif interrupt register and disable */
++	irq = platform_get_irq(pdev, 0);
++	if ((irq <= 0) || request_irq(irq, spdif_isr, 0, "spdif", spdif_priv)) {
++		pr_err("MXC spdif: failed to request irq\n");
++		err = -EBUSY;
++		goto card_err;
++	}
++
++	ret = snd_soc_register_codec(&pdev->dev, &soc_codec_dev_spdif,
++				     &mxc_spdif_codec_dai, 1);
++
++	if (ret) {
++		dev_err(&pdev->dev, "failed to register codec\n");
++		goto card_err;
++	}
++
++	dumpregs();
++
++	return 0;
++
++card_err:
++	clk_disable(plat_data->spdif_clk);
++	clk_put(plat_data->spdif_clk);
++	clk_disable(plat_data->spdif_core_clk);
++
++	platform_set_drvdata(pdev, NULL);
++	kfree(spdif_priv);
++
++	return ret;
++}
++
++static int __devexit mxc_spdif_remove(struct platform_device *pdev)
++{
++	struct mxc_spdif_priv *spdif_priv = platform_get_drvdata(pdev);
++	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
++
++	snd_soc_unregister_codec(&pdev->dev);
++
++	clk_disable(plat_data->spdif_clk);
++	clk_put(plat_data->spdif_clk);
++	clk_disable(plat_data->spdif_core_clk);
++
++	platform_set_drvdata(pdev, NULL);
++	kfree(spdif_priv);
++
++	return 0;
++}
++
++struct platform_driver mxc_spdif_driver = {
++	.driver = {
++		   .name = "mxc_spdif",
++		   .owner = THIS_MODULE,
++		   },
++	.probe = mxc_spdif_probe,
++	.remove = __devexit_p(mxc_spdif_remove),
++};
++
++static int __init mxc_spdif_init(void)
++{
++	return platform_driver_register(&mxc_spdif_driver);
++}
++
++static void __exit mxc_spdif_exit(void)
++{
++	return platform_driver_unregister(&mxc_spdif_driver);
++}
++
++module_init(mxc_spdif_init);
++module_exit(mxc_spdif_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("MXC SPDIF transmitter");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/codecs/mxc_spdif.h b/sound/soc/codecs/mxc_spdif.h
+new file mode 100644
+index 0000000..7eb9835
+--- /dev/null
++++ b/sound/soc/codecs/mxc_spdif.h
+@@ -0,0 +1,164 @@
++/*
++ * ALSA SoC MXC SPDIF codec driver
++ *
++ * Copyright (C) 2008-2011 Freescale Semiconductor, Inc.
++ *
++ * Based on stmp3xxx_spdif.h by:
++ * Vladimir Barinov <vbarinov@embeddedalley.com>
++ *
++ * Copyright 2008 SigmaTel, Inc
++ * Copyright 2008 Embedded Alley Solutions, Inc
++ * Copyright 2008-2009 Freescale Semiconductor, Inc.
++ *
++ * This file is licensed under the terms of the GNU General Public License
++ * version 2.  This program  is licensed "as is" without any warranty of any
++ * kind, whether express or implied.
++ */
++#ifndef __MXC_SPDIF_CODEC_H
++#define __MXC_SPDIF_CODEC_H
++
++#define SPDIF_REG_SCR		0x00
++#define SPDIF_REG_SRCD		0x04
++#define SPDIF_REG_SRPC		0x08
++#define SPDIF_REG_SIE		0x0C
++#define SPDIF_REG_SIS		0x10
++#define SPDIF_REG_SIC		0x10
++#define SPDIF_REG_SRL		0x14
++#define SPDIF_REG_SRR		0x18
++#define SPDIF_REG_SRCSLH	0x1C
++#define SPDIF_REG_SRCSLL	0x20
++#define SPDIF_REG_SQU		0x24
++#define SPDIF_REG_SRQ		0x28
++#define SPDIF_REG_STL		0x2C
++#define SPDIF_REG_STR		0x30
++#define SPDIF_REG_STCSCH	0x34
++#define SPDIF_REG_STCSCL	0x38
++#define SPDIF_REG_SRFM		0x44
++#define SPDIF_REG_STC		0x50
++
++/* SPDIF Configuration register */
++#define SCR_RXFIFO_CTL_ZERO	(1 << 23)
++#define SCR_RXFIFO_OFF		(1 << 22)
++#define SCR_RXFIFO_RST		(1 << 21)
++#define SCR_RXFIFO_FSEL_BIT	(19)
++#define SCR_RXFIFO_FSEL_MASK	(0x3 << SCR_RXFIFO_FSEL_BIT)
++#define SCR_RXFIFO_AUTOSYNC	(1 << 18)
++#define SCR_TXFIFO_AUTOSYNC	(1 << 17)
++#define SCR_TXFIFO_ESEL_BIT	(15)
++#define SCR_TXFIFO_ESEL_MASK	(0x3 << SCR_TXFIFO_FSEL_BIT)
++#define SCR_LOW_POWER		(1 << 13)
++#define SCR_SOFT_RESET		(1 << 12)
++#define SCR_TXFIFO_ZERO		(0 << 10)
++#define SCR_TXFIFO_NORMAL	(1 << 10)
++#define SCR_TXFIFO_ONESAMPLE	(1 << 11)
++#define SCR_DMA_RX_EN		(1 << 9)
++#define SCR_DMA_TX_EN		(1 << 8)
++#define SCR_VAL_CLEAR		(1 << 5)
++#define SCR_TXSEL_OFF		(0 << 2)
++#define SCR_TXSEL_RX		(1 << 2)
++#define SCR_TXSEL_NORMAL	(0x5 << 2)
++#define SCR_USRC_SEL_NONE	(0x0)
++#define SCR_USRC_SEL_RECV	(0x1)
++#define SCR_USRC_SEL_CHIP	(0x3)
++
++/* SPDIF CDText control */
++#define SRCD_CD_USER_OFFSET	1
++#define SRCD_CD_USER		(1 << SRCD_CD_USER_OFFSET)
++
++/* SPDIF Phase Configuration register */
++#define SRPC_DPLL_LOCKED	(1 << 6)
++#define SRPC_CLKSRC_SEL_OFFSET	7
++#define SRPC_CLKSRC_SEL_LOCKED	5
++/* gain sel */
++#define SRPC_GAINSEL_OFFSET	3
++
++enum spdif_gainsel {
++	GAINSEL_MULTI_24 = 0,
++	GAINSEL_MULTI_16,
++	GAINSEL_MULTI_12,
++	GAINSEL_MULTI_8,
++	GAINSEL_MULTI_6,
++	GAINSEL_MULTI_4,
++	GAINSEL_MULTI_3,
++	GAINSEL_MULTI_MAX,
++};
++
++#define SPDIF_DEFAULT_GAINSEL	GAINSEL_MULTI_8
++
++/* SPDIF interrupt mask define */
++#define INT_DPLL_LOCKED		(1 << 20)
++#define INT_TXFIFO_UNOV		(1 << 19)
++#define INT_TXFIFO_RESYNC	(1 << 18)
++#define INT_CNEW		(1 << 17)
++#define INT_VAL_NOGOOD		(1 << 16)
++#define INT_SYM_ERR		(1 << 15)
++#define INT_BIT_ERR		(1 << 14)
++#define INT_URX_FUL		(1 << 10)
++#define INT_URX_OV		(1 << 9)
++#define INT_QRX_FUL		(1 << 8)
++#define INT_QRX_OV		(1 << 7)
++#define INT_UQ_SYNC		(1 << 6)
++#define INT_UQ_ERR		(1 << 5)
++#define INT_RX_UNOV		(1 << 4)
++#define INT_RX_RESYNC		(1 << 3)
++#define INT_LOSS_LOCK		(1 << 2)
++#define INT_TX_EMPTY		(1 << 1)
++#define INT_RXFIFO_FUL		(1 << 0)
++
++/* SPDIF Clock register */
++#define STC_SYSCLK_DIV_OFFSET	11
++#define STC_TXCLK_SRC_OFFSET	8
++#define STC_TXCLK_DIV_OFFSET	0
++
++#define SPDIF_CSTATUS_BYTE	6
++#define SPDIF_UBITS_SIZE	96
++#define SPDIF_QSUB_SIZE		(SPDIF_UBITS_SIZE/8)
++
++enum spdif_clk_accuracy {
++	SPDIF_CLK_ACCURACY_LEV2 = 0,
++	SPDIF_CLK_ACCURACY_LEV1 = 2,
++	SPDIF_CLK_ACCURACY_LEV3 = 1,
++	SPDIF_CLK_ACCURACY_RESV = 3
++};
++
++/* SPDIF clock source */
++enum spdif_clk_src {
++	SPDIF_CLK_SRC1 = 0,
++	SPDIF_CLK_SRC2,
++	SPDIF_CLK_SRC3,
++	SPDIF_CLK_SRC4,
++	SPDIF_CLK_SRC5,
++};
++
++enum spdif_max_wdl {
++	SPDIF_MAX_WDL_20,
++	SPDIF_MAX_WDL_24
++};
++
++enum spdif_wdl {
++	SPDIF_WDL_DEFAULT = 0,
++	SPDIF_WDL_FIFTH = 4,
++	SPDIF_WDL_FOURTH = 3,
++	SPDIF_WDL_THIRD = 2,
++	SPDIF_WDL_SECOND = 1,
++	SPDIF_WDL_MAX = 5
++};
++
++#define MXC_SPDIF_RATES_PLAYBACK	(SNDRV_PCM_RATE_32000 |	\
++					 SNDRV_PCM_RATE_44100 |	\
++					 SNDRV_PCM_RATE_48000)
++
++#define MXC_SPDIF_RATES_CAPTURE		(SNDRV_PCM_RATE_16000 | \
++					 SNDRV_PCM_RATE_32000 |	\
++					 SNDRV_PCM_RATE_44100 | \
++					 SNDRV_PCM_RATE_48000 |	\
++					 SNDRV_PCM_RATE_64000 | \
++					 SNDRV_PCM_RATE_96000)
++
++#define MXC_SPDIF_FORMATS_PLAYBACK	(SNDRV_PCM_FMTBIT_S16_LE | \
++					 SNDRV_PCM_FMTBIT_S20_3LE | \
++					 SNDRV_PCM_FMTBIT_S24_LE)
++
++#define MXC_SPDIF_FORMATS_CAPTURE	(SNDRV_PCM_FMTBIT_S24_LE)
++
++#endif /* __MXC_SPDIF_CODEC_H */
+diff --git a/sound/soc/imx/Kconfig b/sound/soc/imx/Kconfig
+index 1b1206f..1bf9702 100644
+--- a/sound/soc/imx/Kconfig
++++ b/sound/soc/imx/Kconfig
+@@ -17,6 +17,9 @@ config SND_MXC_SOC_FIQ
+ config SND_MXC_SOC_MX2
+ 	tristate
+ 
++config SND_MXC_SOC_SPDIF_DAI
++	tristate
++
+ config SND_MXC_SOC_WM1133_EV1
+ 	tristate "Audio on the the i.MX31ADS with WM1133-EV1 fitted"
+ 	depends on MACH_MX31ADS_WM1133_EV1 && EXPERIMENTAL
+@@ -65,4 +68,14 @@ config SND_SOC_EUKREA_TLV320
+ 	  Enable I2S based access to the TLV320AIC23B codec attached
+ 	  to the SSI interface
+ 
++config SND_SOC_IMX_SPDIF
++	tristate "SoC Audio support for IMX - S/PDIF"
++	default n
++	select SND_MXC_SOC_SPDIF_DAI
++	select SND_SOC_MXC_SPDIF
++	select SND_MXC_SOC_MX2
++	help
++	  Say Y if you want to add support for SoC audio on a IMX development
++	  board with S/PDIF.
++
+ endif	# SND_IMX_SOC
+diff --git a/sound/soc/imx/Makefile.rej b/sound/soc/imx/Makefile.rej
+new file mode 100644
+index 0000000..acdaa6d
+--- /dev/null
++++ b/sound/soc/imx/Makefile.rej
+@@ -0,0 +1,25 @@
++--- sound/soc/imx/Makefile
+++++ sound/soc/imx/Makefile
++@@ -2,18 +2,22 @@
++ snd-soc-imx-objs := imx-ssi.o
++ snd-soc-imx-fiq-objs := imx-pcm-fiq.o
++ snd-soc-imx-mx2-objs := imx-pcm-dma-mx2.o
+++snd-soc-imx-spdif-dai-objs := imx-spdif-dai.o
++ 
++ obj-$(CONFIG_SND_IMX_SOC) += snd-soc-imx.o
++ obj-$(CONFIG_SND_MXC_SOC_FIQ) += snd-soc-imx-fiq.o
++ obj-$(CONFIG_SND_MXC_SOC_MX2) += snd-soc-imx-mx2.o
+++obj-$(CONFIG_SND_MXC_SOC_SPDIF_DAI) += snd-soc-imx-spdif-dai.o
++ 
++ # i.MX Machine Support
++ snd-soc-eukrea-tlv320-objs := eukrea-tlv320.o
++ snd-soc-phycore-ac97-objs := phycore-ac97.o
++ snd-soc-wm1133-ev1-objs := wm1133-ev1.o
++ snd-soc-imx-sgtl5000-objs := imx-sgtl5000.o
+++snd-soc-imx-spdif-objs := imx-spdif.o
++ 
++ obj-$(CONFIG_SND_SOC_EUKREA_TLV320) += snd-soc-eukrea-tlv320.o
++ obj-$(CONFIG_SND_SOC_PHYCORE_AC97) += snd-soc-phycore-ac97.o
++ obj-$(CONFIG_SND_MXC_SOC_WM1133_EV1) += snd-soc-wm1133-ev1.o
++ obj-$(CONFIG_SND_SOC_IMX_SGTL5000) += snd-soc-imx-sgtl5000.o
+++obj-$(CONFIG_SND_SOC_IMX_SPDIF) += snd-soc-imx-spdif.o
+diff --git a/sound/soc/imx/imx-pcm-dma-mx2.c b/sound/soc/imx/imx-pcm-dma-mx2.c
+index 89e859a..7ff31a8 100644
+--- a/sound/soc/imx/imx-pcm-dma-mx2.c
++++ b/sound/soc/imx/imx-pcm-dma-mx2.c
+@@ -83,7 +83,7 @@ static int imx_ssi_dma_alloc(struct snd_pcm_substream *substream,
+ 
+ 	dma_params = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
+ 
+-	iprtd->dma_data.peripheral_type = IMX_DMATYPE_SSI_SP;
++	iprtd->dma_data.peripheral_type = dma_params->peripheral_type;
+ 	iprtd->dma_data.priority = DMA_PRIO_HIGH;
+ 	iprtd->dma_data.dma_request = dma_params->dma;
+ 
+diff --git a/sound/soc/imx/imx-spdif-dai.c b/sound/soc/imx/imx-spdif-dai.c
+new file mode 100644
+index 0000000..a3b3865
+--- /dev/null
++++ b/sound/soc/imx/imx-spdif-dai.c
+@@ -0,0 +1,137 @@
++/*
++ * ALSA SoC SPDIF Audio Layer for MXS
++ *
++ * Copyright (C) 2008-2011 Freescale Semiconductor, Inc.
++ *
++ * Based on stmp3xxx_spdif_dai.c
++ * Vladimir Barinov <vbarinov@embeddedalley.com>
++ * Copyright 2008 SigmaTel, Inc
++ * Copyright 2008 Embedded Alley Solutions, Inc
++ *
++ * This file is licensed under the terms of the GNU General Public License
++ * version 2.  This program  is licensed "as is" without any warranty of any
++ * kind, whether express or implied.
++ */
++
++#include <linux/init.h>
++#include <linux/module.h>
++#include <linux/dma-mapping.h>
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/soc.h>
++#include <mach/dma.h>
++#include <mach/hardware.h>
++
++#include "../codecs/mxc_spdif.h"
++
++#define MXC_SPDIF_TXFIFO_WML      0x8
++#define MXC_SPDIF_RXFIFO_WML      0x8
++
++struct imx_pcm_dma_params dma_params_tx;
++struct imx_pcm_dma_params dma_params_rx;
++
++static int imx_spdif_hw_params(struct snd_pcm_substream *substream,
++			       struct snd_pcm_hw_params *params,
++			       struct snd_soc_dai *cpu_dai)
++{
++	/* Tx/Rx config */
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++		snd_soc_dai_set_dma_data(cpu_dai, substream, &dma_params_tx);
++	else
++		snd_soc_dai_set_dma_data(cpu_dai, substream, &dma_params_rx);
++
++	return 0;
++}
++
++struct snd_soc_dai_ops imx_spdif_dai_ops = {
++	.hw_params      = imx_spdif_hw_params,
++};
++
++struct snd_soc_dai_driver imx_spdif_dai = {
++	.playback = {
++		.channels_min = 2,
++		.channels_max = 2,
++		.rates = MXC_SPDIF_RATES_PLAYBACK,
++		.formats = MXC_SPDIF_FORMATS_PLAYBACK,
++	},
++	.capture = {
++		.channels_min = 2,
++		.channels_max = 2,
++		.rates = MXC_SPDIF_RATES_CAPTURE,
++		.formats = MXC_SPDIF_FORMATS_CAPTURE,
++	},
++	.ops = &imx_spdif_dai_ops,
++};
++
++static int imx_spdif_dai_probe(struct platform_device *pdev)
++{
++	struct resource *res;
++	int ret = 0;
++
++	dma_params_tx.burstsize = MXC_SPDIF_TXFIFO_WML;
++	dma_params_rx.burstsize = MXC_SPDIF_RXFIFO_WML;
++
++	dma_params_tx.peripheral_type = IMX_DMATYPE_SPDIF;
++	dma_params_rx.peripheral_type = IMX_DMATYPE_SPDIF;
++
++	res = platform_get_resource_byname(pdev, IORESOURCE_DMA, "tx");
++	if (res)
++		dma_params_tx.dma = res->start;
++
++	res = platform_get_resource_byname(pdev, IORESOURCE_DMA, "rx");
++	if (res)
++		dma_params_rx.dma = res->start;
++
++	res = platform_get_resource_byname(pdev, IORESOURCE_DMA, "tx_reg");
++	if (res)
++		dma_params_tx.dma_addr = res->start;
++
++	res = platform_get_resource_byname(pdev, IORESOURCE_DMA, "rx_reg");
++	if (res)
++		dma_params_rx.dma_addr = res->start;
++
++	ret = snd_soc_register_dai(&pdev->dev, &imx_spdif_dai);
++	if (ret) {
++		dev_err(&pdev->dev, "register DAI failed\n");
++		goto failed_register;
++	}
++
++	return 0;
++
++failed_register:
++	return ret;
++}
++
++static int __devexit imx_spdif_dai_remove(struct platform_device *pdev)
++{
++	snd_soc_unregister_dai(&pdev->dev);
++	return 0;
++}
++
++static struct platform_driver imx_ssi_driver = {
++	.probe = imx_spdif_dai_probe,
++	.remove = __devexit_p(imx_spdif_dai_remove),
++
++	.driver = {
++		.name = "imx-spdif-dai",
++		.owner = THIS_MODULE,
++	},
++};
++
++static int __init imx_spdif_dai_init(void)
++{
++	return platform_driver_register(&imx_ssi_driver);
++}
++
++static void __exit imx_spdif_dai_exit(void)
++{
++	platform_driver_unregister(&imx_ssi_driver);
++}
++module_init(imx_spdif_dai_init);
++module_exit(imx_spdif_dai_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("IMX SPDIF DAI");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/imx/imx-spdif.c b/sound/soc/imx/imx-spdif.c
+new file mode 100644
+index 0000000..f336545f
+--- /dev/null
++++ b/sound/soc/imx/imx-spdif.c
+@@ -0,0 +1,144 @@
++/*
++ * ASoC S/PDIF driver for IMX development boards
++ *
++ * Copyright (C) 2008-2011 Freescale Semiconductor, Inc.
++ *
++ * based on stmp3780_devb_spdif.c
++ *
++ * Vladimir Barinov <vbarinov@embeddedalley.com>
++ *
++ * Copyright 2008 SigmaTel, Inc
++ * Copyright 2008 Embedded Alley Solutions, Inc
++ *
++ * This file is licensed under the terms of the GNU General Public License
++ * version 2.  This program  is licensed "as is" without any warranty of any
++ * kind, whether express or implied.
++ */
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/timer.h>
++#include <linux/interrupt.h>
++#include <linux/platform_device.h>
++#include <linux/slab.h>
++
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/soc.h>
++#include <sound/soc-dapm.h>
++
++#include <asm/mach-types.h>
++#include <asm/dma.h>
++#include <mach/hardware.h>
++
++#include "imx-ssi.h"
++#include "../codecs/mxc_spdif.h"
++
++/* imx digital audio interface glue - connects codec <--> CPU */
++static struct snd_soc_dai_link imx_spdif_dai_link = {
++	.name = "IMX SPDIF",
++	.stream_name = "IMX SPDIF",
++	.codec_dai_name = "mxc-spdif",
++	.codec_name = "mxc_spdif.0",
++	.cpu_dai_name = "imx-spdif-dai.0",
++	.platform_name = "imx-pcm-audio.2", /* imx-pcm-dma-mx2 */
++};
++
++static struct snd_soc_card snd_soc_card_imx_spdif = {
++	.name = "imx-spdif",
++	.dai_link = &imx_spdif_dai_link,
++	.num_links = 1,
++};
++
++static int __devinit imx_spdif_audio_probe(struct platform_device *pdev)
++{
++	struct imx_ssi *ssi;
++	int ret;
++
++	ssi = kzalloc(sizeof(*ssi), GFP_KERNEL);
++	if (!ssi)
++		return -ENOMEM;
++
++	dev_set_drvdata(&pdev->dev, ssi);
++
++	ssi->soc_platform_pdev = platform_device_alloc("imx-pcm-audio", 2);
++	if (!ssi->soc_platform_pdev) {
++		pr_err("%s failed platform_device_alloc\n", __func__);
++		return -ENOMEM;
++	}
++
++	/* It may seem weird to be using struct imx_ssi here because S/PDIF
++	   doesn't use ssi.  We only use soc_platform_pdev in struct imx_ssi.
++	   But we need it because imx-pcm-dma-mx2 initializes other fields. */
++	platform_set_drvdata(ssi->soc_platform_pdev, ssi);
++
++	ret = platform_device_add(ssi->soc_platform_pdev);
++	if (ret) {
++		dev_err(&pdev->dev, "failed to add platform device\n");
++		platform_device_put(ssi->soc_platform_pdev);
++		return ret;
++	}
++
++	return 0;
++}
++
++static int __devexit imx_spdif_audio_remove(struct platform_device *pdev)
++{
++	struct imx_ssi *ssi = platform_get_drvdata(pdev);
++
++	platform_device_unregister(ssi->soc_platform_pdev);
++	snd_soc_unregister_dai(&pdev->dev);
++	kfree(ssi);
++
++	return 0;
++}
++
++static struct platform_driver imx_spdif_audio_driver = {
++	.probe = imx_spdif_audio_probe,
++	.remove = __devexit_p(imx_spdif_audio_remove),
++	.driver = {
++		   .name = "imx-spdif-audio-device",
++		   .owner = THIS_MODULE,
++		   },
++};
++
++static struct platform_device *imx_spdif_snd_device;
++
++static int __init imx_spdif_init(void)
++{
++	int ret = 0;
++
++	ret = platform_driver_register(&imx_spdif_audio_driver);
++	if (ret) {
++		pr_err("%s - failed platform_driver_register\n", __func__);
++		return -ENOMEM;
++	}
++
++	imx_spdif_snd_device = platform_device_alloc("soc-audio", 1);
++	if (!imx_spdif_snd_device) {
++		pr_err("%s - failed platform_device_alloc\n", __func__);
++		return -ENOMEM;
++	}
++
++	platform_set_drvdata(imx_spdif_snd_device, &snd_soc_card_imx_spdif);
++
++	ret = platform_device_add(imx_spdif_snd_device);
++	if (ret) {
++		pr_err("ASoC S/PDIF: Platform device allocation failed\n");
++		platform_device_put(imx_spdif_snd_device);
++	}
++
++	return ret;
++}
++
++static void __exit imx_spdif_exit(void)
++{
++	platform_driver_unregister(&imx_spdif_audio_driver);
++	platform_device_unregister(imx_spdif_snd_device);
++}
++
++module_init(imx_spdif_init);
++module_exit(imx_spdif_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("IMX EVK development board ASoC driver");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/imx/imx-ssi.c b/sound/soc/imx/imx-ssi.c
+index 3b56254..4e29fba 100644
+--- a/sound/soc/imx/imx-ssi.c
++++ b/sound/soc/imx/imx-ssi.c
+@@ -659,6 +659,9 @@ static int imx_ssi_probe(struct platform_device *pdev)
+ 	ssi->dma_params_tx.burstsize = 4;
+ 	ssi->dma_params_rx.burstsize = 4;
+ 
++	ssi->dma_params_tx.peripheral_type = IMX_DMATYPE_SSI_SP;
++	ssi->dma_params_rx.peripheral_type = IMX_DMATYPE_SSI_SP;
++
+ 	res = platform_get_resource_byname(pdev, IORESOURCE_DMA, "tx0");
+ 	if (res)
+ 		ssi->dma_params_tx.dma = res->start;
+diff --git a/sound/soc/imx/imx-ssi.h b/sound/soc/imx/imx-ssi.h
+index dc8a875..1b43c62 100644
+--- a/sound/soc/imx/imx-ssi.h
++++ b/sound/soc/imx/imx-ssi.h
+@@ -188,12 +188,6 @@
+ #include <linux/dmaengine.h>
+ #include <mach/dma.h>
+ 
+-struct imx_pcm_dma_params {
+-	int dma;
+-	unsigned long dma_addr;
+-	int burstsize;
+-};
+-
+ struct imx_ssi {
+ 	struct platform_device *ac97_dev;
+ 
+-- 
+1.7.7.4
+

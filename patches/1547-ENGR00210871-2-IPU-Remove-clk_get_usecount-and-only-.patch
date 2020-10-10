@@ -1,0 +1,63 @@
+From 47f98165436a796c8c63e21cb8e96b4f676bcfdb Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Fri, 25 May 2012 13:54:52 +0800
+Subject: [PATCH 1547/2463] ENGR00210871-2 IPU: Remove clk_get_usecount and
+ only use clk_enable/clk_disable
+
+Remove clk_get_usecount API and
+only use clk_enable/clk_disable APIs for IPU driver.
+If ipu internal clock is not accurate, use external DI clock.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_disp.c |   33 ++++++++++++++-------------------
+ 1 files changed, 14 insertions(+), 19 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index 4a77439..706dc21 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -1271,26 +1271,21 @@ int32_t ipu_init_sync_panel(struct ipu_soc *ipu, int disp, uint32_t pixel_clk,
+ 			((rounded_pixel_clk >= pixel_clk + pixel_clk/200) ||
+ 			(rounded_pixel_clk <= pixel_clk - pixel_clk/200))) {
+ 			dev_dbg(ipu->dev, "try ipu ext di clk\n");
+-			if (clk_get_usecount(di_parent))
+-				dev_warn(ipu->dev,
+-					"ext di clk already in use, go back to internal clk\n");
+-			else {
+-				rounded_pixel_clk = pixel_clk * 2;
+-				rounded_parent_clk = clk_round_rate(di_parent,
+-							rounded_pixel_clk);
+-				while (rounded_pixel_clk < rounded_parent_clk) {
+-					/* the max divider from parent to di is 8 */
+-					if (rounded_parent_clk / pixel_clk < 8)
+-						rounded_pixel_clk += pixel_clk * 2;
+-					else
+-						rounded_pixel_clk *= 2;
+-				}
+-				clk_set_rate(di_parent, rounded_pixel_clk);
+-				rounded_pixel_clk =
+-					clk_round_rate(ipu->di_clk[disp], pixel_clk);
+-				clk_set_rate(ipu->di_clk[disp], rounded_pixel_clk);
+-				clk_set_parent(&ipu->pixel_clk[disp], ipu->di_clk[disp]);
++			rounded_pixel_clk = pixel_clk * 2;
++			rounded_parent_clk = clk_round_rate(di_parent,
++						rounded_pixel_clk);
++			while (rounded_pixel_clk < rounded_parent_clk) {
++				/* the max divider from parent to di is 8 */
++				if (rounded_parent_clk / pixel_clk < 8)
++					rounded_pixel_clk += pixel_clk * 2;
++				else
++					rounded_pixel_clk *= 2;
+ 			}
++			clk_set_rate(di_parent, rounded_pixel_clk);
++			rounded_pixel_clk =
++				clk_round_rate(ipu->di_clk[disp], pixel_clk);
++			clk_set_rate(ipu->di_clk[disp], rounded_pixel_clk);
++			clk_set_parent(&ipu->pixel_clk[disp], ipu->di_clk[disp]);
+ 		}
+ 	}
+ 	rounded_pixel_clk = clk_round_rate(&ipu->pixel_clk[disp], pixel_clk);
+-- 
+1.7.7.4
+

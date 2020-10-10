@@ -1,0 +1,60 @@
+From c343cba44bc755231c70800aefd4d5d3143b0e52 Mon Sep 17 00:00:00 2001
+From: Dong Aisheng <b29396@freescale.com>
+Date: Mon, 14 Nov 2011 17:31:42 +0800
+Subject: [PATCH 0606/2463] ENGR00162093 mx6q: use gpio_set_value_cansleep for
+ sleepable gpios
+
+This can fix the following issue:
+root@freescale ~$ ./ip link set can1 up type can bitrate 125000
+flexcan imx6q-flexcan.1: writing ctrl=0x0e312005
+------------[ cut here ]------------
+WARNING: at drivers/gpio/gpiolib.c:1593 __gpio_set_value+0x64/0x74()
+Modules linked in:
+[<8005499c>] (unwind_backtrace+0x0/0x108) from [<804db0e8>] (dump_stack+0x20/0x24)
+[<804db0e8>] (dump_stack+0x20/0x24) from [<80079ac0>] (warn_slowpath_common+0x5c/0x74)
+[<80079ac0>] (warn_slowpath_common+0x5c/0x74) from [<80079b04>] (warn_slowpath_null+0x2c/0x34)
+[<80079b04>] (warn_slowpath_null+0x2c/0x34) from [<80297d50>] (__gpio_set_value+0x64/0x74)
+[<80297d50>] (__gpio_set_value+0x64/0x74) from [<80064630>] (mx6q_flexcan1_switch+0x50/0x54)
+[<80064630>] (mx6q_flexcan1_switch+0x50/0x54) from [<80324bf0>] (flexcan_chip_start+0x2dc/0x378)
+[<80324bf0>] (flexcan_chip_start+0x2dc/0x378) from [<80324d0c>] (flexcan_open+0x80/0xe8)
+[<80324d0c>] (flexcan_open+0x80/0xe8) from [<8041b7a8>] (__dev_open+0xac/0xf8)
+[<8041b7a8>] (__dev_open+0xac/0xf8) from [<80418848>] (__dev_change_flags+0x90/0x148)
+[<80418848>] (__dev_change_flags+0x90/0x148) from [<8041b6c4>] (dev_change_flags+0x20/0x58)
+[<8041b6c4>] (dev_change_flags+0x20/0x58) from [<804292d8>] (do_setlink+0x1a0/0x7b4)
+[<804292d8>] (do_setlink+0x1a0/0x7b4) from [<8042a734>] (rtnl_newlink+0x438/0x488)
+[<8042a734>] (rtnl_newlink+0x438/0x488) from [<8042a2d4>] (rtnetlink_rcv_msg+0x200/0x228)
+[<8042a2d4>] (rtnetlink_rcv_msg+0x200/0x228) from [<80434e88>] (netlink_rcv_skb+0xcc/0xe8)
+[<80434e88>] (netlink_rcv_skb+0xcc/0xe8) from [<8042a0cc>] (rtnetlink_rcv+0x2c/0x34)
+[<8042a0cc>] (rtnetlink_rcv+0x2c/0x34) from [<80434aac>] (netlink_unicast+0x2c0/0x328)
+[<80434aac>] (netlink_unicast+0x2c0/0x328) from [<804354a0>] (netlink_sendmsg+0x22c/0x350)
+[<804354a0>] (netlink_sendmsg+0x22c/0x350) from [<80406e24>] (sock_sendmsg+0xa4/0xc4)
+[<80406e24>] (sock_sendmsg+0xa4/0xc4) from [<804073a4>] (sys_sendmsg+0x140/0x270)
+[<804073a4>] (sys_sendmsg+0x140/0x270) from [<8004dc40>] (ret_fast_syscall+0x0/0x30)
+---[ end trace 4612d184c78ddab8 ]---
+
+Signed-off-by: Dong Aisheng <b29396@freescale.com>
+Acked-by: Lily Zhang
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 665d91b..21296ee 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -970,10 +970,10 @@ static void mx6q_flexcan1_switch(int enable)
+ {
+ 	if (enable) {
+ 		gpio_set_value(MX6Q_ARM2_CAN2_EN, 1);
+-		gpio_set_value(MX6Q_ARM2_CAN2_STBY, 1);
++		gpio_set_value_cansleep(MX6Q_ARM2_CAN2_STBY, 1);
+ 	} else {
+ 		gpio_set_value(MX6Q_ARM2_CAN2_EN, 0);
+-		gpio_set_value(MX6Q_ARM2_CAN2_STBY, 0);
++		gpio_set_value_cansleep(MX6Q_ARM2_CAN2_STBY, 0);
+ 	}
+ }
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,54 @@
+From b1d6bc03ae46aafccff91ae0b2983d9b1a3714bf Mon Sep 17 00:00:00 2001
+From: "Zhou, Jie" <b30303@freescale.com>
+Date: Thu, 3 Mar 2011 01:02:40 +0800
+Subject: [PATCH 0122/2463] ENGR00140050 GPU: workaround hang with heavy bus
+ loading
+
+The GPU hang when run two cubes together with one video playback.
+According to the suggestion from AMD, we'd better not read register
+when GPU active, especially for CP block.
+
+Signed-off-by: Zhou, Jie <b30303@freescale.com>
+---
+ drivers/mxc/amd-gpu/common/gsl_intrmgr.c    |    7 ++++++-
+ drivers/mxc/amd-gpu/common/gsl_ringbuffer.c |    6 ------
+ 2 files changed, 6 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/mxc/amd-gpu/common/gsl_intrmgr.c b/drivers/mxc/amd-gpu/common/gsl_intrmgr.c
+index 2c8b278..cba9fc3 100644
+--- a/drivers/mxc/amd-gpu/common/gsl_intrmgr.c
++++ b/drivers/mxc/amd-gpu/common/gsl_intrmgr.c
+@@ -58,7 +58,12 @@ kgsl_intr_decode(gsl_device_t *device, gsl_intrblock_t block_id)
+     unsigned int               status;
+ 
+     // read the block's interrupt status bits
+-    device->ftbl.device_regread(device, block->status_reg, &status);
++    /* exclude CP block here to avoid hang in heavy loading with VPU+GPU */
++    if (block_id == GSL_INTR_BLOCK_YDX_CP) {
++	status = 0x80000000;
++    } else {
++	device->ftbl.device_regread(device, block->status_reg, &status);
++    }
+ 
+     // mask off any interrupts which are disabled
+     status &= device->intr.enabled[block->id];
+diff --git a/drivers/mxc/amd-gpu/common/gsl_ringbuffer.c b/drivers/mxc/amd-gpu/common/gsl_ringbuffer.c
+index 76c6c70..fb05ff3 100644
+--- a/drivers/mxc/amd-gpu/common/gsl_ringbuffer.c
++++ b/drivers/mxc/amd-gpu/common/gsl_ringbuffer.c
+@@ -356,12 +356,6 @@ kgsl_ringbuffer_submit(gsl_ringbuffer_t *rb)
+     // send the wptr to the hw
+     rb->device->ftbl.device_regwrite(rb->device, mmCP_RB_WPTR, rb->wptr);
+ 
+-    // force wptr register to be updated
+-    do
+-    {
+-        rb->device->ftbl.device_regread(rb->device, mmCP_RB_WPTR, &value);
+-    } while (value != rb->wptr);
+-
+     rb->flags |= GSL_FLAGS_ACTIVE;
+ 
+     kgsl_log_write( KGSL_LOG_GROUP_COMMAND | KGSL_LOG_LEVEL_TRACE, "<-- kgsl_ringbuffer_submit.\n" );
+-- 
+1.7.7.4
+

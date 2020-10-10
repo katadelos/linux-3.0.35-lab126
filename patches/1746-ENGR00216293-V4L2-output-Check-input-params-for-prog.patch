@@ -1,0 +1,35 @@
+From 06df73e1d0dff1abf9f41647f8c06849be7209b4 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Fri, 13 Jul 2012 15:01:59 +0800
+Subject: [PATCH 1746/2463] ENGR00216293 V4L2 output: Check input params for
+ progressive tiled format
+
+Check input params for progressive tiled format to remind the application
+input wrong params and make driver more robust.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_vout.c |    7 +++++++
+ 1 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_vout.c b/drivers/media/video/mxc/output/mxc_vout.c
+index 0f755e3..f1f376d 100644
+--- a/drivers/media/video/mxc/output/mxc_vout.c
++++ b/drivers/media/video/mxc/output/mxc_vout.c
+@@ -1109,6 +1109,13 @@ static int mxc_vout_try_format(struct mxc_vout_output *vout, struct v4l2_format
+ 	int ret = 0;
+ 	struct v4l2_rect rect;
+ 
++	if ((f->fmt.pix.field != V4L2_FIELD_NONE) &&
++		(IPU_PIX_FMT_TILED_NV12 == vout->task.input.format)) {
++		v4l2_err(vout->vfd->v4l2_dev,
++			"progressive tiled fmt should used V4L2_FIELD_NONE!\n");
++		return -EINVAL;
++	}
++
+ 	if (f->fmt.pix.priv && copy_from_user(&rect,
+ 		(void __user *)f->fmt.pix.priv, sizeof(rect)))
+ 		return -EFAULT;
+-- 
+1.7.7.4
+

@@ -1,0 +1,41 @@
+From 9b6e17740e6210c6fad439f6bccb702c4d626909 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Mon, 22 Aug 2011 10:25:51 +0800
+Subject: [PATCH 0409/2463] ENGR00155135-2 ipuv3 dev: add processing driver
+ support
+
+IPU's IC/IRT/VDI modules provide resizing/CSC/combination/de-interlacing
+support, this patch make all these features into one processing driver.
+A struct ipu_task is the interface between user and this driver, user
+just need fill his task struct and queue it through ioctl, then wait
+ipu hardware finish its job (now only support BLOCKING operation, not
+support NO_BLOCK operation).
+Pls refer to inlcude/linux/ipu.h for structure information and unit test
+for usage.
+
+This patch is for MSL file change.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/plat-mxc/devices/platform-imx_ipuv3.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c b/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c
+index 311c28d..4c3ebaf 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c
++++ b/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c
+@@ -201,8 +201,9 @@ struct platform_device *__init imx_add_ipuv3(
+ 	pdata->init = data->init;
+ 	pdata->pg = data->pg;
+ 
+-	return imx_add_platform_device("imx-ipuv3", id,
+-			res, ARRAY_SIZE(res), pdata, sizeof(*pdata));
++	return imx_add_platform_device_dmamask("imx-ipuv3", id,
++			res, ARRAY_SIZE(res), pdata, sizeof(*pdata),
++			DMA_BIT_MASK(32));
+ }
+ 
+ struct platform_device *__init imx_add_ipuv3_fb(
+-- 
+1.7.7.4
+

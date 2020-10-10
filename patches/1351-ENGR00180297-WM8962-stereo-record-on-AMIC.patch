@@ -1,0 +1,34 @@
+From 926616f80c51af554bb5d930991839fbeb538e9e Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Mon, 23 Apr 2012 14:53:38 +0800
+Subject: [PATCH 1351/2463] ENGR00180297 WM8962: stereo record on AMIC
+
+Implement stereo recording feature on analog mic
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ sound/soc/codecs/wm8962.c |    8 ++++++++
+ 1 files changed, 8 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/codecs/wm8962.c b/sound/soc/codecs/wm8962.c
+index 824a6fa..ccf8883 100644
+--- a/sound/soc/codecs/wm8962.c
++++ b/sound/soc/codecs/wm8962.c
+@@ -3206,6 +3206,14 @@ static int wm8962_hw_params(struct snd_pcm_substream *substream,
+ 
+ 	wm8962_configure_bclk(codec);
+ 
++	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE) {
++		if (snd_soc_dapm_get_pin_status(&codec->dapm, "DMIC"))
++			snd_soc_update_bits(codec, WM8962_THREED1, WM8962_ADC_MONOMIX_MASK, 0);
++		else
++			snd_soc_update_bits(codec, WM8962_THREED1,
++						WM8962_ADC_MONOMIX_MASK, WM8962_ADC_MONOMIX);
++	}
++
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

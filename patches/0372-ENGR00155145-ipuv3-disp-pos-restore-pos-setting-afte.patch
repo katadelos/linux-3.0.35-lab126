@@ -1,0 +1,50 @@
+From 9bc62ef305c01c2f735356edc06070e99375d977 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Mon, 22 Aug 2011 11:42:25 +0800
+Subject: [PATCH 0372/2463] ENGR00155145 ipuv3 disp pos: restore pos setting
+ after channel disable.
+
+FG pos need be reset to 0 when channel disable, but it will lost old setting.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c |    8 +++++++-
+ 1 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 32fb0cc..d3dccdc 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -2192,6 +2192,7 @@ int32_t ipu_disable_channel(struct ipu_soc *ipu, ipu_channel_t channel, bool wai
+ 	uint32_t out_dma;
+ 	uint32_t sec_dma = NO_DMA;
+ 	uint32_t thrd_dma = NO_DMA;
++	uint16_t fg_pos_x, fg_pos_y;
+ 
+ 	spin_lock_irqsave(&ipu->ipu_lock, lock_flags);
+ 
+@@ -2223,8 +2224,10 @@ int32_t ipu_disable_channel(struct ipu_soc *ipu, ipu_channel_t channel, bool wai
+ 
+ 	if ((channel == MEM_BG_SYNC) || (channel == MEM_FG_SYNC) ||
+ 	    (channel == MEM_DC_SYNC)) {
+-		if (channel == MEM_FG_SYNC)
++		if (channel == MEM_FG_SYNC) {
++			ipu_disp_get_window_pos(ipu, channel, &fg_pos_x, &fg_pos_y);
+ 			ipu_disp_set_window_pos(ipu, channel, 0, 0);
++		}
+ 
+ 		_ipu_dp_dc_disable(ipu, channel, false);
+ 
+@@ -2358,6 +2361,9 @@ int32_t ipu_disable_channel(struct ipu_soc *ipu, ipu_channel_t channel, bool wai
+ 		ipu_clear_buffer_ready(ipu, channel, IPU_ALPHA_IN_BUFFER, 1);
+ 	}
+ 
++	if (channel == MEM_FG_SYNC)
++		ipu_disp_set_window_pos(ipu, channel, fg_pos_x, fg_pos_y);
++
+ 	return 0;
+ }
+ EXPORT_SYMBOL(ipu_disable_channel);
+-- 
+1.7.7.4
+

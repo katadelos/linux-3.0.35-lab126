@@ -1,0 +1,58 @@
+From 0c95ff07dc8c4279f974cb228ed6f3e3118c3e5b Mon Sep 17 00:00:00 2001
+From: Adrian Alonso <aalonso@freescale.com>
+Date: Tue, 21 Feb 2012 14:44:29 -0600
+Subject: [PATCH 1075/2463] ENGR00171079-9: mx53-ard cs42888 board sample rate
+ settings
+
+* Board mx53-ard cs42888 supportted sample rate settings,
+  pass them trough mxc_audio_codec_platform_data
+* Update copyrigth year 2012
+
+Signed-off-by: Adrian Alonso <aalonso@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx53_ard.c |   10 +++++++++-
+ 1 files changed, 9 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx53_ard.c b/arch/arm/mach-mx5/board-mx53_ard.c
+index 9541210..7774b73 100755
+--- a/arch/arm/mach-mx5/board-mx53_ard.c
++++ b/arch/arm/mach-mx5/board-mx53_ard.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -28,6 +28,7 @@
+ #include <linux/smsc911x.h>
+ #include <linux/i2c/pca953x.h>
+ #include <linux/regulator/consumer.h>
++#include <sound/pcm.h>
+ 
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+@@ -254,6 +255,12 @@ static struct mxc_audio_platform_data mxc_surround_audio_data = {
+ 	.sysclk = 24576000,
+ };
+ 
++static struct mxc_audio_codec_platform_data cs42888_data = {
++	.rates = (SNDRV_PCM_RATE_48000 |
++			SNDRV_PCM_RATE_96000 |
++			SNDRV_PCM_RATE_192000),
++};
++
+ static int imx53_init_audio(void)
+ {
+ 	ard_gpio_activate_esai_ports();
+@@ -320,6 +327,7 @@ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+ 	{
+     .type = "cs42888",
+ 	.addr = 0x48,
++	.platform_data = (void *)&cs42888_data,
+ 	},
+ };
+ 
+-- 
+1.7.7.4
+

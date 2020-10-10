@@ -1,0 +1,61 @@
+From f4869c86e630023f84294ef86f198cb5e5bf2d4d Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Thu, 5 Apr 2012 14:11:13 +0800
+Subject: [PATCH 1274/2463] ENGR00178939 [mx6] usb host, msleep may be called
+ in atomic context
+
+- change msleep(1) to udelay(500)
+- msleep may be called in atomic context, which will cause
+  warning message
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ arch/arm/mach-mx6/usb_dr.c |    4 ++--
+ arch/arm/mach-mx6/usb_h1.c |    4 ++--
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index 3a8a3a7..24c8cb9 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -415,14 +415,14 @@ static void _host_platform_rh_resume(struct fsl_usb2_platform_data *pdata)
+ 
+ 	while ((UOG_PORTSC1 & PORTSC_PORT_FORCE_RESUME)
+ 			&& (index < 1000)) {
+-		msleep(1);
++		udelay(500);
+ 		index++;
+ 	}
+ 
+ 	if (index >= 1000)
+ 		printk(KERN_INFO "%s big error\n", __func__);
+ 
+-	msleep(1);
++	udelay(500);
+ 	fsl_platform_otg_set_usb_phy_dis(pdata, 1);
+ }
+ 
+diff --git a/arch/arm/mach-mx6/usb_h1.c b/arch/arm/mach-mx6/usb_h1.c
+index 4d9d152..478ead4 100644
+--- a/arch/arm/mach-mx6/usb_h1.c
++++ b/arch/arm/mach-mx6/usb_h1.c
+@@ -243,14 +243,14 @@ static void usbh1_platform_rh_resume(struct fsl_usb2_platform_data *pdata)
+ 
+ 	while ((UH1_PORTSC1 & PORTSC_PORT_FORCE_RESUME)
+ 			&& (index < 1000)) {
+-		msleep(1);
++		udelay(500);
+ 		index++;
+ 	}
+ 
+ 	if (index >= 1000)
+ 		printk(KERN_INFO "%s big error\n", __func__);
+ 
+-	msleep(1);
++	udelay(500);
+ 	fsl_platform_h1_set_usb_phy_dis(pdata, 1);
+ }
+ 
+-- 
+1.7.7.4
+

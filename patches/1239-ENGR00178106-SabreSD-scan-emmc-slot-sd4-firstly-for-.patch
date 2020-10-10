@@ -1,0 +1,36 @@
+From 4185e712bc64e7938c4b76bcb7f241e5093c134f Mon Sep 17 00:00:00 2001
+From: Frank Li <Frank.Li@freescale.com>
+Date: Tue, 27 Mar 2012 18:04:54 +0800
+Subject: [PATCH 1239/2463] ENGR00178106 SabreSD: scan emmc slot sd4 firstly
+ for mfgtools
+
+Mfgtools want to emmc block device node is fixed mmcblk0.
+Card in other slot is mmcblk1 or mmcblk2
+
+Signed-off-by: Frank Li <Frank.Li@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index a0cd1bb..90b222c 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1485,9 +1485,13 @@ static void __init mx6_sabresd_board_init(void)
+ 	imx6q_add_anatop_thermal_imx(1, &mx6q_sabresd_anatop_thermal_data);
+ 	imx6_init_fec(fec_data);
+ 	imx6q_add_pm_imx(0, &mx6q_sabresd_pm_data);
++
++	/* Move sd4 to first because sd4 connect to emmc.
++	   Mfgtools want emmc is mmcblk0 and other sd card is mmcblk1.
++	*/
++	imx6q_add_sdhci_usdhc_imx(3, &mx6q_sabresd_sd4_data);
+ 	imx6q_add_sdhci_usdhc_imx(1, &mx6q_sabresd_sd2_data);
+ 	imx6q_add_sdhci_usdhc_imx(2, &mx6q_sabresd_sd3_data);
+-	imx6q_add_sdhci_usdhc_imx(3, &mx6q_sabresd_sd4_data);
+ 	imx_add_viv_gpu(&imx6_gpu_data, &imx6q_gpu_pdata);
+ 	imx6q_sabresd_init_usb();
+ 	/* SATA is not supported by MX6DL/Solo */
+-- 
+1.7.7.4
+

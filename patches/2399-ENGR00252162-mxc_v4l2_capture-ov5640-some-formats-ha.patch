@@ -1,0 +1,69 @@
+From 447322b3e5225934cb75b539f3787e1ff05bd71e Mon Sep 17 00:00:00 2001
+From: Sheng Nan <b38800@freescale.com>
+Date: Thu, 28 Feb 2013 18:26:38 +0800
+Subject: [PATCH 2399/2463] ENGR00252162: mxc_v4l2_capture: ov5640: some
+ formats have quality issue
+
+The following formats have quality issue:
+- 30fps: 720p
+- 15 fps: 1080p,qsxga
+
+Quality issue happens on high resolutions.
+So, increase the drive capability of ov5640 can fix this problem.
+
+Signed-off-by: Sheng Nan <b38800@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov5640.c |   30 ++++++++++++++++++++++++++++++
+ 1 files changed, 30 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov5640.c b/drivers/media/video/mxc/capture/ov5640.c
+index 99ca59c..9d1e40e 100644
+--- a/drivers/media/video/mxc/capture/ov5640.c
++++ b/drivers/media/video/mxc/capture/ov5640.c
+@@ -635,6 +635,32 @@ static void ov5640_soft_reset(void)
+ 	msleep(10);
+ }
+ 
++/* set sensor driver capability
++ * 0x302c[7:6] - strength
++	00     - 1x
++	01     - 2x
++	10     - 3x
++	11     - 4x
++ */
++static int ov5640_driver_capability(int strength)
++{
++	u8 temp = 0;
++
++	if (strength > 4 || strength < 1) {
++		pr_err("The valid driver capability of ov5640 is 1x~4x\n");
++		return -EINVAL;
++	}
++
++	ov5640_read_reg(0x302c, &temp);
++
++	temp &= ~0xc0;	/* clear [7:6] */
++	temp |= ((strength - 1) << 6);	/* set [7:6] */
++
++	ov5640_write_reg(0x302c, temp);
++
++	return 0;
++}
++
+ /* calculate sysclk */
+ static int ov5640_get_sysclk(void)
+ {
+@@ -952,6 +978,10 @@ static int ov5640_init_mode(void)
+ 	if (retval < 0)
+ 		goto err;
+ 
++	/* change driver capability to 2x according to validation board.
++	 * if the image is not stable, please increase the driver strength.
++	 */
++	ov5640_driver_capability(2);
+ 	ov5640_set_bandingfilter();
+ 	ov5640_set_AE_target(AE_Target);
+ 	ov5640_set_night_mode(night_mode);
+-- 
+1.7.7.4
+

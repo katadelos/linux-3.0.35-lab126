@@ -1,0 +1,464 @@
+From df63a57d034f77674d2fce9949f0eef6570e02f0 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Sat, 25 Aug 2012 00:14:51 -0500
+Subject: [PATCH 1967/2463] ENGR00221440 MX6x-Fix race-condition in checking
+ bus_freq variables
+
+Checking of the bus_freq variables and changing of the
+bus/ddr frequency should be done under one mutex.
+Else there is a race-condition that the variable changed
+just after it was checked.
+Also ensure that the bus freq is always increased before
+the cpu freq is set to anything other than the lowest setpoint.
+Else there is a possibility that the ARM is set to run from
+PLL1 at higher frequency when bus/DDR are still at 24MHz.
+This is dangerous since when system enters WAIT mode in
+low bus freq state, PLL1 is set to bypass when ARM is being
+sourced from it.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/bus_freq.c    |  159 ++++++++++++++++++++-------------------
+ arch/arm/mach-mx6/clock.c       |   13 +++-
+ arch/arm/mach-mx6/clock_mx6sl.c |   27 +++++--
+ arch/arm/plat-mxc/cpufreq.c     |   24 ++-----
+ 4 files changed, 117 insertions(+), 106 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index bde499d..53a65fb 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -69,6 +69,7 @@ int bus_freq_scaling_is_active;
+ int lp_high_freq;
+ int lp_med_freq;
+ int lp_audio_freq;
++int high_cpu_freq;
+ unsigned int ddr_low_rate;
+ unsigned int ddr_med_rate;
+ unsigned int ddr_normal_rate;
+@@ -194,7 +195,6 @@ static void reduce_bus_freq_handler(struct work_struct *work)
+ 
+ 		spin_unlock_irqrestore(&freq_lock, flags);
+ 	}
+-
+ 	high_bus_freq_mode = 0;
+ 	mutex_unlock(&bus_freq_mutex);
+ }
+@@ -225,40 +225,34 @@ int set_high_bus_freq(int high_bus_freq)
+ {
+ 	if (bus_freq_scaling_initialized && bus_freq_scaling_is_active)
+ 		cancel_delayed_work_sync(&low_bus_freq_handler);
+-	mutex_lock(&bus_freq_mutex);
+-	if (busfreq_suspended) {
+-		mutex_unlock(&bus_freq_mutex);
++
++	if (busfreq_suspended)
+ 		return 0;
+-	}
+ 
+-	if (!bus_freq_scaling_initialized || !bus_freq_scaling_is_active) {
+-		mutex_unlock(&bus_freq_mutex);
++
++	if (!bus_freq_scaling_initialized || !bus_freq_scaling_is_active)
+ 		return 0;
+-	}
+ 
+-	if (high_bus_freq_mode && high_bus_freq) {
+-		mutex_unlock(&bus_freq_mutex);
++
++	if (high_bus_freq_mode && high_bus_freq)
+ 		return 0;
+-	}
+ 
+-	if (med_bus_freq_mode && !high_bus_freq) {
+-		mutex_unlock(&bus_freq_mutex);
++
++	/* medium bus freq is only supported for MX6DQ */
++	if (cpu_is_mx6q() && med_bus_freq_mode && !high_bus_freq)
+ 		return 0;
+-	}
+ 
+ 	if (cpu_is_mx6dl() && high_bus_freq)
+ 		high_bus_freq = 0;
+ 
+-	if (cpu_is_mx6dl() && med_bus_freq_mode) {
+-		mutex_unlock(&bus_freq_mutex);
++	if (cpu_is_mx6dl() && med_bus_freq_mode)
+ 		return 0;
+-	}
++
+ 	if ((high_bus_freq_mode && (high_bus_freq || lp_high_freq)) ||
+ 	    (med_bus_freq_mode && !high_bus_freq && lp_med_freq &&
+-	     !lp_high_freq)) {
+-		mutex_unlock(&bus_freq_mutex);
++	     !lp_high_freq))
+ 		return 0;
+-	}
++
+ 	if (cpu_is_mx6sl()) {
+ 		u32 reg;
+ 		unsigned long flags;
+@@ -321,8 +315,6 @@ int set_high_bus_freq(int high_bus_freq)
+ 
+ 		clk_disable(pll3);
+ 	}
+-
+-	mutex_unlock(&bus_freq_mutex);
+ 	return 0;
+ }
+ 
+@@ -334,11 +326,8 @@ int low_freq_bus_used(void)
+ 	/* We only go the lowest setpoint if ARM is also
+ 	 * at the lowest setpoint.
+ 	 */
+-	if ((clk_get_rate(cpu_clk) >
+-			cpu_op_tbl[cpu_op_nr - 1].cpu_rate)
+-		|| (cpu_op_nr == 1)) {
++	if (high_cpu_freq)
+ 		return 0;
+-	}
+ 
+ 	if ((lp_high_freq == 0)
+ 	    && (lp_med_freq == 0))
+@@ -350,62 +339,80 @@ int low_freq_bus_used(void)
+ void bus_freq_update(struct clk *clk, bool flag)
+ {
+ 	mutex_lock(&bus_freq_mutex);
++
+ 	if (flag) {
+-		/* Update count */
+-		if (clk->flags & AHB_HIGH_SET_POINT)
+-			lp_high_freq++;
+-		else if (clk->flags & AHB_MED_SET_POINT)
+-			lp_med_freq++;
+-		else if (clk->flags & AHB_AUDIO_SET_POINT)
+-			lp_audio_freq++;
+-		/* Update bus freq */
+-		if ((clk->flags & CPU_FREQ_TRIG_UPDATE)
+-			&& (clk_get_usecount(clk) == 0)) {
+-			if (!(clk->flags &
+-				(AHB_HIGH_SET_POINT | AHB_MED_SET_POINT)))  {
+-			if (low_freq_bus_used()) {
+-				if ((clk->flags & AHB_AUDIO_SET_POINT) & !audio_bus_freq_mode)
+-					set_low_bus_freq();
+-				else if (!low_bus_freq_mode)
+-					set_low_bus_freq();
+-			}
+-		} else {
+-			if ((clk->flags & AHB_MED_SET_POINT)
+-				&& !med_bus_freq_mode) {
+-				/* Set to Medium setpoint */
+-				mutex_unlock(&bus_freq_mutex);
++		if (clk == cpu_clk) {
++			/* The CPU freq is being increased.
++			  * check if we need to increase the bus freq
++			  */
++			high_cpu_freq = 1;
++			if (low_bus_freq_mode || audio_bus_freq_mode)
+ 				set_high_bus_freq(0);
+-				return;
+-			}
+-			else if ((clk->flags & AHB_HIGH_SET_POINT)
+-				&& !high_bus_freq_mode) {
+-				/* Currently at low or medium set point,
+-				* need to set to high setpoint
+-				*/
+-				mutex_unlock(&bus_freq_mutex);
+-				set_high_bus_freq(1);
+-				return;
+-			}
++		} else {
++			/* Update count */
++			if (clk->flags & AHB_HIGH_SET_POINT)
++				lp_high_freq++;
++			else if (clk->flags & AHB_MED_SET_POINT)
++				lp_med_freq++;
++			else if (clk->flags & AHB_AUDIO_SET_POINT)
++				lp_audio_freq++;
++			/* Update bus freq */
++			if ((clk->flags & CPU_FREQ_TRIG_UPDATE)
++				&& (clk_get_usecount(clk) == 0)) {
++				if (!(clk->flags &
++					(AHB_HIGH_SET_POINT | AHB_MED_SET_POINT))) {
++					if (low_freq_bus_used()) {
++						if ((clk->flags & AHB_AUDIO_SET_POINT) &
++								!audio_bus_freq_mode)
++							set_low_bus_freq();
++						else if (!low_bus_freq_mode)
++							set_low_bus_freq();
++					}
++				} else {
++					if ((clk->flags & AHB_MED_SET_POINT)
++						&& !med_bus_freq_mode) {
++						/* Set to Medium setpoint */
++						set_high_bus_freq(0);
++					} else if ((clk->flags & AHB_HIGH_SET_POINT)
++						&& !high_bus_freq_mode) {
++						/* Currently at low or medium
++						  * set point, need to set to
++						  * high setpoint
++						  */
++						set_high_bus_freq(1);
++					}
++				}
+ 			}
+ 		}
+ 	} else {
+-		/* Update count */
+-		if (clk->flags & AHB_HIGH_SET_POINT)
+-			lp_high_freq--;
+-		else if (clk->flags & AHB_MED_SET_POINT)
+-			lp_med_freq--;
+-		else if (clk->flags & AHB_AUDIO_SET_POINT)
+-			lp_audio_freq--;
+-		/* Update bus freq */
+-		if ((clk->flags & CPU_FREQ_TRIG_UPDATE)
+-			&& (clk_get_usecount(clk) == 0)) {
+-			if (low_freq_bus_used() && !low_bus_freq_mode)
++		if (clk == cpu_clk) {
++			/* CPU freq is dropped, check if we can
++			  * lower the bus freq.
++			  */
++			high_cpu_freq = 0;
++
++			if (low_freq_bus_used() &&
++				!(low_bus_freq_mode || audio_bus_freq_mode))
+ 				set_low_bus_freq();
+-			else {
+-				/* Set to either high or medium setpoint. */
+-				mutex_unlock(&bus_freq_mutex);
+-				set_high_bus_freq(0);
+-				return;
++		} else {
++			/* Update count */
++			if (clk->flags & AHB_HIGH_SET_POINT)
++				lp_high_freq--;
++			else if (clk->flags & AHB_MED_SET_POINT)
++				lp_med_freq--;
++			else if (clk->flags & AHB_AUDIO_SET_POINT)
++				lp_audio_freq--;
++			/* Update bus freq */
++			if ((clk->flags & CPU_FREQ_TRIG_UPDATE)
++				&& (clk_get_usecount(clk) == 0)) {
++				if (low_freq_bus_used())
++					set_low_bus_freq();
++				else {
++					/* Set to either high or
++					  * medium setpoint.
++					  */
++					set_high_bus_freq(0);
++				}
+ 			}
+ 		}
+ 	}
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 8835c20..e0348e4 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -472,7 +472,6 @@ static int _clk_pll_enable(struct clk *clk)
+ 	pllbase = _get_pll_base(clk);
+ 
+ 	reg = __raw_readl(pllbase);
+-	reg &= ~ANADIG_PLL_BYPASS;
+ 	reg &= ~ANADIG_PLL_POWER_DOWN;
+ 
+ 	/* The 480MHz PLLs have the opposite definition for power bit. */
+@@ -492,6 +491,7 @@ static int _clk_pll_enable(struct clk *clk)
+ 
+ 	/* Enable the PLL output now*/
+ 	reg = __raw_readl(pllbase);
++	reg &= ~ANADIG_PLL_BYPASS;
+ 	reg |= ANADIG_PLL_ENABLE;
+ 	__raw_writel(reg, pllbase);
+ 
+@@ -1262,14 +1262,17 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		  */
+ 		if (pll1_sw_clk.parent != &pll2_pfd_400M) {
+ 			pll2_pfd_400M.enable(&pll2_pfd_400M);
++			pll2_pfd_400M.usecount++;
+ 			arm_needs_pll2_400 = true;
+ 			pll1_sw_clk.set_parent(&pll1_sw_clk, &pll2_pfd_400M);
+ 			pll1_sw_clk.parent = &pll2_pfd_400M;
+ 		}
+ 	} else {
+ 		/* Make sure PLL1 is enabled */
+-		if (!pll1_enabled)
++		if (!pll1_enabled) {
+ 			pll1_sys_main_clk.enable(&pll1_sys_main_clk);
++			pll1_sys_main_clk.usecount = 1;
++		}
+ 		/* Make sure PLL1 rate is what we want */
+ 		if (cpu_op_tbl[i].pll_rate != clk_get_rate(&pll1_sys_main_clk)) {
+ 			/* If pll1_sw_clk is from pll1_sys_main_clk, switch it */
+@@ -1285,6 +1288,8 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		/* Make sure pll1_sw_clk is from pll1_sys_main_clk */
+ 		pll1_sw_clk.set_parent(&pll1_sw_clk, &pll1_sys_main_clk);
+ 		pll1_sw_clk.parent = &pll1_sys_main_clk;
++		if (arm_needs_pll2_400)
++			pll2_pfd_400M.usecount--;
+ 		arm_needs_pll2_400 = false;
+ 		if (pll2_pfd_400M.usecount == 0)
+ 			pll2_pfd_400M.disable(&pll2_pfd_400M);
+@@ -1323,8 +1328,10 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 	while (__raw_readl(MXC_CCM_CDHIPR))
+ 		;
+ 
+-	if (pll1_sys_main_clk.usecount == 1 && arm_needs_pll2_400)
++	if (pll1_sys_main_clk.usecount == 1 && arm_needs_pll2_400) {
+ 		pll1_sys_main_clk.disable(&pll1_sys_main_clk);
++		pll1_sys_main_clk.usecount = 0;
++	}
+ 
+ 	spin_unlock_irqrestore(&clk_lock, flags);
+ 
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 9c79f74..d93320d 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -67,6 +67,7 @@ static struct clk pll7_usb_host_main_clk;
+ static struct clk usdhc3_clk;
+ static struct clk ipg_clk;
+ static struct clk gpt_clk[];
++static struct clk ahb_clk;
+ 
+ static struct cpu_op *cpu_op_tbl;
+ static int cpu_op_nr;
+@@ -412,6 +413,7 @@ static int _clk_pfd_enable(struct clk *clk)
+ 	__raw_writel((1 << (clk->enable_shift + 7)),
+ 			(int)clk->enable_reg + 8);
+ 
++	udelay(3);
+ 	return 0;
+ }
+ 
+@@ -430,7 +432,6 @@ static int _clk_pll_enable(struct clk *clk)
+ 	pllbase = _get_pll_base(clk);
+ 
+ 	reg = __raw_readl(pllbase);
+-	reg &= ~ANADIG_PLL_BYPASS;
+ 	reg &= ~ANADIG_PLL_POWER_DOWN;
+ 
+ 	/* The 480MHz PLLs have the opposite definition for power bit. */
+@@ -450,6 +451,7 @@ static int _clk_pll_enable(struct clk *clk)
+ 
+ 	/* Enable the PLL output now*/
+ 	reg = __raw_readl(pllbase);
++	reg &= ~ANADIG_PLL_BYPASS;
+ 	reg |= ANADIG_PLL_ENABLE;
+ 	__raw_writel(reg, pllbase);
+ 
+@@ -1153,6 +1155,11 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 	if (i >= cpu_op_nr)
+ 		return -EINVAL;
+ 
++	if (clk_get_rate(&ahb_clk) == 24000000) {
++		printk(KERN_INFO "we should not be here!!!!! AHB is at 24MHz....cpu_rate requested = %ld\n", rate);
++		dump_stack();
++		BUG();
++	}
+ 	spin_lock_irqsave(&mx6sl_clk_lock, flags);
+ 
+ 	if (rate <= clk_get_rate(&pll2_pfd2_400M)) {
+@@ -1161,14 +1168,17 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		  */
+ 		if (pll1_sw_clk.parent != &pll2_pfd2_400M) {
+ 			pll2_pfd2_400M.enable(&pll2_pfd2_400M);
++			pll2_pfd2_400M.usecount++;
+ 			arm_needs_pll2_400 = true;
+ 			pll1_sw_clk.set_parent(&pll1_sw_clk, &pll2_pfd2_400M);
+ 			pll1_sw_clk.parent = &pll2_pfd2_400M;
+ 		}
+ 	} else {
+ 		/* Make sure PLL1 is enabled */
+-		if (!pll1_enabled)
++		if (!pll1_enabled) {
+ 			pll1_sys_main_clk.enable(&pll1_sys_main_clk);
++			pll1_sys_main_clk.usecount = 1;
++		}
+ 		if (cpu_op_tbl[i].pll_rate != clk_get_rate(&pll1_sys_main_clk)) {
+ 			if (pll1_sw_clk.parent == &pll1_sys_main_clk) {
+ 				/* Change the PLL1 rate. */
+@@ -1177,15 +1187,13 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 				else
+ 					pll1_sw_clk.set_parent(&pll1_sw_clk, &osc_clk);
+ 			}
+-			if (cpu_op_tbl[i].cpu_podf) {
+-				__raw_writel(cpu_op_tbl[i].cpu_podf, MXC_CCM_CACRR);
+-				while (__raw_readl(MXC_CCM_CDHIPR))
+-							;
+-			}
+ 			pll1_sys_main_clk.set_rate(&pll1_sys_main_clk, cpu_op_tbl[i].pll_rate);
+ 		}
+ 		pll1_sw_clk.set_parent(&pll1_sw_clk, &pll1_sys_main_clk);
+ 		pll1_sw_clk.parent = &pll1_sys_main_clk;
++
++		if (arm_needs_pll2_400)
++			pll2_pfd2_400M.usecount--;
+ 		arm_needs_pll2_400 = false;
+ 		if (pll2_pfd2_400M.usecount == 0)
+ 			pll2_pfd2_400M.disable(&pll2_pfd2_400M);
+@@ -1224,9 +1232,10 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 	while (__raw_readl(MXC_CCM_CDHIPR))
+ 		;
+ 
+-	if (pll1_sys_main_clk.usecount == 1 && arm_needs_pll2_400)
++	if (pll1_sys_main_clk.usecount == 1 && arm_needs_pll2_400) {
+ 		pll1_sys_main_clk.disable(&pll1_sys_main_clk);
+-
++		pll1_sys_main_clk.usecount = 0;
++	}
+ 	spin_unlock_irqrestore(&mx6sl_clk_lock, flags);
+ 
+ 	return 0;
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index ee04150..b6c1e28 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -58,13 +58,7 @@ extern struct regulator *soc_regulator;
+ extern struct regulator *pu_regulator;
+ extern int dvfs_core_is_active;
+ extern struct cpu_op *(*get_cpu_op)(int *op);
+-extern int low_bus_freq_mode;
+-extern int audio_bus_freq_mode;
+-extern int high_bus_freq_mode;
+-extern int set_low_bus_freq(void);
+-extern int set_high_bus_freq(int high_bus_speed);
+-extern int low_freq_bus_used(void);
+-extern struct mutex bus_freq_mutex;
++extern void bus_freq_update(struct clk *clk, bool flag);
+ 
+ int set_cpu_freq(int freq)
+ {
+@@ -95,12 +89,9 @@ int set_cpu_freq(int freq)
+ #endif
+ 	/*Set the voltage for the GP domain. */
+ 	if (freq > org_cpu_rate) {
+-		mutex_lock(&bus_freq_mutex);
+-		if (low_bus_freq_mode || audio_bus_freq_mode) {
+-			mutex_unlock(&bus_freq_mutex);
+-			set_high_bus_freq(0);
+-		} else
+-			mutex_unlock(&bus_freq_mutex);
++		/* Check if the bus freq needs to be increased first */
++		bus_freq_update(cpu_clk, true);
++
+ 		if (freq == cpu_op_tbl[0].cpu_rate && !IS_ERR(soc_regulator) && !IS_ERR(pu_regulator)) {
+ 			ret = regulator_set_voltage(soc_regulator, soc_volt,
+ 							soc_volt);
+@@ -152,11 +143,8 @@ int set_cpu_freq(int freq)
+ 			}
+ 			soc_regulator_set = 0;
+ 		}
+-		mutex_lock(&bus_freq_mutex);
+-		if (low_freq_bus_used() &&
+-			!(low_bus_freq_mode || audio_bus_freq_mode))
+-			set_low_bus_freq();
+-		mutex_unlock(&bus_freq_mutex);
++		/* Check if the bus freq can be decreased.*/
++		bus_freq_update(cpu_clk, false);
+ 	}
+ 
+ 	return ret;
+-- 
+1.7.7.4
+

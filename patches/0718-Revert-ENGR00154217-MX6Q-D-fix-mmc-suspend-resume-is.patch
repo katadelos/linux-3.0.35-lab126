@@ -1,0 +1,33 @@
+From 13b7a585f35f9f89526c0261f286bc5b682e71c3 Mon Sep 17 00:00:00 2001
+From: Jason Liu <jason.hui@linaro.org>
+Date: Wed, 14 Dec 2011 19:41:04 +0800
+Subject: [PATCH 0718/2463] Revert "ENGR00154217 [MX6Q/D]fix mmc
+ suspend/resume issue."
+
+This reverts commit e3f2cd88631b667173047e66d311ba0f815f8a35.
+---
+ drivers/mmc/core/core.c |    8 +-------
+ 1 files changed, 1 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
+index fb541cc..a08b71f 100644
+--- a/drivers/mmc/core/core.c
++++ b/drivers/mmc/core/core.c
+@@ -1075,13 +1075,7 @@ void mmc_power_off(struct mmc_host *host)
+ 
+ 	host->ios.clock = 0;
+ 	host->ios.vdd = 0;
+-
+-	/*
+-	 * Reset ocr mask to be the highest possible voltage supported for
+-	 * this mmc host. This value will be used at next power up.
+-	 */
+-	host->ocr = 1 << (fls(host->ocr_avail) - 1);
+-
++	host->ocr = 0;
+ 	if (!mmc_host_is_spi(host)) {
+ 		host->ios.bus_mode = MMC_BUSMODE_OPENDRAIN;
+ 		host->ios.chip_select = MMC_CS_DONTCARE;
+-- 
+1.7.7.4
+

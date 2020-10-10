@@ -1,0 +1,280 @@
+From 41ebb63fe7f763639780d2dd46a19d2c8795e637 Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Thu, 11 Aug 2011 12:27:21 +0800
+Subject: [PATCH 0353/2463] ENGR00154650-1 [MX53_ARD] ESAI: add ESAI device
+
+add EASI ARCH codes.
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ arch/arm/configs/imx5_defconfig               |    4 +
+ arch/arm/mach-mx5/Kconfig                     |    1 +
+ arch/arm/mach-mx5/board-mx53_ard.c            |  101 +++++++++++++++++++++++++
+ arch/arm/mach-mx5/devices-imx53.h             |    3 +
+ arch/arm/plat-mxc/devices/platform-imx-esai.c |   23 +++++-
+ arch/arm/plat-mxc/include/mach/mx53.h         |    1 +
+ 6 files changed, 129 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/configs/imx5_defconfig b/arch/arm/configs/imx5_defconfig
+index 0ca2ff2..8badcc9 100755
+--- a/arch/arm/configs/imx5_defconfig
++++ b/arch/arm/configs/imx5_defconfig
+@@ -281,6 +281,7 @@ CONFIG_IMX_HAVE_PLATFORM_LDB=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_PXP=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_EPDC=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_SPDIF=y
++CONFIG_IMX_HAVE_PLATFORM_IMX_ESAI=y
+ 
+ #
+ # Freescale MXC Implementations
+@@ -1607,12 +1608,15 @@ CONFIG_SND_SOC=y
+ CONFIG_SND_SOC_AC97_BUS=y
+ CONFIG_SND_IMX_SOC=y
+ CONFIG_SND_MXC_SOC_MX2=y
++CONFIG_SND_SOC_IMX_CS42888=y
++CONFIG_SND_MXC_SOC_ESAI=y
+ CONFIG_SND_MXC_SOC_SPDIF_DAI=y
+ CONFIG_SND_SOC_IMX_SGTL5000=y
+ CONFIG_SND_SOC_IMX_SPDIF=y
+ CONFIG_SND_SOC_I2C_AND_SPI=y
+ # CONFIG_SND_SOC_ALL_CODECS is not set
+ CONFIG_SND_SOC_MXC_SPDIF=y
++CONFIG_SND_SOC_CS42888=y
+ CONFIG_SND_SOC_SGTL5000=y
+ # CONFIG_SOUND_PRIME is not set
+ CONFIG_AC97_BUS=y
+diff --git a/arch/arm/mach-mx5/Kconfig b/arch/arm/mach-mx5/Kconfig
+index 4588dd9..36197c6 100755
+--- a/arch/arm/mach-mx5/Kconfig
++++ b/arch/arm/mach-mx5/Kconfig
+@@ -61,6 +61,7 @@ config	SOC_IMX53
+ 	select IMX_HAVE_PLATFORM_IMX_IIM
+ 	select IMX_HAVE_PLATFORM_LDB
+ 	select IMX_HAVE_PLATFORM_IMX_SPDIF
++	select IMX_HAVE_PLATFORM_IMX_ESAI
+ 
+ if ARCH_MX50_SUPPORTED
+ #comment "i.MX50 machines:"
+diff --git a/arch/arm/mach-mx5/board-mx53_ard.c b/arch/arm/mach-mx5/board-mx53_ard.c
+index e68f7e08..8e2a881 100755
+--- a/arch/arm/mach-mx5/board-mx53_ard.c
++++ b/arch/arm/mach-mx5/board-mx53_ard.c
+@@ -26,6 +26,7 @@
+ #include <linux/ipu.h>
+ #include <linux/pwm_backlight.h>
+ #include <linux/smsc911x.h>
++#include <linux/i2c/pca953x.h>
+ 
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+@@ -44,9 +45,22 @@
+ #define ARD_SD1_WP IMX_GPIO_NR(1, 9)
+ #define ARD_SD2_CD IMX_GPIO_NR(1, 4)
+ #define ARD_SD2_WP IMX_GPIO_NR(1, 2)
++#define ARD_ESAI_INT IMX_GPIO_NR(2, 4)
+ #define ARD_TS_INT IMX_GPIO_NR(7, 12)
+ #define ARD_ETHERNET_INT_B IMX_GPIO_NR(2, 31)
+ 
++/* Start directly after the CPU's GPIO*/
++#define MAX7310_BASE_ADDR		224	/* 7x32 */
++#define ARD_BACKLIGHT_ON		MAX7310_BASE_ADDR
++#define ARD_SPARE			    (MAX7310_BASE_ADDR + 1)
++#define ARD_CPU_PER_RST_B		(MAX7310_BASE_ADDR + 2)
++#define ARD_MAIN_PER_RST_B		(MAX7310_BASE_ADDR + 3)
++#define ARD_IPOD_RST_B			(MAX7310_BASE_ADDR + 4)
++#define ARD_MLB_RST_B			(MAX7310_BASE_ADDR + 5)
++#define ARD_SSI_STEERING		(MAX7310_BASE_ADDR + 6)
++#define ARD_GPS_RST_B			(MAX7310_BASE_ADDR + 7)
++
++
+ static iomux_v3_cfg_t mx53_ard_pads[] = {
+ 	/* UART */
+ 	MX53_PAD_PATA_DIOW__UART1_TXD_MUX,
+@@ -199,6 +213,82 @@ static struct platform_device ard_smsc_lan9220_device = {
+ 	.resource = ard_smsc911x_resources,
+ };
+ 
++static iomux_v3_cfg_t mx53_ard_esai_pads[] = {
++	MX53_PAD_FEC_MDIO__ESAI1_SCKR,
++	MX53_PAD_FEC_REF_CLK__ESAI1_FSR,
++	MX53_PAD_FEC_CRS_DV__ESAI1_SCKT,
++	MX53_PAD_FEC_RXD1__ESAI1_FST,
++	MX53_PAD_FEC_TX_EN__ESAI1_TX3_RX2,
++	MX53_PAD_GPIO_5__ESAI1_TX2_RX3,
++	MX53_PAD_FEC_TXD0__ESAI1_TX4_RX1,
++	MX53_PAD_GPIO_8__ESAI1_TX5_RX0,
++	MX53_PAD_NANDF_CS2__ESAI1_TX0,
++	MX53_PAD_NANDF_CS3__ESAI1_TX1,
++	MX53_PAD_PATA_DATA4__GPIO2_4,
++};
++
++void ard_gpio_activate_esai_ports(void)
++{
++	mxc_iomux_v3_setup_multiple_pads(mx53_ard_esai_pads,
++					ARRAY_SIZE(mx53_ard_esai_pads));
++	/* ESAI_INT */
++	gpio_request(ARD_ESAI_INT, "esai-int");
++	gpio_direction_input(ARD_ESAI_INT);
++
++}
++
++static struct imx_esai_platform_data esai_data = {
++	.flags = IMX_ESAI_NET,
++};
++
++static struct platform_device mxc_alsa_surround_device = {
++	.name = "imx-cs42888",
++};
++
++static struct mxc_audio_platform_data mxc_surround_audio_data = {
++	.ext_ram = 1,
++	.sysclk = 24576000,
++};
++
++static int imx53_init_audio(void)
++{
++	ard_gpio_activate_esai_ports();
++
++	mxc_register_device(&mxc_alsa_surround_device,
++		&mxc_surround_audio_data);
++	imx53_add_imx_esai(0, &esai_data);
++
++    return 0;
++}
++
++static int mx53_ard_max7310_setup(struct i2c_client *client,
++			       unsigned gpio_base, unsigned ngpio,
++			       void *context)
++{
++	static int max7310_gpio_value[] = {
++		1, 1, 1, 1, 0, 0, 0, 0,
++	};
++	int n;
++
++	for (n = 0; n < ARRAY_SIZE(max7310_gpio_value); ++n) {
++		gpio_request(gpio_base + n, "MAX7310 GPIO Expander");
++		if (max7310_gpio_value[n] < 0)
++			gpio_direction_input(gpio_base + n);
++		else
++			gpio_direction_output(gpio_base + n,
++					      max7310_gpio_value[n]);
++		/* Export, direction locked down */
++		gpio_export(gpio_base + n, 0);
++	}
++
++	return 0;
++}
++
++static struct pca953x_platform_data mx53_i2c_max7310_platdata = {
++	.gpio_base	= MAX7310_BASE_ADDR,
++	.invert		= 0, /* Do not invert */
++	.setup		= mx53_ard_max7310_setup,
++};
+ 
+ static const struct imxuart_platform_data mx53_ard_uart_data __initconst = {
+ 	.flags = IMXUART_HAVE_RTSCTS,
+@@ -223,6 +313,10 @@ static struct imxi2c_platform_data mx53_ard_i2c2_data = {
+ };
+ 
+ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
++	{
++    .type = "cs42888",
++	.addr = 0x48,
++	},
+ };
+ 
+ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+@@ -230,6 +324,11 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ 		I2C_BOARD_INFO("max11801", 0x49),
+ 		.irq  = gpio_to_irq(ARD_TS_INT),
+ 	},
++	{
++	 .type = "max7310",
++	 .addr = 0x18,
++	 .platform_data = &mx53_i2c_max7310_platdata,
++	},
+ };
+ 
+ static struct mxc_spdif_platform_data mxc_spdif_data = {
+@@ -364,6 +463,8 @@ static void __init mx53_ard_board_init(void)
+ 	i2c_register_board_info(2, mxc_i2c2_board_info,
+ 				ARRAY_SIZE(mxc_i2c2_board_info));
+ 
++	imx53_init_audio();
++
+ 	/* this call required to release SCC RAM partition held by ROM
+ 	  * during boot, even if SCC2 driver is not part of the image
+ 	  */
+diff --git a/arch/arm/mach-mx5/devices-imx53.h b/arch/arm/mach-mx5/devices-imx53.h
+index cd29666..50b5214 100755
+--- a/arch/arm/mach-mx5/devices-imx53.h
++++ b/arch/arm/mach-mx5/devices-imx53.h
+@@ -105,5 +105,8 @@ extern const struct imx_spdif_dai_data imx53_spdif_dai_data __initconst;
+ #define imx53_add_spdif_dai()	imx_add_spdif_dai(&imx53_spdif_dai_data)
+ 
+ #define imx53_add_spdif_audio_device(pdata)	imx_add_spdif_audio_device()
++extern const struct imx_imx_esai_data imx53_imx_esai_data[] __initconst;
++#define imx53_add_imx_esai(id, pdata) \
++       imx_add_imx_esai(&imx53_imx_esai_data[id], pdata)
+ 
+ extern struct platform_device imx_ahci_device_hwmon;
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-esai.c b/arch/arm/plat-mxc/devices/platform-imx-esai.c
+index b3a9503..03bd53b 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-esai.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-esai.c
+@@ -9,10 +9,17 @@
+ #include <mach/hardware.h>
+ #include <mach/devices-common.h>
+ 
+-#define MX6Q_DMA_REQ_ESAI_RX            23
+-#define MX6Q_DMA_REQ_ESAI_TX            24
++#define imx53_esai_data_entry(soc, _id, _size)			\
++	[_id] = {							\
++		.id = _id,						\
++		.iobase = MX53_ESAI_BASE_ADDR,		\
++		.iosize = _size,					\
++		.irq = MX53_INT_ESAI,			\
++		.dmatx = soc ## _DMA_REQ_ESAI ## _TX,		\
++		.dmarx = soc ## _DMA_REQ_ESAI ## _RX,		\
++	}
+ 
+-#define imx_imx_esai_data_entry(soc, _id, _size)			\
++#define imx6q_esai_data_entry(soc, _id, _size)			\
+ 	[_id] = {							\
+ 		.id = _id,						\
+ 		.iobase = ESAI1_BASE_ADDR,		\
+@@ -22,10 +29,18 @@
+ 		.dmarx = soc ## _DMA_REQ_ESAI ## _RX,		\
+ 	}
+ 
++#ifdef CONFIG_SOC_IMX53
++const struct imx_imx_esai_data imx53_imx_esai_data[] __initconst = {
++#define imx53_imx_esai_data_entry(_id)				\
++		imx53_esai_data_entry(MX53, _id, SZ_4K)
++		imx53_imx_esai_data_entry(0),
++};
++#endif /* ifdef CONFIG_SOC_IMX53 */
++
+ #ifdef CONFIG_SOC_IMX6Q
+ const struct imx_imx_esai_data imx6q_imx_esai_data[] __initconst = {
+ #define imx6q_imx_esai_data_entry(_id)				\
+-	imx_imx_esai_data_entry(MX6Q, _id, SZ_4K)
++	imx6q_esai_data_entry(MX6Q, _id, SZ_4K)
+ 	imx6q_imx_esai_data_entry(0),
+ };
+ #endif /* ifdef CONFIG_SOC_IMX6Q */
+diff --git a/arch/arm/plat-mxc/include/mach/mx53.h b/arch/arm/plat-mxc/include/mach/mx53.h
+index 184e431..2559437 100755
+--- a/arch/arm/plat-mxc/include/mach/mx53.h
++++ b/arch/arm/plat-mxc/include/mach/mx53.h
+@@ -73,6 +73,7 @@
+ #define MX53_UART3_BASE_ADDR		(MX53_SPBA0_BASE_ADDR + 0x0000C000)
+ #define MX53_ECSPI1_BASE_ADDR		(MX53_SPBA0_BASE_ADDR + 0x00010000)
+ #define MX53_SSI2_BASE_ADDR		(MX53_SPBA0_BASE_ADDR + 0x00014000)
++#define MX53_ESAI_BASE_ADDR		(MX53_SPBA0_BASE_ADDR + 0x00018000)
+ #define MX53_ESDHC3_BASE_ADDR	(MX53_SPBA0_BASE_ADDR + 0x00020000)
+ #define MX53_ESDHC4_BASE_ADDR	(MX53_SPBA0_BASE_ADDR + 0x00024000)
+ #define MX53_SPDIF_BASE_ADDR		(MX53_SPBA0_BASE_ADDR + 0x00028000)
+-- 
+1.7.7.4
+

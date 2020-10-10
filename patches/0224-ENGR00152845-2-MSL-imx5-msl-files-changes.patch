@@ -1,0 +1,545 @@
+From 4a2abddb4a51f68377282c1355d45b6409a96533 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Wed, 13 Jul 2011 12:05:41 +0800
+Subject: [PATCH 0224/2463] ENGR00152845-2 MSL imx5: msl files changes.
+
+imx5 MSL files change.
+
+Signed-off-by: Jason Chen <jason.chen@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx51_babbage.c |   60 +++++++++++---------------
+ arch/arm/mach-mx5/board-mx53_evk.c     |   52 +++++++++-------------
+ arch/arm/mach-mx5/board-mx53_loco.c    |   74 ++++++++++++++------------------
+ arch/arm/mach-mx5/board-mx53_smd.c     |   65 +++++++++++-----------------
+ arch/arm/mach-mx5/clock.c              |    6 +-
+ arch/arm/mach-mx5/devices-imx51.h      |    7 +++-
+ arch/arm/mach-mx5/devices-imx53.h      |    7 +++-
+ 7 files changed, 120 insertions(+), 151 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx51_babbage.c b/arch/arm/mach-mx5/board-mx51_babbage.c
+index b260b2c..4d600eb 100755
+--- a/arch/arm/mach-mx5/board-mx51_babbage.c
++++ b/arch/arm/mach-mx5/board-mx51_babbage.c
+@@ -425,43 +425,30 @@ static const struct spi_imx_master mx51_babbage_spi_pdata __initconst = {
+ 	.num_chipselect = ARRAY_SIZE(mx51_babbage_spi_cs),
+ };
+ 
+-static struct fb_videomode video_modes[] = {
+-	{
+-	 /*MITSUBISHI LVDS panel */
+-	 "XGA", 60, 1024, 768, 15385,
+-	 220, 40,
+-	 21, 7,
+-	 60, 10,
+-	 0,
+-	 FB_VMODE_NONINTERLACED,
+-	 0,},
+-	{
+-	 /* 800x480 @ 57 Hz , pixel clk @ 27MHz */
+-	 "CLAA-WVGA", 57, 800, 480, 37037, 40, 60, 10, 10, 20, 10,
+-	 FB_SYNC_CLK_LAT_FALL,
+-	 FB_VMODE_NONINTERLACED,
+-	 0,},
++static struct fsl_mxc_lcd_platform_data lcdif_data = {
++	.ipu_id = 0,
++	.disp_id = 0,
++	.default_ifmt = IPU_PIX_FMT_RGB565,
+ };
+ 
+-static struct ipuv3_fb_platform_data bbg_fb_di0_data = {
++static struct ipuv3_fb_platform_data bbg_fb_data[] = {
++	{
++	.disp_dev = "dvi",
+ 	.interface_pix_fmt = IPU_PIX_FMT_RGB24,
+ 	.mode_str = "1024x768M-16@60",
+-	.modes = video_modes,
+-	.num_modes = ARRAY_SIZE(video_modes),
+-};
+-
+-static struct ipuv3_fb_platform_data bbg_fb_di1_data = {
++	.default_bpp = 16,
++	.int_clk = false,
++	}, {
++	.disp_dev = "lcd",
+ 	.interface_pix_fmt = IPU_PIX_FMT_RGB565,
+ 	.mode_str = "CLAA-WVGA",
+-	.modes = video_modes,
+-	.num_modes = ARRAY_SIZE(video_modes),
++	.default_bpp = 16,
++	.int_clk = false,
++	},
+ };
+ 
+ static struct imx_ipuv3_platform_data ipu_data = {
+ 	.rev = 2,
+-	.fb_head0_platform_data = &bbg_fb_di0_data,
+-	.fb_head1_platform_data = &bbg_fb_di1_data,
+-	.primary_di = MXC_PRI_DI0,
+ };
+ 
+ static struct platform_pwm_backlight_data bbg_pwm_backlight_data = {
+@@ -508,11 +495,11 @@ static int ddc_dvi_update()
+ 		return 0;
+ }
+ 
+-static struct fsl_mxc_ddc_platform_data bbg_ddc_dvi_data = {
+-	.di = 0,
++static struct fsl_mxc_dvi_platform_data bbg_ddc_dvi_data = {
++	.ipu_id = 0,
++	.disp_id = 0,
+ 	.init = ddc_dvi_init,
+ 	.update = ddc_dvi_update,
+-	.boot_enable = 1,
+ };
+ 
+ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+@@ -593,11 +580,9 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ 		gpu_data.reserved_mem_size = gpu_mem;
+ 
+ 		/* reserver memory for fb */
+-		bbg_fb_di0_data.res_base = gpu_data.reserved_mem_base
++		bbg_fb_data[0].res_base = gpu_data.reserved_mem_base
+ 					+ gpu_data.reserved_mem_size;
+-		bbg_fb_di0_data.res_size = fb_mem;
+-		bbg_fb_di1_data.res_base = bbg_fb_di0_data.res_base;
+-		bbg_fb_di1_data.res_size = bbg_fb_di0_data.res_size;
++		bbg_fb_data[0].res_size = fb_mem;
+ 	}
+ }
+ 
+@@ -647,6 +632,8 @@ static struct mxc_spdif_platform_data mxc_spdif_data = {
+  */
+ static void __init mx51_babbage_init(void)
+ {
++	int i;
++
+ 	iomux_v3_cfg_t usbh1stp = MX51_PAD_USBH1_STP__USBH1_STP;
+ 	iomux_v3_cfg_t power_key = _MX51_PAD_EIM_A27__GPIO2_21 |
+ 		MUX_PAD_CTRL(PAD_CTL_SRE_FAST | PAD_CTL_DSE_HIGH | PAD_CTL_PUS_100K_UP);
+@@ -666,7 +653,10 @@ static void __init mx51_babbage_init(void)
+ 	babbage_fec_reset();
+ 	imx51_add_fec(NULL);
+ 
+-	imx51_add_ipuv3(&ipu_data);
++	imx51_add_ipuv3(0, &ipu_data);
++	for (i = 0; i < ARRAY_SIZE(bbg_fb_data); i++)
++		imx51_add_ipuv3fb(i, &bbg_fb_data[i]);
++	imx51_add_lcdif(&lcdif_data);
+ 	imx51_add_vpu();
+ 	imx51_add_tve(&tve_data);
+ 	imx51_add_v4l2_output(0);
+diff --git a/arch/arm/mach-mx5/board-mx53_evk.c b/arch/arm/mach-mx5/board-mx53_evk.c
+index 4231934..6bde90c 100755
+--- a/arch/arm/mach-mx5/board-mx53_evk.c
++++ b/arch/arm/mach-mx5/board-mx53_evk.c
+@@ -369,43 +369,30 @@ static const struct imxuart_platform_data mx53_evk_uart_pdata __initconst = {
+ 	.flags = IMXUART_HAVE_RTSCTS,
+ };
+ 
+-static struct fb_videomode video_modes[] = {
+-	{
+-	 /* 800x480 @ 57 Hz , pixel clk @ 27MHz */
+-	 "CLAA-WVGA", 57, 800, 480, 37037, 40, 60, 10, 10, 20, 10,
+-	 FB_SYNC_CLK_LAT_FALL,
+-	 FB_VMODE_NONINTERLACED,
+-	 0,},
+-	{
+-	/* 1600x1200 @ 60 Hz 162M pixel clk*/
+-	"UXGA", 60, 1600, 1200, 6172,
+-	304, 64,
+-	1, 46,
+-	192, 3,
+-	FB_SYNC_HOR_HIGH_ACT|FB_SYNC_VERT_HIGH_ACT,
+-	FB_VMODE_NONINTERLACED,
+-	0,},
++static struct fsl_mxc_lcd_platform_data lcdif_data = {
++	.ipu_id = 0,
++	.disp_id = 0,
++	.default_ifmt = IPU_PIX_FMT_RGB565,
+ };
+ 
+-static struct ipuv3_fb_platform_data evk_fb_di0_data = {
++static struct ipuv3_fb_platform_data evk_fb_data[] = {
++	{
++	.disp_dev = "lcd",
+ 	.interface_pix_fmt = IPU_PIX_FMT_RGB565,
+ 	.mode_str = "CLAA-WVGA",
+-	.modes = video_modes,
+-	.num_modes = ARRAY_SIZE(video_modes),
+-};
+-
+-static struct ipuv3_fb_platform_data evk_fb_di1_data = {
++	.default_bpp = 16,
++	.int_clk = false,
++	}, {
++	.disp_dev = "vga",
+ 	.interface_pix_fmt = IPU_PIX_FMT_GBR24,
+ 	.mode_str = "VGA-XGA",
+-	.modes = video_modes,
+-	.num_modes = ARRAY_SIZE(video_modes),
++	.default_bpp = 16,
++	.int_clk = false,
++	},
+ };
+ 
+ static struct imx_ipuv3_platform_data ipu_data = {
+ 	.rev = 3,
+-	.fb_head0_platform_data = &evk_fb_di0_data,
+-	.fb_head1_platform_data = &evk_fb_di1_data,
+-	.primary_di = MXC_PRI_DI0,
+ };
+ 
+ static struct platform_pwm_backlight_data evk_pwm_backlight_data = {
+@@ -500,8 +487,9 @@ static int ddc_dvi_update(void)
+ 		return 0;
+ }
+ 
+-static struct fsl_mxc_ddc_platform_data evk_ddc_dvi_data = {
+-	.di = 0,
++static struct fsl_mxc_dvi_platform_data evk_ddc_dvi_data = {
++	.ipu_id = 0,
++	.disp_id = 0,
+ 	.init = ddc_dvi_init,
+ 	.update = ddc_dvi_update,
+ 	.analog_regulator = "VSD",
+@@ -731,6 +719,8 @@ static struct mxc_spdif_platform_data mxc_spdif_data = {
+ 
+ static void __init mx53_evk_board_init(void)
+ {
++	int i;
++
+ 	mx53_evk_io_init();
+ 
+ 	mxc_spdif_data.spdif_core_clk = clk_get(NULL, "spdif_xtal_clk");
+@@ -741,7 +731,9 @@ static void __init mx53_evk_board_init(void)
+ 	mx53_evk_fec_reset();
+ 	imx53_add_fec(&mx53_evk_fec_pdata);
+ 
+-	imx53_add_ipuv3(&ipu_data);
++	imx53_add_ipuv3(0, &ipu_data);
++	for (i = 0; i < ARRAY_SIZE(evk_fb_data); i++)
++		imx53_add_ipuv3fb(i, &evk_fb_data[i]);
+ 	imx53_add_vpu();
+ 	imx53_add_tve(&tve_data);
+ 	imx53_add_v4l2_output(0);
+diff --git a/arch/arm/mach-mx5/board-mx53_loco.c b/arch/arm/mach-mx5/board-mx53_loco.c
+index 7f45381..503c999 100755
+--- a/arch/arm/mach-mx5/board-mx53_loco.c
++++ b/arch/arm/mach-mx5/board-mx53_loco.c
+@@ -273,7 +273,9 @@ static void sii902x_hdmi_reset(void)
+ }
+ 
+ static struct fsl_mxc_lcd_platform_data sii902x_hdmi_data = {
+-       .reset = sii902x_hdmi_reset,
++	.ipu_id = 0,
++	.disp_id = 0,
++	.reset = sii902x_hdmi_reset,
+ };
+ 
+ static void loco_suspend_enter(void)
+@@ -307,49 +309,30 @@ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+ 	},
+ };
+ 
+-static struct fb_videomode video_modes[] = {
+-	{
+-	/* 800x480 @ 57 Hz , pixel clk @ 27MHz */
+-	"CLAA-WVGA", 57, 800, 480, 37037, 40, 60, 10, 10, 20, 10,
+-	FB_SYNC_CLK_LAT_FALL,
+-	FB_VMODE_NONINTERLACED,
+-	0,},
+-	{
+-	/* 800x480 @ 60 Hz , pixel clk @ 32MHz */
+-	"SEIKO-WVGA", 60, 800, 480, 29850, 89, 164, 23, 10, 10, 10,
+-	FB_SYNC_CLK_LAT_FALL,
+-	FB_VMODE_NONINTERLACED,
+-	0,},
+-	{
+-	/* 1600x1200 @ 60 Hz 162M pixel clk*/
+-	"UXGA", 60, 1600, 1200, 6172,
+-	304, 64,
+-	1, 46,
+-	192, 3,
+-	FB_SYNC_HOR_HIGH_ACT|FB_SYNC_VERT_HIGH_ACT,
+-	FB_VMODE_NONINTERLACED,
+-	0,},
+-};
+-
+-static struct ipuv3_fb_platform_data loco_fb_di0_data = {
+-	.interface_pix_fmt = IPU_PIX_FMT_RGB565,
+-	.mode_str = "CLAA-WVGA",
+-	.modes = video_modes,
+-	.num_modes = ARRAY_SIZE(video_modes),
++static struct fsl_mxc_lcd_platform_data lcdif_data = {
++	.ipu_id = 0,
++	.disp_id = 0,
++	.default_ifmt = IPU_PIX_FMT_RGB565,
+ };
+ 
+-static struct ipuv3_fb_platform_data loco_fb_di1_data = {
++static struct ipuv3_fb_platform_data loco_fb_data[] = {
++	{ /*fb0*/
++	.disp_dev = "vga",
+ 	.interface_pix_fmt = IPU_PIX_FMT_GBR24,
+ 	.mode_str = "VGA-XGA",
+-	.modes = video_modes,
+-	.num_modes = ARRAY_SIZE(video_modes),
++	.default_bpp = 16,
++	.int_clk = false,
++	}, {
++	.disp_dev = "lcd",
++	.interface_pix_fmt = IPU_PIX_FMT_RGB565,
++	.mode_str = "CLAA-WVGA",
++	.default_bpp = 16,
++	.int_clk = false,
++	},
+ };
+ 
+ static struct imx_ipuv3_platform_data ipu_data = {
+ 	.rev = 3,
+-	.fb_head0_platform_data = &loco_fb_di0_data,
+-	.fb_head1_platform_data = &loco_fb_di1_data,
+-	.primary_di = MXC_PRI_DI1,
+ };
+ 
+ static struct platform_pwm_backlight_data loco_pwm_backlight_data = {
+@@ -361,7 +344,6 @@ static struct platform_pwm_backlight_data loco_pwm_backlight_data = {
+ 
+ static struct fsl_mxc_tve_platform_data tve_data = {
+ 	.dac_reg = "DA9052_LDO7",
+-	.boot_enable = MXC_TVE_VGA,
+ };
+ 
+ static struct mxc_dvfs_platform_data loco_dvfs_core_data = {
+@@ -599,7 +581,10 @@ static struct mxc_iim_platform_data iim_data = {
+ static struct mxc_gpu_platform_data gpu_data __initdata;
+ 
+ static struct fsl_mxc_ldb_platform_data ldb_data = {
++	.ipu_id = 0,
++	.disp_id = 0,
+ 	.ext_ref = 1,
++	.mode = LDB_SIN_DI0,
+ };
+ 
+ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+@@ -657,11 +642,9 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ 		gpu_data.reserved_mem_size = gpu_mem;
+ 
+ 		/* reserver memory for fb */
+-		loco_fb_di0_data.res_base = gpu_data.reserved_mem_base
++		loco_fb_data[0].res_base = gpu_data.reserved_mem_base
+ 					+ gpu_data.reserved_mem_size;
+-		loco_fb_di0_data.res_size = fb_mem;
+-		loco_fb_di1_data.res_base = loco_fb_di0_data.res_base;
+-		loco_fb_di1_data.res_size = loco_fb_di0_data.res_size;
++		loco_fb_data[0].res_size = fb_mem;
+ 	}
+ }
+ 
+@@ -679,6 +662,8 @@ static struct mxc_spdif_platform_data mxc_spdif_data = {
+ 
+ static void __init mx53_loco_board_init(void)
+ {
++	int i;
++
+ 	mx53_loco_io_init();
+ 
+ 	imx53_add_imx_uart(0, NULL);
+@@ -690,8 +675,13 @@ static void __init mx53_loco_board_init(void)
+ 
+ 	mxc_register_device(&mxc_pm_device, &loco_pm_data);
+ 
+-	imx53_add_ipuv3(&ipu_data);
++	imx53_add_ipuv3(0, &ipu_data);
++
++	for (i = 0; i < ARRAY_SIZE(loco_fb_data); i++)
++		imx53_add_ipuv3fb(i, &loco_fb_data[i]);
++
+ 	imx53_add_vpu();
++	imx53_add_lcdif(&lcdif_data);
+ 	imx53_add_ldb(&ldb_data);
+ 	imx53_add_tve(&tve_data);
+ 	imx53_add_v4l2_output(0);
+diff --git a/arch/arm/mach-mx5/board-mx53_smd.c b/arch/arm/mach-mx5/board-mx53_smd.c
+index b712aea..a9357f0 100755
+--- a/arch/arm/mach-mx5/board-mx53_smd.c
++++ b/arch/arm/mach-mx5/board-mx53_smd.c
+@@ -484,7 +484,6 @@ static void sii9022_hdmi_reset(void)
+ static struct fsl_mxc_lcd_platform_data sii902x_hdmi_data = {
+ 	.reset = sii9022_hdmi_reset,
+ 	.analog_reg = "DA9052_LDO2",
+-	.boot_enable = 1,
+ };
+ 
+ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+@@ -679,49 +678,31 @@ static struct imx_ssi_platform_data smd_ssi_pdata = {
+ 	.flags = IMX_SSI_DMA,
+ };
+ 
+-static struct fb_videomode video_modes[] = {
+-	{
+-	/* 800x480 @ 57 Hz , pixel clk @ 27MHz */
+-	"CLAA-WVGA", 57, 800, 480, 37037, 40, 60, 10, 10, 20, 10,
+-	FB_SYNC_CLK_LAT_FALL,
+-	FB_VMODE_NONINTERLACED,
+-	0,},
+-	{
+-	/* 800x480 @ 60 Hz , pixel clk @ 32MHz */
+-	"SEIKO-WVGA", 60, 800, 480, 29850, 89, 164, 23, 10, 10, 10,
+-	FB_SYNC_CLK_LAT_FALL,
+-	FB_VMODE_NONINTERLACED,
+-	0,},
+-	{
+-	/* 1600x1200 @ 60 Hz 162M pixel clk*/
+-	"UXGA", 60, 1600, 1200, 6172,
+-	304, 64,
+-	1, 46,
+-	192, 3,
+-	FB_SYNC_HOR_HIGH_ACT|FB_SYNC_VERT_HIGH_ACT,
+-	FB_VMODE_NONINTERLACED,
+-	0,},
++static struct fsl_mxc_lcd_platform_data lcdif_data = {
++	.ipu_id = 0,
++	.disp_id = 0,
++	.default_ifmt = IPU_PIX_FMT_RGB565,
+ };
+ 
+-static struct ipuv3_fb_platform_data smd_fb_di0_data = {
++static struct ipuv3_fb_platform_data smd_fb_data[] = {
++	{
++	.disp_dev = "ldb",
++	.interface_pix_fmt = IPU_PIX_FMT_RGB666,
++	.mode_str = "LDB-XGA",
++	.default_bpp = 16,
++	.int_clk = false,
++	}, {
++	.disp_dev = "hdmi",
+ 	.interface_pix_fmt = IPU_PIX_FMT_RGB24,
+ 	.mode_str = "1024x768M-16@60",
+-	.modes = video_modes,
+-	.num_modes = ARRAY_SIZE(video_modes),
+-};
+-
+-static struct ipuv3_fb_platform_data smd_fb_di1_data = {
+-	.interface_pix_fmt = IPU_PIX_FMT_RGB666,
+-	.mode_str = "XGA",
+-	.modes = video_modes,
+-	.num_modes = ARRAY_SIZE(video_modes),
++	.default_bpp = 16,
++	.int_clk = false,
++	},
+ };
+ 
+ static struct imx_ipuv3_platform_data ipu_data = {
+ 	.rev = 3,
+-	.fb_head0_platform_data = &smd_fb_di0_data,
+-	.fb_head1_platform_data = &smd_fb_di1_data,
+-	.primary_di = MXC_PRI_DI1,
++	.csi_clk[0] = "ssi_ext1_clk",
+ };
+ 
+ static struct platform_pwm_backlight_data mxc_pwm_backlight_data = {
+@@ -732,8 +713,10 @@ static struct platform_pwm_backlight_data mxc_pwm_backlight_data = {
+ };
+ 
+ static struct fsl_mxc_ldb_platform_data ldb_data = {
++	.ipu_id = 0,
++	.disp_id = 1,
+ 	.ext_ref = 1,
+-	.boot_enable = MXC_LDBDI1,
++	.mode = LDB_SIN_DI1,
+ };
+ 
+ static struct mxc_spdif_platform_data mxc_spdif_data = {
+@@ -750,7 +733,8 @@ static struct mxc_spdif_platform_data mxc_spdif_data = {
+ 
+ static void __init mx53_smd_board_init(void)
+ {
+-	ipu_data.csi_clk[0] = clk_get(NULL, "ssi_ext1_clk");
++	int i;
++
+ 	mxc_iomux_v3_setup_multiple_pads(mx53_smd_pads,
+ 					ARRAY_SIZE(mx53_smd_pads));
+ 
+@@ -768,7 +752,10 @@ static void __init mx53_smd_board_init(void)
+ 	imx53_add_imx_i2c(2, &mx53_smd_i2c_data);
+ 	imx53_add_ecspi(0, &mx53_smd_spi_data);
+ 
+-	imx53_add_ipuv3(&ipu_data);
++	imx53_add_ipuv3(0, &ipu_data);
++	for (i = 0; i < ARRAY_SIZE(smd_fb_data); i++)
++		imx53_add_ipuv3fb(i, &smd_fb_data[i]);
++	imx53_add_lcdif(&lcdif_data);
+ 	imx53_add_vpu();
+ 	imx53_add_ldb(&ldb_data);
+ 	imx53_add_v4l2_output(0);
+diff --git a/arch/arm/mach-mx5/clock.c b/arch/arm/mach-mx5/clock.c
+index 8f0d22a..1c209093 100755
+--- a/arch/arm/mach-mx5/clock.c
++++ b/arch/arm/mach-mx5/clock.c
+@@ -4442,9 +4442,9 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "vpu_core_clk", vpu_clk[1]),
+ 	_REGISTER_CLOCK(NULL, "nfc_clk", emi_enfc_clk),
+ 	_REGISTER_CLOCK("imx-sdma", NULL, sdma_clk[0]),
+-	_REGISTER_CLOCK(NULL, "ipu_clk", ipu_clk[0]),
+-	_REGISTER_CLOCK(NULL, "ipu_di0_clk", ipu_di_clk[0]),
+-	_REGISTER_CLOCK(NULL, "ipu_di1_clk", ipu_di_clk[1]),
++	_REGISTER_CLOCK(NULL, "ipu1_clk", ipu_clk[0]),
++	_REGISTER_CLOCK(NULL, "ipu1_di0_clk", ipu_di_clk[0]),
++	_REGISTER_CLOCK(NULL, "ipu1_di1_clk", ipu_di_clk[1]),
+ 	_REGISTER_CLOCK(NULL, "csi_mclk1", csi0_clk),
+ 	_REGISTER_CLOCK(NULL, "csi_mclk2", csi1_clk),
+ 	_REGISTER_CLOCK(NULL, "tve_clk", tve_clk),
+diff --git a/arch/arm/mach-mx5/devices-imx51.h b/arch/arm/mach-mx5/devices-imx51.h
+index 952ca7b..f99a316 100755
+--- a/arch/arm/mach-mx5/devices-imx51.h
++++ b/arch/arm/mach-mx5/devices-imx51.h
+@@ -73,7 +73,8 @@ extern const struct imx_mxc_pwm_data imx51_mxc_pwm_data[] __initconst;
+ 			id, NULL, 0, pdata, sizeof(*pdata));
+ 
+ extern const struct imx_ipuv3_data imx51_ipuv3_data __initconst;
+-#define imx51_add_ipuv3(pdata)	imx_add_ipuv3(&imx51_ipuv3_data, pdata)
++#define imx51_add_ipuv3(id, pdata)	imx_add_ipuv3(id, &imx51_ipuv3_data, pdata)
++#define imx51_add_ipuv3fb(id, pdata)	imx_add_ipuv3_fb(id, pdata)
+ 
+ extern const struct imx_vpu_data imx51_vpu_data __initconst;
+ #define imx51_add_vpu()	imx_add_vpu(&imx51_vpu_data)
+@@ -82,6 +83,10 @@ extern const struct imx_tve_data imx51_tve_data __initconst;
+ #define imx51_add_tve(pdata)	\
+ 	imx_add_tve(&imx51_tve_data, pdata)
+ 
++#define imx51_add_lcdif(pdata)	\
++	platform_device_register_resndata(NULL, "mxc_lcdif",\
++			0, NULL, 0, pdata, sizeof(*pdata));
++
+ #define imx51_add_v4l2_output(id)	\
+ 	platform_device_register_resndata(NULL, "mxc_v4l2_output",\
+ 			id, NULL, 0, NULL, 0);
+diff --git a/arch/arm/mach-mx5/devices-imx53.h b/arch/arm/mach-mx5/devices-imx53.h
+index 18ce6b9..a975dba 100755
+--- a/arch/arm/mach-mx5/devices-imx53.h
++++ b/arch/arm/mach-mx5/devices-imx53.h
+@@ -42,7 +42,8 @@ extern const struct imx_mxc_pwm_data imx53_mxc_pwm_data[] __initconst;
+ 			id, NULL, 0, pdata, sizeof(*pdata));
+ 
+ extern const struct imx_ipuv3_data imx53_ipuv3_data __initconst;
+-#define imx53_add_ipuv3(pdata)	imx_add_ipuv3(&imx53_ipuv3_data, pdata)
++#define imx53_add_ipuv3(id, pdata)	imx_add_ipuv3(id, &imx53_ipuv3_data, pdata)
++#define imx53_add_ipuv3fb(id, pdata)	imx_add_ipuv3_fb(id, pdata)
+ 
+ extern const struct imx_vpu_data imx53_vpu_data __initconst;
+ #define imx53_add_vpu()	imx_add_vpu(&imx53_vpu_data)
+@@ -61,6 +62,10 @@ extern const struct imx_srtc_data imx53_imx_srtc_data __initconst;
+ #define imx53_add_srtc()	\
+ 	imx_add_srtc(&imx53_imx_srtc_data)
+ 
++#define imx53_add_lcdif(pdata)	\
++	platform_device_register_resndata(NULL, "mxc_lcdif",\
++			0, NULL, 0, pdata, sizeof(*pdata));
++
+ #define imx53_add_v4l2_output(id)	\
+ 	platform_device_register_resndata(NULL, "mxc_v4l2_output",\
+ 			id, NULL, 0, NULL, 0);
+-- 
+1.7.7.4
+

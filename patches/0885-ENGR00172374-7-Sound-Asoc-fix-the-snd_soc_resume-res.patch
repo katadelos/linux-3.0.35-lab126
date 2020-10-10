@@ -1,0 +1,91 @@
+From eb01b2b153f727a1c1d5e3d4c0b580f2582b995b Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Tue, 10 Jan 2012 12:54:23 +0800
+Subject: [PATCH 0885/2463] ENGR00172374-7 Sound: Asoc: fix the snd_soc_resume
+ resume crash
+
+[  330.922320] [<800417e0>] (__bug+0x1c/0x24) from [<8007b4dc>] (__queue_work+0x24c/0x3f0)
+[  330.930333] [<8007b4dc>] (__queue_work+0x24c/0x3f0) from [<8007b6e0>] (queue_work_on+0x38/0x40)
+[  330.939039] [<8007b6e0>] (queue_work_on+0x38/0x40) from [<8007d568>] (queue_work+0x2c/0x58)
+[  330.947401] [<8007d568>] (queue_work+0x2c/0x58) from [<803b83a4>] (snd_soc_resume+0x98/0xb8)
+[  330.955852] [<803b83a4>] (snd_soc_resume+0x98/0xb8) from [<80280aa4>] (platform_pm_resume+0x2c/0x4c)
+[  330.964996] [<80280aa4>] (platform_pm_resume+0x2c/0x4c) from [<80284388>] (pm_op+0xe4/0x11c)
+[  330.973441] [<80284388>] (pm_op+0xe4/0x11c) from [<80284780>] (device_resume+0x78/0x13c)
+[  330.981537] [<80284780>] (device_resume+0x78/0x13c) from [<802849d0>] (dpm_resume+0x144/0x194)
+[  330.990154] [<802849d0>] (dpm_resume+0x144/0x194) from [<80284a2c>] (dpm_resume_end+0xc/0x18)
+[  330.998692] [<80284a2c>] (dpm_resume_end+0xc/0x18) from [<8009cf18>] (suspend_devices_and_enter+0x78/0xb8)
+[  331.008355] [<8009cf18>] (suspend_devices_and_enter+0x78/0xb8) from [<8009d010>] (enter_state+0xb8/0xe4)
+[  331.017842] [<8009d010>] (enter_state+0xb8/0xe4) from [<8009c5b4>] (state_store+0x8c/0xc0)
+[  331.026116] [<8009c5b4>] (state_store+0x8c/0xc0) from [<80223b20>] (kobj_attr_store+0x18/0x1c)
+[  331.034740] [<80223b20>] (kobj_attr_store+0x18/0x1c) from [<801352ec>] (sysfs_write_file+0x104/0x184)
+[  331.043969] [<801352ec>] (sysfs_write_file+0x104/0x184) from [<800e4ce8>] (vfs_write+0xb4/0x148)
+[  331.052762] [<800e4ce8>] (vfs_write+0xb4/0x148) from [<800e4e4c>] (sys_write+0x40/0x70)
+[  331.060781] [<800e4e4c>] (sys_write+0x40/0x70) from [<8003e380>] (ret_fast_syscall+0x0/0x30)
+
+The commit:c4e133f ASoC: core: Don't schedule deferred_resume_work twice
+commit c4e133f4e253b57e5d4409964a3b51f2d887e94b
+Author: Stephen Warren <swarren@nvidia.com>
+Date:   Wed May 25 14:06:41 2011 -0600
+
+    ASoC: core: Don't schedule deferred_resume_work twice
+
+    commit 82e14e8bdd88b69018fe757192b01dd98582905e upstream.
+
+    For cards that have two or more DAIs, snd_soc_resume's loop over all
+    DAIs ends up calling schedule_work(deferred_resume_work) once per DAI.
+    Since this is the same work item each time, the 2nd and subsequent
+    calls return 0 (work item already queued), and trigger the dev_err
+    message below stating that a work item may have been lost.
+
+    Solve this by adjusting the loop to simply calculate whether to run the
+    resume work immediately or defer it, and then call schedule work (or not)
+    one time based on that.
+
+    Note: This has not been tested in mainline, but only in chromeos-2.6.38;
+    mainline doesn't support suspend/resume on Tegra, nor does the mainline
+    Tegra ASoC driver contain multiple DAIs. It has been compile-checked in
+    mainline.
+
+    Signed-off-by: Stephen Warren <swarren@nvidia.com>
+    Acked-by: Liam Girdwood <lrg@ti.com>
+    Signed-off-by: Mark Brown <broonie@opensource.wolfsonmicro.com>
+    Signed-off-by: Greg Kroah-Hartman <gregkh@suse.de>
+
+changed the defaut behaviour for non-ac97 class which cause deferred_resume_work
+was scheduled not by desire when card->num_rdt is zero.
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ sound/soc/soc-core.c |   16 +++++++++-------
+ 1 files changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/sound/soc/soc-core.c b/sound/soc/soc-core.c
+index eefebd9..ad12a4c 100644
+--- a/sound/soc/soc-core.c
++++ b/sound/soc/soc-core.c
+@@ -1292,13 +1292,15 @@ int snd_soc_resume(struct device *dev)
+ 		struct snd_soc_dai *cpu_dai = card->rtd[i].cpu_dai;
+ 		ac97_control |= cpu_dai->driver->ac97_control;
+ 	}
+-	if (ac97_control) {
+-		dev_dbg(dev, "Resuming AC97 immediately\n");
+-		soc_resume_deferred(&card->deferred_resume_work);
+-	} else {
+-		dev_dbg(dev, "Scheduling resume work\n");
+-		if (!schedule_work(&card->deferred_resume_work))
+-			dev_err(dev, "resume work item may be lost\n");
++	if (card->num_rtd) {
++		if (ac97_control) {
++			dev_dbg(dev, "Resuming AC97 immediately\n");
++			soc_resume_deferred(&card->deferred_resume_work);
++		} else {
++			dev_dbg(dev, "Scheduling resume work\n");
++			if (!schedule_work(&card->deferred_resume_work))
++				dev_err(dev, "resume work item may be lost\n");
++		}
+ 	}
+ 
+ 	return 0;
+-- 
+1.7.7.4
+

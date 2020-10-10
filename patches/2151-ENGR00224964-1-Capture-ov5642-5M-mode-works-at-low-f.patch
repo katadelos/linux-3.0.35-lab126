@@ -1,0 +1,53 @@
+From 23023bc7a100552451d3541ab34be348a8c32c3a Mon Sep 17 00:00:00 2001
+From: Sheng Nan <b38800@freescale.com>
+Date: Mon, 15 Oct 2012 17:49:27 +0800
+Subject: [PATCH 2151/2463] ENGR00224964-1 Capture: ov5642: 5M mode works at
+ low frame rate
+
+current setting of 5M (QSXGA) mode, sensor works at 2.5fps.
+the expected frame rate is 7.5fps.
+
+- use new ov5642 QSXGA firmware get from ov
+  change sensor PLL settings 0x3010/0x3012
+  QSXGA frame rate changes from 2.5 -- 7.5fps
+- change mode between QSXGA@15fps and VGA@15fps go through quick change path.
+  modify QSXGA_VGA quick change firmware due to the QSXGA PLL setting changes.
+  keep value of 0x3010/0x3012 the same as VGA@15fps original value.
+
+Signed-off-by: Sheng Nan <b38800@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov5642.c |    4 +++-
+ 1 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov5642.c b/drivers/media/video/mxc/capture/ov5642.c
+index dcbd864..534d8ad 100644
+--- a/drivers/media/video/mxc/capture/ov5642.c
++++ b/drivers/media/video/mxc/capture/ov5642.c
+@@ -630,7 +630,7 @@ static struct reg_value ov5642_setting_15fps_QSXGA_2592_1944[] = {
+ 	{0x3503, 0x07, 0, 0}, {0x3000, 0x00, 0, 0}, {0x3001, 0x00, 0, 0},
+ 	{0x3002, 0x00, 0, 0}, {0x3003, 0x00, 0, 0}, {0x3004, 0xff, 0, 0},
+ 	{0x3005, 0xff, 0, 0}, {0x3006, 0xff, 0, 0}, {0x3007, 0x3f, 0, 0},
+-	{0x3011, 0x08, 0, 0}, {0x3010, 0x20, 0, 0}, {0x3818, 0xc0, 0, 0},
++	{0x3011, 0x08, 0, 0}, {0x3010, 0x10, 0, 0}, {0x3818, 0xc0, 0, 0},
+ 	{0x3621, 0x09, 0, 0}, {0x350c, 0x07, 0, 0}, {0x350d, 0xd0, 0, 0},
+ 	{0x3602, 0xe4, 0, 0}, {0x3612, 0xac, 0, 0}, {0x3613, 0x44, 0, 0},
+ 	{0x3622, 0x60, 0, 0}, {0x3623, 0x22, 0, 0}, {0x3604, 0x48, 0, 0},
+@@ -650,6 +650,7 @@ static struct reg_value ov5642_setting_15fps_QSXGA_2592_1944[] = {
+ 	{0x501f, 0x00, 0, 0}, {0x3002, 0x1c, 0, 0}, {0x3819, 0x80, 0, 0},
+ 	{0x5002, 0xe0, 0, 0}, {0x530a, 0x01, 0, 0}, {0x530d, 0x10, 0, 0},
+ 	{0x530c, 0x04, 0, 0}, {0x5312, 0x20, 0, 0}, {0x5282, 0x01, 0, 0},
++	{0x3010, 0x10, 0, 0}, {0x3012, 0x00, 0, 0},
+ };
+ 
+ 
+@@ -682,6 +683,7 @@ static struct reg_value ov5642_setting_QSXGA_2_VGA[] = {
+ 	{0x3002, 0x5c, 0, 0}, {0x3819, 0x80, 0, 0}, {0x5002, 0xe0, 0, 0},
+ 	{0x530a, 0x01, 0, 0}, {0x530d, 0x0c, 0, 0}, {0x530c, 0x00, 0, 0},
+ 	{0x5312, 0x40, 0, 0}, {0x5282, 0x00, 0, 0},
++	{0x3012, 0x02, 0, 0}, {0x3010, 0x00, 0, 0},
+ };
+ 
+ static struct reg_value ov5642_setting_30fps_VGA_640_480[] = {
+-- 
+1.7.7.4
+

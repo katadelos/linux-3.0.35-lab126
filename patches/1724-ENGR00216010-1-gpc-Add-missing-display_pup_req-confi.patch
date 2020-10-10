@@ -1,0 +1,102 @@
+From f86a8329318fd6374c30a8a340ac8b81db100dfc Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Fri, 6 Jul 2012 17:51:13 +0800
+Subject: [PATCH 1724/2463] ENGR00216010-1: gpc: Add missing display_pup_req
+ config after system resumes
+
+There's only DISPLAY power down request setting before system suspends,
+but without the paired DISPLAY power up request setting after resume.
+This will cause ePxP/EPDC/SPDC module nonfunctional because the modules
+will be powered down once pdn_req is asserted but not powered up again.
+
+With this patch, ePxP/EPDC/SPDC survived (need reinitialize each, however)
+on resume.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ arch/arm/mach-mx6/pm.c     |   23 +++++++++++++++++++++++
+ arch/arm/mach-mx6/system.c |    5 -----
+ 2 files changed, 23 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index 4217fbe..50df571 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -50,6 +50,9 @@
+ #define GPC_ISR4_OFFSET				0x24
+ #define GPC_CNTR_OFFSET				0x0
+ #define GPC_PGC_DISP_PGCR_OFFSET	0x240
++#define GPC_PGC_DISP_PUPSCR_OFFSET	0x244
++#define GPC_PGC_DISP_PDNSCR_OFFSET	0x248
++#define GPC_PGC_DISP_SR_OFFSET		0x24c
+ #define GPC_PGC_GPU_PGCR_OFFSET		0x260
+ #define GPC_PGC_CPU_PDN_OFFSET		0x2a0
+ #define GPC_PGC_CPU_PUPSCR_OFFSET	0x2a4
+@@ -226,7 +229,25 @@ static void gpu_power_up(void)
+ 	udelay(10);
+ }
+ 
++static void disp_power_down(void)
++{
++	if (cpu_is_mx6sl()) {
++		__raw_writel(0xFFFFFFFF, gpc_base + GPC_PGC_DISP_PUPSCR_OFFSET);
++		__raw_writel(0xFFFFFFFF, gpc_base + GPC_PGC_DISP_PDNSCR_OFFSET);
++
++		__raw_writel(0x1, gpc_base + GPC_PGC_DISP_PGCR_OFFSET);
++		__raw_writel(0x10, gpc_base + GPC_CNTR_OFFSET);
++	}
++}
+ 
++static void disp_power_up(void)
++{
++	if (cpu_is_mx6sl()) {
++		__raw_writel(0x0, gpc_base + GPC_PGC_DISP_PGCR_OFFSET);
++		__raw_writel(0x20, gpc_base + GPC_CNTR_OFFSET);
++		__raw_writel(0x1, gpc_base + GPC_PGC_DISP_SR_OFFSET);
++	}
++}
+ 
+ static void mx6_suspend_store(void)
+ {
+@@ -324,6 +345,7 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 	switch (state) {
+ 	case PM_SUSPEND_MEM:
+ 		gpu_power_down();
++		disp_power_down();
+ 		usb_power_down_handler();
+ 		mxc_cpu_lp_set(ARM_POWER_OFF);
+ 		break;
+@@ -358,6 +380,7 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 			restore_gic_dist_state(0, &gds);
+ 			restore_gic_cpu_state(0, &gcs);
+ 			usb_power_up_handler();
++			disp_power_up();
+ 			gpu_power_up();
+ 		}
+ 
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 943b757..b9efbb6 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -39,7 +39,6 @@
+ #define SCU_INVALIDATE				0x0c
+ #define SCU_FPGA_REVISION			0x10
+ #define GPC_CNTR_OFFSET				0x0
+-#define GPC_PGC_DISP_PGCR_OFFSET	0x240
+ #define GPC_PGC_GPU_PGCR_OFFSET		0x260
+ #define GPC_PGC_CPU_PDN_OFFSET		0x2a0
+ #define GPC_PGC_CPU_PUPSCR_OFFSET	0x2a4
+@@ -149,10 +148,6 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 			__raw_writel(0x1, gpc_base + GPC_PGC_CPU_PDN_OFFSET);
+ 			__raw_writel(0x1, gpc_base + GPC_PGC_GPU_PGCR_OFFSET);
+ 			__raw_writel(0x1, gpc_base + GPC_CNTR_OFFSET);
+-			if (cpu_is_mx6sl()) {
+-				__raw_writel(0x1, gpc_base + GPC_PGC_DISP_PGCR_OFFSET);
+-				__raw_writel(0x10, gpc_base + GPC_CNTR_OFFSET);
+-			}
+ 			if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+ 				/* Enable weak 2P5 linear regulator */
+ 				anatop_val = __raw_readl(anatop_base +
+-- 
+1.7.7.4
+

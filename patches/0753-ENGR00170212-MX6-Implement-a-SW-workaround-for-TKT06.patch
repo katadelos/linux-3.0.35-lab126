@@ -1,0 +1,111 @@
+From ac9e30eacd35743ae1c24bccb82e247d9d4427ba Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Mon, 12 Dec 2011 12:42:58 -0600
+Subject: [PATCH 0753/2463] ENGR00170212: MX6 - Implement a SW workaround for
+ TKT065875
+
+Only CPU0 executes WFI followed by ISBs in uncached iRAM.
+All other cores execute the regular cpu_do_idle()
+This puts a restriction that all interrupts should only be routed to CPU0.
+This bug should be fixed in TO1.1.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/cpu.c     |    2 +-
+ arch/arm/mach-mx6/mx6_wfi.S |   24 +++++-------------------
+ arch/arm/mach-mx6/system.c  |   11 ++++++++---
+ 3 files changed, 14 insertions(+), 23 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index bfc4993..46e22f1 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -33,7 +33,7 @@
+ 
+ 
+ void *mx6_wait_in_iram_base;
+-void (*mx6_wait_in_iram)(void *ccm_base);
++void (*mx6_wait_in_iram)();
+ extern void mx6_wait(void);
+ 
+ 
+diff --git a/arch/arm/mach-mx6/mx6_wfi.S b/arch/arm/mach-mx6/mx6_wfi.S
+index 88993f0..3c63102 100644
+--- a/arch/arm/mach-mx6/mx6_wfi.S
++++ b/arch/arm/mach-mx6/mx6_wfi.S
+@@ -27,28 +27,14 @@
+  */
+ ENTRY(mx6_wait)
+ 
+-	stmfd   sp!, {r3,r4,r5,r6,r7}     @ Save registers
++	dsb
+ 
+ 	wfi
+ 
+-	/*Wait for 170ns due to L2 cache errata (TKT065875) */
+-	/*System is more stable only if the wait is closer to ~380ns */
+-	/* Each IO read takes about 76ns. */
+-
+-	ldr   r6, [r0]
+-	ldr   r6, [r0, #4]
+-	ldr   r6, [r0, #8]
+-	ldr   r6, [r0, #0xc]
+-	ldr   r6, [r0, #0x10]
+-	ldr   r6, [r0, #0x14]
+-	ldr   r6, [r0, #0x18]
+-	ldr   r6, [r0, #0x1c]
+-	ldr   r6, [r0, #0x20]
+-	ldr   r6, [r0, #0x24]
+-
+-    /* Restore registers */
+-    ldmfd sp!, {r3,r4,r5,r6,r7}
+-    mov     pc, lr
++ 	isb
++	isb
++
++      mov     pc, lr
+ 
+     .type   mx6_do_wait, #object
+ ENTRY(mx6_do_wait)
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 69e761c..8d8e0c7 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -46,12 +46,13 @@
+ /* static DEFINE_SPINLOCK(wfi_lock); */
+ 
+ extern unsigned int gpc_wake_irq[4];
++extern int mx6q_revision(void);
+ 
+ /* static unsigned int cpu_idle_mask; */
+ 
+ static void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ 
+-extern void (*mx6_wait_in_iram)(void *ccm_base);
++extern void (*mx6_wait_in_iram)();
+ extern void mx6_wait(void);
+ extern void *mx6_wait_in_iram_base;
+ extern bool enable_wait_mode;
+@@ -143,13 +144,17 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 	__raw_writel(ccm_clpcr, MXC_CCM_CLPCR);
+ }
+ 
+-void arch_idle(void)
++ void arch_idle(void)
+ {
+ 	if (enable_wait_mode) {
+ 		if ((num_online_cpus() == num_present_cpus())
+ 			&& mx6_wait_in_iram != NULL) {
+ 			mxc_cpu_lp_set(WAIT_UNCLOCKED_POWER_OFF);
+-			mx6_wait_in_iram(MXC_CCM_BASE);
++			if (smp_processor_id() == 0 &&
++				(mx6q_revision() <= IMX_CHIP_REVISION_1_0))
++				mx6_wait_in_iram();
++			else
++				cpu_do_idle();
+ 		}
+ 	} else
+ 		cpu_do_idle();
+-- 
+1.7.7.4
+

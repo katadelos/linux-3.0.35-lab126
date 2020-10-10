@@ -1,0 +1,42 @@
+From e170d8a4362ed19afb6feaa172de5e1835539c5c Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Thu, 11 Oct 2012 19:43:49 +0800
+Subject: [PATCH 2167/2463] ENGR00229222 mmc: esdhc: allow MMC and SDIO cards
+ switched to 1.8V signalling
+
+The current driver only allows SD cards to run at 1.8V.
+This patch allows MMC and SDIO cards to be switched to 1.8V signalling
+
+Acked-by: Dong Aisheng <b29396@freescale.com>
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ drivers/mmc/host/sdhci-esdhc-imx.c |    8 +++++++-
+ 1 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index 39eb287..59cc92c 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -841,12 +841,18 @@ static int esdhc_pltfm_init(struct sdhci_host *host, struct sdhci_pltfm_data *pd
+ 			MMC_VDD_32_33 | MMC_VDD_33_34;
+ 	host->ocr_avail_mmc = MMC_VDD_29_30 | MMC_VDD_30_31 | \
+ 			MMC_VDD_32_33 | MMC_VDD_33_34;
++	host->ocr_avail_sdio = MMC_VDD_29_30 | MMC_VDD_30_31 | \
++			MMC_VDD_32_33 | MMC_VDD_33_34;
+ 
+ 	if (cpu_is_mx6q() || cpu_is_mx6dl())
+ 		sdhci_esdhc_ops.platform_execute_tuning = esdhc_execute_tuning;
+ 
+-	if (boarddata->support_18v)
++	if (boarddata->support_18v) {
+ 		host->ocr_avail_sd |= MMC_VDD_165_195;
++		host->ocr_avail_mmc |= MMC_VDD_165_195;
++		host->ocr_avail_sdio |= MMC_VDD_165_195;
++	}
++
+ 	if (boarddata->support_8bit)
+ 		host->mmc->caps |= MMC_CAP_8_BIT_DATA;
+ 	if (boarddata->keep_power_at_suspend)
+-- 
+1.7.7.4
+

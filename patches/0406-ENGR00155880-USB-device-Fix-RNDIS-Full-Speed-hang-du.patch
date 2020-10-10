@@ -1,0 +1,75 @@
+From 71aade4b92d4f737022ef6a60565fc9b83c5bdfa Mon Sep 17 00:00:00 2001
+From: Anish Trivedi <anish@freescale.com>
+Date: Thu, 1 Sep 2011 17:20:42 -0500
+Subject: [PATCH 0406/2463] ENGR00155880 USB device: Fix RNDIS Full Speed hang
+ during initialization
+
+When setup irq is received, the status phase of the transfer is primed
+on ep0 before the data phase. The usb requests are added to the list
+of transfer descriptors (maintained by driver) in reverse of their
+expected completion order. Completion order is data followed by status,
+however the list of tds contains status followed by data.
+
+Upon completion of the data request, the irq handler proceeds to check
+the 1st td in the list -- the status request. In full speed mode,
+the status phase has not yet completed at this time, so the td's
+ACTIVE bit is still set. This leads irq handler to ignore the completion
+interrupt without checking the actual td for the data request that caused
+the interrupt.
+
+In high speed mode, this issue does not bear itself out because the status
+request also completes by the time the irq handler goes to process the data
+completion interrupt.
+
+The simple fix for this issue is to prime the status request AFTER the data
+request, so that the list of tds maintained by the driver contains the tds
+in the order of expected completion.
+
+Signed-off-by: Anish Trivedi <anish@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |   20 ++++++++------------
+ 1 files changed, 8 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index f33ba52..ccd8591 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -1577,17 +1577,6 @@ static void setup_received_irq(struct fsl_udc *udc,
+ 	unsigned mA = 500;
+ 	udc_reset_ep_queue(udc, 0);
+ 
+-	if (wLength) {
+-		int dir;
+-		dir = EP_DIR_IN;
+-		if (setup->bRequestType & USB_DIR_IN) {
+-			dir = EP_DIR_OUT;
+-		}
+-		spin_unlock(&udc->lock);
+-		if (ep0_prime_status(udc, dir))
+-			ep0stall(udc);
+-		spin_lock(&udc->lock);
+-	}
+ 	/* We process some stardard setup requests here */
+ 	switch (setup->bRequest) {
+ 	case USB_REQ_GET_STATUS:
+@@ -1689,9 +1678,16 @@ static void setup_received_irq(struct fsl_udc *udc,
+ 		spin_unlock(&udc->lock);
+ 		if (udc->driver->setup(&udc->gadget,
+ 				&udc->local_setup_buff) < 0) {
+-			/* cancel status phase */
++			/* cancel all requests on ep0 */
+ 			udc_reset_ep_queue(udc, 0);
+ 			ep0stall(udc);
++		} else {
++			/* prime the status phase */
++			int dir = EP_DIR_IN;
++			if (setup->bRequestType & USB_DIR_IN)
++				dir = EP_DIR_OUT;
++			if (ep0_prime_status(udc, dir))
++				ep0stall(udc);
+ 		}
+ 	} else {
+ 		/* No data phase, IN status from gadget */
+-- 
+1.7.7.4
+

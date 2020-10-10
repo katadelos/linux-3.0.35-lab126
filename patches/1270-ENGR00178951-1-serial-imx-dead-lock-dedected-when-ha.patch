@@ -1,0 +1,42 @@
+From a8d6d6a1b444713fc488594f071ffcfd208b0c62 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Sun, 1 Apr 2012 16:33:25 +0800
+Subject: [PATCH 1270/2463] ENGR00178951-1 serial/imx: dead lock dedected when
+ handle sysrq
+
+imx_rxint -> spin_lock_irqsave(&sport->port.lock, flags);
+
+And then it will call the following functions:
+
+uart_handle_sysrq_char -> handle_sysrq -> printk ->
+__call_console_write_drivers -> imx_console_write ->
+
+Here the imx_console_write function will call:
+spin_lock_irqsave(&sport->port.lock, flags);
+
+The A-A deadlock happens. We need spin_unlock before handle sysrq char
+and spin_lock again after it.
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ drivers/tty/serial/imx.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/tty/serial/imx.c b/drivers/tty/serial/imx.c
+index 10163b6..f8cd9bd 100644
+--- a/drivers/tty/serial/imx.c
++++ b/drivers/tty/serial/imx.c
+@@ -553,8 +553,10 @@ static irqreturn_t imx_rxint(int irq, void *dev_id)
+ 				continue;
+ 		}
+ 
++		spin_unlock_irqrestore(&sport->port.lock, flags);
+ 		if (uart_handle_sysrq_char(&sport->port, (unsigned char)rx))
+ 			continue;
++		spin_lock_irqsave(&sport->port.lock, flags);
+ 
+ 		if (unlikely(rx & URXD_ERR)) {
+ 			if (rx & URXD_BRK)
+-- 
+1.7.7.4
+

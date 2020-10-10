@@ -1,0 +1,45 @@
+From 12839b695de4661a75f67d385929d2000152e009 Mon Sep 17 00:00:00 2001
+From: Mahesh Mahadevan <r9aadq@freescale.com>
+Date: Tue, 25 Oct 2011 09:23:46 -0500
+Subject: [PATCH 0484/2463] ENGR00160794 Update AUDMUX driver for MX6Q
+
+Update the AUDMUX driver for MX6Q support
+
+Signed-off-by: Mahesh Mahadevan <r9aadq@freescale.com>
+---
+ arch/arm/plat-mxc/audmux-v2.c        |    5 +++++
+ arch/arm/plat-mxc/include/mach/mx6.h |    2 +-
+ 2 files changed, 6 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/audmux-v2.c b/arch/arm/plat-mxc/audmux-v2.c
+index 175e364..c0f9788 100644
+--- a/arch/arm/plat-mxc/audmux-v2.c
++++ b/arch/arm/plat-mxc/audmux-v2.c
+@@ -187,6 +187,11 @@ EXPORT_SYMBOL_GPL(mxc_audmux_v2_configure_port);
+ static int mxc_audmux_v2_init(void)
+ {
+ 	int ret;
++
++#if defined(CONFIG_ARCH_MX6)
++	audmux_base = MX6_IO_ADDRESS(MX6Q_AUDMUX_BASE_ADDR);
++	ret = 0;
++#endif
+ #if defined(CONFIG_ARCH_MX5)
+ 	if (cpu_is_mx51()) {
+ 		audmux_base = MX51_IO_ADDRESS(MX51_AUDMUX_BASE_ADDR);
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 9103e9d..284c529 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -221,7 +221,7 @@
+ #define IP2APB_PERFMON3_BASE_ADDR       (AIPS2_OFF_BASE_ADDR + 0x4C000)
+ #define IP2APB_TZASC1_BASE_ADDR         (AIPS2_OFF_BASE_ADDR + 0x50000)
+ #define IP2APB_TZASC2_BASE_ADDR         (AIPS2_OFF_BASE_ADDR + 0x54000)
+-#define AUDMUX_BASE_ADDR                (AIPS2_OFF_BASE_ADDR + 0x58000)
++#define MX6Q_AUDMUX_BASE_ADDR           (AIPS2_OFF_BASE_ADDR + 0x58000)
+ #define MIPI_CSI2_BASE_ADDR             (AIPS2_OFF_BASE_ADDR + 0x5C000)
+ #define MIPI_DSI_BASE_ADDR              (AIPS2_OFF_BASE_ADDR + 0x60000)
+ #define VDOA_BASE_ADDR                  (AIPS2_OFF_BASE_ADDR + 0x64000)
+-- 
+1.7.7.4
+

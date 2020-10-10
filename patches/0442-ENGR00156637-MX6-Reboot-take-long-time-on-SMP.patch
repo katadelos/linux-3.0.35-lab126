@@ -1,0 +1,65 @@
+From 07090fda2f501790cbfb31f41048a4b1c99bd9ea Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 27 Sep 2011 18:20:19 +0800
+Subject: [PATCH 0442/2463] ENGR00156637 [MX6]Reboot take long time on SMP
+
+Add work around to the reboot issue of SMP, with
+SMP, all the CPUs need to do _rcu_barrier, if we
+enqueue an rcu callback, we need to make sure CPU
+tick to stay alive until we take care of those by
+completing the appropriate grace period.
+
+This work around only work when the reboot command
+issue, so it didn't impact normal kernel feature.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ kernel/rcutree.c |   11 ++++++++++-
+ 1 files changed, 10 insertions(+), 1 deletions(-)
+
+diff --git a/kernel/rcutree.c b/kernel/rcutree.c
+index ba06207..3585b42 100644
+--- a/kernel/rcutree.c
++++ b/kernel/rcutree.c
+@@ -50,6 +50,7 @@
+ #include <linux/wait.h>
+ #include <linux/kthread.h>
+ #include <linux/prefetch.h>
++#include <linux/tick.h>
+ 
+ #include "rcutree.h"
+ 
+@@ -1480,6 +1481,7 @@ static void rcu_process_callbacks(struct softirq_action *unused)
+ 	/* If we are last CPU on way to dyntick-idle mode, accelerate it. */
+ 	rcu_needs_cpu_flush();
+ }
++static atomic_t rcu_barrier_cpu_count;
+ 
+ /*
+  * Wake up the current CPU's kthread.  This replaces raise_softirq()
+@@ -1536,6 +1538,14 @@ __call_rcu(struct rcu_head *head, void (*func)(struct rcu_head *rcu),
+ 		return;
+ 	}
+ 
++	/* Work around for reboot issue, check rcu_barrier_cpu_count
++	to see whether it is in the _rcu_barrier process, do
++	tick_nohz_restart_sched_tick if yes. If we enqueue an rcu
++	callback, we need the CPU tick to stay alive until we take care
++	of those by completing the appropriate grace period. */
++	if (atomic_read(&rcu_barrier_cpu_count) != 0)
++		tick_nohz_restart_sched_tick();
++
+ 	/*
+ 	 * Force the grace period if too many callbacks or too long waiting.
+ 	 * Enforce hysteresis, and don't invoke force_quiescent_state()
+@@ -1750,7 +1760,6 @@ static int rcu_needs_cpu_quick_check(int cpu)
+ }
+ 
+ static DEFINE_PER_CPU(struct rcu_head, rcu_barrier_head) = {NULL};
+-static atomic_t rcu_barrier_cpu_count;
+ static DEFINE_MUTEX(rcu_barrier_mutex);
+ static struct completion rcu_barrier_completion;
+ 
+-- 
+1.7.7.4
+

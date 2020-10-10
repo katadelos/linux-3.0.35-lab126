@@ -1,0 +1,58 @@
+From 834211aff0708f3486da14594d55dc18d0e89bc0 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Thu, 2 Aug 2012 09:46:53 +0800
+Subject: [PATCH 1942/2463] ENGR00219601-01: mmc: queue: enlarge the size of
+ bounce buffer for SDMA.
+
+- set bounce buffer to 512KB from 64K, which is hw max seg size for
+fsl sd host controller
+- by enlarging the size of bounce buffer, it will reduce the number
+of irq on writing by merging small requests into a large one, which
+will improve writing throughput.
+- the side effect is that the reading throughput of 512KB bounce buffer
+is lower than the one of 64KB bounce buffer, when cpu freq is at 200Mhz.
+
+Test Env:
+1. MX6DL SabreSD board
+2. On board eMMC (Sandisk: SDIN5C2-8G) running at 8-bit DDR @ 52Mhz
+3. Test commands:
+  3.1 Writing test command:
+  # dd if=/dev/zero of=/dev/mmcblk0 bs=1M count=100 conv=fsync
+  3.2 Reading test command:
+  # echo 1 > /proc/sys/vm/drop_caches
+  # echo 1 > /proc/sys/vm/drop_caches
+  # sleep 1
+  # dd if=/dev/mmcblk0 of=/dev/null bs=1M count=100
+
+Performance result:
+-------------------------------------------------------
+| CPU freq | SDMA (512KB) | SDMA (64KB) |    ADMA     |
+|----------+--------------+-------------+-------------|
+|   1Ghz   |  ~10MB/s (w) | ~5MB/s (w)  | ~10MB/s (w) |
+|          |  ~22MB/s (r) | ~23MB/s (r) | ~22MB/s (r) |
+|----------+--------------+-------------+-------------|
+|  200Mhz  |  ~8MB/s (w)  | ~4MB/s (w)  | ~8MB/s (w)  |
+|          |  ~13MB/s (r) | ~16MB/s (r) | ~11MB/s (r) |
+-------------------------------------------------------
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/card/queue.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mmc/card/queue.c b/drivers/mmc/card/queue.c
+index 45fb362..de1aaf9 100644
+--- a/drivers/mmc/card/queue.c
++++ b/drivers/mmc/card/queue.c
+@@ -20,7 +20,7 @@
+ #include <linux/mmc/host.h>
+ #include "queue.h"
+ 
+-#define MMC_QUEUE_BOUNCESZ	65536
++#define MMC_QUEUE_BOUNCESZ	(512 * 1024)
+ 
+ #define MMC_QUEUE_SUSPENDED	(1 << 0)
+ 
+-- 
+1.7.7.4
+

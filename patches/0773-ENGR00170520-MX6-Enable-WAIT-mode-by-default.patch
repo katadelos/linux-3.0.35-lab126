@@ -1,0 +1,45 @@
+From 003a808a6c44c6b4ef282cc7437779569816b23d Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Fri, 16 Dec 2011 16:13:45 -0600
+Subject: [PATCH 0773/2463] ENGR00170520: MX6-Enable WAIT mode by default.
+
+WAIT mode is enabled by default with this commit.
+Adding "enable_wait_mode=off" to the command line will
+prevent the system from entering WAIT mode.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/cpu.c |   10 ++++++++--
+ 1 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index 46e22f1..81f691c 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -38,7 +38,7 @@ extern void mx6_wait(void);
+ 
+ 
+ struct cpu_op *(*get_cpu_op)(int *op);
+-bool enable_wait_mode;
++bool enable_wait_mode = true;
+ u32 arm_max_freq = CPU_AT_1GHz;
+ 
+ void __iomem *gpc_base;
+@@ -154,7 +154,13 @@ postcore_initcall(post_cpu_init);
+ 
+ static int __init enable_wait(char *p)
+ {
+-	enable_wait_mode = true;
++	if (memcmp(p, "on", 2) == 0) {
++		enable_wait_mode = true;
++		p += 2;
++	} else if (memcmp(p, "off", 3) == 0) {
++		enable_wait_mode = false;
++		p += 3;
++	}
+ 	return 0;
+ }
+ early_param("enable_wait_mode", enable_wait);
+-- 
+1.7.7.4
+

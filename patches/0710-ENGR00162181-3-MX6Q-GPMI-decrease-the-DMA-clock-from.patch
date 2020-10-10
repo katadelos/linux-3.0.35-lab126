@@ -1,0 +1,42 @@
+From a397cbaef1e72933d52ec8591fef04af1bfa6d54 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Wed, 7 Dec 2011 15:18:25 +0800
+Subject: [PATCH 0710/2463] ENGR00162181-3 MX6Q/GPMI : decrease the DMA clock
+ from 200M to 11M
+
+This is just a workaroud for the DMA timeout.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 12a8d35..67d86b3 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4794,7 +4794,6 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK("mxs-perfmon.2", "perfmon", perfmon2_clk),
+ };
+ 
+-
+ static void clk_tree_init(void)
+ 
+ {
+@@ -4886,9 +4885,12 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	clk_set_parent(&asrc_clk[1], &pll3_sw_clk);
+ 	clk_set_rate(&asrc_clk[1], 7500000);
+ 
+-	/* set the NAND to 11MHz. Too fast will cause dma timeout. */
++	/* set the GPMI clock to : 11MHz */
+ 	clk_set_rate(&enfc_clk, enfc_clk.round_rate(&enfc_clk, 11000000));
+ 
++	/* set the DMA clock */
++	clk_set_rate(&usdhc3_clk, usdhc3_clk.round_rate(&usdhc3_clk, 11000000));
++
+ 	mx6_cpu_op_init();
+ 	cpu_op_tbl = get_cpu_op(&cpu_op_nr);
+ 
+-- 
+1.7.7.4
+

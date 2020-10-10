@@ -1,0 +1,41 @@
+From fb34f0f8eef5c7bdaf4d32b2ee806a1d866a5c5e Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Tue, 30 Oct 2012 14:52:30 +0800
+Subject: [PATCH 2202/2463] ENGR00231595 spdif: improve spdif driver
+
+add clk operation in mxc_pb_spdif_put function
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ sound/soc/codecs/mxc_spdif.c |    8 ++++++++
+ 1 files changed, 8 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/codecs/mxc_spdif.c b/sound/soc/codecs/mxc_spdif.c
+index c80eed6..33b2337 100644
+--- a/sound/soc/codecs/mxc_spdif.c
++++ b/sound/soc/codecs/mxc_spdif.c
+@@ -849,13 +849,21 @@ static int mxc_pb_spdif_get(struct snd_kcontrol *kcontrol,
+ static int mxc_pb_spdif_put(struct snd_kcontrol *kcontrol,
+ 			    struct snd_ctl_elem_value *uvalue)
+ {
++	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
++	struct mxc_spdif_priv *spdif_priv = snd_soc_codec_get_drvdata(codec);
++	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
++
+ 	mxc_spdif_control.ch_status[0] = uvalue->value.iec958.status[0];
+ 	mxc_spdif_control.ch_status[1] = uvalue->value.iec958.status[1];
+ 	mxc_spdif_control.ch_status[2] = uvalue->value.iec958.status[2];
+ 	mxc_spdif_control.ch_status[3] = uvalue->value.iec958.status[3];
+ 
++	clk_enable(plat_data->spdif_clk);
++
+ 	spdif_write_channel_status();
+ 
++	clk_disable(plat_data->spdif_clk);
++
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

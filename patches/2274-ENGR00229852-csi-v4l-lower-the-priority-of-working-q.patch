@@ -1,0 +1,31 @@
+From da530263e2ee17008df97c0eecf268a9c3fc3538 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Mon, 12 Nov 2012 16:17:14 +0800
+Subject: [PATCH 2274/2463] ENGR00229852 csi/v4l: lower the priority of
+ "working queue empty" message
+
+When pause the capture test program, the "working queue empty" message
+shows up repeatedly. However this message is expected to show up because
+there's no QBUF called. Change pr_err to pr_debug to keep it as debug level.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ drivers/media/video/mxc/capture/csi_v4l2_capture.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/csi_v4l2_capture.c b/drivers/media/video/mxc/capture/csi_v4l2_capture.c
+index c3ec6e4..d8a956c 100644
+--- a/drivers/media/video/mxc/capture/csi_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/csi_v4l2_capture.c
+@@ -273,7 +273,7 @@ static void camera_callback(u32 mask, void *dev)
+ 		return;
+ 
+ 	if (list_empty(&cam->working_q)) {
+-		pr_err("ERROR: v4l2 capture: %s: "
++		pr_debug("v4l2 capture: %s: "
+ 				"working queue empty\n", __func__);
+ 		return;
+ 	}
+-- 
+1.7.7.4
+

@@ -1,0 +1,32 @@
+From e6f10c1d092758e19f252aaafa06b1368c6f28d0 Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Tue, 27 Mar 2012 19:18:14 +0800
+Subject: [PATCH 1233/2463] ENGR00177058 mx6 sabreauto: enable tvin function
+
+set different gpr register due to mx6q or mx6dl
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 1bad3d5..56ebaa6 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -1213,7 +1213,11 @@ static inline void __init mx6q_csi0_io_init(void)
+ 	gpio_direction_output(SABREAUTO_CSI0_PWN, 1);
+ 	msleep(1);
+ 	gpio_set_value(SABREAUTO_CSI0_PWN, 0);
+-	mxc_iomux_set_gpr_register(1, 19, 1, 1);
++
++	if (cpu_is_mx6q())
++		mxc_iomux_set_gpr_register(1, 19, 1, 1);
++	else if (cpu_is_mx6dl())
++		mxc_iomux_set_gpr_register(13, 0, 3, 4);
+ }
+ 
+ static struct mxc_spdif_platform_data mxc_spdif_data = {
+-- 
+1.7.7.4
+

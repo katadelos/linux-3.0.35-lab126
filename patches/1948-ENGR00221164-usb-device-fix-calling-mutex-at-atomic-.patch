@@ -1,0 +1,32 @@
+From 76ff4e14a63bf7982e2301e61bea41fb7a9aea2d Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Thu, 23 Aug 2012 10:49:12 +0800
+Subject: [PATCH 1948/2463] ENGR00221164 usb: device: fix calling mutex at
+ atomic environment
+
+Move spin_unlock_irqrestore to avoid calling mutex at atomic
+environment, as dr_wake_up_enable will call mutex_lock
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index bab3ec9..b6b6190 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -2206,9 +2206,9 @@ static void fsl_gadget_disconnect_event(struct work_struct *work)
+ 		fsl_writel(tmp | (OTGSC_B_SESSION_VALID_IRQ_EN),
+ 				&dr_regs->otgsc);
+ 	udc->stopped = 1;
++	spin_unlock_irqrestore(&udc->lock, flags);
+ 	/* enable wake up */
+ 	dr_wake_up_enable(udc, true);
+-	spin_unlock_irqrestore(&udc->lock, flags);
+ 	/* close USB PHY clock */
+ 	dr_phy_low_power_mode(udc, true);
+ 	/* close dr controller clock */
+-- 
+1.7.7.4
+

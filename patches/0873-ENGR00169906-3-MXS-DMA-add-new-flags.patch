@@ -1,0 +1,45 @@
+From 339d83818dd524e39a3c296dedff66ed353403ea Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Mon, 16 Jan 2012 17:37:10 +0800
+Subject: [PATCH 0873/2463] ENGR00169906-3 MXS-DMA : add new flags
+
+We catch a DMA timeout bug in the NAND in mx6q.
+
+If we do not set the WAIT4END in the middle DMA command structure
+of the long DMA command chain, a DMA timeout may occurs.
+
+In order to fix the bug, we should let the driver to
+set the proper DMA flags in the DMA command structrues.
+
+So add the new flags for MXS-DMA.
+
+The driver can use these flags to control the DMA in a flexible way.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/plat-mxc/include/mach/dma.h |    4 +++-
+ 1 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/include/mach/dma.h b/arch/arm/plat-mxc/include/mach/dma.h
+index 04ab43d..321ced1 100644
+--- a/arch/arm/plat-mxc/include/mach/dma.h
++++ b/arch/arm/plat-mxc/include/mach/dma.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2004-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+@@ -81,6 +81,8 @@ struct mxs_dma_data {
+ 	int chan_irq;
+ };
+ 
++#define MXS_DMA_F_APPEND	(1 << 0)
++#define MXS_DMA_F_WAIT4END	(1 << 1)
+ static inline int mxs_dma_is_apbh(struct dma_chan *chan)
+ {
+ 	return !strcmp(dev_name(chan->device->dev), "mxs-dma-apbh");
+-- 
+1.7.7.4
+

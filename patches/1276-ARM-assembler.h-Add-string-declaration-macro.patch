@@ -1,0 +1,40 @@
+From 43dea184aa762bc053946addc1a840878e659787 Mon Sep 17 00:00:00 2001
+From: Dave Martin <dave.martin@linaro.org>
+Date: Thu, 23 Jun 2011 17:10:05 +0100
+Subject: [PATCH 1276/2463] ARM: assembler.h: Add string declaration macro
+
+Declaring strings in assembler source involves a certain amount of
+tedious boilerplate code in order to annotate the resulting symbol
+correctly.
+
+Encapsulating this boilerplate in a macro should help to avoid some
+duplication and the occasional mistake.
+
+Signed-off-by: Dave Martin <dave.martin@linaro.org>
+Acked-by: Nicolas Pitre <nicolas.pitre@linaro.org>
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/include/asm/assembler.h |    9 +++++++++
+ 1 files changed, 9 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/include/asm/assembler.h b/arch/arm/include/asm/assembler.h
+index d42a18b..fed335e 100644
+--- a/arch/arm/include/asm/assembler.h
++++ b/arch/arm/include/asm/assembler.h
+@@ -298,4 +298,13 @@
+ 	.macro	ldrusr, reg, ptr, inc, cond=al, rept=1, abort=9001f
+ 	usracc	ldr, \reg, \ptr, \inc, \cond, \rept, \abort
+ 	.endm
++
++/* Utility macro for declaring string literals */
++	.macro	string name:req, string
++	.type \name , #object
++\name:
++	.asciz "\string"
++	.size \name , . - \name
++	.endm
++
+ #endif /* __ASM_ASSEMBLER_H__ */
+-- 
+1.7.7.4
+

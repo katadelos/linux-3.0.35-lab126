@@ -1,0 +1,39 @@
+From 15da95d33e3f5623f1fbaf53895608523d814537 Mon Sep 17 00:00:00 2001
+From: Dong Aisheng <b29396@freescale.com>
+Date: Thu, 17 Nov 2011 19:24:54 +0800
+Subject: [PATCH 0630/2463] ENGR00162506 mx6q: set a correct clock for asrc
+
+The ASRC mem to mem mode does not work without this patch.
+Bacause 1.5Mhz clock rate is not available which will cause
+clock setting fail, change to 7.5Mhz (the mininum one) to make
+ASRC work properly.
+
+Signed-off-by: Dong Aisheng <b29396@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    8 ++++----
+ 1 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 2180e3eaf..bc15997 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4839,12 +4839,12 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	clk_set_rate(&gpu3d_core_clk[0], 528000000);
+ 
+ 	/*
+-	 * FIXME: asrc needs to use asrc_serial(spdif1) clock to do sample rate convertion,
+-	 * however we found it only works when set to 1.5M clock and the
+-	 * parent is pll3_sw_clk.
++	 * FIXME: asrc needs to use asrc_serial(spdif1) clock to do sample
++	 * rate convertion and this clock frequency can not be too high, set
++	 * it to the minimum value 7.5Mhz to make asrc work properly.
+ 	 */
+ 	clk_set_parent(&asrc_clk[1], &pll3_sw_clk);
+-	clk_set_rate(&asrc_clk[1], 1500000);
++	clk_set_rate(&asrc_clk[1], 7500000);
+ 
+ 	/* set the NAND to 11MHz. Too fast will cause dma timeout. */
+ 	clk_set_rate(&enfc_clk, enfc_clk.round_rate(&enfc_clk, 11000000));
+-- 
+1.7.7.4
+

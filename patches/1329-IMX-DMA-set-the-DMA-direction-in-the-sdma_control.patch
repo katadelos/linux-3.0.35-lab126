@@ -1,0 +1,30 @@
+From 3ab7d994b19ff1cd32c729c6de91904efea6ffdb Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Fri, 18 Nov 2011 16:38:02 +0800
+Subject: [PATCH 1329/2463] IMX/DMA : set the DMA direction in the
+ sdma_control()
+
+Set the right DMA direction in the sdma_control(), else
+we will get the wrong log when enable the DYNAMIC_DEBUG.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+Signed-off-by: Vinod Koul <vinod.koul@linux.intel.com>
+---
+ drivers/dma/imx-sdma.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/dma/imx-sdma.c b/drivers/dma/imx-sdma.c
+index 1b98d73..b6c7211 100644
+--- a/drivers/dma/imx-sdma.c
++++ b/drivers/dma/imx-sdma.c
+@@ -1128,6 +1128,7 @@ static int sdma_control(struct dma_chan *chan, enum dma_ctrl_cmd cmd,
+ 			sdmac->watermark_level = dmaengine_cfg->dst_maxburst;
+ 			sdmac->word_size = dmaengine_cfg->dst_addr_width;
+ 		}
++		sdmac->direction = dmaengine_cfg->direction;
+ 		return sdma_config_channel(sdmac);
+ 	default:
+ 		return -ENOSYS;
+-- 
+1.7.7.4
+

@@ -1,0 +1,38 @@
+From 7b5b4e82c860484314824196574ee3b1b3bb125b Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Fri, 20 Jan 2012 11:14:54 +0800
+Subject: [PATCH 0893/2463] ENGR00172476 [USB Host]change the default wakeup
+ value of RH
+
+- change the default wakeup value of RH from enabled to disabled
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ drivers/usb/host/ehci-arc.c |    5 ++++-
+ 1 files changed, 4 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index 8db08ba..d34e7de 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -1,6 +1,6 @@
+ /*
+  * Copyright (c) 2005 MontaVista Software
+- * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+  *
+  * This program is free software; you can redistribute it and/or modify it
+  * under the terms of the GNU General Public License as published by the
+@@ -521,6 +521,9 @@ static int ehci_fsl_setup(struct usb_hcd *hcd)
+ 	struct ehci_hcd *ehci = hcd_to_ehci(hcd);
+ 	int retval;
+ 
++	/* overwrite the default wakeup strategy */
++	device_set_wakeup_enable(&hcd->self.root_hub->dev, false);
++
+ 	/* EHCI registers start at offset 0x100 */
+ 	ehci->caps = hcd->regs + 0x100;
+ 	ehci->regs = hcd->regs + 0x100 +
+-- 
+1.7.7.4
+

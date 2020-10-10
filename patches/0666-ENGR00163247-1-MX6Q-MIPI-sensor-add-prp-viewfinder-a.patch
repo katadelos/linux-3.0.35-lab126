@@ -1,0 +1,103 @@
+From e783f50915dca45ebaf7ebe5ac70e8ccbcb01971 Mon Sep 17 00:00:00 2001
+From: Even Xu <Feng.Xu@freescale.com>
+Date: Mon, 28 Nov 2011 14:29:16 +0800
+Subject: [PATCH 0666/2463] ENGR00163247-1 MX6Q: MIPI sensor add prp
+ viewfinder and prp enc support
+
+1. Add mipi_en information to mipi csi2 driver info
+2. Add mipi related value to ipu channel parameter
+
+Signed-off-by: Even Xu <b21019@freescale.com>
+---
+ arch/arm/plat-mxc/include/mach/ipu-v3.h    |   16 ++++++++++++++++
+ arch/arm/plat-mxc/include/mach/mipi_csi2.h |   18 ++++++++++++------
+ 2 files changed, 28 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/include/mach/ipu-v3.h b/arch/arm/plat-mxc/include/mach/ipu-v3.h
+index 480b4ea..dd18f36 100755
+--- a/arch/arm/plat-mxc/include/mach/ipu-v3.h
++++ b/arch/arm/plat-mxc/include/mach/ipu-v3.h
+@@ -136,7 +136,12 @@ typedef union {
+ 		uint32_t out_width;
+ 		uint32_t out_height;
+ 		uint32_t out_pixel_fmt;
++		uint32_t outh_resize_ratio;
++		uint32_t outv_resize_ratio;
+ 		uint32_t csi;
++		uint32_t mipi_id;
++		uint32_t mipi_vc;
++		bool mipi_en;
+ 	} csi_prp_enc_mem;
+ 	struct {
+ 		uint32_t in_width;
+@@ -163,10 +168,21 @@ typedef union {
+ 		uint32_t out_width;
+ 		uint32_t out_height;
+ 		uint32_t out_pixel_fmt;
++		uint32_t outh_resize_ratio;
++		uint32_t outv_resize_ratio;
+ 		bool graphics_combine_en;
+ 		bool global_alpha_en;
+ 		bool key_color_en;
++		uint32_t in_g_pixel_fmt;
++		uint8_t alpha;
++		uint32_t key_color;
++		bool alpha_chan_en;
++		ipu_motion_sel motion_sel;
++		enum v4l2_field field_fmt;
+ 		uint32_t csi;
++		uint32_t mipi_id;
++		uint32_t mipi_vc;
++		bool mipi_en;
+ 	} csi_prp_vf_mem;
+ 	struct {
+ 		uint32_t in_width;
+diff --git a/arch/arm/plat-mxc/include/mach/mipi_csi2.h b/arch/arm/plat-mxc/include/mach/mipi_csi2.h
+index b266083..91a474d 100644
+--- a/arch/arm/plat-mxc/include/mach/mipi_csi2.h
++++ b/arch/arm/plat-mxc/include/mach/mipi_csi2.h
+@@ -24,14 +24,14 @@
+ #define	CSI2_N_LANES					(0x004/4)
+ #define	CSI2_PHY_SHUTDOWNZ				(0x008/4)
+ #define	CSI2_DPHY_RSTZ					(0x00c/4)
+-#define	CSI2_RESETN						(0x010/4)
++#define	CSI2_RESETN					(0x010/4)
+ #define	CSI2_PHY_STATE					(0x014/4)
+ #define	CSI2_DATA_IDS_1					(0x018/4)
+ #define	CSI2_DATA_IDS_2					(0x01c/4)
+-#define	CSI2_ERR1						(0x020/4)
+-#define	CSI2_ERR2						(0x024/4)
+-#define	CSI2_MSK1						(0x028/4)
+-#define	CSI2_MSK2						(0x02c/4)
++#define	CSI2_ERR1					(0x020/4)
++#define	CSI2_ERR2					(0x024/4)
++#define	CSI2_MSK1					(0x028/4)
++#define	CSI2_MSK2					(0x02c/4)
+ #define	CSI2_PHY_TST_CTRL0				(0x030/4)
+ #define	CSI2_PHY_TST_CTRL1				(0x034/4)
+ #define	CSI2_SFT_RESET					(0xf00/4)
+@@ -50,6 +50,12 @@ struct mipi_csi2_info;
+ /* mipi csi2 API */
+ struct mipi_csi2_info *mipi_csi2_get_info(void);
+ 
++bool mipi_csi2_enable(struct mipi_csi2_info *info);
++
++bool mipi_csi2_disable(struct mipi_csi2_info *info);
++
++bool mipi_csi2_get_status(struct mipi_csi2_info *info);
++
+ int mipi_csi2_get_bind_ipu(struct mipi_csi2_info *info);
+ 
+ unsigned int mipi_csi2_get_bind_csi(struct mipi_csi2_info *info);
+@@ -59,7 +65,7 @@ unsigned int mipi_csi2_get_virtual_channel(struct mipi_csi2_info *info);
+ unsigned int mipi_csi2_set_lanes(struct mipi_csi2_info *info);
+ 
+ unsigned int mipi_csi2_set_datatype(struct mipi_csi2_info *info,
+-										unsigned int datatype);
++					unsigned int datatype);
+ 
+ unsigned int mipi_csi2_get_datatype(struct mipi_csi2_info *info);
+ 
+-- 
+1.7.7.4
+

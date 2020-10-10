@@ -1,0 +1,36 @@
+From 2cf8cf02d1268ddccbc5850ae573f3409ee0a98c Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Fri, 16 Nov 2012 10:32:07 +0800
+Subject: [PATCH 2259/2463] ENGR00233886 ASRC: init variable to fix build
+ warning
+
+warning:
+
+Compiling warning on mainline imx_3.0.35 (potential bug):
+drivers/mxc/asrc/mxc_asrc.c: In function 'asrc_output_task_worker':
+drivers/mxc/asrc/mxc_asrc.c:961:68: warning: 't_size' may be used
+uninitialized in this function [-Wuninitialized]
+drivers/mxc/asrc/mxc_asrc.c:943:23: note: 't_size' was declared here
+
+In this patch, init t_size.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/mxc/asrc/mxc_asrc.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index 6c5daed..77f88f3 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -945,6 +945,7 @@ static void asrc_read_output_FIFO_S16(struct asrc_pair_params *params)
+ 	u32 size, i, j, reg, t_size;
+ 	u16 *index = params->output_last_period.dma_vaddr;
+ 
++	t_size = 0;
+ 	size = asrc_get_output_FIFO_size(params->index);
+ 	while (size) {
+ 		for (i = 0; i < size; i++) {
+-- 
+1.7.7.4
+

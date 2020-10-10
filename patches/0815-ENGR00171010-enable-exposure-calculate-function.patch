@@ -1,0 +1,42 @@
+From 2f19b3aca615790962e745989a020202f3e835ea Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Wed, 28 Dec 2011 14:20:20 +0800
+Subject: [PATCH 0815/2463] ENGR00171010 enable exposure calculate function
+
+Exposure calculate function was not used and this produce build
+warning, enable this function not only remove this warning, but
+also get a better image quality when take picture.
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov5642.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov5642.c b/drivers/media/video/mxc/capture/ov5642.c
+index 0a20b6f..206c96b 100644
+--- a/drivers/media/video/mxc/capture/ov5642.c
++++ b/drivers/media/video/mxc/capture/ov5642.c
+@@ -1881,6 +1881,7 @@ err:
+ }
+ static int ov5642_init_mode(enum ov5642_frame_rate frame_rate,
+ 		enum ov5642_mode mode);
++static int ov5642_write_snapshot_para(void);
+ static int ov5642_change_mode(enum ov5642_frame_rate frame_rate,
+ 		enum ov5642_mode new_mode,  enum ov5642_mode orig_mode)
+ {
+@@ -1906,10 +1907,10 @@ static int ov5642_change_mode(enum ov5642_frame_rate frame_rate,
+ 		ov5642_data.pix.height = 480;
+ 		return 0;
+ 	} else if (new_mode == ov5642_mode_QSXGA_2592_1944 && orig_mode == ov5642_mode_VGA_640_480) {
+-		pModeSetting = ov5642_setting_15fps_QSXGA_2592_1944;
+-		iModeSettingArySize = ARRAY_SIZE(ov5642_setting_15fps_QSXGA_2592_1944);
+ 		ov5642_data.pix.width = 2592;
+ 		ov5642_data.pix.height = 1944;
++		retval = ov5642_write_snapshot_para();
++		return retval;
+ 	} else if (new_mode == ov5642_mode_VGA_640_480 && orig_mode == ov5642_mode_QSXGA_2592_1944) {
+ 		pModeSetting = ov5642_setting_QSXGA_2_VGA;
+ 		iModeSettingArySize = ARRAY_SIZE(ov5642_setting_QSXGA_2_VGA);
+-- 
+1.7.7.4
+

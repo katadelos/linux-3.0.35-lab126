@@ -1,0 +1,50 @@
+From ec6389c2d0c32e1c0c7eb0735e703ceff1042b4a Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Fri, 6 Jul 2012 22:33:02 +0800
+Subject: [PATCH 1720/2463] ENGR00215970 [MX6]Enable BUS freq driver by
+ default
+
+Enable BUS freq by default for i.MX6DQ and i.MX6DL
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/bus_freq.c |   21 ++++++++++++---------
+ 1 files changed, 12 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index 2de1da2..a123295 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -586,17 +586,20 @@ static int __init busfreq_init(void)
+ 
+ 	printk(KERN_INFO "Bus freq driver module loaded\n");
+ 
+-	if (cpu_is_mx6sl()) {
+-		/* Enable busfreq by default. */
+-		bus_freq_scaling_is_active = 1;
++	/* Enable busfreq by default. */
++	bus_freq_scaling_is_active = 1;
++
++	if (cpu_is_mx6q())
++		set_high_bus_freq(1);
++	else
+ 		set_high_bus_freq(0);
+-		/* Make sure system can enter low bus mode if it should be in
+-		low bus mode */
+-		if (low_freq_bus_used() && !low_bus_freq_mode)
+-			set_low_bus_freq();
+ 
+-		printk(KERN_INFO "Bus freq driver Enabled\n");
+-	}
++	/* Make sure system can enter low bus mode if it should be in
++	low bus mode */
++	if (low_freq_bus_used() && !low_bus_freq_mode)
++		set_low_bus_freq();
++
++	printk(KERN_INFO "Bus freq driver Enabled\n");
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

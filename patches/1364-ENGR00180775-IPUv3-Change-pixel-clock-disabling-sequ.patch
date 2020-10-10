@@ -1,0 +1,112 @@
+From 0b94d3fa6457f6d2bc4e9763ec1579b6d37b9e2e Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Wed, 25 Apr 2012 14:34:31 +0800
+Subject: [PATCH 1364/2463] ENGR00180775 IPUv3:Change pixel clock disabling
+ sequence
+
+This patch postpones pixel clock and its parent clock(if
+the parent clock usecount is 1) disabling time point
+until DC/DP/DI enable bits are cleared in IPU_CONF
+register to prevent LVDS display channel starvation for
+some special LVDS display video mode.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c |   25 +++++++++++++++++++++++++
+ drivers/mxc/ipu3/ipu_disp.c   |    5 +----
+ 2 files changed, 26 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index f03980b..61687ad 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -97,6 +97,18 @@ static inline int _ipu_is_trb_chan(uint32_t dma_chan)
+ 		(g_ipu_hw_rev >= 2));
+ }
+ 
++/*
++ * We usually use IDMAC 23 as full plane and IDMAC 27 as partial
++ * plane.
++ * IDMAC 23/24/28/41 can drive a display respectively - primary
++ * IDMAC 27 depends on IDMAC 23 - nonprimary
++ */
++static inline int _ipu_is_primary_disp_chan(uint32_t dma_chan)
++{
++	return ((dma_chan == 23) || (dma_chan == 24) ||
++		(dma_chan == 28) || (dma_chan == 41));
++}
++
+ #define idma_is_valid(ch)	(ch != NO_DMA)
+ #define idma_mask(ch)		(idma_is_valid(ch) ? (1UL << (ch & 0x1F)) : 0)
+ #define idma_is_set(ipu, reg, dma)	(ipu_idmac_read(ipu, reg(dma)) & idma_mask(dma))
+@@ -952,6 +964,7 @@ void ipu_uninit_channel(struct ipu_soc *ipu, ipu_channel_t channel)
+ 	uint32_t reg;
+ 	uint32_t in_dma, out_dma = 0;
+ 	uint32_t ipu_conf;
++	uint32_t dc_chan = 0;
+ 
+ 	_ipu_lock(ipu);
+ 
+@@ -1084,12 +1097,14 @@ void ipu_uninit_channel(struct ipu_soc *ipu, ipu_channel_t channel)
+ 		_ipu_ic_uninit_rotate_pp(ipu);
+ 		break;
+ 	case MEM_DC_SYNC:
++		dc_chan = 1;
+ 		_ipu_dc_uninit(ipu, 1);
+ 		ipu->di_use_count[ipu->dc_di_assignment[1]]--;
+ 		ipu->dc_use_count--;
+ 		ipu->dmfc_use_count--;
+ 		break;
+ 	case MEM_BG_SYNC:
++		dc_chan = 5;
+ 		_ipu_dp_uninit(ipu, channel);
+ 		_ipu_dc_uninit(ipu, 5);
+ 		ipu->di_use_count[ipu->dc_di_assignment[5]]--;
+@@ -1104,11 +1119,13 @@ void ipu_uninit_channel(struct ipu_soc *ipu, ipu_channel_t channel)
+ 		ipu->dmfc_use_count--;
+ 		break;
+ 	case DIRECT_ASYNC0:
++		dc_chan = 8;
+ 		_ipu_dc_uninit(ipu, 8);
+ 		ipu->di_use_count[ipu->dc_di_assignment[8]]--;
+ 		ipu->dc_use_count--;
+ 		break;
+ 	case DIRECT_ASYNC1:
++		dc_chan = 9;
+ 		_ipu_dc_uninit(ipu, 9);
+ 		ipu->di_use_count[ipu->dc_di_assignment[9]]--;
+ 		ipu->dc_use_count--;
+@@ -1145,6 +1162,14 @@ void ipu_uninit_channel(struct ipu_soc *ipu, ipu_channel_t channel)
+ 
+ 	ipu->channel_init_mask &= ~(1L << IPU_CHAN_ID(channel));
+ 
++	/*
++	 * Disable pixel clk and its parent clock(if the parent clock
++	 * usecount is 1) after clearing DC/DP/DI bits in IPU_CONF
++	 * register to prevent LVDS display channel starvation.
++	 */
++	if (_ipu_is_primary_disp_chan(in_dma))
++		clk_disable(&ipu->pixel_clk[ipu->dc_di_assignment[dc_chan]]);
++
+ 	_ipu_unlock(ipu);
+ 
+ 	_ipu_put(ipu);
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index 229545c..d2fa65d 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -997,10 +997,7 @@ void _ipu_dp_dc_disable(struct ipu_soc *ipu, ipu_channel_t channel, bool swap)
+ 		reg &= ~DC_WR_CH_CONF_PROG_TYPE_MASK;
+ 		reg ^= DC_WR_CH_CONF_PROG_DI_ID;
+ 		ipu_dc_write(ipu, reg, DC_WR_CH_CONF(dc_chan));
+-	} else
+-		/* Clock is already off because it must be done quickly, but
+-		   we need to fix the ref count */
+-		clk_disable(&ipu->pixel_clk[ipu->dc_di_assignment[dc_chan]]);
++	}
+ }
+ 
+ void _ipu_init_dc_mappings(struct ipu_soc *ipu)
+-- 
+1.7.7.4
+

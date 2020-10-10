@@ -1,0 +1,39 @@
+From 09e8841d847ee4d94715496b3a6a273829565f6e Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Wed, 14 Dec 2011 14:09:08 +0800
+Subject: [PATCH 0748/2463] ENGR00170168-2 mxc_vout: add non FB_VMODE_YWRAP
+ support
+
+when use pan display, the case could be:
+1. a small window wrap in a big frame buffer
+2. a frame switch in a serial buffers
+
+the ipuv3 fb driver used to support case 1, and for case 2,
+if the fb format is interleaved, there is no problem, but for
+non-interleaved format (like I420), there will be a display bug.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_vout.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_vout.c b/drivers/media/video/mxc/output/mxc_vout.c
+index b93e148..094f5b2 100644
+--- a/drivers/media/video/mxc/output/mxc_vout.c
++++ b/drivers/media/video/mxc/output/mxc_vout.c
+@@ -1328,10 +1328,12 @@ static int config_disp_output(struct mxc_vout_output *vout)
+ 		else
+ 			var.yres_virtual = var.yres;
+ 		var.rotate = vout->task.output.rotate;
++		var.vmode |= FB_VMODE_YWRAP;
+ 	} else {
+ 		fb_num = FB_BUFS;
+ 		var.xres_virtual = var.xres;
+ 		var.yres_virtual = fb_num * var.yres;
++		var.vmode &= ~FB_VMODE_YWRAP;
+ 	}
+ 	var.bits_per_pixel = fmt_to_bpp(vout->task.output.format);
+ 	var.nonstd = vout->task.output.format;
+-- 
+1.7.7.4
+

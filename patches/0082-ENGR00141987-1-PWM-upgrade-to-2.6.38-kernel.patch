@@ -1,0 +1,199 @@
+From e54570eaddeabc5e03ef13eb74ea7de186f60905 Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Wed, 13 Apr 2011 11:08:02 +0800
+Subject: [PATCH 0082/2463] ENGR00141987-1 PWM: upgrade to 2.6.38 kernel
+
+- Upgrade PWM driver to 2.6.38 kernel
+- Add PWM support for MX53 SMD
+
+Signed-off-by: Sun Yuxi <b36102@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx53_smd.c |   14 +++++++++++
+ arch/arm/plat-mxc/pwm.c            |   45 +++++++++++++++++++++++++++++++----
+ 2 files changed, 53 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx53_smd.c b/arch/arm/mach-mx5/board-mx53_smd.c
+index 7fcb794..ef2dd87 100755
+--- a/arch/arm/mach-mx5/board-mx53_smd.c
++++ b/arch/arm/mach-mx5/board-mx53_smd.c
+@@ -29,6 +29,8 @@
+ #include <linux/ahci_platform.h>
+ #include <linux/regulator/consumer.h>
+ 
++#include <linux/pwm_backlight.h>
++
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+ #include <mach/imx-uart.h>
+@@ -149,6 +151,8 @@ static iomux_v3_cfg_t mx53_smd_pads[] = {
+ 	MX53_PAD_EIM_DA1__GPIO3_1,
+ 	/* DCDC5V_BB_EN */
+ 	MX53_PAD_KEY_COL4__GPIO4_14,
++	/* PWM */
++	MX53_PAD_GPIO_1__PWM2_PWMO,
+ };
+ 
+ #if defined(CONFIG_KEYBOARD_GPIO) || defined(CONFIG_KEYBOARD_GPIO_MODULE)
+@@ -585,6 +589,13 @@ static struct imx_ssi_platform_data smd_ssi_pdata = {
+ 	.flags = IMX_SSI_DMA,
+ };
+ 
++static struct platform_pwm_backlight_data mxc_pwm_backlight_data = {
++	.pwm_id = 1,
++	.max_brightness = 255,
++	.dft_brightness = 128,
++	.pwm_period_ns = 50000,
++};
++
+ static void __init mx53_smd_board_init(void)
+ {
+ 	mxc_iomux_v3_setup_multiple_pads(mx53_smd_pads,
+@@ -603,6 +614,9 @@ static void __init mx53_smd_board_init(void)
+ 	imx53_add_sdhci_esdhc_imx(2, NULL);
+ 	imx53_add_ahci_imx(0, &sata_data);
+ 
++	imx53_add_mxc_pwm(1);
++	imx53_add_mxc_pwm_backlight(0, &mxc_pwm_backlight_data);
++
+ 	mx53_smd_init_usb();
+ 	imx53_add_iim(&iim_data);
+ 	smd_add_device_buttons();
+diff --git a/arch/arm/plat-mxc/pwm.c b/arch/arm/plat-mxc/pwm.c
+index 5db4823..c95622c 100755
+--- a/arch/arm/plat-mxc/pwm.c
++++ b/arch/arm/plat-mxc/pwm.c
+@@ -6,6 +6,7 @@
+  * published by the Free Software Foundation.
+  *
+  * Derived from pxa PWM driver by eric miao <eric.miao@marvell.com>
++ * Copyright 2009-2011 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ #include <linux/module.h>
+@@ -16,6 +17,7 @@
+ #include <linux/clk.h>
+ #include <linux/io.h>
+ #include <linux/pwm.h>
++#include <linux/fsl_devices.h>
+ #include <mach/hardware.h>
+ 
+ 
+@@ -39,7 +41,12 @@
+ #define MX3_PWMCR_CLKSRC_IPG      (1 << 16)
+ #define MX3_PWMCR_EN              (1 << 0)
+ 
+-
++#define MX3_PWMCR_STOPEN		(1 << 25)
++#define MX3_PWMCR_DOZEEN                (1 << 24)
++#define MX3_PWMCR_WAITEN                (1 << 23)
++#define MX3_PWMCR_DBGEN			(1 << 22)
++#define MX3_PWMCR_CLKSRC_IPG		(1 << 16)
++#define MX3_PWMCR_CLKSRC_IPG_32k	(3 << 16)
+ 
+ struct pwm_device {
+ 	struct list_head	node;
+@@ -53,6 +60,9 @@ struct pwm_device {
+ 
+ 	unsigned int	use_count;
+ 	unsigned int	pwm_id;
++	int		pwmo_invert;
++	void (*enable_pwm_pad)(void);
++	void (*disable_pwm_pad)(void);
+ };
+ 
+ int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns)
+@@ -60,12 +70,14 @@ int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns)
+ 	if (pwm == NULL || period_ns == 0 || duty_ns > period_ns)
+ 		return -EINVAL;
+ 
+-	if (cpu_is_mx27() || cpu_is_mx3() || cpu_is_mx25() || cpu_is_mx51() ||
+-		cpu_is_mx53()) {
++	if (!(cpu_is_mx1() || cpu_is_mx21())) {
+ 		unsigned long long c;
+ 		unsigned long period_cycles, duty_cycles, prescale;
+ 		u32 cr;
+ 
++		if (pwm->pwmo_invert)
++			duty_ns = period_ns - duty_ns;
++
+ 		c = clk_get_rate(pwm->clk);
+ 		c = c * period_ns;
+ 		do_div(c, 1000000000);
+@@ -91,8 +103,8 @@ int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns)
+ 		writel(period_cycles, pwm->mmio_base + MX3_PWMPR);
+ 
+ 		cr = MX3_PWMCR_PRESCALER(prescale) |
+-			MX3_PWMCR_DOZEEN | MX3_PWMCR_WAITEN |
+-			MX3_PWMCR_DBGEN | MX3_PWMCR_EN;
++			MX3_PWMCR_STOPEN | MX3_PWMCR_DOZEEN |
++			MX3_PWMCR_WAITEN | MX3_PWMCR_DBGEN;
+ 
+ 		if (cpu_is_mx25())
+ 			cr |= MX3_PWMCR_CLKSRC_IPG;
+@@ -118,7 +130,10 @@ int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns)
+ 		 * (/2 .. /16).
+ 		 */
+ 		u32 max = readl(pwm->mmio_base + MX1_PWMP);
+-		u32 p = max * duty_ns / period_ns;
++		u32 p;
++		if (pwm->pwmo_invert)
++			duty_ns = period_ns - duty_ns;
++		p = max * duty_ns / period_ns;
+ 		writel(max - p, pwm->mmio_base + MX1_PWMS);
+ 	} else {
+ 		BUG();
+@@ -130,6 +145,7 @@ EXPORT_SYMBOL(pwm_config);
+ 
+ int pwm_enable(struct pwm_device *pwm)
+ {
++	unsigned long reg;
+ 	int rc = 0;
+ 
+ 	if (!pwm->clk_enabled) {
+@@ -137,12 +153,23 @@ int pwm_enable(struct pwm_device *pwm)
+ 		if (!rc)
+ 			pwm->clk_enabled = 1;
+ 	}
++
++	reg = readl(pwm->mmio_base + MX3_PWMCR);
++	reg |= MX3_PWMCR_EN;
++	writel(reg, pwm->mmio_base + MX3_PWMCR);
++
++	if (pwm->enable_pwm_pad)
++		pwm->enable_pwm_pad();
++
+ 	return rc;
+ }
+ EXPORT_SYMBOL(pwm_enable);
+ 
+ void pwm_disable(struct pwm_device *pwm)
+ {
++	if (pwm->disable_pwm_pad)
++		pwm->disable_pwm_pad();
++
+ 	writel(0, pwm->mmio_base + MX3_PWMCR);
+ 
+ 	if (pwm->clk_enabled) {
+@@ -201,6 +228,7 @@ static int __devinit mxc_pwm_probe(struct platform_device *pdev)
+ {
+ 	struct pwm_device *pwm;
+ 	struct resource *r;
++	struct mxc_pwm_platform_data *plat_data = pdev->dev.platform_data;
+ 	int ret = 0;
+ 
+ 	pwm = kzalloc(sizeof(struct pwm_device), GFP_KERNEL);
+@@ -221,6 +249,11 @@ static int __devinit mxc_pwm_probe(struct platform_device *pdev)
+ 	pwm->use_count = 0;
+ 	pwm->pwm_id = pdev->id;
+ 	pwm->pdev = pdev;
++	if (plat_data != NULL) {
++		pwm->pwmo_invert = plat_data->pwmo_invert;
++		pwm->enable_pwm_pad = plat_data->enable_pwm_pad;
++		pwm->disable_pwm_pad = plat_data->disable_pwm_pad;
++	}
+ 
+ 	r = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (r == NULL) {
+-- 
+1.7.7.4
+

@@ -1,0 +1,45 @@
+From e6cd59ec61e8931f939d5b47d343ff8f4a4f1097 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <b42378@freescale.com>
+Date: Fri, 31 Aug 2012 13:54:45 +0800
+Subject: [PATCH 2005/2463] ENGR00222836 Fix Kern BUG during Susp/Resu caused
+ by SPDIF debug code
+
+dump_reg() in msc_spdif.c will cause kernel BUG during Suspend/Resume,
+because of calling clk_enable() in an interrupt for playback.
+
+There's also a simular issue in capture case.
+Capture'd be stopped after resume for suspending.
+
+Signed-off-by: Nicolin Chen <b42378@freescale.com>
+---
+ sound/soc/codecs/mxc_spdif.c |    5 ++++-
+ 1 files changed, 4 insertions(+), 1 deletions(-)
+
+diff --git a/sound/soc/codecs/mxc_spdif.c b/sound/soc/codecs/mxc_spdif.c
+index 883aa4d..c80eed6 100644
+--- a/sound/soc/codecs/mxc_spdif.c
++++ b/sound/soc/codecs/mxc_spdif.c
+@@ -571,6 +571,7 @@ static int mxc_spdif_playback_start(struct snd_pcm_substream *substream,
+ 	if (!plat_data->spdif_tx)
+ 		return -EINVAL;
+ 
++	spdif_priv->tx_active = true;
+ 	regval = __raw_readl(spdif_base_addr + SPDIF_REG_SCR);
+ 	regval &= 0xfc33e3;
+ 	regval &= ~SCR_LOW_POWER;
+@@ -715,9 +716,11 @@ static int mxc_spdif_capture_start(struct snd_pcm_substream *substream,
+ 	struct mxc_spdif_platform_data *plat_data = spdif_priv->plat_data;
+ 	unsigned long regval;
+ 
+-	if (!plat_data->spdif_rx || !spdif_priv->rx_active)
++	if (!plat_data->spdif_rx)
+ 		return -EINVAL;
+ 
++	spdif_priv->rx_active = true;
++
+ 	regval = __raw_readl(spdif_base_addr + SPDIF_REG_SCR);
+ 	/*
+ 	 * initial and reset SPDIF configuration:
+-- 
+1.7.7.4
+

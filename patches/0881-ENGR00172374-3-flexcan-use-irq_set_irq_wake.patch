@@ -1,0 +1,63 @@
+From 21873eecefce73cd4550b9622d6a1862457a6824 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Thu, 19 Jan 2012 14:04:43 +0800
+Subject: [PATCH 0881/2463] ENGR00172374-3: flexcan: use irq_set_irq_wake
+
+fix the building errors when upgrade to v3.0
+
+The following commit change the function name:
+commit a0cd9ca2b907d7ee26575e7b63ac92dad768a75e
+Author: Thomas Gleixner <tglx@linutronix.de>
+Date:   Thu Feb 10 11:36:33 2011 +0100
+
+    genirq: Namespace cleanup
+
+    The irq namespace has become quite convoluted. My bad.  Clean it up
+    and deprecate the old functions. All new functions follow the scheme:
+
+    irq number based:
+        irq_set/get/xxx/_xxx(unsigned int irq, ...)
+
+    irq_data based:
+         irq_data_set/get/xxx/_xxx(struct irq_data *d, ....)
+
+    irq_desc based:
+         irq_desc_get_xxx(struct irq_desc *desc)
+
+    Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
+
+We need give one fix to change the function call name to align this change,
+
+-       ret = set_irq_wake(dev->irq, 1);
++       ret = irq_set_irq_wake(dev->irq, 1);
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ drivers/net/can/flexcan.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/can/flexcan.c b/drivers/net/can/flexcan.c
+index 3b6bde5..27dcf75 100644
+--- a/drivers/net/can/flexcan.c
++++ b/drivers/net/can/flexcan.c
+@@ -1076,7 +1076,7 @@ static int flexcan_suspend(struct platform_device *pdev, pm_message_t state)
+ 	if (priv->version >= FLEXCAN_VER_10_0_12)
+ 		mxc_iomux_set_gpr_register(13, 28, 1, 1);
+ 
+-	ret = set_irq_wake(dev->irq, 1);
++	ret = irq_set_irq_wake(dev->irq, 1);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -1089,7 +1089,7 @@ static int flexcan_resume(struct platform_device *pdev)
+ 	struct flexcan_priv *priv = netdev_priv(dev);
+ 	int ret;
+ 
+-	ret = set_irq_wake(dev->irq, 0);
++	ret = irq_set_irq_wake(dev->irq, 0);
+ 	if (ret)
+ 		return ret;
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,46 @@
+From 6986cfe4ed5f91bc8f5948c8e371f63ad4dffe8a Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Fri, 1 Jun 2012 17:56:48 +0800
+Subject: [PATCH 1565/2463] ENGR00211329-2 add mutex for otg wake up enable
+
+- For the system dump issue of usb unhandled irq,
+  the root cause is the shared resource being lack of protection
+  add mutex to protect the shared access.
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ arch/arm/mach-mx6/usb_dr.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index 0a15a8c..4f4df22 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -28,6 +28,8 @@
+ #include "devices-imx6q.h"
+ #include "regs-anadig.h"
+ #include "usb.h"
++
++DEFINE_MUTEX(otg_wakeup_enable_mutex);
+ static int usbotg_init_ext(struct platform_device *pdev);
+ static void usbotg_uninit_ext(struct platform_device *pdev);
+ static void usbotg_clock_gate(bool on);
+@@ -331,6 +333,7 @@ static void __wakeup_irq_enable(struct fsl_usb2_platform_data *pdata, bool on, i
+ 	/* otg host and device share the OWIE bit, only when host and device
+ 	 * all enable the wakeup irq, we can enable the OWIE bit
+ 	 */
++	mutex_lock(&otg_wakeup_enable_mutex);
+ 	if (on) {
+ #ifdef CONFIG_USB_OTG
+ 		wakeup_irq_enable_src |= source;
+@@ -347,6 +350,7 @@ static void __wakeup_irq_enable(struct fsl_usb2_platform_data *pdata, bool on, i
+ 		 * cycles of the standby clock(32k Hz) , that is 0.094 ms*/
+ 		udelay(100);
+ 	}
++	mutex_unlock(&otg_wakeup_enable_mutex);
+ }
+ 
+ /* The wakeup operation for DR port, it will clear the wakeup irq status
+-- 
+1.7.7.4
+

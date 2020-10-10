@@ -1,0 +1,44 @@
+From 2121d647a84064e9a7fb74b65a6921331664b222 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Fri, 20 Jul 2012 09:51:17 +0800
+Subject: [PATCH 1785/2463] ENGR00217719 usb gadget msc may enumeration fail
+ if msc storage response slow
+
+- communication between the usb driver and msc class driver is using
+  raise_exception/handle_excpetion, such mechaism can only have two
+  events(exceptions) at most, one is on processing and another is store to be
+  executed after the current one completed.
+  If the first one processing is very slow, and the third one occur, then the
+  second one will be overwriten by the third one and then the second event is
+  lost and then enumeration failed
+- since it is the linux community code, it is hard to change the whole frame
+  work, currently only a work around is provided
+- because this issue is brought in when the first reset event, when this
+  event occur, a lun sync will happen and it will cost much time, but in fact
+  this lun sync is not necessary for the first reset event, the work around
+  is to skip this lun sync.
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ drivers/usb/gadget/file_storage.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/gadget/file_storage.c b/drivers/usb/gadget/file_storage.c
+index 9b4f105..36b8c2b 100644
+--- a/drivers/usb/gadget/file_storage.c
++++ b/drivers/usb/gadget/file_storage.c
+@@ -3049,8 +3049,9 @@ static void handle_exception(struct fsg_dev *fsg)
+ 		break;
+ 
+ 	case FSG_STATE_DISCONNECT:
+-		for (i = 0; i < fsg->nluns; ++i)
+-			fsg_lun_fsync_sub(fsg->luns + i);
++		if (fsg->config != 0)
++			for (i = 0; i < fsg->nluns; ++i)
++				fsg_lun_fsync_sub(fsg->luns + i);
+ 		do_set_config(fsg, 0);		// Unconfigured state
+ 		break;
+ 
+-- 
+1.7.7.4
+

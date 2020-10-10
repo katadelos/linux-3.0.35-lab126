@@ -1,0 +1,138 @@
+From e9aba4ccd0a4036092b5311247c926be3643d24c Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Wed, 8 Aug 2012 20:54:19 +0800
+Subject: [PATCH 1868/2463] ENGR00219837-1 HDMI: Add HDMI_SDMA support for
+ RIGEL TO1.1
+
+In RIGEL TO1.1, the same HDMI_SDMA fix is introduced as ARIK TO1.2. Add
+support for RIGEL TO1.1 for HDMI_SDMA functionality.
+
+In this patch:
+	1.Add hdmi_SDMA_check() interface to judge whether MX6 chip
+	support HDMI_SDMA.
+	2.Replace mx6q_version() check with hdmi_SDMA_check() to support
+	both ARIK To1.2 and RIGEL TO1.1.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/mfd/mxc-hdmi-core.c       |    7 +++++++
+ include/linux/mfd/mxc-hdmi-core.h |    1 +
+ sound/soc/imx/imx-hdmi-dma.c      |   17 ++++++++---------
+ 3 files changed, 16 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/mfd/mxc-hdmi-core.c b/drivers/mfd/mxc-hdmi-core.c
+index 6ccf550..3328436 100644
+--- a/drivers/mfd/mxc-hdmi-core.c
++++ b/drivers/mfd/mxc-hdmi-core.c
+@@ -40,6 +40,7 @@
+ #include "../mxc/ipu3/ipu_prv.h"
+ #include <linux/mfd/mxc-hdmi-core.h>
+ #include <linux/fsl_devices.h>
++#include <mach/hardware.h>
+ 
+ struct mxc_hdmi_data {
+ 	struct platform_device *pdev;
+@@ -397,6 +398,12 @@ static void hdmi_set_clk_regenerator(void)
+ 	hdmi_set_clock_regenerator_n(clk_n);
+ }
+ 
++unsigned int hdmi_SDMA_check(void)
++{
++	return (mx6q_revision() > IMX_CHIP_REVISION_1_1) ||
++			(mx6dl_revision() > IMX_CHIP_REVISION_1_0);
++}
++
+ /* Need to run this before phy is enabled the first time to prevent
+  * overflow condition in HDMI_IH_FC_STAT2 */
+ void hdmi_init_clk_regenerator(void)
+diff --git a/include/linux/mfd/mxc-hdmi-core.h b/include/linux/mfd/mxc-hdmi-core.h
+index 6ed08d3..8ddea5a 100644
+--- a/include/linux/mfd/mxc-hdmi-core.h
++++ b/include/linux/mfd/mxc-hdmi-core.h
+@@ -49,5 +49,6 @@ extern int mxc_hdmi_disp_id;
+ 
+ void hdmi_set_registered(int registered);
+ int hdmi_get_registered(void);
++unsigned int hdmi_SDMA_check(void);
+ 
+ #endif
+diff --git a/sound/soc/imx/imx-hdmi-dma.c b/sound/soc/imx/imx-hdmi-dma.c
+index 443ff10..18e3a01 100644
+--- a/sound/soc/imx/imx-hdmi-dma.c
++++ b/sound/soc/imx/imx-hdmi-dma.c
+@@ -993,8 +993,7 @@ static int hdmi_dma_hw_free(struct snd_pcm_substream *substream)
+ {
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+ 	struct imx_hdmi_dma_runtime_data *params = runtime->private_data;
+-	if ((mx6q_revision() > IMX_CHIP_REVISION_1_1) &&
+-							(params->dma_channel)) {
++	if (hdmi_SDMA_check() && (params->dma_channel)) {
+ 		dma_release_channel(params->dma_channel);
+ 		params->dma_channel = NULL;
+ 	}
+@@ -1037,7 +1036,7 @@ static int hdmi_dma_hw_params(struct snd_pcm_substream *substream,
+ 	}
+ 
+ 	rtd->dma_period_bytes = rtd->period_bytes * rtd->buffer_ratio;
+-	if ((mx6q_revision() > IMX_CHIP_REVISION_1_1)) {
++	if (hdmi_SDMA_check()) {
+ 		rtd->sdma_params.buffer_num = rtd->periods;
+ 		rtd->sdma_params.phyaddr = rtd->phy_hdmi_sdma_t;
+ 
+@@ -1096,7 +1095,7 @@ static int hdmi_dma_trigger(struct snd_pcm_substream *substream, int cmd)
+ 		hdmi_dma_start();
+ 		hdmi_dma_irq_mask(0);
+ 		hdmi_set_dma_mode(1);
+-		if ((mx6q_revision() > IMX_CHIP_REVISION_1_1))
++		if (hdmi_SDMA_check())
+ 			dmaengine_submit(rtd->desc);
+ 		break;
+ 
+@@ -1107,7 +1106,7 @@ static int hdmi_dma_trigger(struct snd_pcm_substream *substream, int cmd)
+ 		hdmi_dma_stop();
+ 		hdmi_set_dma_mode(0);
+ 		hdmi_dma_irq_mask(1);
+-		if ((mx6q_revision() > IMX_CHIP_REVISION_1_1))
++		if (hdmi_SDMA_check())
+ 			dmaengine_terminate_all(rtd->dma_channel);
+ 		break;
+ 
+@@ -1155,7 +1154,7 @@ static void hdmi_dma_irq_enable(struct imx_hdmi_dma_runtime_data *rtd)
+ 	spin_lock_irqsave(&hdmi_dma_priv->irq_lock, flags);
+ 
+ 	hdmi_dma_clear_irq_status(0xff);
+-	if ((mx6q_revision() > IMX_CHIP_REVISION_1_1))
++	if (hdmi_SDMA_check())
+ 		hdmi_dma_irq_mute(1);
+ 	else
+ 		hdmi_dma_irq_mute(0);
+@@ -1335,7 +1334,7 @@ static int __devinit imx_soc_platform_probe(struct platform_device *pdev)
+ 	if (hdmi_dma_priv == NULL)
+ 		return -ENOMEM;
+ 
+-	if ((mx6q_revision() > IMX_CHIP_REVISION_1_1)) {
++	if (hdmi_SDMA_check()) {
+ 		/*To alloc a buffer non cacheable for hdmi script use*/
+ 		hdmi_dma_priv->hdmi_sdma_t =
+ 			dma_alloc_coherent(NULL,
+@@ -1365,7 +1364,7 @@ static int __devinit imx_soc_platform_probe(struct platform_device *pdev)
+ 		dev_err(&pdev->dev, "Unable to get HDMI ahb clk: %d\n", ret);
+ 		goto e_clk_get2;
+ 	}
+-	if ((mx6q_revision() <= IMX_CHIP_REVISION_1_1)) {
++	if (!hdmi_SDMA_check()) {
+ 		if (request_irq(hdmi_dma_priv->irq, hdmi_dma_isr, IRQF_SHARED,
+ 				"hdmi dma", hdmi_dma_priv)) {
+ 			dev_err(&pdev->dev,
+@@ -1395,7 +1394,7 @@ e_clk_get1:
+ static int __devexit imx_soc_platform_remove(struct platform_device *pdev)
+ {
+ 	free_irq(hdmi_dma_priv->irq, hdmi_dma_priv);
+-	if ((mx6q_revision() > IMX_CHIP_REVISION_1_1)) {
++	if (hdmi_SDMA_check()) {
+ 		dma_free_coherent(NULL,
+ 				sizeof(struct hdmi_sdma_script_data),
+ 				hdmi_dma_priv->hdmi_sdma_t,
+-- 
+1.7.7.4
+

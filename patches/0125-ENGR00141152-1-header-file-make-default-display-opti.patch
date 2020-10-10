@@ -1,0 +1,81 @@
+From 3f00b0e6dc3fd042ab2ea4853cea88eea1674ebb Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Tue, 19 Apr 2011 16:33:28 +0800
+Subject: [PATCH 0125/2463] ENGR00141152-1 header file: make default display
+ option
+
+After this patch, default display for below platforms:
+
+mx51 bbg: DVI-XGA on DI0
+mx53 ard:  LVDS-XGA on DI0
+mx53 evk: CLAA-WVGA on DI0
+mx53 loco: VGA-XGA on DI1
+mx53 smd: LVDS-XGA on DI1
+
+The default options will work if you do not enter other video cmdline options.
+For platform need enable other drivers, it will enable it automatically.
+For example, under default option, mx53 loco will enable tve-vga driver
+automatically; before this patch, it need add 'vga' to cmdline to enable it.
+And 'di1_primary' option also will be enabled automatically if need.
+
+If you want to overwrite the default option, please refer to below:
+
+enable vga: 'vga'
+disable vga: 'vga=off'
+enable tve: 'tve'
+disable tve:  'tve=off'
+enable ddc: 'ddc'
+disable ddc: 'ddc=off'
+enable hdmi: 'hdmi'
+disable hdmi: 'hdmi=off'
+choose di0 as primary: 'di0_primary'
+choose di1 as primary: 'di1_primary'
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ include/linux/fsl_devices.h |    8 ++++++++
+ 1 files changed, 8 insertions(+), 0 deletions(-)
+
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index 6cc1a4e..a2d6574 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -186,6 +186,9 @@ struct fsl_spi_platform_data {
+ struct fsl_mxc_tve_platform_data {
+ 	char *dac_reg;
+ 	char *dig_reg;
++#define MXC_TVE_TVOUT	0x1
++#define MXC_TVE_VGA	0x2
++	int boot_enable;
+ };
+ 
+ struct fsl_mxc_lightsensor_platform_data {
+@@ -196,6 +199,9 @@ struct fsl_mxc_lightsensor_platform_data {
+ struct fsl_mxc_ldb_platform_data {
+ 	char *lvds_bg_reg;
+ 	u32 ext_ref;
++#define MXC_LDBDI0	0x1
++#define MXC_LDBDI1	0x2
++	int boot_enable;
+ };
+ 
+ struct fsl_mxc_lcd_platform_data {
+@@ -203,6 +209,7 @@ struct fsl_mxc_lcd_platform_data {
+ 	char *core_reg;
+ 	char *analog_reg;
+ 	void (*reset) (void);
++	int boot_enable;
+ };
+ 
+ struct fsl_mxc_ddc_platform_data {
+@@ -210,6 +217,7 @@ struct fsl_mxc_ddc_platform_data {
+ 	void (*init) (void);
+ 	int (*update) (void);
+ 	char *analog_regulator;
++	int boot_enable;
+ };
+ 
+ struct fsl_mxc_camera_platform_data {
+-- 
+1.7.7.4
+

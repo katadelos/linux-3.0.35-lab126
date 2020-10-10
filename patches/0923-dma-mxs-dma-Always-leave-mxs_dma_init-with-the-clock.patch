@@ -1,0 +1,49 @@
+From dab9c133368573d2da587196b00325ec8258214e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Lothar=20Wa=C3=9Fmann?= <LW@KARO-electronics.de>
+Date: Thu, 8 Dec 2011 09:15:42 +0100
+Subject: [PATCH 0923/2463] dma: mxs-dma: Always leave mxs_dma_init() with the
+ clock disabled.
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+There is no need to have the clock enabled all the time the driver is
+loaded.
+It will be enabled anyway in mxs_dma_alloc_chan_resources() when a
+channel is actually going to be used.
+
+Signed-off-by: Lothar Waßmann <LW@KARO-electronics.de>
+Signed-off-by: Vinod Koul <vinod.koul@linux.intel.com>
+---
+ drivers/dma/mxs-dma.c |    7 ++-----
+ 1 files changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/dma/mxs-dma.c b/drivers/dma/mxs-dma.c
+index c13687a..365e7ac 100644
+--- a/drivers/dma/mxs-dma.c
++++ b/drivers/dma/mxs-dma.c
+@@ -580,7 +580,7 @@ static int __init mxs_dma_init(struct mxs_dma_engine *mxs_dma)
+ 
+ 	ret = clk_enable(mxs_dma->clk);
+ 	if (ret)
+-		goto err_out;
++		return ret;
+ 
+ 	ret = mxs_reset_block(mxs_dma->base);
+ 	if (ret)
+@@ -604,11 +604,8 @@ static int __init mxs_dma_init(struct mxs_dma_engine *mxs_dma)
+ 	writel(MXS_DMA_CHANNELS_MASK << MXS_DMA_CHANNELS,
+ 		mxs_dma->base + HW_APBHX_CTRL1 + MXS_SET_ADDR);
+ 
+-	clk_disable(mxs_dma->clk);
+-
+-	return 0;
+-
+ err_out:
++	clk_disable(mxs_dma->clk);
+ 	return ret;
+ }
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,271 @@
+From d24899091ff14ae100315744b703ab3340beafdf Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Tue, 6 Mar 2012 10:10:22 +0800
+Subject: [PATCH 1149/2463] ENGR00176147-2: usb: pass the wakeup event to
+ pdata
+
+The host driver needs to differentiate wakeup event.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ arch/arm/mach-mx5/usb_dr.c     |   22 +++++++++++++---------
+ arch/arm/mach-mx5/usb_h1.c     |    5 ++---
+ arch/arm/mach-mx5/usb_h2.c     |    5 ++---
+ arch/arm/mach-mx6/usb_dr.c     |   10 ++++------
+ arch/arm/mach-mx6/usb_h1.c     |    5 ++---
+ arch/arm/mach-mx6/usb_h2.c     |    3 +--
+ arch/arm/mach-mx6/usb_h3.c     |    3 +--
+ arch/arm/plat-mxc/usb_wakeup.c |    3 ++-
+ 8 files changed, 27 insertions(+), 29 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/usb_dr.c b/arch/arm/mach-mx5/usb_dr.c
+index 36e9eac..7f0d902 100755
+--- a/arch/arm/mach-mx5/usb_dr.c
++++ b/arch/arm/mach-mx5/usb_dr.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2005-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2005-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -225,7 +225,6 @@ static void host_wakeup_handler(struct fsl_usb2_platform_data *pdata)
+ {
+ 	_host_wakeup_enable(pdata, false);
+ 	_host_phy_lowpower_suspend(pdata, false);
+-	pdata->wakeup_event = 1;
+ }
+ /* End of host related operation for DR port */
+ #endif /* CONFIG_USB_EHCI_ARC_OTG */
+@@ -262,22 +261,27 @@ static enum usb_wakeup_event _is_device_wakeup(struct fsl_usb2_platform_data *pd
+ 	pr_debug("the otgsc is 0x%x, usbsts is 0x%x, portsc is 0x%x, wakeup_irq is 0x%x\n", UOG_OTGSC, UOG_USBSTS, UOG_PORTSC1, wakeup_req);
+ 
+ 	/* if ID=1, it is a device wakeup event */
+-	if (wakeup_req && (UOG_OTGSC & OTGSC_STS_USB_ID) && (UOG_PORTSC1 & PORTSC_PORT_FORCE_RESUME)) {
+-		printk(KERN_INFO "otg udc wakeup, host sends resume signal\n");
+-		return true;
+-	}
+ 	if (wakeup_req && (UOG_OTGSC & OTGSC_STS_USB_ID) && (UOG_USBSTS & USBSTS_URI)) {
+ 		printk(KERN_INFO "otg udc wakeup, host sends reset signal\n");
+-		return true;
++		return WAKEUP_EVENT_DPDM;
++	}
++	if (wakeup_req && (UOG_OTGSC & OTGSC_STS_USB_ID) &&  \
++		((UOG_USBSTS & USBSTS_PCI) || (UOG_PORTSC1 & PORTSC_PORT_FORCE_RESUME))) {
++		/*
++		 * When the line state from J to K, the Port Change Detect bit
++		 * in the USBSTS register is also set to '1'.
++		 */
++		printk(KERN_INFO "otg udc wakeup, host sends resume signal\n");
++		return WAKEUP_EVENT_DPDM;
+ 	}
+ 	if (wakeup_req && (UOG_OTGSC & OTGSC_STS_USB_ID) && (UOG_OTGSC & OTGSC_STS_A_VBUS_VALID) \
+ 		&& (UOG_OTGSC & OTGSC_IS_B_SESSION_VALID)) {
+ 		printk(KERN_INFO "otg udc vbus rising wakeup\n");
+-		return true;
++		return WAKEUP_EVENT_VBUS;
+ 	}
+ 	if (wakeup_req && (UOG_OTGSC & OTGSC_STS_USB_ID) && !(UOG_OTGSC & OTGSC_STS_A_VBUS_VALID)) {
+ 		printk(KERN_INFO "otg udc vbus falling wakeup\n");
+-		return true;
++		return WAKEUP_EVENT_VBUS;
+ 	}
+ 
+ 	return WAKEUP_EVENT_INVALID;
+diff --git a/arch/arm/mach-mx5/usb_h1.c b/arch/arm/mach-mx5/usb_h1.c
+index 3d692e9..e291fb7 100755
+--- a/arch/arm/mach-mx5/usb_h1.c
++++ b/arch/arm/mach-mx5/usb_h1.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2005-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2005-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -124,7 +124,7 @@ static enum usb_wakeup_event _is_usbh1_wakeup(struct fsl_usb2_platform_data *pda
+ 	int wakeup_req = USBCTRL & UCTRL_H1WIR;
+ 
+ 	if (wakeup_req)
+-		return !WAKEUP_EVENT_INVALID;
++		return WAKEUP_EVENT_DPDM;
+ 
+ 	return WAKEUP_EVENT_INVALID;
+ }
+@@ -133,7 +133,6 @@ static void h1_wakeup_handler(struct fsl_usb2_platform_data *pdata)
+ {
+ 	_wake_up_enable(pdata, false);
+ 	_phy_lowpower_suspend(pdata, false);
+-	pdata->wakeup_event = 1;
+ }
+ 
+ static void usbh1_wakeup_event_clear(void)
+diff --git a/arch/arm/mach-mx5/usb_h2.c b/arch/arm/mach-mx5/usb_h2.c
+index 37e8476..1f7d0a7 100755
+--- a/arch/arm/mach-mx5/usb_h2.c
++++ b/arch/arm/mach-mx5/usb_h2.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2005-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2005-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -104,7 +104,7 @@ static enum usb_wakeup_event _is_usbh2_wakeup(struct fsl_usb2_platform_data *pda
+ 	int wakeup_req = USBCTRL & UCTRL_H2WIR;
+ 
+ 	if (wakeup_req)
+-		return !WAKEUP_EVENT_INVALID;
++		return WAKEUP_EVENT_DPDM;
+ 
+ 	return WAKEUP_EVENT_INVALID;
+ }
+@@ -113,7 +113,6 @@ static void h2_wakeup_handler(struct fsl_usb2_platform_data *pdata)
+ {
+ 	_wake_up_enable(pdata, false);
+ 	_phy_lowpower_suspend(pdata, false);
+-	pdata->wakeup_event = 1;
+ }
+ 
+ static void usbh2_wakeup_event_clear(void)
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index b0ef01a..f49bb10 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -29,7 +29,6 @@
+ #include "regs-anadig.h"
+ #include "usb.h"
+ 
+-
+ static int usbotg_init_ext(struct platform_device *pdev);
+ static void usbotg_uninit_ext(struct platform_device *pdev);
+ static void usbotg_clock_gate(bool on);
+@@ -403,7 +402,6 @@ static void host_wakeup_handler(struct fsl_usb2_platform_data *pdata)
+ {
+ 	_host_phy_lowpower_suspend(pdata, false);
+ 	_host_wakeup_enable(pdata, false);
+-	pdata->wakeup_event = 1;
+ }
+ /* End of host related operation for DR port */
+ #endif /* CONFIG_USB_EHCI_ARC_OTG */
+@@ -441,7 +439,7 @@ static enum usb_wakeup_event _is_device_wakeup(struct fsl_usb2_platform_data *pd
+ 	/* if ID=1, it is a device wakeup event */
+ 	if (wakeup_req && (UOG_OTGSC & OTGSC_STS_USB_ID) && (UOG_USBSTS & USBSTS_URI)) {
+ 		printk(KERN_INFO "otg udc wakeup, host sends reset signal\n");
+-		return true;
++		return WAKEUP_EVENT_DPDM;
+ 	}
+ 	if (wakeup_req && (UOG_OTGSC & OTGSC_STS_USB_ID) &&  \
+ 		((UOG_USBSTS & USBSTS_PCI) || (UOG_PORTSC1 & PORTSC_PORT_FORCE_RESUME))) {
+@@ -450,16 +448,16 @@ static enum usb_wakeup_event _is_device_wakeup(struct fsl_usb2_platform_data *pd
+ 		 * in the USBSTS register is also set to '1'.
+ 		 */
+ 		printk(KERN_INFO "otg udc wakeup, host sends resume signal\n");
+-		return true;
++		return WAKEUP_EVENT_DPDM;
+ 	}
+ 	if (wakeup_req && (UOG_OTGSC & OTGSC_STS_USB_ID) && (UOG_OTGSC & OTGSC_STS_A_VBUS_VALID) \
+ 		&& (UOG_OTGSC & OTGSC_IS_B_SESSION_VALID)) {
+ 		printk(KERN_INFO "otg udc vbus rising wakeup\n");
+-		return true;
++		return WAKEUP_EVENT_VBUS;
+ 	}
+ 	if (wakeup_req && (UOG_OTGSC & OTGSC_STS_USB_ID) && !(UOG_OTGSC & OTGSC_STS_A_VBUS_VALID)) {
+ 		printk(KERN_INFO "otg udc vbus falling wakeup\n");
+-		return true;
++		return WAKEUP_EVENT_VBUS;
+ 	}
+ 
+ 	return WAKEUP_EVENT_INVALID;
+diff --git a/arch/arm/mach-mx6/usb_h1.c b/arch/arm/mach-mx6/usb_h1.c
+index f4b84df..9d2a1e7 100644
+--- a/arch/arm/mach-mx6/usb_h1.c
++++ b/arch/arm/mach-mx6/usb_h1.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -221,7 +221,7 @@ static enum usb_wakeup_event _is_usbh1_wakeup(struct fsl_usb2_platform_data *pda
+ 	u32 wakeup_req = USB_H1_CTRL & UCTRL_OWIR;
+ 
+ 	if (wakeup_req)
+-		return !WAKEUP_EVENT_INVALID;
++		return WAKEUP_EVENT_DPDM;
+ 	pr_err("host1, %s, invalid wake up\n", __func__);
+ 	return WAKEUP_EVENT_INVALID;
+ }
+@@ -230,7 +230,6 @@ static void h1_wakeup_handler(struct fsl_usb2_platform_data *pdata)
+ {
+ 	_wake_up_enable(pdata, false);
+ 	_phy_lowpower_suspend(pdata, false);
+-	pdata->wakeup_event = 1;
+ }
+ 
+ static void usbh1_wakeup_event_clear(void)
+diff --git a/arch/arm/mach-mx6/usb_h2.c b/arch/arm/mach-mx6/usb_h2.c
+index 4e78ad3..a671a95 100644
+--- a/arch/arm/mach-mx6/usb_h2.c
++++ b/arch/arm/mach-mx6/usb_h2.c
+@@ -149,7 +149,7 @@ static enum usb_wakeup_event _is_usbh2_wakeup(struct fsl_usb2_platform_data *pda
+ 	u32 wakeup_req = USB_H2_CTRL & UCTRL_OWIR;
+ 
+ 	if (wakeup_req)
+-		return !WAKEUP_EVENT_INVALID;
++		return WAKEUP_EVENT_DPDM;
+ 	pr_err("host2, %s, invalid wake up\n", __func__);
+ 	return WAKEUP_EVENT_INVALID;
+ }
+@@ -158,7 +158,6 @@ static void h2_wakeup_handler(struct fsl_usb2_platform_data *pdata)
+ {
+ 	_wake_up_enable(pdata, false);
+ 	_phy_lowpower_suspend(pdata, false);
+-	pdata->wakeup_event = 1;
+ }
+ 
+ static void usbh2_wakeup_event_clear(void)
+diff --git a/arch/arm/mach-mx6/usb_h3.c b/arch/arm/mach-mx6/usb_h3.c
+index 46ffc74..820ecd9 100644
+--- a/arch/arm/mach-mx6/usb_h3.c
++++ b/arch/arm/mach-mx6/usb_h3.c
+@@ -150,7 +150,7 @@ static enum usb_wakeup_event _is_usbh3_wakeup(struct fsl_usb2_platform_data *pda
+ 	u32 wakeup_req = USB_H3_CTRL & UCTRL_OWIR;
+ 
+ 	if (wakeup_req)
+-		return !WAKEUP_EVENT_INVALID;
++		return WAKEUP_EVENT_DPDM;
+ 	pr_err("host3, %s, invalid wake up\n", __func__);
+ 	return WAKEUP_EVENT_INVALID;
+ }
+@@ -159,7 +159,6 @@ static void usbh3_wakeup_handler(struct fsl_usb2_platform_data *pdata)
+ {
+ 	_wake_up_enable(pdata, false);
+ 	_phy_lowpower_suspend(pdata, false);
+-	pdata->wakeup_event = 1;
+ }
+ 
+ static void usbh3_wakeup_event_clear(void)
+diff --git a/arch/arm/plat-mxc/usb_wakeup.c b/arch/arm/plat-mxc/usb_wakeup.c
+index 9afd479..4704eae 100755
+--- a/arch/arm/plat-mxc/usb_wakeup.c
++++ b/arch/arm/plat-mxc/usb_wakeup.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -118,6 +118,7 @@ static void wakeup_event_handler(struct wakeup_ctrl *ctrl)
+ 
+ 			usb_pdata->irq_delay = 0;
+ 			wakeup_evt = is_wakeup(usb_pdata);
++			usb_pdata->wakeup_event = wakeup_evt;
+ 			if (wakeup_evt != WAKEUP_EVENT_INVALID) {
+ 				if (usb2_is_in_lowpower(ctrl))
+ 					if (usb_pdata->usb_clock_for_pm)
+-- 
+1.7.7.4
+

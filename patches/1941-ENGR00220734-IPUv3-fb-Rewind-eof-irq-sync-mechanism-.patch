@@ -1,0 +1,105 @@
+From 7e8bcd60f9f7d5a7d038a4ac25e9ec8c4ca60962 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Mon, 20 Aug 2012 13:59:40 +0800
+Subject: [PATCH 1941/2463] ENGR00220734 IPUv3 fb:Rewind eof irq sync
+ mechanism back
+
+This patch changes to use original sync mechanism for eof
+irq, which may improve pan-display or alpha buffer update
+performance.
+1) Initialize flip_completion and alpha_flip_completion
+only once when fb is initialized instead of initializing
+it every time when pan display is called.
+2) Clear and enable eof irq after selecting buffer ready.
+In this way, we have no chance to lose an interrupt, as
+selecting a new buffer ready doesn't make the eof irq
+come(from the newly selected buffer) before we clear the irq
+status and enable the irq. Otherwise, if we clear the irq
+status and enable the irq before we doing down in pan-display
+or alpha buffer update, we have chance(users call pan-display or
+alpha buffer update faster than vsync frequency and blocks at
+down()) to clear an unhandled irq, which may cause performance
+issue.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit 67c2bd5edef363412a074e9b4130b5207dac8a7f)
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |   26 +++++++++++++++++++-------
+ 1 files changed, 19 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index c9cdad4..5e074e7 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -248,8 +248,20 @@ static int _setup_disp_channel2(struct fb_info *fbi)
+ 	base += fr_yoff * fb_stride + fr_xoff;
+ 
+ 	mxc_fbi->cur_ipu_buf = 2;
+-	if (mxc_fbi->alpha_chan_en)
++	init_completion(&mxc_fbi->flip_complete);
++	/*
++	 * We don't need to wait for vsync at the first time
++	 * we do pan display after fb is initialized, as IPU will
++	 * switch to the newly selected buffer automatically,
++	 * so we call complete() for both mxc_fbi->flip_complete
++	 * and mxc_fbi->alpha_flip_complete.
++	 */
++	complete(&mxc_fbi->flip_complete);
++	if (mxc_fbi->alpha_chan_en) {
+ 		mxc_fbi->cur_ipu_alpha_buf = 1;
++		init_completion(&mxc_fbi->alpha_flip_complete);
++		complete(&mxc_fbi->alpha_flip_complete);
++	}
+ 
+ 	retval = ipu_init_channel_buffer(mxc_fbi->ipu,
+ 					 mxc_fbi->ipu_ch, IPU_INPUT_BUFFER,
+@@ -1000,9 +1012,6 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 			else
+ 				ipu_alp_ch_irq = IPU_IRQ_BG_ALPHA_SYNC_EOF;
+ 
+-			init_completion(&mxc_fbi->alpha_flip_complete);
+-			ipu_clear_irq(mxc_fbi->ipu, ipu_alp_ch_irq);
+-			ipu_enable_irq(mxc_fbi->ipu, ipu_alp_ch_irq);
+ 			retval = wait_for_completion_timeout(
+ 				&mxc_fbi->alpha_flip_complete, HZ/2);
+ 			if (retval == 0) {
+@@ -1021,6 +1030,8 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 				ipu_select_buffer(mxc_fbi->ipu, mxc_fbi->ipu_ch,
+ 						  IPU_ALPHA_IN_BUFFER,
+ 						  mxc_fbi->cur_ipu_alpha_buf);
++				ipu_clear_irq(mxc_fbi->ipu, ipu_alp_ch_irq);
++				ipu_enable_irq(mxc_fbi->ipu, ipu_alp_ch_irq);
+ 			} else {
+ 				dev_err(fbi->device,
+ 					"Error updating %s SDC alpha buf %d "
+@@ -1400,9 +1411,6 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 		}
+ 	}
+ 
+-	init_completion(&mxc_fbi->flip_complete);
+-	ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+-	ipu_enable_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+ 	ret = wait_for_completion_timeout(&mxc_fbi->flip_complete, HZ/2);
+ 	if (ret == 0) {
+ 		dev_err(info->device, "timeout when waiting for flip irq\n");
+@@ -1442,6 +1450,8 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 
+ 		ipu_select_buffer(mxc_fbi->ipu, mxc_fbi->ipu_ch, IPU_INPUT_BUFFER,
+ 				  mxc_fbi->cur_ipu_buf);
++		ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
++		ipu_enable_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+ 	} else {
+ 		dev_err(info->device,
+ 			"Error updating SDC buf %d to address=0x%08lX, "
+@@ -1460,6 +1470,8 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 		++mxc_fbi->cur_ipu_buf;
+ 		mxc_fbi->cur_ipu_buf %= 3;
+ 		mxc_fbi->cur_ipu_alpha_buf = !mxc_fbi->cur_ipu_alpha_buf;
++		ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
++		ipu_enable_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+ 		return -EBUSY;
+ 	}
+ 
+-- 
+1.7.7.4
+

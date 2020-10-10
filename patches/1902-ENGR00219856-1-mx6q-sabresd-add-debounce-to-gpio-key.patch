@@ -1,0 +1,50 @@
+From 83ec55588691d188c0419b9a659bff6985239615 Mon Sep 17 00:00:00 2001
+From: Xinyu Chen <xinyu.chen@freescale.com>
+Date: Wed, 15 Aug 2012 13:32:06 +0800
+Subject: [PATCH 1902/2463] ENGR00219856-1 mx6q sabresd: add debounce to gpio
+ key
+
+Add a 1ms debounce to the gpio key to avoid
+unexpected gpio status read from gpio_key driver's
+workqueue. This issue happens on android's resume stage,
+sometimes the framework get more than one up key even
+user press the power key once.
+
+Signed-off-by: Xinyu Chen <xinyu.chen@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |    9 +++++----
+ 1 files changed, 5 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 480ef18..429cffc 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1535,7 +1535,7 @@ static void __init imx6q_add_device_gpio_leds(void) {}
+ #endif
+ 
+ #if defined(CONFIG_KEYBOARD_GPIO) || defined(CONFIG_KEYBOARD_GPIO_MODULE)
+-#define GPIO_BUTTON(gpio_num, ev_code, act_low, descr, wake)	\
++#define GPIO_BUTTON(gpio_num, ev_code, act_low, descr, wake, debounce)	\
+ {								\
+ 	.gpio		= gpio_num,				\
+ 	.type		= EV_KEY,				\
+@@ -1543,12 +1543,13 @@ static void __init imx6q_add_device_gpio_leds(void) {}
+ 	.active_low	= act_low,				\
+ 	.desc		= "btn " descr,				\
+ 	.wakeup		= wake,					\
++	.debounce_interval = debounce,				\
+ }
+ 
+ static struct gpio_keys_button imx6q_buttons[] = {
+-	GPIO_BUTTON(SABRESD_VOLUME_UP, KEY_VOLUMEUP, 1, "volume-up", 0),
+-	GPIO_BUTTON(SABRESD_VOLUME_DN, KEY_VOLUMEDOWN, 1, "volume-down", 0),
+-	GPIO_BUTTON(SABRESD_POWER_OFF, KEY_POWER, 1, "power", 1),
++	GPIO_BUTTON(SABRESD_VOLUME_UP, KEY_VOLUMEUP, 1, "volume-up", 0, 1),
++	GPIO_BUTTON(SABRESD_VOLUME_DN, KEY_VOLUMEDOWN, 1, "volume-down", 0, 1),
++	GPIO_BUTTON(SABRESD_POWER_OFF, KEY_POWER, 1, "power", 1, 1),
+ };
+ 
+ static struct gpio_keys_platform_data imx6q_button_data = {
+-- 
+1.7.7.4
+

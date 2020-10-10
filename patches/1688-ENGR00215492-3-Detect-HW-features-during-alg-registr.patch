@@ -1,0 +1,310 @@
+From 6149d681634f8508ba41e67be1e5d8b422810d20 Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Sat, 30 Jun 2012 16:11:00 -0700
+Subject: [PATCH 1688/2463] ENGR00215492-3: Detect HW features during alg
+ registration
+
+i.MX6 instantiates a CAAM with a low-power MDHA block, which does not
+compute digests larger than 256 bits. Since the driver installs handlers
+for hashes longer than 256 bits in several places, added the ability to
+read and interpret the CHA version and instantiations registers, and then
+only register handlers that it can support.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/crypto/caam/caamalg.c  |   44 +++++++++++++-
+ drivers/crypto/caam/caamhash.c |   21 ++++++-
+ drivers/crypto/caam/caamrng.c  |    4 +
+ drivers/crypto/caam/ctrl.c     |    4 +-
+ drivers/crypto/caam/regs.h     |  122 +++++++++++++++++++++++++++-------------
+ 5 files changed, 147 insertions(+), 48 deletions(-)
+
+diff --git a/drivers/crypto/caam/caamalg.c b/drivers/crypto/caam/caamalg.c
+index d26e25c..1d3d89a 100644
+--- a/drivers/crypto/caam/caamalg.c
++++ b/drivers/crypto/caam/caamalg.c
+@@ -2212,7 +2212,9 @@ int caam_algapi_startup(struct platform_device *pdev)
+ {
+ 	struct device *ctrldev, **jrdev;
+ 	struct caam_drv_private *priv;
+-	int i = 0, err = 0;
++	int i = 0, err = 0, md_limit = 0;
++	int des_inst, aes_inst, md_inst;
++	u64 cha_inst;
+ 
+ 	ctrldev = &pdev->dev;
+ 	priv = dev_get_drvdata(ctrldev);
+@@ -2238,11 +2240,47 @@ int caam_algapi_startup(struct platform_device *pdev)
+ 	priv->algapi_jr = jrdev;
+ 	atomic_set(&priv->tfm_count, -1);
+ 
+-	/* register crypto algorithms the device supports */
++	/*
++	 * register crypto algorithms the device supports
++	 * first, detect presence of DES, AES, and MD blocks. If MD present,
++	 * determine limit of supported digest size
++	 */
++	cha_inst = rd_reg64(&priv->ctrl->perfmon.cha_num);
++	des_inst = (cha_inst & CHA_ID_DES_MASK) >> CHA_ID_DES_SHIFT;
++	aes_inst = (cha_inst & CHA_ID_AES_MASK) >> CHA_ID_AES_SHIFT;
++	md_inst = (cha_inst & CHA_ID_MD_MASK) >> CHA_ID_MD_SHIFT;
++	if (md_inst) {
++		md_limit = SHA512_DIGEST_SIZE;
++		if ((rd_reg64(&priv->ctrl->perfmon.cha_id) & CHA_ID_MD_MASK)
++		     == CHA_ID_MD_LP256) /* LP256 limits digest size */
++			md_limit = SHA256_DIGEST_SIZE;
++	}
++
+ 	for (i = 0; i < ARRAY_SIZE(driver_algs); i++) {
+-		/* TODO: check if h/w supports alg */
+ 		struct caam_crypto_alg *t_alg;
+ 
++		/*
++		 * All registrable algs in this module require a blockcipher
++		 * All aead algs require message digests, so check them for
++		 * instantiation and size.
++		 */
++		if (driver_algs[i].type == CRYPTO_ALG_TYPE_AEAD) {
++			/* If no MD instantiated, or MD too small, skip */
++			if ((!md_inst) ||
++			    (driver_algs[i].template_aead.maxauthsize >
++			     md_limit))
++				continue;
++		}
++		/* If DES alg, and CHA not instantiated, skip */
++		if ((driver_algs[i].class1_alg_type & OP_ALG_ALGSEL_3DES) ||
++		    (driver_algs[i].class1_alg_type & OP_ALG_ALGSEL_DES))
++			if (!des_inst)
++				continue;
++		/* If AES alg, and CHA not instantiated, skip */
++		if (driver_algs[i].class1_alg_type & OP_ALG_ALGSEL_AES)
++			if (!aes_inst)
++				continue;
++
+ 		t_alg = caam_alg_alloc(ctrldev, &driver_algs[i]);
+ 		if (IS_ERR(t_alg)) {
+ 			err = PTR_ERR(t_alg);
+diff --git a/drivers/crypto/caam/caamhash.c b/drivers/crypto/caam/caamhash.c
+index d36582b..7d1fd28 100644
+--- a/drivers/crypto/caam/caamhash.c
++++ b/drivers/crypto/caam/caamhash.c
+@@ -1821,7 +1821,8 @@ int caam_algapi_hash_startup(struct platform_device *pdev)
+ {
+ 	struct device *ctrldev;
+ 	struct caam_drv_private *priv;
+-	int i = 0, err = 0;
++	int i = 0, err = 0, md_limit = 0, md_inst;
++	u64 cha_inst;
+ 
+ 	ctrldev = &pdev->dev;
+ 	priv = dev_get_drvdata(ctrldev);
+@@ -1830,11 +1831,25 @@ int caam_algapi_hash_startup(struct platform_device *pdev)
+ 
+ 	atomic_set(&priv->tfm_count, -1);
+ 
+-	/* register crypto algorithms the device supports */
++	/* register algorithms the device supports */
++	cha_inst = rd_reg64(&priv->ctrl->perfmon.cha_num);
++	md_inst = (cha_inst & CHA_ID_MD_MASK) >> CHA_ID_MD_SHIFT;
++	if (md_inst) {
++		md_limit = SHA512_DIGEST_SIZE;
++		if ((rd_reg64(&priv->ctrl->perfmon.cha_id) & CHA_ID_MD_MASK)
++		     == CHA_ID_MD_LP256) /* LP256 limits digest size */
++			md_limit = SHA256_DIGEST_SIZE;
++	}
++
+ 	for (i = 0; i < ARRAY_SIZE(driver_hash); i++) {
+-		/* TODO: check if h/w supports alg */
+ 		struct caam_hash_alg *t_alg;
+ 
++		/* If no MD instantiated, or MD too small, skip */
++		if ((!md_inst) ||
++		    (driver_hash[i].template_ahash.halg.digestsize >
++		     md_limit))
++			continue;
++
+ 		/* register hmac version */
+ 		t_alg = caam_hash_alloc(ctrldev, &driver_hash[i], true);
+ 		if (IS_ERR(t_alg)) {
+diff --git a/drivers/crypto/caam/caamrng.c b/drivers/crypto/caam/caamrng.c
+index 3778e0e..f992c10 100644
+--- a/drivers/crypto/caam/caamrng.c
++++ b/drivers/crypto/caam/caamrng.c
+@@ -327,6 +327,10 @@ int caam_rng_startup(struct platform_device *pdev)
+ 	ctrldev = &pdev->dev;
+ 	priv = dev_get_drvdata(ctrldev);
+ 
++	/* Check instantiated RNG before registration */
++	if (!(rd_reg64(&priv->ctrl->perfmon.cha_num) & CHA_ID_RNG_MASK))
++		return -ENODEV;
++
+ 	caam_init_rng(&rng_ctx, priv->jrdev[0]);
+ 
+ #ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_RNG_TEST
+diff --git a/drivers/crypto/caam/ctrl.c b/drivers/crypto/caam/ctrl.c
+index 1b49033..d7374aa 100644
+--- a/drivers/crypto/caam/ctrl.c
++++ b/drivers/crypto/caam/ctrl.c
+@@ -359,8 +359,8 @@ static int caam_probe(struct platform_device *pdev)
+ 	 * RNG4 based SECs (v5+ | >= i.MX6) need special initialization prior
+ 	 * to executing any descriptors
+ 	 */
+-	if ((rd_reg64(&topregs->ctrl.perfmon.cha_id) & CHA_VID_RNG_MASK)
+-	    == CHA_VID_RNG_4) {
++	if ((rd_reg64(&topregs->ctrl.perfmon.cha_id) & CHA_ID_RNG_MASK)
++	    == CHA_ID_RNG_4) {
+ 		kick_trng(pdev);
+ 		ret = instantiate_rng(ctrlpriv->jrdev[0]);
+ 		if (ret) {
+diff --git a/drivers/crypto/caam/regs.h b/drivers/crypto/caam/regs.h
+index 868cf19..fd8a2a2 100644
+--- a/drivers/crypto/caam/regs.h
++++ b/drivers/crypto/caam/regs.h
+@@ -113,61 +113,103 @@ struct jr_outentry {
+ } __packed;
+ 
+ /*
+- * caam_perfmon - Performance Monitor/Secure Memory Status/
+- *                CAAM Global Status/Component Version IDs
+- *
+- * Spans f00-fff wherever instantiated
++ * CHA version ID / instantiation bitfields
++ * Defined for use within cha_id in perfmon
++ * Note that the same shift/mask selectors can be used to pull out number
++ * of instantiated blocks within cha_num in perfmon, the locations are
++ * the same.
+  */
+ 
+-/* CHA version IDs for cha_id register */
+-#define CHA_VID_JR_SHIFT	60
+-#define CHA_VID_JR_MASK		(0xfull << CHA_VID_JR_SHIFT)
+-
+-#define CHA_VID_DECO_SHIFT	56
+-#define CHA_VID_DECO_MASK	(0xfull << CHA_VID_DECO_SHIFT)
++/* Job Ring */
++#define CHA_ID_JR_SHIFT	60
++#define CHA_ID_JR_MASK		(0xfull << CHA_ID_JR_SHIFT)
+ 
+-#define CHA_VID_ZA_SHIFT	44
+-#define CHA_VID_ZA_MASK		(0xfull << CHA_VID_ZA_SHIFT)
++/* DEscriptor COntroller */
++#define CHA_ID_DECO_SHIFT	56
++#define CHA_ID_DECO_MASK	(0xfull << CHA_ID_DECO_SHIFT)
++#define CHA_NUM_DECONUM_SHIFT	56 /* legacy definition */
++#define CHA_NUM_DECONUM_MASK	(0xfull << CHA_NUM_DECONUM_SHIFT)
+ 
+-#define CHA_VID_ZE_SHIFT	40
+-#define CHA_VID_ZE_MASK		(0xfull << CHA_VID_ZE_SHIFT)
++/* ZUC-Authentication */
++#define CHA_ID_ZA_SHIFT	44
++#define CHA_ID_ZA_MASK		(0xfull << CHA_ID_ZA_SHIFT)
+ 
+-#define CHA_VID_SNW9_SHIFT	36
+-#define CHA_VID_SNW9_MASK	(0xfull << CHA_VID_SNW9_SHIFT)
++/* ZUC-Encryption */
++#define CHA_ID_ZE_SHIFT	40
++#define CHA_ID_ZE_MASK		(0xfull << CHA_ID_ZE_SHIFT)
+ 
+-#define CHA_VID_CRC_SHIFT	32
+-#define CHA_VID_CRC_MASK	(0xfull << CHA_VID_CRC_SHIFT)
++/* SNOW f9 */
++#define CHA_ID_SNW9_SHIFT	36
++#define CHA_ID_SNW9_MASK	(0xfull << CHA_ID_SNW9_SHIFT)
+ 
+-#define CHA_VID_PK_SHIFT	28
+-#define CHA_VID_PK_MASK		(0xfull << CHA_VID_PK_SHIFT)
++/* CRC */
++#define CHA_ID_CRC_SHIFT	32
++#define CHA_ID_CRC_MASK		(0xfull << CHA_ID_CRC_SHIFT)
+ 
+-#define CHA_VID_KAS_SHIFT	24
+-#define CHA_VID_KAS_MASK	(0xfull << CHA_VID_KAS_SHIFT)
++/* Public Key */
++#define CHA_ID_PK_SHIFT	28
++#define CHA_ID_PK_MASK		(0xfull << CHA_ID_PK_SHIFT)
+ 
+-#define CHA_VID_SNW8_SHIFT	20
+-#define CHA_VID_SNW8_MASK	(0xfull << CHA_VID_SNW8_SHIFT)
++/* Kasumi */
++#define CHA_ID_KAS_SHIFT	24
++#define CHA_ID_KAS_MASK		(0xfull << CHA_ID_KAS_SHIFT)
+ 
+-#define CHA_VID_RNG_SHIFT	16
+-#define CHA_VID_RNG_MASK	(0xfull << CHA_VID_RNG_SHIFT)
+-#define CHA_VID_RNG_A		(0x1ull << CHA_VID_RNG_SHIFT)
+-#define CHA_VID_RNG_B		(0x2ull << CHA_VID_RNG_SHIFT)
+-#define CHA_VID_RNG_4		(0x4ull << CHA_VID_RNG_SHIFT)
++/* SNOW f8 */
++#define CHA_ID_SNW8_SHIFT	20
++#define CHA_ID_SNW8_MASK	(0xfull << CHA_ID_SNW8_SHIFT)
+ 
+-#define CHA_VID_MD_SHIFT	12
+-#define CHA_VID_MD_MASK		(0xfull << CHA_VID_MD_SHIFT)
++/*
++ * Random Generator
++ * RNG4 = FIPS-verification-compliant, requires init kickstart for use
++ */
++#define CHA_ID_RNG_SHIFT	16
++#define CHA_ID_RNG_MASK		(0xfull << CHA_ID_RNG_SHIFT)
++#define CHA_ID_RNG_A		(0x1ull << CHA_ID_RNG_SHIFT)
++#define CHA_ID_RNG_B		(0x2ull << CHA_ID_RNG_SHIFT)
++#define CHA_ID_RNG_C		(0x3ull << CHA_ID_RNG_SHIFT)
++#define CHA_ID_RNG_4		(0x4ull << CHA_ID_RNG_SHIFT)
+ 
+-#define CHA_VID_ARC4_SHIFT	8
+-#define CHA_VID_ARC4_MASK	(0xfull << CHA_VID_ARC4_SHIFT)
++/*
++ * Message Digest
++ * LP256 = Low Power (MD5/SHA1/SHA224/SHA256 + HMAC)
++ * LP512 = Low Power (LP256 + SHA384/SHA512)
++ * HP    = High Power (LP512 + SMAC)
++ */
++#define CHA_ID_MD_SHIFT		12
++#define CHA_ID_MD_MASK		(0xfull << CHA_ID_MD_SHIFT)
++#define CHA_ID_MD_LP256		(0x0ull << CHA_ID_MD_SHIFT)
++#define CHA_ID_MD_LP512		(0x1ull << CHA_ID_MD_SHIFT)
++#define CHA_ID_MD_HP		(0x2ull << CHA_ID_MD_SHIFT)
++
++/* ARC4 Streamcipher */
++#define CHA_ID_ARC4_SHIFT	8
++#define CHA_ID_ARC4_MASK	(0xfull << CHA_ID_ARC4_SHIFT)
++#define CHA_ID_ARC4_LP		(0x0ull << CHA_ID_ARC4_SHIFT)
++#define CHA_ID_ARC4_HP		(0x1ull << CHA_ID_ARC4_SHIFT)
++
++/* DES Blockcipher Accelerator */
++#define CHA_ID_DES_SHIFT	4
++#define CHA_ID_DES_MASK		(0xfull << CHA_ID_DES_SHIFT)
+ 
+-#define CHA_VID_DES_SHIFT	4
+-#define CHA_VID_DES_MASK	(0xfull << CHA_VID_DES_SHIFT)
++/*
++ * AES Blockcipher + Combo Mode Accelerator
++ * LP = Low Power (includes ECB/CBC/CFB128/OFB/CTR/CCM/CMAC/XCBC-MAC)
++ * HP = High Power (LP + CBCXCBC/CTRXCBC/XTS/GCM)
++ * DIFFPWR = ORed in if differential-power-analysis resistance implemented
++ */
++#define CHA_ID_AES_SHIFT	0
++#define CHA_ID_AES_MASK		(0xfull << CHA_ID_AES_SHIFT)
++#define CHA_ID_AES_LP		(0x3ull << CHA_ID_AES_SHIFT)
++#define CHA_ID_AES_HP		(0x4ull << CHA_ID_AES_SHIFT)
++#define CHA_ID_AES_DIFFPWR	(0x1ull << CHA_ID_AES_SHIFT)
+ 
+-#define CHA_VID_AES_SHIFT	0
+-#define CHA_VID_AES_MASK	(0xfull << CHA_VID_AES_SHIFT)
+ 
+-/* Number of DECOs for cha_num register*/
+-#define CHA_NUM_DECONUM_SHIFT	56
+-#define CHA_NUM_DECONUM_MASK	(0xfull << CHA_NUM_DECONUM_SHIFT)
++/*
++ * caam_perfmon - Performance Monitor/Secure Memory Status/
++ *                CAAM Global Status/Component Version IDs
++ *
++ * Spans f00-fff wherever instantiated
++ */
+ 
+ struct caam_perfmon {
+ 	/* Performance Monitor Registers			f00-f9f */
+-- 
+1.7.7.4
+

@@ -1,0 +1,46 @@
+From 84cdc6e9acfc36c18e5b289e1e0d80810e284dcb Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Thu, 17 Jan 2013 16:15:45 +0800
+Subject: [PATCH 2357/2463] ENGR00240571 mtd: gpmi: fix the compiler warning
+
+The current code may print out the following warning:
+....................................................................
+drivers/mtd/nand/gpmi-nand/gpmi-lib.c: In function gpmi_begin:
+drivers/mtd/nand/gpmi-nand/gpmi-lib.c:1163: warning: hw.use_half_periods
+				may be used uninitialized in this function
+drivers/mtd/nand/gpmi-nand/gpmi-lib.c:1163: warning: hw.sample_delay_factor
+				may be used uninitialized in this function
+....................................................................
+
+this patch fixes it.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/mtd/nand/gpmi-nand/gpmi-lib.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mtd/nand/gpmi-nand/gpmi-lib.c b/drivers/mtd/nand/gpmi-nand/gpmi-lib.c
+index 2138dcb..5c8f3bc 100644
+--- a/drivers/mtd/nand/gpmi-nand/gpmi-lib.c
++++ b/drivers/mtd/nand/gpmi-nand/gpmi-lib.c
+@@ -1,7 +1,7 @@
+ /*
+  * Freescale GPMI NAND Flash Driver
+  *
+- * Copyright (C) 2008-2012 Freescale Semiconductor, Inc.
++ * Copyright (C) 2008-2013 Freescale Semiconductor, Inc.
+  * Copyright (C) 2008 Embedded Alley Solutions, Inc.
+  *
+  * This program is free software; you can redistribute it and/or modify
+@@ -1160,7 +1160,7 @@ void gpmi_begin(struct gpmi_nand_data *this)
+ 	unsigned int   clock_period_in_ns;
+ 	uint32_t       reg;
+ 	unsigned int   dll_wait_time_in_us;
+-	struct gpmi_nfc_hardware_timing  hw;
++	struct gpmi_nfc_hardware_timing  hw = {};
+ 	int ret;
+ 
+ 	/* Enable the clock. */
+-- 
+1.7.7.4
+

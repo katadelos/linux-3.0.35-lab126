@@ -1,0 +1,48 @@
+From b60d26819d57d14cb174576c561a2f4e17828dca Mon Sep 17 00:00:00 2001
+From: Xianzhong <b07117@freescale.com>
+Date: Fri, 3 Aug 2012 00:50:19 +0800
+Subject: [PATCH 1857/2463] ENGR00219193 improve gpu3d core clock to 528M
+
+The original 528M setting is invalid and become 396M actually,
+Change gpu3d core clock parent to 594_PFD to enable 528M setting.
+
+Benchmark performance are improved with clock change on i.MX6DL:
+     Basemark2: 5.85 --> 7.66
+     Nenamark2: 23.7 --> 27.4
+     Quadrant 3d: 2186 --> 2270
+
+Signed-off-by: Xianzhong <b07117@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    8 ++++++--
+ 1 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 4d98b26..61cf37c 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5354,9 +5354,11 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	*/
+ 	clk_set_parent(&gpu3d_shader_clk, &pll2_pfd_594M);
+ 	clk_set_rate(&gpu3d_shader_clk, 594000000);
+-	clk_set_parent(&gpu3d_core_clk[0], &mmdc_ch0_axi_clk[0]);
+-	clk_set_rate(&gpu3d_core_clk[0], 528000000);
+ 	if (cpu_is_mx6dl()) {
++		/*for mx6dl, change gpu3d core clk parant to 594_PFD */
++		clk_set_parent(&gpu3d_core_clk[0], &pll2_pfd_594M);
++		clk_set_rate(&gpu3d_core_clk[0], 594000000);
++
+ 		/*on mx6dl, 2d core clock sources from 3d shader core clock*/
+ 		clk_set_parent(&gpu2d_core_clk[0], &gpu3d_shader_clk);
+ 		/* on mx6dl gpu3d_axi_clk source from mmdc0 directly */
+@@ -5369,6 +5371,8 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 		clk_set_parent(&ipu2_clk, &pll2_pfd_400M);
+ 		clk_set_rate(&ipu2_clk, 200000000);
+ 	} else if (cpu_is_mx6q()) {
++		clk_set_parent(&gpu3d_core_clk[0], &mmdc_ch0_axi_clk[0]);
++		clk_set_rate(&gpu3d_core_clk[0], 528000000);
+ 		clk_set_parent(&ipu2_clk, &mmdc_ch0_axi_clk[0]);
+ 		clk_set_parent(&ipu1_clk, &mmdc_ch0_axi_clk[0]);
+ 	}
+-- 
+1.7.7.4
+

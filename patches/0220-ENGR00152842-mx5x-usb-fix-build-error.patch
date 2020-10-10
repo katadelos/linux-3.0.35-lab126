@@ -1,0 +1,53 @@
+From 1c5b416a4705faee39825e6ab0c39d5289747f9a Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Fri, 8 Jul 2011 08:49:53 +0800
+Subject: [PATCH 0220/2463] ENGR00152842 mx5x-usb: fix build error
+
+As well as some warnings for compiling
+
+Fix the build error reported by Alan Tull, the error message is:
+arch/arm/mach-mx5/usb_dr.c: In function 'mx5_usb_dr_init':
+arch/arm/mach-mx5/usb_dr.c:309: error: implicit
+declaration of function 'machine_is_mx53_loco'
+
+The below warning message output when compiling mx5x kenrel:
+arch/arm/plat-mxc/include/mach/arc_otg.h:36:7:
+warning: "CONFIG_ARCH_MX6" is not defined
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ arch/arm/mach-mx5/usb_dr.c               |    1 +
+ arch/arm/plat-mxc/include/mach/arc_otg.h |    5 +----
+ 2 files changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/usb_dr.c b/arch/arm/mach-mx5/usb_dr.c
+index 25e63ca..36e9eac 100755
+--- a/arch/arm/mach-mx5/usb_dr.c
++++ b/arch/arm/mach-mx5/usb_dr.c
+@@ -19,6 +19,7 @@
+ #include <mach/arc_otg.h>
+ #include <mach/hardware.h>
+ #include <linux/delay.h>
++#include <asm/mach-types.h>
+ #include "usb.h"
+ static int usbotg_init_ext(struct platform_device *pdev);
+ static void usbotg_uninit_ext(struct platform_device *pdev);
+diff --git a/arch/arm/plat-mxc/include/mach/arc_otg.h b/arch/arm/plat-mxc/include/mach/arc_otg.h
+index 16cfae3..d35a29b 100755
+--- a/arch/arm/plat-mxc/include/mach/arc_otg.h
++++ b/arch/arm/plat-mxc/include/mach/arc_otg.h
+@@ -30,10 +30,7 @@ extern void __iomem *imx_otg_base;
+ #define USB_OTGREGS_BASE	(OTG_BASE_ADDR + 0x000)
+ #define USB_H1REGS_BASE		(OTG_BASE_ADDR + 0x200)
+ #define USB_H2REGS_BASE		(OTG_BASE_ADDR + 0x400)
+-#if defined CONFIG_ARCH_MX5
+-#define USB_H3REGS_BASE		(OTG_BASE_ADDR + 0x600)
+-#define USB_OTHERREGS_BASE	(OTG_BASE_ADDR + 0x800)
+-#elif CONFIG_ARCH_MX6
++#if (defined CONFIG_ARCH_MX5 | defined CONFIG_ARCH_MX6)
+ #define USB_H3REGS_BASE		(OTG_BASE_ADDR + 0x600)
+ #define USB_OTHERREGS_BASE	(OTG_BASE_ADDR + 0x800)
+ #else
+-- 
+1.7.7.4
+

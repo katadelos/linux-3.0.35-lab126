@@ -1,0 +1,112 @@
+From b3743135efb7fffffb864e468a922afa537222d9 Mon Sep 17 00:00:00 2001
+From: Xinyu Chen <b03824@freescale.com>
+Date: Wed, 7 Mar 2012 10:17:21 +0800
+Subject: [PATCH 1448/2463] ENGR00176278 mx6: make local timer work with WAIT
+ mode
+
+As mx6q soc use one clock to provide for cpu and local timer,
+the local timers will be stopped when enter wait mode.
+This causes system hang when enter wait mode with local timer
+enabled. So we should switch the clock event to GPT
+broadcast clock event before entering wait mode, and disable
+local timers. Todo this, following changes made:
+* In arch_idle(), we check if the GPT broadcast clock
+  event is switched to one shot mode. If the kernel clocksource
+  is switched from jiffies one to GPT, then we can use GPT
+  as broadcast event. And switch from local timer to GPT broadcast
+  event before entering mx6q_wait. Otherwise, kernel will hange
+  if the SW jiffies clock source is used.
+  We call clockevents_notify to switch clock source.
+* Remove the enable_wait_mode check in local timer setup.
+* Always return 0 in GPT v2 timer's set_next_event routing.
+  All the GPTs are running in free run mode as what driver did.
+  So we should allow the GPT CNT register roll over to 0 when it
+  reaches 0xFFFFFFFF. And the next event written to compare register
+  can less than the current value in CNT.
+  If we refused to do roll over settings, the kernel will continues
+  to set_next_event to GPT when the next event is far away and
+  we return negative value. This is happend when one CPU is in idle
+  and no timewheel is being expired in short time.
+
+Signed-off-by: Xinyu Chen <xinyu.chen@freescale.com>
+---
+ arch/arm/mach-mx6/localtimer.c |   11 +++--------
+ arch/arm/mach-mx6/system.c     |   15 ++++++++++++++-
+ arch/arm/plat-mxc/time.c       |    3 +--
+ 3 files changed, 18 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/localtimer.c b/arch/arm/mach-mx6/localtimer.c
+index b8bfdab..402368b 100644
+--- a/arch/arm/mach-mx6/localtimer.c
++++ b/arch/arm/mach-mx6/localtimer.c
+@@ -31,12 +31,7 @@ extern bool enable_wait_mode;
+  */
+ int __cpuinit local_timer_setup(struct clock_event_device *evt)
+ {
+-#ifdef CONFIG_LOCAL_TIMERS
+-	if (!enable_wait_mode) {
+-		evt->irq = IRQ_LOCALTIMER;
+-		twd_timer_setup(evt);
+-		return 0;
+-	}
+-#endif
+-	return -1;
++	evt->irq = IRQ_LOCALTIMER;
++	twd_timer_setup(evt);
++	return 0;
+ }
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index fb0b0ad..37f1b2e 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -22,6 +22,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/pmic_external.h>
++#include <linux/clockchips.h>
+ #include <asm/io.h>
+ #include <mach/hardware.h>
+ #include <mach/clock.h>
+@@ -156,12 +157,24 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 	__raw_writel(ccm_clpcr, MXC_CCM_CLPCR);
+ }
+ 
+- void arch_idle(void)
++extern int tick_broadcast_oneshot_active(void);
++
++void arch_idle(void)
+ {
+ 	if (enable_wait_mode) {
++#ifdef CONFIG_LOCAL_TIMERS
++		int cpu = smp_processor_id();
++		if (!tick_broadcast_oneshot_active())
++			return;
++
++		clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_ENTER, &cpu);
++#endif
+ 		*((char *)(&num_cpu_idle_lock) + smp_processor_id()) = 0x0;
+ 		mxc_cpu_lp_set(WAIT_UNCLOCKED_POWER_OFF);
+ 		mx6_wait((void *)&num_cpu_idle_lock, (void *)&num_cpu_idle);
++#ifdef CONFIG_LOCAL_TIMERS
++		clockevents_notify(CLOCK_EVT_NOTIFY_BROADCAST_EXIT, &cpu);
++#endif
+ 	} else
+ 		cpu_do_idle();
+ }
+diff --git a/arch/arm/plat-mxc/time.c b/arch/arm/plat-mxc/time.c
+index 7b00a69..bb247b4 100644
+--- a/arch/arm/plat-mxc/time.c
++++ b/arch/arm/plat-mxc/time.c
+@@ -165,8 +165,7 @@ static int v2_set_next_event(unsigned long evt,
+ 
+ 	__raw_writel(tcmp, timer_base + V2_TCMP);
+ 
+-	return (int)(tcmp - __raw_readl(timer_base + V2_TCN)) < 0 ?
+-				-ETIME : 0;
++	return 0;
+ }
+ 
+ #ifdef DEBUG
+-- 
+1.7.7.4
+

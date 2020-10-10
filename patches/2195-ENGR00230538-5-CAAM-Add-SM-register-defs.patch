@@ -1,0 +1,339 @@
+From 04737d1fed868ce9f55489a18775d30896b7d00a Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Fri, 19 Oct 2012 14:43:41 -0700
+Subject: [PATCH 2195/2463] ENGR00230538-5: CAAM: Add SM register defs
+
+Add SM register defs, and expanded driver-private storage.
+
+These add changes to the driver private areas for the CAAM
+controller and CAAM Secure Memory subsystems, and expand register
+definitions to include the Secure Memory subsystems as reflected
+in multiple areas (controller, rings, secure memory itself).
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/crypto/caam/intern.h |   16 +++++
+ drivers/crypto/caam/regs.h   |  138 ++++++++++++++++++++++++++++++++++++++++--
+ drivers/crypto/caam/sm.h     |   86 ++++++++++++++++++++++++++
+ 3 files changed, 235 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/crypto/caam/intern.h b/drivers/crypto/caam/intern.h
+index 1f818ff..87c3b68 100644
+--- a/drivers/crypto/caam/intern.h
++++ b/drivers/crypto/caam/intern.h
+@@ -95,6 +95,9 @@ struct caam_drv_private {
+ 	struct caam_deco **deco; /* DECO/CCB views */
+ 	struct caam_assurance *ac;
+ 	struct caam_queue_if *qi; /* QI control region */
++	struct snvs_full __iomem *snvs;	/* SNVS HP+LP register space */
++	dma_addr_t __iomem *sm_base;	/* Secure memory storage base */
++	u32 sm_size;
+ 
+ 	/*
+ 	 * Detected geometry block. Filled in from device tree if powerpc,
+@@ -118,6 +121,9 @@ struct caam_drv_private {
+ 	struct clk *caam_clk;
+ #endif
+ 
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_SM
++	struct device *smdev;	/* Secure Memory dev */
++#endif
+ 	/*
+ 	 * debugfs entries for developer view into driver/device
+ 	 * variables at runtime.
+@@ -157,6 +163,16 @@ void caam_algapi_hash_shutdown(struct platform_device *pdev);
+ int caam_rng_startup(struct platform_device *pdev);
+ void caam_rng_shutdown(void);
+ #endif
++
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_SM
++int caam_sm_startup(struct platform_device *pdev);
++void caam_sm_shutdown(struct platform_device *pdev);
++#endif
++
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_SM_TEST
++int caam_sm_example_init(struct platform_device *pdev);
++#endif
++
+ #endif /* CONFIG_OF */
+ 
+ #endif /* INTERN_H */
+diff --git a/drivers/crypto/caam/regs.h b/drivers/crypto/caam/regs.h
+index 04ae9d4..248dd93 100644
+--- a/drivers/crypto/caam/regs.h
++++ b/drivers/crypto/caam/regs.h
+@@ -203,7 +203,6 @@ struct jr_outentry {
+ #define CHA_ID_AES_HP		(0x4ull << CHA_ID_AES_SHIFT)
+ #define CHA_ID_AES_DIFFPWR	(0x1ull << CHA_ID_AES_SHIFT)
+ 
+-
+ /*
+  * caam_perfmon - Performance Monitor/Secure Memory Status/
+  *                CAAM Global Status/Component Version IDs
+@@ -227,15 +226,21 @@ struct caam_perfmon {
+ #define CTPR_QI_SHIFT		57
+ #define CTPR_QI_MASK		(0x1ull << CTPR_QI_SHIFT)
+ 	u64 comp_parms;	/* CTPR - Compile Parameters Register	*/
+-	u64 rsvd1[2];
++
++	/* Secure Memory State Visibility */
++	u32 rsvd1;
++	u32 smstatus;	/* Secure memory status */
++	u32 rsvd2;
++	u32 smpartown;	/* Secure memory partition owner */
+ 
+ 	/* CAAM Global Status					fc0-fdf */
+ 	u64 faultaddr;	/* FAR  - Fault Address		*/
+ 	u32 faultliodn;	/* FALR - Fault Address LIODN	*/
+ 	u32 faultdetail;	/* FADR - Fault Addr Detail	*/
+-	u32 rsvd2;
++	u32 rsvd3;
+ 	u32 status;		/* CSTA - CAAM Status */
+-	u64 rsvd3;
++	u32 smpart;		/* Secure Memory Partition Parameters */
++	u32 smvid;		/* Secure Memory Version ID */
+ 
+ 	/* Component Instantiation Parameters			fe0-fff */
+ 	u32 rtic_id;		/* RVID - RTIC Version ID	*/
+@@ -245,6 +250,62 @@ struct caam_perfmon {
+ 	u64 caam_id;		/* CAAMVID - CAAM Version ID	*/
+ };
+ 
++#define SMSTATUS_PART_SHIFT	28
++#define SMSTATUS_PART_MASK	(0xf << SMSTATUS_PART_SHIFT)
++#define SMSTATUS_PAGE_SHIFT	16
++#define SMSTATUS_PAGE_MASK	(0x7ff << SMSTATUS_PAGE_SHIFT)
++#define SMSTATUS_MID_SHIFT	8
++#define SMSTATUS_MID_MASK	(0x3f << SMSTATUS_MID_SHIFT)
++#define SMSTATUS_ACCERR_SHIFT	4
++#define SMSTATUS_ACCERR_MASK	(0xf << SMSTATUS_ACCERR_SHIFT)
++#define SMSTATUS_ACCERR_NONE	0
++#define SMSTATUS_ACCERR_ALLOC	1	/* Page not allocated */
++#define SMSTATUS_ACCESS_ID	2	/* Not granted by ID */
++#define SMSTATUS_ACCESS_WRITE	3	/* Writes not allowed */
++#define SMSTATUS_ACCESS_READ	4	/* Reads not allowed */
++#define SMSTATUS_ACCESS_NONKEY	6	/* Non-key reads not allowed */
++#define SMSTATUS_ACCESS_BLOB	9	/* Blob access not allowed */
++#define SMSTATUS_ACCESS_DESCB	10	/* Descriptor Blob access spans pages */
++#define SMSTATUS_ACCESS_NON_SM	11	/* Outside Secure Memory range */
++#define SMSTATUS_ACCESS_XPAGE	12	/* Access crosses pages */
++#define SMSTATUS_ACCESS_INITPG	13	/* Page still initializing */
++#define SMSTATUS_STATE_SHIFT	0
++#define SMSTATUS_STATE_MASK	(0xf << SMSTATUS_STATE_SHIFT)
++#define SMSTATUS_STATE_RESET	0
++#define SMSTATUS_STATE_INIT	1
++#define SMSTATUS_STATE_NORMAL	2
++#define SMSTATUS_STATE_FAIL	3
++
++/* up to 15 rings, 2 bits shifted by ring number */
++#define SMPARTOWN_RING_SHIFT	2
++#define SMPARTOWN_RING_MASK	3
++#define SMPARTOWN_AVAILABLE	0
++#define SMPARTOWN_NOEXIST	1
++#define SMPARTOWN_UNAVAILABLE	2
++#define SMPARTOWN_OURS		3
++
++/* Maximum number of pages possible */
++#define SMPART_MAX_NUMPG_SHIFT	16
++#define SMPART_MAX_NUMPG_MASK	(0x3f << SMPART_MAX_NUMPG_SHIFT)
++
++/* Maximum partition number */
++#define SMPART_MAX_PNUM_SHIFT	12
++#define SMPART_MAX_PNUM_MASK	(0xf << SMPART_MAX_PNUM_SHIFT)
++
++/* Highest possible page number */
++#define SMPART_MAX_PG_SHIFT	0
++#define SMPART_MAX_PG_MASK	(0x3f << SMPART_MAX_PG_SHIFT)
++
++/* Max size of a page */
++#define SMVID_PG_SIZE_SHIFT	16
++#define SMVID_PG_SIZE_MASK	(0x7 << SMVID_PG_SIZE_SHIFT)
++
++/* Major/Minor Version ID */
++#define SMVID_MAJ_VERS_SHIFT	8
++#define SMVID_MAJ_VERS		(0xf << SMVID_MAJ_VERS_SHIFT)
++#define SMVID_MIN_VERS_SHIFT	0
++#define SMVID_MIN_VERS		(0xf << SMVID_MIN_VERS_SHIFT)
++
+ /* LIODN programming for DMA configuration */
+ #define MSTRID_LOCK_LIODN	0x80000000
+ #define MSTRID_LOCK_MAKETRUSTED	0x00010000	/* only for JR masterid */
+@@ -446,7 +507,18 @@ struct caam_job_ring {
+ 	u32 rsvd11;
+ 	u32 jrcommand;	/* JRCRx - JobR command */
+ 
+-	u32 rsvd12[932];
++	u32 rsvd12[33];
++
++	/* Secure Memory Configuration - if you have it */
++	u32 sm_cmd;	/* SMCJRx - Secure memory command */
++	u32 rsvd13;
++	u32 sm_status;	/* SMCSJRx - Secure memory status */
++	u32 rsvd14;
++	u32 sm_perm;	/* SMAPJRx - Secure memory access perms */
++	u32 sm_group2;	/* SMAP2JRx - Secure memory access group 2 */
++	u32 sm_group1;	/* SMAP1JRx - Secure memory access group 1 */
++
++	u32 rsvd15[891];
+ 
+ 	/* Performance Monitor                                  f00-fff */
+ 	struct caam_perfmon perfmon;
+@@ -569,6 +641,62 @@ struct caam_job_ring {
+ 
+ #define JRCR_RESET                  0x01
+ 
++/* secure memory command */
++#define SMC_PAGE_SHIFT	16
++#define SMC_PAGE_MASK	(0xffff << SMC_PAGE_SHIFT)
++#define SMC_PART_SHIFT	8
++#define SMC_PART_MASK	(0x0f << SMC_PART_SHIFT)
++#define SMC_CMD_SHIFT	0
++#define SMC_CMD_MASK	(0x0f << SMC_CMD_SHIFT)
++
++#define SMC_CMD_ALLOC_PAGE	0x01	/* allocate page to this partition */
++#define SMC_CMD_DEALLOC_PAGE	0x02	/* deallocate page from partition */
++#define SMC_CMD_DEALLOC_PART	0x03	/* deallocate partition */
++#define SMC_CMD_PAGE_INQUIRY	0x05	/* find partition associate with page */
++
++/* secure memory (command) status */
++#define SMCS_PAGE_SHIFT		16
++#define SMCS_PAGE_MASK		(0x0fff << SMCS_PAGE_SHIFT)
++#define SMCS_CMDERR_SHIFT	14
++#define SMCS_CMDERR_MASK	(3 << SMCS_CMDERR_SHIFT)
++#define SMCS_ALCERR_SHIFT	12
++#define SMCS_ALCERR_MASK	(3 << SMCS_ALCERR_SHIFT)
++#define SMCS_PGOWN_SHIFT	6
++#define SMCS_PGWON_MASK		(3 << SMCS_PGOWN_SHIFT)
++#define SMCS_PART_SHIFT		0
++#define SMCS_PART_MASK		(0xf << SMCS_PART_SHIFT)
++
++#define SMCS_CMDERR_NONE	0
++#define SMCS_CMDERR_INCOMP	1	/* Command not yet complete */
++#define SMCS_CMDERR_SECFAIL	2	/* Security failure occurred */
++#define SMCS_CMDERR_OVERFLOW	3	/* Command overflow */
++
++#define SMCS_ALCERR_NONE	0
++#define SMCS_ALCERR_PSPERR	1	/* Partion marked PSP (dealloc only) */
++#define SMCS_ALCERR_PAGEAVAIL	2	/* Page not available */
++#define SMCS_ALCERR_PARTOWN	3	/* Partition ownership error */
++
++#define SMCS_PGOWN_AVAIL	0	/* Page is available */
++#define SMCS_PGOWN_NOEXIST	1	/* Page initializing or nonexistent */
++#define SMCS_PGOWN_NOOWN	2	/* Page owned by another processor */
++#define SMCS_PGOWN_OWNED	3	/* Page belongs to this processor */
++
++/* secure memory access permissions */
++#define SMCS_PERM_KEYMOD_SHIFT	16
++#define SMCA_PERM_KEYMOD_MASK	(0xff << SMCS_PERM_KEYMOD_SHIFT)
++#define SMCA_PERM_CSP_ZERO	0x8000	/* Zero when deallocated or released */
++#define SMCA_PERM_PSP_LOCK	0x4000	/* Part./pages can't be deallocated */
++#define SMCA_PERM_PERM_LOCK	0x2000	/* Lock permissions */
++#define SMCA_PERM_GRP_LOCK	0x1000	/* Lock access groups */
++#define SMCA_PERM_RINGID_SHIFT	10
++#define SMCA_PERM_RINGID_MASK	(3 << SMCA_PERM_RINGID_SHIFT)
++#define SMCA_PERM_G2_BLOB	0x0080	/* Group 2 blob import/export */
++#define SMCA_PERM_G2_WRITE	0x0020	/* Group 2 write */
++#define SMCA_PERM_G2_READ	0x0010	/* Group 2 read */
++#define SMCA_PERM_G1_BLOB	0x0008	/* Group 1... */
++#define SMCA_PERM_G1_WRITE	0x0002
++#define SMCA_PERM_G1_READ	0x0001
++
+ /*
+  * caam_assurance - Assurance Controller View
+  * base + 0x6000 padded out to 0x1000
+diff --git a/drivers/crypto/caam/sm.h b/drivers/crypto/caam/sm.h
+new file mode 100644
+index 0000000..7124efa
+--- /dev/null
++++ b/drivers/crypto/caam/sm.h
+@@ -0,0 +1,86 @@
++
++/*
++ * CAAM Secure Memory/Keywrap API Definitions
++ * Copyright (C) 2008-2012 Freescale Semiconductor, Inc.
++ */
++
++#ifndef SM_H
++#define SM_H
++
++
++/* Storage access permissions */
++#define SM_PERM_READ 0x01
++#define SM_PERM_WRITE 0x02
++#define SM_PERM_BLOB 0x03
++
++
++/* Keystore maintenance functions */
++void sm_init_keystore(struct device *dev);
++u32 sm_detect_keystore_units(struct device *dev);
++int sm_establish_keystore(struct device *dev, u32 unit);
++void sm_release_keystore(struct device *dev, u32 unit);
++
++/* Keystore accessor functions */
++extern int sm_keystore_slot_alloc(struct device *dev, u32 unit, u32 size,
++				  u32 *slot);
++extern int sm_keystore_slot_dealloc(struct device *dev, u32 unit, u32 slot);
++extern int sm_keystore_slot_load(struct device *dev, u32 unit, u32 slot,
++				 const u8 *key_data, u32 key_length);
++extern int sm_keystore_slot_read(struct device *dev, u32 unit, u32 slot,
++				 u32 key_length, u8 *key_data);
++extern int sm_keystore_slot_encapsulate(struct device *dev, u32 unit,
++					u32 inslot, u32 outslot, u16 secretlen,
++					u8 *keymod, u16 keymodlen);
++extern int sm_keystore_slot_decapsulate(struct device *dev, u32 unit,
++					u32 inslot, u32 outslot, u16 secretlen,
++					u8 *keymod, u16 keymodlen);
++
++/* Data structure to hold per-slot information */
++struct keystore_data_slot_info {
++	u8	allocated;	/* Track slot assignments */
++	u32	key_length;	/* Size of the key */
++};
++
++/* Data structure to hold keystore information */
++struct keystore_data {
++	void	*base_address;	/* Base of the Secure Partition */
++	u32	slot_count;	/* Number of slots in the keystore */
++	struct keystore_data_slot_info *slot; /* Per-slot information */
++};
++
++/* store the detected attributes of a secure memory page */
++struct sm_page_descriptor {
++	u16 phys_pagenum;	/* may be discontiguous */
++	u16 own_part;		/* Owning partition */
++	void *pg_base;		/* Calculated virtual address */
++	struct keystore_data *ksdata;
++};
++
++struct caam_drv_private_sm {
++	struct device *parentdev;	/* this ends up as the controller */
++	struct device *smringdev;	/* ring that owns this instance */
++	spinlock_t kslock ____cacheline_aligned;
++
++	/* Default parameters for geometry */
++	u32 max_pages;		/* maximum pages this instance can support */
++	u32 top_partition;	/* highest partition number in this instance */
++	u32 top_page;		/* highest page number in this instance */
++	u32 page_size;		/* page size */
++	u32 slot_size;		/* selected size of each storage block */
++
++	/* Partition/Page Allocation Map */
++	u32 localpages;		/* Number of pages we can access */
++	struct sm_page_descriptor *pagedesc;	/* Allocated per-page */
++
++	/* Installed handlers for keystore access */
++	int (*data_init)(struct device *dev, u32 unit);
++	void (*data_cleanup)(struct device *dev, u32 unit);
++	int (*slot_alloc)(struct device *dev, u32 unit, u32 size, u32 *slot);
++	int (*slot_dealloc)(struct device *dev, u32 unit, u32 slot);
++	void *(*slot_get_address)(struct device *dev, u32 unit, u32 handle);
++	u32 (*slot_get_base)(struct device *dev, u32 unit, u32 handle);
++	u32 (*slot_get_offset)(struct device *dev, u32 unit, u32 handle);
++	u32 (*slot_get_slot_size)(struct device *dev, u32 unit, u32 handle);
++};
++
++#endif /* SM_H */
+-- 
+1.7.7.4
+

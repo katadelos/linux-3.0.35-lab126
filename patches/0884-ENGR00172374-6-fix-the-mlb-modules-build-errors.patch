@@ -1,0 +1,45 @@
+From 77051347ec63e9983c24f855ff7827e0cad5e25a Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Mon, 9 Jan 2012 15:58:11 +0800
+Subject: [PATCH 0884/2463] ENGR00172374-6: fix the mlb modules build errors
+
+/home/r64343/work_space/linux-2.6/drivers/mxc/mlb/mxc_mlb150.c: In function 'mlb_tx_isr':
+/home/r64343/work_space/linux-2.6/drivers/mxc/mlb/mxc_mlb150.c:1351: error: 'TASK_INTERRUPTIBLE' undeclared (first use in this function)
+/home/r64343/work_space/linux-2.6/drivers/mxc/mlb/mxc_mlb150.c:1351: error: (Each undeclared identifier is reported only once
+/home/r64343/work_space/linux-2.6/drivers/mxc/mlb/mxc_mlb150.c:1351: error: for each function it appears in.)
+/home/r64343/work_space/linux-2.6/drivers/mxc/mlb/mxc_mlb150.c: In function 'mlb_rx_isr':
+/home/r64343/work_space/linux-2.6/drivers/mxc/mlb/mxc_mlb150.c:1400: error: 'TASK_INTERRUPTIBLE' undeclared (first use in this function)
+/home/r64343/work_space/linux-2.6/drivers/mxc/mlb/mxc_mlb150.c: In function 'mxc_mlb150_read':
+/home/r64343/work_space/linux-2.6/drivers/mxc/mlb/mxc_mlb150.c:1828: error: 'TASK_INTERRUPTIBLE' undeclared (first use in this function)
+/home/r64343/work_space/linux-2.6/drivers/mxc/mlb/mxc_mlb150.c:1828: error: implicit declaration of function 'signal_pending'
+/home/r64343/work_space/linux-2.6/drivers/mxc/mlb/mxc_mlb150.c:1828: error: implicit declaration of function 'schedule'
+
+missing one header file: sched.h, add it to fix it.
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ drivers/mxc/mlb/mxc_mlb150.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/mlb/mxc_mlb150.c b/drivers/mxc/mlb/mxc_mlb150.c
+index 83f50e2..c8de9af 100755
+--- a/drivers/mxc/mlb/mxc_mlb150.c
++++ b/drivers/mxc/mlb/mxc_mlb150.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -36,6 +36,7 @@
+ #include <linux/fsl_devices.h>
+ #include <linux/delay.h>
+ #include <linux/spinlock.h>
++#include <linux/sched.h>
+ 
+ #define DRIVER_NAME "mxc_mlb150"
+ 
+-- 
+1.7.7.4
+

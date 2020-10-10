@@ -1,0 +1,40 @@
+From 614556c6c57fa76b6ec207d7c32f9c291d7b0528 Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Thu, 2 Aug 2012 11:11:31 +0800
+Subject: [PATCH 1850/2463] ENGR00219153 HDMI: Remove enable/disable_pins in
+ blank/unblank function
+
+HDMI enable/disable_pins setting HDMI DDC enable, but the pins confilct
+with I2C2 bus on board design, so only HDCP function is enable
+the function can been called.
+Remove enable/disable_pins in  blank/unblank function to make sure
+I2C2 bus can work when HDCP disable.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ drivers/video/mxc_hdmi.c |    2 --
+ 1 files changed, 0 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index 4bc3f9a..e53301d 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -2046,7 +2046,6 @@ static int mxc_hdmi_fb_event(struct notifier_block *nb,
+ 
+ 			hdmi->blank = *((int *)event->data);
+ 
+-			mxc_hdmi_enable_pins(hdmi);
+ 			if (hdmi->fb_reg && hdmi->cable_plugin)
+ 				mxc_hdmi_setup(hdmi, val);
+ 
+@@ -2054,7 +2053,6 @@ static int mxc_hdmi_fb_event(struct notifier_block *nb,
+ 			dev_dbg(&hdmi->pdev->dev,
+ 				"event=FB_EVENT_BLANK - BLANK\n");
+ 
+-			mxc_hdmi_disable_pins(hdmi);
+ 			mxc_hdmi_phy_disable(hdmi);
+ 
+ 			hdmi->blank = *((int *)event->data);
+-- 
+1.7.7.4
+

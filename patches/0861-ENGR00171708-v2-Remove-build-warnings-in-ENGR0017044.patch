@@ -1,0 +1,68 @@
+From 26f9719dc5c1587681a020951eaf34bf0a040360 Mon Sep 17 00:00:00 2001
+From: B37753 <B37753@freescale.com>
+Date: Wed, 11 Jan 2012 05:24:01 +0000
+Subject: [PATCH 0861/2463] ENGR00171708: [v2] Remove build warnings in
+ ENGR00170444
+
+Remove ddc_dvi_init and ddc_dvi_update functions because
+    those generate a compiler warning.
+Also remove I2C duplicate IOMUXES and devices.
+
+Signed-off-by: Israel Perez <B37753@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   22 ----------------------
+ 1 files changed, 0 insertions(+), 22 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 3876a4d..c5baa0d 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -181,7 +181,6 @@ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 	MX6Q_PAD_GPIO_0__CCM_CLKO,
+ 	/*MX6Q_PAD_GPIO_3__CCM_CLKO2,i*/
+ 	MX6Q_PAD_GPIO_3__I2C3_SCL,
+-	MX6Q_PAD_GPIO_3__I2C3_SCL,
+ 
+ 	/* Android GPIO keys */
+ 	MX6Q_PAD_SD2_CMD__GPIO_1_11, /* home */
+@@ -719,22 +718,6 @@ static struct pca953x_platform_data max7310_u43_platdata = {
+ 	.setup		= max7310_u43_setup,
+ };
+ 
+-
+-static void ddc_dvi_init(void)
+-{
+-	/* enable DVI I2C */
+-	gpio_set_value(MX6Q_SABREAUTO_DISP0_I2C_EN, 1);
+-}
+-
+-static int ddc_dvi_update(void)
+-{
+-	/* DVI cable state */
+-	if (gpio_get_value(MX6Q_SABREAUTO_DISP0_DET_INT) == 1)
+-		return 1;
+-	else
+-		return 0;
+-}
+-
+ static struct fsl_mxc_camera_platform_data camera_data = {
+ 	.analog_regulator = "DA9052_LDO7",
+ 	.core_regulator = "DA9052_LDO9",
+@@ -796,14 +779,9 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ 		.platform_data = &max7310_u39_platdata,
+ 	},
+ 	{
+-		I2C_BOARD_INFO("max7310", 0x34),
+-		.platform_data = &max7310_u43_platdata,
+-	},
+-	{
+ 		I2C_BOARD_INFO("adv7180", 0x21),
+ 		.platform_data = (void *)&adv7180_data,
+ 	},
+-
+ };
+ 
+ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+-- 
+1.7.7.4
+

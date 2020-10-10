@@ -1,0 +1,346 @@
+From af8bfad7f86e64f4421a8bd1ca22866e27aaf6a3 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Tue, 24 May 2011 10:06:03 +0800
+Subject: [PATCH 0178/2463] ENGR00142551-3 MXC V4L2:Change IPU interface for
+ triple buffer
+
+This patch changes IPU interface for MXC V4L2 to align with
+IPUv3 triple buffer support.
+When V4L2 is used, we'll change to use double buffer for
+display channel via internal framebuffer interface.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit db97e4d616f105bec1cfadf33e842fc624ecf0d5)
+---
+ drivers/media/video/mxc/capture/ipu_csi_enc.c      |    2 +-
+ drivers/media/video/mxc/capture/ipu_prp_enc.c      |   10 +++++---
+ drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c   |   17 +++++++++-----
+ .../media/video/mxc/capture/ipu_prp_vf_sdc_bg.c    |   18 ++++++++++-----
+ drivers/media/video/mxc/capture/ipu_still.c        |    2 +-
+ drivers/media/video/mxc/output/mxc_v4l2_output.c   |   24 +++++++++++++------
+ 6 files changed, 47 insertions(+), 26 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ipu_csi_enc.c b/drivers/media/video/mxc/capture/ipu_csi_enc.c
+index c8a4dab7..0ba9c46 100644
+--- a/drivers/media/video/mxc/capture/ipu_csi_enc.c
++++ b/drivers/media/video/mxc/capture/ipu_csi_enc.c
+@@ -132,7 +132,7 @@ static int csi_enc_setup(cam_data *cam)
+ 				      pixel_fmt, cam->v2f.fmt.pix.width,
+ 				      cam->v2f.fmt.pix.height,
+ 				      cam->v2f.fmt.pix.width, IPU_ROTATE_NONE,
+-				      dummy, dummy,
++				      dummy, dummy, 0,
+ 				      cam->offset.u_offset,
+ 				      cam->offset.v_offset);
+ 	if (err != 0) {
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_enc.c b/drivers/media/video/mxc/capture/ipu_prp_enc.c
+index 67637dd..a51d468 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_enc.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_enc.c
+@@ -177,7 +177,7 @@ static int prp_enc_setup(cam_data *cam)
+ 					      enc.csi_prp_enc_mem.out_width,
+ 					      IPU_ROTATE_NONE,
+ 					      cam->rot_enc_bufs[0],
+-					      cam->rot_enc_bufs[1], 0, 0);
++					      cam->rot_enc_bufs[1], 0, 0, 0);
+ 		if (err != 0) {
+ 			printk(KERN_ERR "CSI_PRP_ENC_MEM err\n");
+ 			return err;
+@@ -196,7 +196,7 @@ static int prp_enc_setup(cam_data *cam)
+ 					      enc.csi_prp_enc_mem.out_width,
+ 					      cam->rotation,
+ 					      cam->rot_enc_bufs[0],
+-					      cam->rot_enc_bufs[1], 0, 0);
++					      cam->rot_enc_bufs[1], 0, 0, 0);
+ 		if (err != 0) {
+ 			printk(KERN_ERR "MEM_ROT_ENC_MEM input buffer\n");
+ 			return err;
+@@ -210,7 +210,8 @@ static int prp_enc_setup(cam_data *cam)
+ 					    cam->v2f.fmt.pix.bytesperline /
+ 					    bytes_per_pixel(enc.csi_prp_enc_mem.
+ 							    out_pixel_fmt),
+-					    IPU_ROTATE_NONE, dummy, dummy,
++					    IPU_ROTATE_NONE,
++					    dummy, dummy, 0,
+ 					    cam->offset.u_offset,
+ 					    cam->offset.v_offset);
+ 		if (err != 0) {
+@@ -247,7 +248,8 @@ static int prp_enc_setup(cam_data *cam)
+ 					    cam->v2f.fmt.pix.bytesperline /
+ 					    bytes_per_pixel(enc.csi_prp_enc_mem.
+ 							    out_pixel_fmt),
+-					    cam->rotation, dummy, dummy,
++					    cam->rotation,
++					    dummy, dummy, 0,
+ 					    cam->offset.u_offset,
+ 					    cam->offset.v_offset);
+ 		if (err != 0) {
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c
+index 95b6ee6..6f6b7d4 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c
+@@ -94,6 +94,7 @@ static int prpvf_start(void *private)
+ 	fbvar.yres = cam->win.w.height;
+ 	fbvar.yres_virtual = cam->win.w.height * 2;
+ 	fbvar.yoffset = 0;
++	fbvar.accel_flags = FB_ACCEL_DOUBLE_FLAG;
+ 	fbvar.activate |= FB_ACTIVATE_FORCE;
+ 	fb_set_var(fbi, &fbvar);
+ 
+@@ -179,8 +180,9 @@ static int prpvf_start(void *private)
+ 					      vf.csi_prp_vf_mem.out_width,
+ 					      vf.csi_prp_vf_mem.out_height,
+ 					      vf.csi_prp_vf_mem.out_width,
+-					      IPU_ROTATE_NONE, cam->vf_bufs[0],
+-					      cam->vf_bufs[1], 0, 0);
++					      IPU_ROTATE_NONE,
++					      cam->vf_bufs[0], cam->vf_bufs[1],
++					      0, 0, 0);
+ 		if (err != 0) {
+ 			goto out_3;
+ 		}
+@@ -196,8 +198,10 @@ static int prpvf_start(void *private)
+ 					      vf.csi_prp_vf_mem.out_width,
+ 					      vf.csi_prp_vf_mem.out_height,
+ 					      vf.csi_prp_vf_mem.out_width,
+-					      cam->vf_rotation, cam->vf_bufs[0],
+-					      cam->vf_bufs[1], 0, 0);
++					      cam->vf_rotation,
++					      cam->vf_bufs[0],
++					      cam->vf_bufs[1],
++					      0, 0, 0);
+ 		if (err != 0) {
+ 			printk(KERN_ERR "Error MEM_ROT_VF_MEM input buffer\n");
+ 			goto out_2;
+@@ -219,7 +223,7 @@ static int prpvf_start(void *private)
+ 					      fbi->fix.smem_start +
+ 					      (fbi->fix.line_length *
+ 					       fbi->var.yres),
+-					      fbi->fix.smem_start, 0, 0);
++					      fbi->fix.smem_start, 0, 0, 0);
+ 
+ 		if (err != 0) {
+ 			printk(KERN_ERR "Error MEM_ROT_VF_MEM output buffer\n");
+@@ -256,7 +260,7 @@ static int prpvf_start(void *private)
+ 					      fbi->fix.smem_start +
+ 					      (fbi->fix.line_length *
+ 					       fbi->var.yres),
+-					      fbi->fix.smem_start, 0, 0);
++					      fbi->fix.smem_start, 0, 0, 0);
+ 		if (err != 0) {
+ 			printk(KERN_ERR "Error initializing CSI_PRP_VF_MEM\n");
+ 			goto out_4;
+@@ -354,6 +358,7 @@ static int prpvf_stop(void *private)
+ 
+ 	/* Set the overlay frame buffer std to what it is used to be */
+ 	fbvar = fbi->var;
++	fbvar.accel_flags = FB_ACCEL_TRIPLE_FLAG;
+ 	fbvar.nonstd = cam->fb_origin_std;
+ 	fbvar.activate |= FB_ACTIVATE_FORCE;
+ 	fb_set_var(fbi, &fbvar);
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
+index 042d07e..192a38e 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
+@@ -176,8 +176,10 @@ static int prpvf_start(void *private)
+ 				      format, vf.csi_prp_vf_mem.out_width,
+ 				      vf.csi_prp_vf_mem.out_height,
+ 				      vf.csi_prp_vf_mem.out_width,
+-				      IPU_ROTATE_NONE, cam->vf_bufs[0],
+-				      cam->vf_bufs[1], 0, 0);
++				      IPU_ROTATE_NONE,
++				      cam->vf_bufs[0],
++				      cam->vf_bufs[1],
++				      0, 0, 0);
+ 	if (err != 0) {
+ 		printk(KERN_ERR "Error initializing CSI_PRP_VF_MEM\n");
+ 		goto out_3;
+@@ -192,8 +194,10 @@ static int prpvf_start(void *private)
+ 				      format, vf.csi_prp_vf_mem.out_width,
+ 				      vf.csi_prp_vf_mem.out_height,
+ 				      vf.csi_prp_vf_mem.out_width,
+-				      cam->vf_rotation, cam->vf_bufs[0],
+-				      cam->vf_bufs[1], 0, 0);
++				      cam->vf_rotation,
++				      cam->vf_bufs[0],
++				      cam->vf_bufs[1],
++				      0, 0, 0);
+ 	if (err != 0) {
+ 		printk(KERN_ERR "Error MEM_ROT_VF_MEM input buffer\n");
+ 		goto out_2;
+@@ -205,7 +209,8 @@ static int prpvf_start(void *private)
+ 					      vf.csi_prp_vf_mem.out_height,
+ 					      vf.csi_prp_vf_mem.out_width,
+ 					      cam->overlay_fb->var.xres * bpp,
+-					      IPU_ROTATE_NONE, offset, 0, 0, 0);
++					      IPU_ROTATE_NONE,
++					      offset, 0, 0, 0, 0);
+ 
+ 		if (err != 0) {
+ 			printk(KERN_ERR "Error MEM_ROT_VF_MEM output buffer\n");
+@@ -217,7 +222,8 @@ static int prpvf_start(void *private)
+ 					      vf.csi_prp_vf_mem.out_width,
+ 					      vf.csi_prp_vf_mem.out_height,
+ 					      cam->overlay_fb->var.xres * bpp,
+-					      IPU_ROTATE_NONE, offset, 0, 0, 0);
++					      IPU_ROTATE_NONE,
++					      offset, 0, 0, 0, 0);
+ 		if (err != 0) {
+ 			printk(KERN_ERR "Error MEM_ROT_VF_MEM output buffer\n");
+ 			goto out_2;
+diff --git a/drivers/media/video/mxc/capture/ipu_still.c b/drivers/media/video/mxc/capture/ipu_still.c
+index b81891a..fbc9aa5 100644
+--- a/drivers/media/video/mxc/capture/ipu_still.c
++++ b/drivers/media/video/mxc/capture/ipu_still.c
+@@ -130,7 +130,7 @@ static int prp_still_start(void *private)
+ 				      pixel_fmt, cam->v2f.fmt.pix.width,
+ 				      cam->v2f.fmt.pix.height,
+ 				      cam->v2f.fmt.pix.width, IPU_ROTATE_NONE,
+-				      cam->still_buf[0], cam->still_buf[1],
++				      cam->still_buf[0], cam->still_buf[1], 0,
+ 				      0, 0);
+ 	if (err != 0)
+ 		return err;
+diff --git a/drivers/media/video/mxc/output/mxc_v4l2_output.c b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+index e558571..565dd96 100644
+--- a/drivers/media/video/mxc/output/mxc_v4l2_output.c
++++ b/drivers/media/video/mxc/output/mxc_v4l2_output.c
+@@ -834,6 +834,7 @@ static int init_VDI_in_channel_buffer(vout_data *vout, uint32_t in_pixel_fmt,
+ 				    IPU_ROTATE_NONE,
+ 				    vout->v4l2_bufs[vout->ipu_buf[0]].m.offset,
+ 				    vout->v4l2_bufs[vout->ipu_buf[0]].m.offset,
++				    0,
+ 				    u_offset, v_offset) != 0) {
+ 		dev_err(dev, "Error initializing VDI current input buffer\n");
+ 		return -EINVAL;
+@@ -845,6 +846,7 @@ static int init_VDI_in_channel_buffer(vout_data *vout, uint32_t in_pixel_fmt,
+ 					    stride, IPU_ROTATE_NONE,
+ 					    vout->v4l2_bufs[vout->ipu_buf_p[0]].m.offset+vout->bytesperline,
+ 					    vout->v4l2_bufs[vout->ipu_buf_p[0]].m.offset+vout->bytesperline,
++					    0,
+ 					    u_offset, v_offset) != 0) {
+ 			dev_err(dev, "Error initializing VDI previous input buffer\n");
+ 			return -EINVAL;
+@@ -855,6 +857,7 @@ static int init_VDI_in_channel_buffer(vout_data *vout, uint32_t in_pixel_fmt,
+ 					    stride, IPU_ROTATE_NONE,
+ 					    vout->v4l2_bufs[vout->ipu_buf_n[0]].m.offset+vout->bytesperline,
+ 					    vout->v4l2_bufs[vout->ipu_buf_n[0]].m.offset+vout->bytesperline,
++					    0,
+ 					    u_offset, v_offset) != 0) {
+ 			dev_err(dev, "Error initializing VDI next input buffer\n");
+ 			return -EINVAL;
+@@ -918,7 +921,7 @@ static int init_VDI(ipu_channel_params_t params, vout_data *vout,
+ 					    out_height, out_width,
+ 					    IPU_ROTATE_NONE,
+ 					    vout->rot_pp_bufs[0],
+-					    vout->rot_pp_bufs[1], 0, 0) != 0) {
++					    vout->rot_pp_bufs[1], 0, 0, 0) != 0) {
+ 			dev_err(dev, "Error initializing PRP output buffer\n");
+ 			return -EINVAL;
+ 		}
+@@ -934,7 +937,7 @@ static int init_VDI(ipu_channel_params_t params, vout_data *vout,
+ 					    out_height, out_width,
+ 					    vout->rotate,
+ 					    vout->rot_pp_bufs[0],
+-					    vout->rot_pp_bufs[1], 0, 0) != 0) {
++					    vout->rot_pp_bufs[1], 0, 0, 0) != 0) {
+ 			dev_err(dev,
+ 				"Error initializing PP ROT input buffer\n");
+ 			return -EINVAL;
+@@ -953,7 +956,7 @@ static int init_VDI(ipu_channel_params_t params, vout_data *vout,
+ 					    out_height, out_width,
+ 					    IPU_ROTATE_NONE,
+ 					    vout->display_bufs[0],
+-					    vout->display_bufs[1], 0, 0) != 0) {
++					    vout->display_bufs[1], 0, 0, 0) != 0) {
+ 			dev_err(dev,
+ 				"Error initializing PP-VDI output buffer\n");
+ 			return -EINVAL;
+@@ -974,7 +977,7 @@ static int init_VDI(ipu_channel_params_t params, vout_data *vout,
+ 					    out_height, out_width,
+ 					    vout->rotate,
+ 					    vout->display_bufs[0],
+-					    vout->display_bufs[1], 0, 0) != 0) {
++					    vout->display_bufs[1], 0, 0, 0) != 0) {
+ 			dev_err(dev,
+ 				"Error initializing PP-VDI output buffer\n");
+ 			return -EINVAL;
+@@ -1109,6 +1112,7 @@ static int init_PP(ipu_channel_params_t *params, vout_data *vout,
+ 				    IPU_ROTATE_NONE,
+ 				    phy_addr0,
+ 				    phy_addr1,
++				    0,
+ 				    vout->offset.u_offset,
+ 				    vout->offset.v_offset) != 0) {
+ 		dev_err(dev, "Error initializing PP input buffer\n");
+@@ -1134,7 +1138,7 @@ static int init_PP(ipu_channel_params_t *params, vout_data *vout,
+ 					    out_height, out_stride,
+ 					    IPU_ROTATE_NONE,
+ 					    vout->rot_pp_bufs[0] + eba_offset,
+-					    vout->rot_pp_bufs[1] + eba_offset, 0, 0) != 0) {
++					    vout->rot_pp_bufs[1] + eba_offset, 0, 0, 0) != 0) {
+ 			dev_err(dev, "Error initializing PP output buffer\n");
+ 			return -EINVAL;
+ 		}
+@@ -1150,7 +1154,7 @@ static int init_PP(ipu_channel_params_t *params, vout_data *vout,
+ 					    out_height, out_stride,
+ 					    vout->rotate,
+ 					    vout->rot_pp_bufs[0],
+-					    vout->rot_pp_bufs[1], 0, 0) != 0) {
++					    vout->rot_pp_bufs[1], 0, 0, 0) != 0) {
+ 			dev_err(dev,
+ 				"Error initializing PP ROT input buffer\n");
+ 			return -EINVAL;
+@@ -1169,7 +1173,7 @@ static int init_PP(ipu_channel_params_t *params, vout_data *vout,
+ 					    out_height, out_stride,
+ 					    IPU_ROTATE_NONE,
+ 					    vout->display_bufs[0] + eba_offset,
+-					    vout->display_bufs[1] + eba_offset, 0, 0) != 0) {
++					    vout->display_bufs[1] + eba_offset, 0, 0, 0) != 0) {
+ 			dev_err(dev, "Error initializing PP output buffer\n");
+ 			return -EINVAL;
+ 		}
+@@ -1189,7 +1193,7 @@ static int init_PP(ipu_channel_params_t *params, vout_data *vout,
+ 					    out_height, out_stride,
+ 					    vout->rotate,
+ 					    vout->display_bufs[0] + eba_offset,
+-					    vout->display_bufs[1] + eba_offset, 0, 0) != 0) {
++					    vout->display_bufs[1] + eba_offset, 0, 0, 0) != 0) {
+ 			dev_err(dev, "Error initializing PP output buffer\n");
+ 			return -EINVAL;
+ 		}
+@@ -1424,6 +1428,7 @@ static int mxc_v4l2out_streamon(vout_data *vout)
+ 
+ 	/* Init display channel through fb API */
+ 	fbvar.yoffset = 0;
++	fbvar.accel_flags = FB_ACCEL_DOUBLE_FLAG;
+ 	fbvar.activate |= FB_ACTIVATE_FORCE;
+ 	console_lock();
+ 	fbi->flags |= FBINFO_MISC_USEREVENT;
+@@ -1703,6 +1708,7 @@ static int mxc_v4l2out_streamoff(vout_data *vout)
+ 	}
+ 
+ 	if (vout->ic_bypass) {
++		fbi->var.accel_flags = FB_ACCEL_TRIPLE_FLAG;
+ 		fbi->var.activate |= FB_ACTIVATE_FORCE;
+ 		console_lock();
+ 		fbi->flags |= FBINFO_MISC_USEREVENT;
+@@ -1733,6 +1739,7 @@ static int mxc_v4l2out_streamoff(vout_data *vout)
+ 		}
+ 		ipu_disable_channel(MEM_PP_MEM, true);
+ 
++		fbi->var.accel_flags = FB_ACCEL_TRIPLE_FLAG;
+ 		fbi->var.activate |= FB_ACTIVATE_FORCE;
+ 		console_lock();
+ 		fbi->flags |= FBINFO_MISC_USEREVENT;
+@@ -1772,6 +1779,7 @@ static int mxc_v4l2out_streamoff(vout_data *vout)
+ 			ipu_disable_channel(MEM_VDI_PRP_VF_MEM_N, true);
+ 		}
+ 
++		fbi->var.accel_flags = FB_ACCEL_TRIPLE_FLAG;
+ 		fbi->var.activate |= FB_ACTIVATE_FORCE;
+ 		console_lock();
+ 		fbi->flags |= FBINFO_MISC_USEREVENT;
+-- 
+1.7.7.4
+

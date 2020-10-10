@@ -1,0 +1,56 @@
+From 72843594a22992d1df6fbcfc13866c862887df78 Mon Sep 17 00:00:00 2001
+From: Frank Li <Frank.Li@freescale.com>
+Date: Wed, 20 Jul 2011 18:44:20 +0800
+Subject: [PATCH 0276/2463] ENGR00139238-3 MX6: add p1003 i2c touch device
+
+Add p1003 i2c touch device
+
+Signed-off-by: Frank Li <Frank.Li@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   23 +++++++++++++++++++++++
+ 1 files changed, 23 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 4bba7a4..f52f327 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -356,6 +356,27 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ 	},
+ };
+ 
++static int p1003_ts_hw_status(void)
++{
++	return gpio_get_value(MX6Q_SABREAUTO_CAP_TCH_INT);
++}
++
++static struct p1003_ts_platform_data p1003_ts_data = {
++	.hw_status = p1003_ts_hw_status,
++};
++
++static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
++	{
++		I2C_BOARD_INFO("egalax_ts", 0x4),
++		.irq = gpio_to_irq(MX6Q_SABREAUTO_CAP_TCH_INT),
++	},
++	{
++		I2C_BOARD_INFO("p1003_fwv33", 0x41),
++		.irq = gpio_to_irq(MX6Q_SABREAUTO_CAP_TCH_INT),
++		.platform_data = &p1003_ts_data,
++	},
++};
++
+ static void imx6q_sabreauto_usbotg_vbus(bool on)
+ {
+ 	if (on)
+@@ -545,6 +566,8 @@ static void __init mx6_board_init(void)
+ 
+ 	imx6q_add_imx_i2c(1, &mx6q_sabreauto_i2c_data);
+ 	imx6q_add_imx_i2c(2, &mx6q_sabreauto_i2c_data);
++	i2c_register_board_info(1, mxc_i2c1_board_info,
++			ARRAY_SIZE(mxc_i2c1_board_info));
+ 	i2c_register_board_info(2, mxc_i2c2_board_info,
+ 			ARRAY_SIZE(mxc_i2c2_board_info));
+ 
+-- 
+1.7.7.4
+

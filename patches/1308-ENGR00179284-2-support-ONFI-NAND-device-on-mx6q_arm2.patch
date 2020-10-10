@@ -1,0 +1,47 @@
+From bc6e7d2099a5a8d5fdcff4d895eefc1d08e533d2 Mon Sep 17 00:00:00 2001
+From: Allen Xu <allen.xu@freescale.com>
+Date: Tue, 10 Apr 2012 16:56:38 +0800
+Subject: [PATCH 1308/2463] ENGR00179284-2 support ONFI NAND device on
+ mx6q_arm2_pop board
+
+enable ONFI NAND feature by command line parameter "onfi_support"
+
+Signed-off-by: Allen Xu <allen.xu@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c |   13 +++++++++++--
+ 1 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index f720c87..2318f76 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -316,15 +316,24 @@ static int __init gpmi_nand_platform_init(void)
+ 	return mxc_iomux_v3_setup_multiple_pads(nand_pads, nand_pads_cnt);
+ }
+ 
+-static const struct gpmi_nand_platform_data
+-mx6_gpmi_nand_platform_data __initconst = {
++static struct gpmi_nand_platform_data
++mx6_gpmi_nand_platform_data = {
+ 	.platform_init           = gpmi_nand_platform_init,
+ 	.min_prop_delay_in_ns    = 5,
+ 	.max_prop_delay_in_ns    = 9,
+ 	.max_chip_count          = 1,
+ 	.enable_bbt              = 1,
++	.enable_ddr              = 0,
+ };
+ 
++static int __init board_support_onfi_nand(char *p)
++{
++	mx6_gpmi_nand_platform_data.enable_ddr = 1;
++	return 0;
++}
++
++early_param("onfi_support", board_support_onfi_nand);
++
+ static const struct anatop_thermal_platform_data
+ 	mx6_arm2_anatop_thermal_data __initconst = {
+ 	.name = "anatop_thermal",
+-- 
+1.7.7.4
+

@@ -1,0 +1,60 @@
+From fd1aee57a4c8083e1f05b53ac431cab8b69a8a8f Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Wed, 28 Nov 2012 14:00:34 +0800
+Subject: [PATCH 2294/2463] ENGR00234111 wm8962: switch automatically between
+ speaker and hp
+
+when detect hp inserted, disable speaker; when hp is plugout,
+enable speaker.
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ sound/soc/imx/imx-wm8962.c |   18 ++++++++++++++++++
+ 1 files changed, 18 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/imx/imx-wm8962.c b/sound/soc/imx/imx-wm8962.c
+index 04aca39..a224518 100644
+--- a/sound/soc/imx/imx-wm8962.c
++++ b/sound/soc/imx/imx-wm8962.c
+@@ -184,6 +184,14 @@ static void headphone_detect_handler(struct work_struct *wor)
+ 	/*sysfs_notify(&pdev->dev.kobj, NULL, "headphone");*/
+ 	priv->hp_status = gpio_get_value(plat->hp_gpio);
+ 
++	/* if headphone is inserted, disable speaker */
++	if (priv->hp_status != plat->hp_active_low)
++		snd_soc_dapm_nc_pin(&gcodec->dapm, "Ext Spk");
++	else
++		snd_soc_dapm_enable_pin(&gcodec->dapm, "Ext Spk");
++
++	snd_soc_dapm_sync(&gcodec->dapm);
++
+ 	/* setup a message for userspace headphone in */
+ 	buf = kmalloc(32, GFP_ATOMIC);
+ 	if (!buf) {
+@@ -252,6 +260,8 @@ static void amic_detect_handler(struct work_struct *work)
+ 	else
+ 		snd_soc_dapm_enable_pin(&gcodec->dapm, "DMIC");
+ 
++	snd_soc_dapm_sync(&gcodec->dapm);
++
+ 	/* setup a message for userspace headphone in */
+ 	buf = kmalloc(32, GFP_ATOMIC);
+ 	if (!buf) {
+@@ -341,6 +351,14 @@ static int imx_wm8962_init(struct snd_soc_pcm_runtime *rtd)
+ 			ret = -EINVAL;
+ 			return ret;
+ 		}
++
++		priv->hp_status = gpio_get_value(plat->hp_gpio);
++
++		/* if headphone is inserted, disable speaker */
++		if (priv->hp_status != plat->hp_active_low)
++			snd_soc_dapm_nc_pin(&codec->dapm, "Ext Spk");
++		else
++			snd_soc_dapm_enable_pin(&codec->dapm, "Ext Spk");
+ 	}
+ 
+ 	if (plat->mic_gpio != -1) {
+-- 
+1.7.7.4
+

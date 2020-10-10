@@ -1,0 +1,63 @@
+From 6eb361a842cded0c8966a6fb356cdc3df15d210e Mon Sep 17 00:00:00 2001
+From: Larry Li <b20787@freescale.com>
+Date: Mon, 25 Jun 2012 16:04:08 +0800
+Subject: [PATCH 1646/2463] ENGR00214791-1 [MX6] Add baseAddress parameter for
+ GPU resource
+
+Add baseAddress parameter for GPU resource according to different
+SOC
+
+Signed-off-by: Larry Li <b20787@freescale.com>
+---
+ arch/arm/plat-mxc/devices/platform-viv_gpu.c    |    8 ++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h |    1 +
+ 2 files changed, 9 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/platform-viv_gpu.c b/arch/arm/plat-mxc/devices/platform-viv_gpu.c
+index 40cd3fc..9b02196 100644
+--- a/arch/arm/plat-mxc/devices/platform-viv_gpu.c
++++ b/arch/arm/plat-mxc/devices/platform-viv_gpu.c
+@@ -24,6 +24,7 @@
+ #ifdef CONFIG_ARCH_MX6
+ #ifdef CONFIG_SOC_IMX6SL
+ const struct imx_viv_gpu_data imx6_gpu_data __initconst = {
++	.phys_baseaddr = MX6SL_MMDC0_ARB_BASE_ADDR,
+ 	.iobase_3d = 0,
+ 	.irq_3d = -1,
+ 	.iobase_2d = MX6SL_GPU_2D_ARB_BASE_ADDR,
+@@ -33,6 +34,7 @@ const struct imx_viv_gpu_data imx6_gpu_data __initconst = {
+ };
+ #else
+ const struct imx_viv_gpu_data imx6_gpu_data __initconst = {
++	.phys_baseaddr = 0,
+ 	.iobase_3d = GPU_3D_ARB_BASE_ADDR,
+ 	.irq_3d = MXC_INT_GPU3D_IRQ,
+ 	.iobase_2d = GPU_2D_ARB_BASE_ADDR,
+@@ -50,6 +52,12 @@ struct platform_device *__init imx_add_viv_gpu(
+ 	u32 res_count = 0;
+ 	struct resource res[] = {
+ 		{
++			.name = "phys_baseaddr",
++			.start = data->phys_baseaddr,
++			.end = data->phys_baseaddr,
++			.flags = IORESOURCE_MEM,
++		}, {
++
+ 			.name = "iobase_3d",
+ 			.start = data->iobase_3d,
+ 			.end = data->iobase_3d + SZ_16K - 1,
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index eaddb7e..369ec0f 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -513,6 +513,7 @@ struct platform_device *__init imx_add_spdif_audio_device(void);
+ 
+ #include <mach/viv_gpu.h>
+ struct imx_viv_gpu_data {
++	resource_size_t phys_baseaddr;
+ 	resource_size_t irq_3d;
+ 	resource_size_t iobase_3d;
+ 	resource_size_t irq_2d;
+-- 
+1.7.7.4
+

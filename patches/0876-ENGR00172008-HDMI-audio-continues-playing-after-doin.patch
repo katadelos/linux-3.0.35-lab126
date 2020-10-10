@@ -1,0 +1,49 @@
+From d3f058dea5b3b69f2bf6f7b62c060551d106d60f Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Tue, 17 Jan 2012 08:34:44 -0600
+Subject: [PATCH 0876/2463] ENGR00172008 HDMI audio continues playing after
+ doing ctrl-z
+
+The bug is that HDMI audio continues playing after doing ctrl-z,
+repeating playing a small part of the buffer.
+
+Mask HDMI audio irq when we receive SNDRV_PCM_TRIGGER_STOP command.
+Unmask when we receive SNDRV_PCM_TRIGGER_START.
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ sound/soc/imx/imx-hdmi-dma.c |    4 +++-
+ 1 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/sound/soc/imx/imx-hdmi-dma.c b/sound/soc/imx/imx-hdmi-dma.c
+index 1c875a2..34a64d6 100644
+--- a/sound/soc/imx/imx-hdmi-dma.c
++++ b/sound/soc/imx/imx-hdmi-dma.c
+@@ -1,7 +1,7 @@
+ /*
+  * imx-hdmi-dma.c  --  HDMI DMA driver for ALSA Soc Audio Layer
+  *
+- * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+  *
+  * based on imx-pcm-dma-mx2.c
+  * Copyright 2009 Sascha Hauer <s.hauer@pengutronix.de>
+@@ -540,6 +540,7 @@ static int hdmi_dma_trigger(struct snd_pcm_substream *substream, int cmd)
+ 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+ 		rtd->frame_idx = 0;
+ 		dumpregs();
++		hdmi_dma_irq_mask(0);
+ 		hdmi_dma_start();
+ 		break;
+ 
+@@ -547,6 +548,7 @@ static int hdmi_dma_trigger(struct snd_pcm_substream *substream, int cmd)
+ 	case SNDRV_PCM_TRIGGER_SUSPEND:
+ 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+ 		hdmi_dma_stop();
++		hdmi_dma_irq_mask(1);
+ 		break;
+ 
+ 	default:
+-- 
+1.7.7.4
+

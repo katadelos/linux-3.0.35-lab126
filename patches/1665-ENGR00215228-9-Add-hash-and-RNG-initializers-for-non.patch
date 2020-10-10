@@ -1,0 +1,100 @@
+From 0c92afb4903ea025de3174b650865ecae5422758 Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Mon, 25 Jun 2012 17:51:58 -0700
+Subject: [PATCH 1665/2463] ENGR00215228-9: Add hash and RNG initializers for
+ non-OF builds
+
+Inserted explicit initializers for split-out startup and shutdown functions
+needed for kernels using platform devices in place of OF-device-tree
+initialization and detection.
+
+Also added necessary ahash algorithm list head to driver private storage
+block.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+---
+ drivers/crypto/caam/ctrl.c   |   16 ++++++++++++++++
+ drivers/crypto/caam/intern.h |   23 +++++++++++++++++++++++
+ 2 files changed, 39 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/crypto/caam/ctrl.c b/drivers/crypto/caam/ctrl.c
+index 3a245aa..89699e1 100644
+--- a/drivers/crypto/caam/ctrl.c
++++ b/drivers/crypto/caam/ctrl.c
+@@ -24,6 +24,15 @@ static int caam_remove(struct platform_device *pdev)
+ 
+ #ifndef CONFIG_OF
+ 	caam_algapi_shutdown(pdev);
++
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_AHASH_API
++	caam_algapi_hash_shutdown(pdev);
++#endif
++
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_RNG_API
++	caam_rng_shutdown();
++#endif
++
+ #endif
+ 	/* shut down JobRs */
+ 	for (ring = 0; ring < ctrlpriv->total_jobrs; ring++) {
+@@ -335,8 +344,15 @@ static int caam_probe(struct platform_device *pdev)
+ #ifndef CONFIG_OF
+ 	/* FIXME: check status */
+ 	caam_algapi_startup(pdev);
++
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_AHASH_API
++	caam_algapi_hash_startup(pdev);
+ #endif
+ 
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_RNG_API
++	caam_rng_startup(pdev);
++#endif
++#endif /* CONFIG_OF */
+ 	return 0;
+ }
+ 
+diff --git a/drivers/crypto/caam/intern.h b/drivers/crypto/caam/intern.h
+index 19e4f25..8550598 100644
+--- a/drivers/crypto/caam/intern.h
++++ b/drivers/crypto/caam/intern.h
+@@ -107,6 +107,8 @@ struct caam_drv_private {
+ 	struct device **algapi_jr;
+ 	/* list of registered crypto algorithms (mk generic context handle?) */
+ 	struct list_head alg_list;
++	/* list of registered hash algorithms (mk generic context handle?) */
++	struct list_head hash_list;
+ 
+ #ifdef CONFIG_ARM
+ 	struct clk *caam_clk;
+@@ -129,7 +131,28 @@ struct caam_drv_private {
+ #endif
+ };
+ 
++/*
++ * These startup/shutdown functions exist to enable API startup/shutdown
++ * outside of the OF device detection framework. It's necessary for ARM
++ * kernels as presently delivered.
++ *
++ * Once ARM kernels are shipping with OF support, these functions can
++ * be re-integrated into the normal probe startup/exit functions,
++ * and these prototypes can then be removed.
++ */
++#ifndef CONFIG_OF
+ void caam_algapi_shutdown(struct platform_device *pdev);
+ int caam_algapi_startup(struct platform_device *pdev);
+ 
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_AHASH_API
++int caam_algapi_hash_startup(struct platform_device *pdev);
++void caam_algapi_hash_shutdown(struct platform_device *pdev);
++#endif
++
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_RNG_API
++int caam_rng_startup(struct platform_device *pdev);
++void caam_rng_shutdown(void);
++#endif
++#endif /* CONFIG_OF */
++
+ #endif /* INTERN_H */
+-- 
+1.7.7.4
+

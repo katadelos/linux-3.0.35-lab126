@@ -1,0 +1,55 @@
+From 051754dd1cdfb1476ddbf4ebcd04881c420ed9b1 Mon Sep 17 00:00:00 2001
+From: Xinyu Chen <xinyu.chen@freescale.com>
+Date: Wed, 15 Aug 2012 13:36:24 +0800
+Subject: [PATCH 1903/2463] ENGR00219856-2 mxc pwm: do pwm software reset
+ after disable
+
+When android doing suspend/resume, we may meet the issue of
+backlight is not on (pwm pin no signal) after system wakeup.
+The root cause is PWM sample can not be set into the PWMSAR
+register after pwm being used and disabled for a while.
+The value read back after write is 0 when this issue happens.
+
+Do a software reset after pwm disable can resolve this
+issue, this makes sure the next sample update is correct.
+
+Signed-off-by: Xinyu Chen <xinyu.chen@freescale.com>
+---
+ arch/arm/plat-mxc/pwm.c |    7 +++++--
+ 1 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/pwm.c b/arch/arm/plat-mxc/pwm.c
+index c663acf..b683d2e 100755
+--- a/arch/arm/plat-mxc/pwm.c
++++ b/arch/arm/plat-mxc/pwm.c
+@@ -6,7 +6,7 @@
+  * published by the Free Software Foundation.
+  *
+  * Derived from pxa PWM driver by eric miao <eric.miao@marvell.com>
+- * Copyright 2009-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2009-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ #include <linux/module.h>
+@@ -39,6 +39,7 @@
+ #define MX3_PWMCR_DBGEN			(1 << 22)
+ #define MX3_PWMCR_CLKSRC_IPG_HIGH (2 << 16)
+ #define MX3_PWMCR_CLKSRC_IPG      (1 << 16)
++#define MX3_PWMCR_SWR             (1 << 3)
+ #define MX3_PWMCR_EN              (1 << 0)
+ 
+ #define MX3_PWMCR_STOPEN		(1 << 25)
+@@ -174,7 +175,9 @@ void pwm_disable(struct pwm_device *pwm)
+ 	if (pwm->disable_pwm_pad)
+ 		pwm->disable_pwm_pad();
+ 
+-	writel(0, pwm->mmio_base + MX3_PWMCR);
++	writel(MX3_PWMCR_SWR, pwm->mmio_base + MX3_PWMCR);
++	while (readl(pwm->mmio_base + MX3_PWMCR) & MX3_PWMCR_SWR)
++		;
+ 
+ 	if (pwm->clk_enabled) {
+ 		clk_disable(pwm->clk);
+-- 
+1.7.7.4
+

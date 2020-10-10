@@ -1,0 +1,62 @@
+From a6d139a91f6e0fc1059f9f6b560fa5d08b4808e2 Mon Sep 17 00:00:00 2001
+From: Zeng Zhaoming <b32542@freescale.com>
+Date: Thu, 21 Apr 2011 08:01:53 +0800
+Subject: [PATCH 0132/2463] ENGR00142436-1 MX53 LOCO: Audio not work in 2.6.38
+ kernel
+
+Audio init failed with:
+failed to call snd_soc_jack_add_gpios
+soc-audio soc-audio: asoc: failed to init HiFi: -16
+asoc: failed to instantiate card sgtl5000-audio: -16
+
+This is caused by hp_status() callback gpio setting introduced by:
+9dbaab8db17c3ce6bbe368a2b708c41ea1db33f8
+
+Fix it by provide gpio setting in platform data.
+
+Signed-off-by: Zeng Zhaoming <b32542@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx53_loco.c |   15 +++++++++------
+ 1 files changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx53_loco.c b/arch/arm/mach-mx5/board-mx53_loco.c
+index 356349f..82aec68 100755
+--- a/arch/arm/mach-mx5/board-mx53_loco.c
++++ b/arch/arm/mach-mx5/board-mx53_loco.c
+@@ -47,17 +47,18 @@
+ #include "devices.h"
+ #include "usb.h"
+ 
+-#define LOCO_DISP0_PWR			IMX_GPIO_NR(3, 24)
+-#define LOCO_DISP0_DET_INT		IMX_GPIO_NR(3, 31)
+-#define LOCO_DISP0_RESET		IMX_GPIO_NR(5, 0)
+ #define MX53_LOCO_POWER			IMX_GPIO_NR(1, 8)
++#define LOCO_HEADPHONE_DET		IMX_GPIO_NR(2, 5)
+ #define MX53_LOCO_UI1			IMX_GPIO_NR(2, 14)
+ #define MX53_LOCO_UI2			IMX_GPIO_NR(2, 15)
+-#define LOCO_FEC_PHY_RST		IMX_GPIO_NR(7, 6)
+-#define LOCO_USBH1_VBUS			IMX_GPIO_NR(7, 8)
+-#define MX53_LOCO_SD1_CD		IMX_GPIO_NR(3, 13)
+ #define MX53_LOCO_SD3_CD		IMX_GPIO_NR(3, 11)
+ #define MX53_LOCO_SD3_WP		IMX_GPIO_NR(3, 12)
++#define MX53_LOCO_SD1_CD		IMX_GPIO_NR(3, 13)
++#define LOCO_DISP0_PWR			IMX_GPIO_NR(3, 24)
++#define LOCO_DISP0_DET_INT		IMX_GPIO_NR(3, 31)
++#define LOCO_DISP0_RESET		IMX_GPIO_NR(5, 0)
++#define LOCO_FEC_PHY_RST		IMX_GPIO_NR(7, 6)
++#define LOCO_USBH1_VBUS			IMX_GPIO_NR(7, 8)
+ 
+ extern void __iomem *arm_plat_base;
+ extern void __iomem *gpc_base;
+@@ -610,6 +611,8 @@ static struct mxc_audio_platform_data loco_audio_data = {
+ 	.src_port = 2,
+ 	.ext_port = 5,
+ 	.init = loco_sgtl5000_init,
++	.hp_gpio = LOCO_HEADPHONE_DET,
++	.hp_active_low = 1,
+ };
+ 
+ static struct platform_device loco_audio_device = {
+-- 
+1.7.7.4
+

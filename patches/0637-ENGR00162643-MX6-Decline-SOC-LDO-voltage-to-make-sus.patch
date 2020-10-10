@@ -1,0 +1,43 @@
+From cc87f8e2f4a1b88ecfbf22414ea941e5ca3db7d8 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Sat, 19 Nov 2011 10:24:21 +0800
+Subject: [PATCH 0637/2463] ENGR00162643 [MX6]Decline SOC LDO voltage to make
+ suspend/resume work
+
+Need to decline SOC LDO domain voltage to make 800M ARM2 board work,
+we can set the SOC power domain to be same as ARM core power domain.
+Tested on both 1G rework board and 800M origin board.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/system.c |    7 ++++---
+ 1 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 72ffc77..de15c2a 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -124,16 +124,17 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 
+ 		/* dormant mode, need to power off the arm core */
+ 		if (stop_mode == 2) {
+-			 __raw_writel(0x1, gpc_base + GPC_PGC_CPU_PDN_OFFSET);
++			__raw_writel(0x1, gpc_base + GPC_PGC_CPU_PDN_OFFSET);
+ 			__raw_writel(0x1, gpc_base + GPC_PGC_GPU_PGCR_OFFSET);
+ 			__raw_writel(0x1, gpc_base + GPC_CNTR_OFFSET);
+ 			/* Enable weak 2P5 linear regulator */
+ 			anatop_val = __raw_readl(anatop_base + ANATOP_REG_2P5_OFFSET);
+ 			anatop_val |= 1 << 18;
+ 			__raw_writel(anatop_val, anatop_base + ANATOP_REG_2P5_OFFSET);
+-			/* Set ARM core power domain to 1V and PU domain set to off */
++			/* Make sure ARM and SOC domain has same voltage and PU domain off */
+ 			anatop_val = __raw_readl(anatop_base + ANATOP_REG_CORE_OFFSET);
+-			anatop_val &= 0xfffc001f;
++			anatop_val &= 0xff83001f;
++			anatop_val |= (anatop_val & 0x1f) << 18;
+ 			__raw_writel(anatop_val, anatop_base + ANATOP_REG_CORE_OFFSET);
+ 			__raw_writel(__raw_readl(MXC_CCM_CCR) | MXC_CCM_CCR_RBC_EN, MXC_CCM_CCR);
+ 			ccm_clpcr |= MXC_CCM_CLPCR_WB_PER_AT_LPM;
+-- 
+1.7.7.4
+

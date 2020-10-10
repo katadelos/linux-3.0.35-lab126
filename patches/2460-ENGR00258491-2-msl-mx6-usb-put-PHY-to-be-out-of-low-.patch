@@ -1,0 +1,64 @@
+From 6c3dc00386f3053698366ea24dea0984e8838f7c Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Tue, 16 Apr 2013 09:47:15 +0800
+Subject: [PATCH 2460/2463] ENGR00258491-2 msl-mx6: usb: put PHY to be out of
+ low power explicitly
+
+We have wrong understanding that reset controller will put PHY
+to be out of low power automatically, but in fact, it is not.
+So, we should put PHY to be out of low power explicitly if the
+portsc.phcd = 1 before we need to access controller's register.
+Some register writing will hang system (eg,PERIODICLISTBASE),
+some reading will not get the correct value (eg, otgsc).
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ arch/arm/mach-mx6/usb_dr.c |   10 ++++++++++
+ arch/arm/mach-mx6/usb_h1.c |   10 ++++++++++
+ 2 files changed, 20 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index 9942071..e3f8fc8 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -99,6 +99,16 @@ static int usb_phy_enable(struct fsl_usb2_platform_data *pdata)
+ 	UOG_USBCMD |= UCMD_RESET;
+ 	while ((UOG_USBCMD) & (UCMD_RESET))
+ 		;
++
++	/*
++	 * If the controller reset does not put the PHY be out of
++	 * low power mode, do it manually.
++	 */
++	if (UOG_PORTSC1 & PORTSC_PHCD) {
++		UOG_PORTSC1 &= ~PORTSC_PHCD;
++		mdelay(1);
++	}
++
+ 	/* Reset USBPHY module */
+ 	phy_ctrl = phy_reg + HW_USBPHY_CTRL;
+ 	tmp = __raw_readl(phy_ctrl);
+diff --git a/arch/arm/mach-mx6/usb_h1.c b/arch/arm/mach-mx6/usb_h1.c
+index e12e4dd..68b9ea1 100644
+--- a/arch/arm/mach-mx6/usb_h1.c
++++ b/arch/arm/mach-mx6/usb_h1.c
+@@ -111,6 +111,16 @@ static int usb_phy_enable(struct fsl_usb2_platform_data *pdata)
+ 	UH1_USBCMD |= UCMD_RESET;
+ 	while ((UH1_USBCMD) & (UCMD_RESET))
+ 		;
++
++	/*
++	 * If the controller reset does not put the PHY be out of
++	 * low power mode, do it manually.
++	 */
++	if (UH1_PORTSC1 & PORTSC_PHCD) {
++		UH1_PORTSC1 &= ~PORTSC_PHCD;
++		mdelay(1);
++	}
++
+ 	/* Reset USBPHY module */
+ 	phy_ctrl = phy_reg + HW_USBPHY_CTRL;
+ 	tmp = __raw_readl(phy_ctrl);
+-- 
+1.7.7.4
+

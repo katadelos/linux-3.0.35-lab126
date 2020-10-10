@@ -1,0 +1,54 @@
+From a0871cf7ee0a660054254e00574b967e6a96283d Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Mon, 13 Feb 2012 08:40:44 +0800
+Subject: [PATCH 1015/2463] ENGR00174295-01 Revert "ENGR173939 Skip sending
+ S18R on slots with no 1.8V"
+
+- this patch will mask ddr mode support on the slots support ddr,
+but no 1.8v support
+
+This reverts commit 05b7fdd4d6103500f1e531b3e5bd91d97f40ee34.
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/host/sdhci.c |   22 ++++++++++------------
+ 1 files changed, 10 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci.c b/drivers/mmc/host/sdhci.c
+index e2dda50..84ec611 100755
+--- a/drivers/mmc/host/sdhci.c
++++ b/drivers/mmc/host/sdhci.c
+@@ -2602,20 +2602,18 @@ int sdhci_add_host(struct sdhci_host *host)
+ 	    mmc_card_is_removable(mmc))
+ 		mmc->caps |= MMC_CAP_NEEDS_POLL;
+ 
+-	if (host->ocr_avail_sd & MMC_VDD_165_195) {
+-		/* UHS-I mode(s) supported by the host controller. */
+-		if (host->version >= SDHCI_SPEC_300)
+-			mmc->caps |= MMC_CAP_UHS_SDR12 | MMC_CAP_UHS_SDR25;
++	/* UHS-I mode(s) supported by the host controller. */
++	if (host->version >= SDHCI_SPEC_300)
++		mmc->caps |= MMC_CAP_UHS_SDR12 | MMC_CAP_UHS_SDR25;
+ 
+-		/* SDR104 supports also implies SDR50 support */
+-		if (caps[1] & SDHCI_SUPPORT_SDR104)
+-			mmc->caps |= MMC_CAP_UHS_SDR104 | MMC_CAP_UHS_SDR50;
+-		else if (caps[1] & SDHCI_SUPPORT_SDR50)
+-			mmc->caps |= MMC_CAP_UHS_SDR50;
++	/* SDR104 supports also implies SDR50 support */
++	if (caps[1] & SDHCI_SUPPORT_SDR104)
++		mmc->caps |= MMC_CAP_UHS_SDR104 | MMC_CAP_UHS_SDR50;
++	else if (caps[1] & SDHCI_SUPPORT_SDR50)
++		mmc->caps |= MMC_CAP_UHS_SDR50;
+ 
+-		if (caps[1] & SDHCI_SUPPORT_DDR50)
+-			mmc->caps |= MMC_CAP_UHS_DDR50;
+-	}
++	if (caps[1] & SDHCI_SUPPORT_DDR50)
++		mmc->caps |= MMC_CAP_UHS_DDR50;
+ 
+ 	/* Does the host needs tuning for SDR50? */
+ 	if (caps[1] & SDHCI_USE_SDR50_TUNING)
+-- 
+1.7.7.4
+

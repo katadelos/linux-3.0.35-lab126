@@ -1,0 +1,140 @@
+From 0ffba594ae7e498b1bf28c21bb51551d62226fdc Mon Sep 17 00:00:00 2001
+From: Michael Minnick <michael.minnick@freescale.com>
+Date: Tue, 13 Nov 2012 12:51:13 -0600
+Subject: [PATCH 2278/2463] ENGR00233494 EPDC: Driver only supports 16 LUTs
+
+This bug was introduced by ENGR00229290 which fixed
+the problem of greater than 16 LUTs used when 5-bit
+waveform loaded. The bug is that now the driver is also
+restricted to using 16 LUTs in 4-bit mode.
+
+The fix is to correct the test of the EPDC_FORMAT
+register used to determine if a 5-bit waveform
+is loaded.
+
+Also removed the while loop in favor of a bitwise OR
+used to determine if a chosen LUT has yet to be
+acknowledged by the interrupt handler.
+
+Signed-off-by: Michael Minnick <michael.minnick@freescale.com>
+---
+ drivers/video/mxc/epdc_regs.h   |    1 +
+ drivers/video/mxc/mxc_epdc_fb.c |   77 ++++++++++++++++++---------------------
+ 2 files changed, 37 insertions(+), 41 deletions(-)
+
+diff --git a/drivers/video/mxc/epdc_regs.h b/drivers/video/mxc/epdc_regs.h
+index cc7b500..4f5137e 100644
+--- a/drivers/video/mxc/epdc_regs.h
++++ b/drivers/video/mxc/epdc_regs.h
+@@ -197,6 +197,7 @@ enum {
+ 	EPDC_FORMAT_BUF_PIXEL_SCALE_ROUND = 0x1000000,
+ 	EPDC_FORMAT_DEFAULT_TFT_PIXEL_MASK = 0xFF0000,
+ 	EPDC_FORMAT_DEFAULT_TFT_PIXEL_OFFSET = 16,
++	EPDC_FORMAT_BUF_PIXEL_FORMAT_MASK = 0x700,
+ 	EPDC_FORMAT_BUF_PIXEL_FORMAT_P2N = 0x200,
+ 	EPDC_FORMAT_BUF_PIXEL_FORMAT_P3N = 0x300,
+ 	EPDC_FORMAT_BUF_PIXEL_FORMAT_P4N = 0x400,
+diff --git a/drivers/video/mxc/mxc_epdc_fb.c b/drivers/video/mxc/mxc_epdc_fb.c
+index f3c8ea8..6787b1e 100644
+--- a/drivers/video/mxc/mxc_epdc_fb.c
++++ b/drivers/video/mxc/mxc_epdc_fb.c
+@@ -733,11 +733,11 @@ static inline int epdc_get_next_lut(void)
+ 
+ static int epdc_choose_next_lut(int rev, int *next_lut)
+ {
+-	u64 luts_status, unprocessed_luts;
+-	bool next_lut_found = false;
++	u64 luts_status, unprocessed_luts, used_luts;
+ 	/* Available LUTs are reduced to 16 in 5-bit waveform mode */
+-	u32 format_p5n = __raw_readl(EPDC_FORMAT) &
+-		EPDC_FORMAT_BUF_PIXEL_FORMAT_P5N;
++	bool format_p5n = ((__raw_readl(EPDC_FORMAT) &
++	EPDC_FORMAT_BUF_PIXEL_FORMAT_MASK) ==
++	EPDC_FORMAT_BUF_PIXEL_FORMAT_P5N);
+ 
+ 	luts_status = __raw_readl(EPDC_STATUS_LUTS);
+ 	if ((rev < 20) || format_p5n)
+@@ -754,48 +754,43 @@ static int epdc_choose_next_lut(int rev, int *next_lut)
+ 			unprocessed_luts &= 0xFFFF;
+ 	}
+ 
+-	while (!next_lut_found) {
+-		/*
+-		 * Selecting a LUT to minimize incidence of TCE Underrun Error
+-		 * --------------------------------------------------------
+-		 * We want to find the lowest order LUT that is of greater
+-		 * order than all other active LUTs.  If highest order LUT
+-		 * is active, then we want to choose the lowest order
+-		 * available LUT.
+-		 *
+-		 * NOTE: For EPDC version 2.0 and later, TCE Underrun error
+-		 *       bug is fixed, so it doesn't matter which LUT is used.
+-		 */
+-		*next_lut = fls64(luts_status);
++	/*
++	 * Note on unprocessed_luts: There is a race condition
++	 * where a LUT completes, but has not been processed by
++	 * IRQ handler workqueue, and then a new update request
++	 * attempts to use that LUT.  We prevent that here by
++	 * ensuring that the LUT we choose doesn't have its IRQ
++	 * bit set (indicating it has completed but not yet been
++	 * processed).
++	 */
++	used_luts = luts_status | unprocessed_luts;
+ 
+-		if ((rev < 20) || format_p5n) {
+-			if (*next_lut > 15)
+-				*next_lut = ffz(luts_status);
+-		} else {
+-			if (*next_lut > 63) {
+-				*next_lut = ffz((u32)luts_status);
+-				if (*next_lut == -1)
+-					*next_lut =
+-						ffz((u32)(luts_status >> 32)) + 32;
+-			}
+-		}
++	/*
++	 * Selecting a LUT to minimize incidence of TCE Underrun Error
++	 * --------------------------------------------------------
++	 * We want to find the lowest order LUT that is of greater
++	 * order than all other active LUTs.  If highest order LUT
++	 * is active, then we want to choose the lowest order
++	 * available LUT.
++	 *
++	 * NOTE: For EPDC version 2.0 and later, TCE Underrun error
++	 *       bug is fixed, so it doesn't matter which LUT is used.
++	 */
+ 
+-		/*
+-		 * Note on unprocessed_luts: There is a race condition
+-		 * where a LUT completes, but has not been processed by
+-		 * IRQ handler workqueue, and then a new update request
+-		 * attempts to use that LUT.  We prevent that here by
+-		 * ensuring that the LUT we choose doesn't have its IRQ
+-		 * bit set (indicating it has completed but not yet been
+-		 * processed).
+-		 */
+-		if ((1 << *next_lut) & unprocessed_luts)
+-			luts_status |= (1 << *next_lut);
++	if ((rev < 20) || format_p5n) {
++		*next_lut = fls64(used_luts);
++		if (*next_lut > 15)
++			*next_lut = ffz(used_luts);
++	} else {
++		if ((u32)used_luts != ~0UL)
++			*next_lut = ffz((u32)used_luts);
++		else if ((u32)(used_luts >> 32) != ~0UL)
++			*next_lut = ffz((u32)(used_luts >> 32)) + 32;
+ 		else
+-			next_lut_found = true;
++			*next_lut = INVALID_LUT;
+ 	}
+ 
+-	if (luts_status & 0x8000)
++	if (used_luts & 0x8000)
+ 		return 1;
+ 	else
+ 		return 0;
+-- 
+1.7.7.4
+

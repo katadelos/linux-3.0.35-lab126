@@ -1,0 +1,56 @@
+From 72b2444cbe32f2b7bf7c99323a1dd5d3b34e9098 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Thu, 16 Aug 2012 17:14:37 +0800
+Subject: [PATCH 1915/2463] ENGR00219931 ESAI ASRC: fix channel swap bug while
+ playback 6 channel
+
+Channel swap caused by 2 reason:
+
+1. To avoid ASRC underflow error, ASRC driver would prefill ASRC input
+FIFO with 160 samples. However, 160 can't be divided by 6. In this case,
+channel data miss alignment. In this patch, prefill ASRC input
+FIFO with 120, which can be divided by 2,4,6,8.
+
+2. While start P2P playback, ESAI driver would first start SDMA, then
+ASRC, and last ESAI. While start ESAI, the data is not ready, thus ESAI
+underrun would happens and channel data miss alignment. In this patch,
+delay 1 ms between ASRC's start and ESAI's start.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/mxc/asrc/mxc_asrc.c     |    6 ------
+ sound/soc/imx/imx-pcm-dma-mx2.c |    1 +
+ 2 files changed, 1 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index cf41f29..ed32569 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -667,12 +667,6 @@ void asrc_start_conv(enum asrc_pair_index index)
+ 		__raw_writel(reg,
+ 			     g_asrc->vaddr + ASRC_ASRDIA_REG +
+ 			     (index << 3));
+-		__raw_writel(reg,
+-			     g_asrc->vaddr + ASRC_ASRDIA_REG +
+-			     (index << 3));
+-		__raw_writel(reg,
+-			     g_asrc->vaddr + ASRC_ASRDIA_REG +
+-			     (index << 3));
+ 	}
+ 
+ 	__raw_writel(0x40, g_asrc->vaddr + ASRC_ASRIER_REG);
+diff --git a/sound/soc/imx/imx-pcm-dma-mx2.c b/sound/soc/imx/imx-pcm-dma-mx2.c
+index b36b281..ad8d5a3 100644
+--- a/sound/soc/imx/imx-pcm-dma-mx2.c
++++ b/sound/soc/imx/imx-pcm-dma-mx2.c
+@@ -359,6 +359,7 @@ static int snd_imx_pcm_trigger(struct snd_pcm_substream *substream, int cmd)
+ 			dmaengine_submit(iprtd->asrc_p2p_desc);
+ 			dmaengine_submit(iprtd->asrc_desc);
+ 			asrc_start_conv(iprtd->asrc_index);
++			mdelay(1);
+ 		} else {
+ 			dmaengine_submit(iprtd->desc);
+ 		}
+-- 
+1.7.7.4
+

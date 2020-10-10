@@ -1,0 +1,115 @@
+From aa7eb2a5853b932e138546283bb7bae283ccec90 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Tue, 4 Sep 2012 16:51:41 +0800
+Subject: [PATCH 2008/2463] ENGR00222900 HDMI AUDIO: fix kernel panic when
+ doing suspend-resume test
+
+In MX6 series, HDMI audio driver is responsible for add IEC header to
+audio samples. Driver would maintain variables to cover this work.
+
+The old driver would cause memory access exceeding issue:
+1. Resume from an playback. In this case, variable maintained by ALSA is
+updated while variable maintained by HDMI driver is not updated. The
+mmap copy operation would run into error state due to misalignment.
+2. underrun!!! The same error would happens as the items above.
+
+In this patch, add variable check while adding IED header.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ sound/soc/imx/imx-hdmi-dma.c |   42 ++++++++++++++++++++++++++++++++++++++++--
+ 1 files changed, 40 insertions(+), 2 deletions(-)
+
+diff --git a/sound/soc/imx/imx-hdmi-dma.c b/sound/soc/imx/imx-hdmi-dma.c
+index 70c8cb1..4581142 100644
+--- a/sound/soc/imx/imx-hdmi-dma.c
++++ b/sound/soc/imx/imx-hdmi-dma.c
+@@ -597,9 +597,15 @@ static void hdmi_sdma_isr(void *data)
+ 		if (runtime->access == SNDRV_PCM_ACCESS_MMAP_INTERLEAVED) {
+ 			appl_bytes = frames_to_bytes(runtime,
+ 						runtime->control->appl_ptr);
++			if (rtd->appl_bytes > appl_bytes)
++				rtd->appl_bytes = 0;
+ 			offset = rtd->appl_bytes % rtd->buffer_bytes;
+ 			space_to_end = rtd->buffer_bytes - offset;
+ 			count = appl_bytes - rtd->appl_bytes;
++			if (count > rtd->buffer_bytes) {
++				pr_info("HDMI is slow,ring buffer size[%ld], count[%ld]!\n",
++						rtd->buffer_bytes, count);
++			}
+ 			rtd->appl_bytes = appl_bytes;
+ 
+ 			if (count <= space_to_end) {
+@@ -645,9 +651,15 @@ static irqreturn_t hdmi_dma_isr(int irq, void *dev_id)
+ 		if (runtime->access == SNDRV_PCM_ACCESS_MMAP_INTERLEAVED) {
+ 			appl_bytes = frames_to_bytes(runtime,
+ 						runtime->control->appl_ptr);
++			if (rtd->appl_bytes > appl_bytes)
++				rtd->appl_bytes = 0;
+ 			offset = rtd->appl_bytes % rtd->buffer_bytes;
+ 			space_to_end = rtd->buffer_bytes - offset;
+ 			count = appl_bytes - rtd->appl_bytes;
++			if (count > rtd->buffer_bytes) {
++				pr_info("HDMI is slow,ring buffer size[%ld],count[%ld]!\n",
++						rtd->buffer_bytes, count);
++			}
+ 			rtd->appl_bytes = appl_bytes;
+ 
+ 			if (count <= space_to_end) {
+@@ -1066,6 +1078,8 @@ static int hdmi_dma_hw_params(struct snd_pcm_substream *substream,
+ 	/* Init par for mmap optimizate */
+ 	init_table(rtd->channels);
+ 
++	rtd->appl_bytes = 0;
++
+ 	return 0;
+ }
+ 
+@@ -1073,6 +1087,7 @@ static int hdmi_dma_trigger(struct snd_pcm_substream *substream, int cmd)
+ {
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+ 	struct imx_hdmi_dma_runtime_data *rtd = runtime->private_data;
++	unsigned long offset,  count, space_to_end, appl_bytes;
+ 
+ 	switch (cmd) {
+ 	case SNDRV_PCM_TRIGGER_START:
+@@ -1080,11 +1095,34 @@ static int hdmi_dma_trigger(struct snd_pcm_substream *substream, int cmd)
+ 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+ 		rtd->frame_idx = 0;
+ 		if (runtime->access == SNDRV_PCM_ACCESS_MMAP_INTERLEAVED) {
+-			rtd->appl_bytes = frames_to_bytes(runtime,
++			appl_bytes = frames_to_bytes(runtime,
+ 						runtime->control->appl_ptr);
++			/* If resume, the rtd->appl_bytes may stil
++			 * keep the old value but the control->
++			 * appl_ptr is clear. Reset it if this
++			 * misalignment happens*/
++			if (rtd->appl_bytes > appl_bytes)
++				rtd->appl_bytes = 0;
++			offset = rtd->appl_bytes % rtd->buffer_bytes;
++			space_to_end = rtd->buffer_bytes - offset;
++			count = appl_bytes - rtd->appl_bytes;
+ 
+-			hdmi_dma_mmap_copy(substream, 0, rtd->appl_bytes);
++			if (count > rtd->buffer_bytes) {
++				pr_err("Error Count,ring buffer size[%ld], count[%ld]!\n",
++						rtd->buffer_bytes, count);
++				return -EINVAL;
++			}
+ 
++			rtd->appl_bytes = appl_bytes;
++
++			if (count <= space_to_end) {
++				hdmi_dma_mmap_copy(substream, offset, count);
++			} else {
++				hdmi_dma_mmap_copy(substream,
++						offset, space_to_end);
++				hdmi_dma_mmap_copy(substream,
++						0, count - space_to_end);
++			}
+ 		}
+ 		dumpregs();
+ 
+-- 
+1.7.7.4
+

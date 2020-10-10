@@ -1,0 +1,84 @@
+From d3162b067687c33c7dde368dd9b8243c06ebe956 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Thu, 11 Oct 2012 14:50:34 +0800
+Subject: [PATCH 2168/2463] ENGR00227726 csi: Disable csi clock when it's
+ inactive
+
+Disable csi clock when inactive, otherwise this prevents system from
+entering low power mode.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ drivers/media/video/mxc/capture/csi_v4l2_capture.c |    6 ++++--
+ drivers/media/video/mxc/capture/fsl_csi.c          |   10 ++++++++--
+ 2 files changed, 12 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/csi_v4l2_capture.c b/drivers/media/video/mxc/capture/csi_v4l2_capture.c
+index a0887b9..5eb750c 100644
+--- a/drivers/media/video/mxc/capture/csi_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/csi_v4l2_capture.c
+@@ -1536,7 +1536,8 @@ static int csi_v4l2_suspend(struct platform_device *pdev, pm_message_t state)
+ 	if (cam->overlay_on == true)
+ 		stop_preview(cam);
+ 
+-	camera_power(cam, false);
++	if (cam->capture_on == true || cam->overlay_on == true)
++		camera_power(cam, false);
+ 
+ 	return 0;
+ }
+@@ -1561,7 +1562,8 @@ static int csi_v4l2_resume(struct platform_device *pdev)
+ 
+ 	cam->low_power = false;
+ 	wake_up_interruptible(&cam->power_queue);
+-	camera_power(cam, true);
++	if (cam->capture_on == true || cam->overlay_on == true)
++		camera_power(cam, true);
+ 
+ 	if (cam->overlay_on == true)
+ 		start_preview(cam);
+diff --git a/drivers/media/video/mxc/capture/fsl_csi.c b/drivers/media/video/mxc/capture/fsl_csi.c
+index 33a8224..f5677e4 100644
+--- a/drivers/media/video/mxc/capture/fsl_csi.c
++++ b/drivers/media/video/mxc/capture/fsl_csi.c
+@@ -250,12 +250,14 @@ static void csi_mclk_recalc(struct clk *clk)
+ 
+ void csi_mclk_enable(void)
+ {
++	clk_enable(&csi_mclk);
+ 	__raw_writel(__raw_readl(CSI_CSICR1) | BIT_MCLKEN, CSI_CSICR1);
+ }
+ 
+ void csi_mclk_disable(void)
+ {
+ 	__raw_writel(__raw_readl(CSI_CSICR1) & ~BIT_MCLKEN, CSI_CSICR1);
++	clk_disable(&csi_mclk);
+ }
+ 
+ static int __devinit csi_probe(struct platform_device *pdev)
+@@ -293,8 +295,13 @@ static int __devinit csi_probe(struct platform_device *pdev)
+ 		return PTR_ERR(per_clk);
+ 
+ 	clk_put(per_clk);
++	/*
++	 * On mx6sl, there's no divider in CSI module(BIT_MCLKDIV in CSI_CSICR1
++	 * is marked as reserved). We use CSI clock in CCM.
++	 * However, the value read from BIT_MCLKDIV bits are 0, which is
++	 * equivalent to "divider=1". The code works for mx6sl without change.
++	 */
+ 	csi_mclk.parent = per_clk;
+-	clk_enable(per_clk);
+ 	csi_mclk_recalc(&csi_mclk);
+ 
+ err:
+@@ -303,7 +310,6 @@ err:
+ 
+ static int __devexit csi_remove(struct platform_device *pdev)
+ {
+-	clk_disable(&csi_mclk);
+ 	iounmap(csi_regbase);
+ 
+ 	return 0;
+-- 
+1.7.7.4
+

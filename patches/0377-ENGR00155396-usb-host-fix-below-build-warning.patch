@@ -1,0 +1,37 @@
+From 7ec832600b2420c9a32dfa79b6783d879607a90b Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Fri, 26 Aug 2011 14:38:08 +0800
+Subject: [PATCH 0377/2463] ENGR00155396 usb-host: fix below build warning
+
+drivers/usb/host/ehci-hub.c:109:
+warning: 'ehci_adjust_port_wakeup_flags' defined but not used
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/host/ehci-arc.c |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index e2db3327..74666ee 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -623,6 +623,8 @@ static int ehci_fsl_drv_suspend(struct platform_device *pdev,
+ 	/* Only handles OTG mode switch event, system suspend event will be done in bus suspend */
+ 	if (pdata->pmflags == 0) {
+ 		printk(KERN_DEBUG "%s, pm event \n", __func__);
++		ehci_prepare_ports_for_controller_suspend(hcd_to_ehci(hcd),
++				device_may_wakeup(&(pdev->dev)));
+ 		if (!host_can_wakeup_system(pdev)) {
+ 			int mask;
+ 			/* Need open clock for register access */
+@@ -732,6 +734,7 @@ static int ehci_fsl_drv_resume(struct platform_device *pdev)
+ 				fsl_usb_clk_gate(hcd->self.controller->platform_data, false);
+ 			}
+ 		}
++		ehci_prepare_ports_for_controller_resume(hcd_to_ehci(hcd));
+ 		return 0;
+ 	}
+ 	if (!test_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags)) {
+-- 
+1.7.7.4
+

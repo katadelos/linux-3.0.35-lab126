@@ -1,0 +1,38 @@
+From ee2d9c5d2c3e1f8d9a9c470ffb4087428a6642eb Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Wed, 27 Jul 2011 16:16:46 +0800
+Subject: [PATCH 0305/2463] ENGR00153785 ipuv3: use ipu internal divider for
+ external di clock
+
+on imx6q, pll5 can only provide rate >=650M, and ipu_di_clk only has max
+divider 8, so need use ipu internal clock divider for some low resolution
+case. For example 640x480p60 need 25.2MHz pixel clock.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_disp.c |    9 +++++++--
+ 1 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index fc28b37..e956529 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -1087,8 +1087,13 @@ int32_t ipu_init_sync_panel(struct ipu_soc *ipu, int disp, uint32_t pixel_clk,
+ 				rounded_pixel_clk = pixel_clk * 2;
+ 				rounded_parent_clk = clk_round_rate(di_parent,
+ 							rounded_pixel_clk);
+-				while (rounded_pixel_clk < rounded_parent_clk)
+-					rounded_pixel_clk += pixel_clk * 2;
++				while (rounded_pixel_clk < rounded_parent_clk) {
++					/* the max divider from parent to di is 8 */
++					if (rounded_parent_clk / pixel_clk < 8)
++						rounded_pixel_clk += pixel_clk * 2;
++					else
++						rounded_pixel_clk *= 2;
++				}
+ 				clk_set_rate(di_parent, rounded_pixel_clk);
+ 				rounded_pixel_clk =
+ 					clk_round_rate(ipu->di_clk[disp], pixel_clk);
+-- 
+1.7.7.4
+

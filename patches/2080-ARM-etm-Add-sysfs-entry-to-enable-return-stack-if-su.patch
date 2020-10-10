@@ -1,0 +1,139 @@
+From 1b7aab024e897875100c331786f55902c6de565d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Arve=20Hj=C3=B8nnev=C3=A5g?= <arve@android.com>
+Date: Tue, 3 Apr 2012 18:01:03 -0700
+Subject: [PATCH 2080/2463] ARM: etm: Add sysfs entry to enable return stack
+ if supported
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Change-Id: Icb73d60324ad0ddfc3e8a450a28bb3d90c702788
+Signed-off-by: Arve Hjønnevåg <arve@android.com>
+---
+ arch/arm/include/asm/hardware/coresight.h |    4 ++
+ arch/arm/kernel/etm.c                     |   51 +++++++++++++++++++++++++++-
+ 2 files changed, 53 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/include/asm/hardware/coresight.h b/arch/arm/include/asm/hardware/coresight.h
+index 727ba0f..dcf74d7 100644
+--- a/arch/arm/include/asm/hardware/coresight.h
++++ b/arch/arm/include/asm/hardware/coresight.h
+@@ -20,12 +20,14 @@
+ #define TRACER_TRACE_DATA_BIT	3
+ #define TRACER_TIMESTAMP_BIT	4
+ #define TRACER_BRANCHOUTPUT_BIT	5
++#define TRACER_RETURN_STACK_BIT	6
+ #define TRACER_ACCESSED		BIT(TRACER_ACCESSED_BIT)
+ #define TRACER_RUNNING		BIT(TRACER_RUNNING_BIT)
+ #define TRACER_CYCLE_ACC	BIT(TRACER_CYCLE_ACC_BIT)
+ #define TRACER_TRACE_DATA	BIT(TRACER_TRACE_DATA_BIT)
+ #define TRACER_TIMESTAMP	BIT(TRACER_TIMESTAMP_BIT)
+ #define TRACER_BRANCHOUTPUT	BIT(TRACER_BRANCHOUTPUT_BIT)
++#define TRACER_RETURN_STACK	BIT(TRACER_RETURN_STACK_BIT)
+ 
+ #define TRACER_TIMEOUT 10000
+ 
+@@ -62,6 +64,7 @@
+ #define ETMCTRL_BRANCH_OUTPUT	(1 << 8)
+ #define ETMCTRL_CYCLEACCURATE	(1 << 12)
+ #define ETMCTRL_TIMESTAMP_EN	(1 << 28)
++#define ETMCTRL_RETURN_STACK_EN	(1 << 29)
+ 
+ /* ETM configuration code register */
+ #define ETMR_CONFCODE		(0x04)
+@@ -136,6 +139,7 @@
+ #define ETMIDR_VERSION_PFT_1_0	0x30
+ 
+ #define ETMR_CCE		0x1e8
++#define ETMCCER_RETURN_STACK_IMPLEMENTED	BIT(23)
+ #define ETMCCER_TIMESTAMPING_IMPLEMENTED	BIT(22)
+ 
+ #define ETMR_TRACEIDR		0x200
+diff --git a/arch/arm/kernel/etm.c b/arch/arm/kernel/etm.c
+index ad1ee57..93d06ba 100644
+--- a/arch/arm/kernel/etm.c
++++ b/arch/arm/kernel/etm.c
+@@ -123,6 +123,9 @@ static int trace_start_etm(struct tracectx *t, int id)
+ 	if (t->flags & TRACER_TIMESTAMP)
+ 		v |= ETMCTRL_TIMESTAMP_EN;
+ 
++	if (t->flags & TRACER_RETURN_STACK)
++		v |= ETMCTRL_RETURN_STACK_EN;
++
+ 	etm_unlock(t, id);
+ 
+ 	etm_writel(t, id, v, ETMR_CTRL);
+@@ -702,10 +705,13 @@ static ssize_t trace_branch_output_store(struct kobject *kobj,
+ 		return -EINVAL;
+ 
+ 	mutex_lock(&tracer.mutex);
+-	if (branch_output)
++	if (branch_output) {
+ 		tracer.flags |= TRACER_BRANCHOUTPUT;
+-	else
++		/* Branch broadcasting is incompatible with the return stack */
++		tracer.flags &= ~TRACER_RETURN_STACK;
++	} else {
+ 		tracer.flags &= ~TRACER_BRANCHOUTPUT;
++	}
+ 	mutex_unlock(&tracer.mutex);
+ 
+ 	return n;
+@@ -715,6 +721,39 @@ static struct kobj_attribute trace_branch_output_attr =
+ 	__ATTR(trace_branch_output, 0644,
+ 		trace_branch_output_show, trace_branch_output_store);
+ 
++static ssize_t trace_return_stack_show(struct kobject *kobj,
++				  struct kobj_attribute *attr,
++				  char *buf)
++{
++	return sprintf(buf, "%d\n", !!(tracer.flags & TRACER_RETURN_STACK));
++}
++
++static ssize_t trace_return_stack_store(struct kobject *kobj,
++				   struct kobj_attribute *attr,
++				   const char *buf, size_t n)
++{
++	unsigned int return_stack;
++
++	if (sscanf(buf, "%u", &return_stack) != 1)
++		return -EINVAL;
++
++	mutex_lock(&tracer.mutex);
++	if (return_stack) {
++		tracer.flags |= TRACER_RETURN_STACK;
++		/* Return stack is incompatible with branch broadcasting */
++		tracer.flags &= ~TRACER_BRANCHOUTPUT;
++	} else {
++		tracer.flags &= ~TRACER_RETURN_STACK;
++	}
++	mutex_unlock(&tracer.mutex);
++
++	return n;
++}
++
++static struct kobj_attribute trace_return_stack_attr =
++	__ATTR(trace_return_stack, 0644,
++		trace_return_stack_show, trace_return_stack_store);
++
+ static ssize_t trace_timestamp_show(struct kobject *kobj,
+ 				  struct kobj_attribute *attr,
+ 				  char *buf)
+@@ -899,6 +938,14 @@ static int __devinit etm_probe(struct amba_device *dev, const struct amba_id *id
+ 		dev_dbg(&dev->dev,
+ 			"Failed to create trace_branch_output in sysfs\n");
+ 
++	if (etmccer & ETMCCER_RETURN_STACK_IMPLEMENTED) {
++		ret = sysfs_create_file(&dev->dev.kobj,
++					&trace_return_stack_attr.attr);
++		if (ret)
++			dev_dbg(&dev->dev,
++			      "Failed to create trace_return_stack in sysfs\n");
++	}
++
+ 	if (etmccer & ETMCCER_TIMESTAMPING_IMPLEMENTED) {
+ 		ret = sysfs_create_file(&dev->dev.kobj,
+ 					&trace_timestamp_attr.attr);
+-- 
+1.7.7.4
+

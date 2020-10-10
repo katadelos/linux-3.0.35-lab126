@@ -1,0 +1,56 @@
+From 5a613ed0f1f86f060ac5f90687ad9920ae6f789c Mon Sep 17 00:00:00 2001
+From: Lin Fuzhen <fuzhen.lin@freescale.com>
+Date: Wed, 16 May 2012 13:11:02 +0800
+Subject: [PATCH 1462/2463] ENGR00209462 Thermal: print tempreture for debug
+ uasge
+
+Add debugmask to control the cooling device tempreture being printed or not
+
+To enable the thermal tempreture printing by below command
+echo 0xf > /sys/module/thermal/parameters/debug_mask
+
+Signed-off-by: Lin Fuzhen <fuzhen.lin@freescale.com>
+---
+ drivers/mxc/thermal/thermal.c |   12 ++++++++++--
+ 1 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/thermal/thermal.c b/drivers/mxc/thermal/thermal.c
+index bf207f8..a66e504 100644
+--- a/drivers/mxc/thermal/thermal.c
++++ b/drivers/mxc/thermal/thermal.c
+@@ -3,7 +3,7 @@
+  *
+  *  Copyright (C) 2001, 2002 Andy Grover <andrew.grover@intel.com>
+  *  Copyright (C) 2001, 2002 Paul Diefenbaugh <paul.s.diefenbaugh@intel.com>
+- *  Copyright (C) 2011 Freescale Semiconductor, Inc.
++ *  Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  *
+  *  This program is free software; you can redistribute it and/or modify
+@@ -139,6 +139,13 @@ static const struct anatop_device_id thermal_device_ids[] = {
+ 	{""},
+ };
+ 
++enum {
++	DEBUG_USER_STATE = 1U << 0,
++	DEBUG_VERBOSE = 1U << 1,
++};
++static int debug_mask = DEBUG_USER_STATE;
++module_param_named(debug_mask, debug_mask, int, S_IRUGO | S_IWUSR | S_IWGRP);
++
+ /* functions */
+ static int anatop_thermal_add(struct anatop_device *device);
+ static int anatop_thermal_remove(struct platform_device *pdev);
+@@ -296,7 +303,8 @@ static int anatop_thermal_get_temp(struct thermal_zone_device *thermal,
+ 		tz->temperature = REG_VALUE_TO_CEL(ratio, tmp);
+ 	else
+ 		tz->temperature = -25;
+-	pr_debug("Temperature is %lu C\n", tz->temperature);
++	if (debug_mask & DEBUG_VERBOSE)
++		pr_info("Cooling device Temperature is %lu C\n", tz->temperature);
+ 	/* power down anatop thermal sensor */
+ 	__raw_writel(BM_ANADIG_TEMPSENSE0_POWER_DOWN,
+ 			anatop_base + HW_ANADIG_TEMPSENSE0_SET);
+-- 
+1.7.7.4
+

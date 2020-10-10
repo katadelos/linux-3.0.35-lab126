@@ -1,0 +1,45 @@
+From 635de53d87cbdac730cb552e10ea2c2c95537507 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Wed, 25 Jul 2012 20:43:16 +0800
+Subject: [PATCH 1836/2463] ENGR00218421-3 ESAI: init platform data for p2p
+ playback
+
+Set audio p2p playback params(sample rate, word width) for ESAI in board
+init file(ARD).
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    7 +++++++
+ 1 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 52cf62f..b80a4bc 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -54,6 +54,7 @@
+ #include <linux/regulator/consumer.h>
+ #include <linux/regulator/machine.h>
+ #include <linux/regulator/fixed.h>
++#include <linux/mxc_asrc.h>
+ #include <sound/pcm.h>
+ 
+ #include <mach/common.h>
+@@ -1062,9 +1063,15 @@ static const struct pm_platform_data mx6q_sabreauto_pm_data __initconst = {
+ 	.suspend_exit	= sabreauto_suspend_exit,
+ };
+ 
++static const struct asrc_p2p_params esai_p2p = {
++	.p2p_rate = 48000,
++	.p2p_width = ASRC_WIDTH_24_BIT,
++};
++
+ static struct mxc_audio_platform_data sab_audio_data = {
+ 	.sysclk		= 24576000,
+ 	.codec_name	= "cs42888.1-0048",
++	.priv = (void *)&esai_p2p,
+ };
+ 
+ static struct platform_device sab_audio_device = {
+-- 
+1.7.7.4
+

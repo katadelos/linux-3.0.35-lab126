@@ -1,0 +1,107 @@
+From dd4c3153c8f2f92785f115146c5e6ee00b135a5c Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Tue, 12 Mar 2013 19:17:50 +0800
+Subject: [PATCH 2444/2463] ENGR00253947 EPDC: fix reboot failure
+
+This patch is to
+
+1) add clock enablement before access EPDC registers, otherwise system may hang.
+
+And,
+2) fix unbalanced disablement for PMIC regulators
+
+------------[ cut here ]------------
+WARNING: at drivers/regulator/core.c:1422 _regulator_disable+0xf8/0x12c()
+unbalanced disables for VCOM
+Modules linked in:
+[<80040518>] (unwind_backtrace+0x0/0xf8) from [<800671d8>]
+		(warn_slowpath_common +0x4c/0x64)
+[<800671d8>] (warn_slowpath_common+0x4c/0x64) from [<80067284>]
+		(warn_slowpath_fmt+0x30/0x40)
+[<80067284>] (warn_slowpath_fmt+0x30/0x40) from [<8024ef60>]
+		(_regulator_disable+0xf8/0x12c)
+[<8024ef60>] (_regulator_disable+0xf8/0x12c) from [<8024efc4>]
+		(regulator_disable+0x30/0x70)
+[<8024efc4>] (regulator_disable+0x30/0x70) from [<80241044>]
+		(mxc_epdc_fb_shutdown+0x18/0x84)
+[<80241044>] (mxc_epdc_fb_shutdown+0x18/0x84) from [<80277f64>]
+		(platform_drv_shutdown+0x18/0x1c)
+[<80277f64>] (platform_drv_shutdown+0x18/0x1c) from [<802751d0>]
+		(device_shutdown+0xac/0x124)
+[<802751d0>] (device_shutdown+0xac/0x124) from [<8007812c>]
+		(kernel_restart_prepare+0x30/0x38)
+[<8007812c>] (kernel_restart_prepare+0x30/0x38) from [<80078140>]
+		(kernel_restart+0xc/0x48)
+[<80078140>] (kernel_restart+0xc/0x48) from [<80078290>]
+		(sys_reboot+0x10c/0x1c4)
+[<80078290>] (sys_reboot+0x10c/0x1c4) from [<8003ad40>]
+		(ret_fast_syscall+0x0/0x30)
+---[ end trace e392f5dd2f75e1a5 ]---
+------------[ cut here ]------------
+WARNING: at drivers/regulator/core.c:1422 _regulator_disable+0xf8/0x12c()
+unbalanced disables for DISPLAY
+Modules linked in:
+[<80040518>] (unwind_backtrace+0x0/0xf8) from [<800671d8>]
+		(warn_slowpath_common+0x4c/0x64)
+[<800671d8>] (warn_slowpath_common+0x4c/0x64) from [<80067284>]
+		(warn_slowpath_fmt+0x30/0x40)
+[<80067284>] (warn_slowpath_fmt+0x30/0x40) from [<8024ef60>]
+		(_regulator_disable+0xf8/0x12c)
+[<8024ef60>] (_regulator_disable+0xf8/0x12c) from [<8024efc4>]
+		(regulator_disable+0x30/0x70)
+[<8024efc4>] (regulator_disable+0x30/0x70) from [<8024104c>]
+		(mxc_epdc_fb_shutdown+0x20/0x84)
+[<8024104c>] (mxc_epdc_fb_shutdown+0x20/0x84) from [<80277f64>]
+		(platform_drv_shutdown+0x18/0x1c)
+[<80277f64>] (platform_drv_shutdown+0x18/0x1c) from [<802751d0>]
+		(device_shutdown+0xac/0x124)
+[<802751d0>] (device_shutdown+0xac/0x124) from [<8007812c>]
+		(kernel_restart_prepare+0x30/0x38)
+[<8007812c>] (kernel_restart_prepare+0x30/0x38) from [<80078140>]
+		(kernel_restart+0xc/0x48)
+[<80078140>] (kernel_restart+0xc/0x48) from [<80078290>]
+		(sys_reboot+0x10c/0x1c4)
+[<80078290>] (sys_reboot+0x10c/0x1c4) from [<8003ad40>]
+		(ret_fast_syscall+0x0/0x30)
+---[ end trace e392f5dd2f75e1a6 ]---
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+(cherry picked from commit bda715c9defa98cfcdcdf8784717500a42e5b7af)
+---
+ drivers/video/mxc/mxc_epdc_fb.c |   11 ++++++++---
+ 1 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_epdc_fb.c b/drivers/video/mxc/mxc_epdc_fb.c
+index 743b084..1122e21 100644
+--- a/drivers/video/mxc/mxc_epdc_fb.c
++++ b/drivers/video/mxc/mxc_epdc_fb.c
+@@ -5031,10 +5031,14 @@ static void mxc_epdc_fb_shutdown(struct platform_device *pdev)
+ 	struct mxc_epdc_fb_data *fb_data = platform_get_drvdata(pdev);
+ 
+ 	/* Disable power to the EPD panel */
+-	regulator_disable(fb_data->vcom_regulator);
+-	regulator_disable(fb_data->display_regulator);
++	if (regulator_is_enabled(fb_data->vcom_regulator))
++		regulator_disable(fb_data->vcom_regulator);
++	if (regulator_is_enabled(fb_data->display_regulator))
++		regulator_disable(fb_data->display_regulator);
+ 
+ 	/* Disable clocks to EPDC */
++	clk_enable(fb_data->epdc_clk_axi);
++	clk_enable(fb_data->epdc_clk_pix);
+ 	__raw_writel(EPDC_CTRL_CLKGATE, EPDC_CTRL_SET);
+ 	clk_disable(fb_data->epdc_clk_pix);
+ 	clk_disable(fb_data->epdc_clk_axi);
+@@ -5044,7 +5048,8 @@ static void mxc_epdc_fb_shutdown(struct platform_device *pdev)
+ 		fb_data->pdata->disable_pins();
+ 
+ 	/* turn off the V3p3 */
+-	regulator_disable(fb_data->v3p3_regulator);
++	if (regulator_is_enabled(fb_data->v3p3_regulator))
++		regulator_disable(fb_data->v3p3_regulator);
+ }
+ #else
+ #define mxc_epdc_fb_suspend	NULL
+-- 
+1.7.7.4
+

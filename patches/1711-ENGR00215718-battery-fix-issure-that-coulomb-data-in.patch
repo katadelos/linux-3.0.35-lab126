@@ -1,0 +1,52 @@
+From 6cf00108de4e6c354e82bc30ae7452684d2ba8ee Mon Sep 17 00:00:00 2001
+From: Rong Dian <b38775@freescale.com>
+Date: Wed, 4 Jul 2012 12:51:17 +0800
+Subject: [PATCH 1711/2463] ENGR00215718: battery: fix issure that coulomb
+ data increases in discharger
+
+Hardware cannot support battery internal resistance and coulomb calculation,
+estimate data only by battery voltage.The true battery voltage will change to
+a bit lower about 50mV~500mV than normal voltage with playing game or video or
+other consumption actions, then change back to normal voltage with finishing
+playing game or video or other consumption actions in the discharger stage.
+
+Signed-off-by: Rong Dian <b38775@freescale.com>
+---
+ drivers/power/sabresd_battery.c |   20 +++++++++++++++++++-
+ 1 files changed, 19 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/power/sabresd_battery.c b/drivers/power/sabresd_battery.c
+index df9f62c..460da4a 100755
+--- a/drivers/power/sabresd_battery.c
++++ b/drivers/power/sabresd_battery.c
+@@ -249,8 +249,26 @@ u32 calibration_voltage(struct max8903_data *data)
+ static void max8903_battery_update_status(struct max8903_data *data)
+ {
+ 	static int counter;
++	int temp;
++	static int temp_last;
+ 	mutex_lock(&data->work_lock);
+-	data->voltage_uV = calibration_voltage(data);
++	temp = calibration_voltage(data);
++	if (temp_last == 0) {
++		data->voltage_uV = temp;
++		temp_last = temp;
++	}
++	if (data->charger_online == 0 && temp_last != 0) {
++		if (temp < temp_last) {
++		temp_last = temp;
++		data->voltage_uV = temp;
++		} else {
++		data->voltage_uV = temp_last;
++		}
++	}
++	if (data->charger_online == 1) {
++		data->voltage_uV = temp;
++		temp_last = temp;
++	}
+ 	data->percent = calibrate_battery_capability_percent(data);
+ 	if (data->percent != data->old_percent) {
+ 		data->old_percent = data->percent;
+-- 
+1.7.7.4
+

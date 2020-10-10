@@ -1,0 +1,38 @@
+From 52296e6f032a8619efe3d4e2a24e4358afc246c0 Mon Sep 17 00:00:00 2001
+From: Larry Li <b20787@freescale.com>
+Date: Wed, 4 Jan 2012 17:07:50 +0800
+Subject: [PATCH 0835/2463] ENGR00171259 mx6 Fix warning while remove GPU
+ module
+
+Avoid necessary clk_disable operation
+
+Signed-off-by: Larry Li <b20787@freescale.com>
+---
+ .../hal/os/linux/kernel/gc_hal_kernel_device.c     |    3 ---
+ 1 files changed, 0 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+index 6d3b91b..02f2ff7 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+@@ -971,17 +971,14 @@ gckGALDEVICE_Destroy(
+ 
+         /*Disable clock*/
+         if (Device->clk_3d_core) {
+-           clk_disable(Device->clk_3d_core);
+            clk_put(Device->clk_3d_core);
+            Device->clk_3d_core = NULL;
+         }
+         if (Device->clk_3d_shader) {
+-           clk_disable(Device->clk_3d_shader);
+            clk_put(Device->clk_3d_shader);
+            Device->clk_3d_shader = NULL;
+         }
+         if (Device->clk_2d_core) {
+-           clk_disable(Device->clk_2d_core);
+            clk_put(Device->clk_2d_core);
+            Device->clk_2d_core = NULL;
+         }
+-- 
+1.7.7.4
+

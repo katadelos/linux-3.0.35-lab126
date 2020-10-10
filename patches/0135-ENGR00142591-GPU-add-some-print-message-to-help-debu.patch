@@ -1,0 +1,86 @@
+From e698e3a6054d7d25419e7333548b91f56843e81d Mon Sep 17 00:00:00 2001
+From: Richard Zhao <richard.zhao@freescale.com>
+Date: Tue, 26 Apr 2011 17:37:50 +0800
+Subject: [PATCH 0135/2463] ENGR00142591 GPU: add some print message to help
+ debug
+
+Add print message when ioremap or shared memory alloc fail.
+
+Signed-off-by: Richard Zhao <richard.zhao@freescale.com>
+---
+ drivers/mxc/amd-gpu/platform/hal/linux/gsl_hal.c  |   11 +++++++++++
+ drivers/mxc/amd-gpu/platform/hal/linux/gsl_kmod.c |    5 ++++-
+ 2 files changed, 15 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/amd-gpu/platform/hal/linux/gsl_hal.c b/drivers/mxc/amd-gpu/platform/hal/linux/gsl_hal.c
+index 8d45283..51270ad 100644
+--- a/drivers/mxc/amd-gpu/platform/hal/linux/gsl_hal.c
++++ b/drivers/mxc/amd-gpu/platform/hal/linux/gsl_hal.c
+@@ -1,4 +1,5 @@
+ /* Copyright (c) 2008-2010, Advanced Micro Devices. All rights reserved.
++ * Copyright (C) 2008-2011 Freescale Semiconductor, Inc.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 and
+@@ -130,6 +131,7 @@ kgsl_hal_init(void)
+ 	hal->z430_regspace.mmio_virt_base = (unsigned char *)ioremap(hal->z430_regspace.mmio_phys_base, hal->z430_regspace.sizebytes);
+ 
+ 	if (hal->z430_regspace.mmio_virt_base == NULL) {
++	    printk(KERN_ERR "GPU: %s:%d ioremap failed!\n", __func__, __LINE__);
+ 	    return GSL_FAILURE_SYSTEMERROR;
+ 	}
+ 
+@@ -146,6 +148,7 @@ kgsl_hal_init(void)
+ 	hal->z160_regspace.mmio_virt_base = (unsigned char *)ioremap(hal->z160_regspace.mmio_phys_base, hal->z160_regspace.sizebytes);
+ 
+ 	if (hal->z160_regspace.mmio_virt_base == NULL) {
++	    printk(KERN_ERR "GPU: %s:%d ioremap failed!\n", __func__, __LINE__);
+ 	    return GSL_FAILURE_SYSTEMERROR;
+ 	}
+ 
+@@ -162,6 +165,10 @@ kgsl_hal_init(void)
+ 	if (gpu_reserved_mem && gpu_reserved_mem_size >= totalsize) {
+ 	    pa = gpu_reserved_mem;
+ 	    va = (unsigned int)ioremap(gpu_reserved_mem, totalsize);
++	    if (!va) {
++		    printk(KERN_ERR "GPU: %s:%d ioremap failed!\n", __func__, __LINE__);
++		    return GSL_FAILURE_SYSTEMERROR;
++	   }
+ 	} else {
+ 	    va = (unsigned int)dma_alloc_coherent(0, totalsize, (dma_addr_t *)&pa, GFP_DMA | GFP_KERNEL);
+ 	}
+@@ -170,6 +177,10 @@ kgsl_hal_init(void)
+ 	    totalsize = gpu_reserved_mem_size;
+ 	    pa = gpu_reserved_mem;
+ 	    va = (unsigned int)ioremap(gpu_reserved_mem, gpu_reserved_mem_size);
++	    if (!va) {
++		    printk(KERN_ERR "GPU: %s:%d ioremap failed!\n", __func__, __LINE__);
++		    return GSL_FAILURE_SYSTEMERROR;
++	   }
+ 	} else {
+ 	    gpu_reserved_mem = 0;
+ 	    totalsize = GSL_HAL_SHMEM_SIZE_EMEM1_NOMMU + GSL_HAL_SHMEM_SIZE_EMEM2_NOMMU + GSL_HAL_SHMEM_SIZE_PHYS_NOMMU;
+diff --git a/drivers/mxc/amd-gpu/platform/hal/linux/gsl_kmod.c b/drivers/mxc/amd-gpu/platform/hal/linux/gsl_kmod.c
+index 94667d0..b674041 100644
+--- a/drivers/mxc/amd-gpu/platform/hal/linux/gsl_kmod.c
++++ b/drivers/mxc/amd-gpu/platform/hal/linux/gsl_kmod.c
+@@ -1,4 +1,5 @@
+ /* Copyright (c) 2008-2010, Advanced Micro Devices. All rights reserved.
++ * Copyright (C) 2008-2011 Freescale Semiconductor, Inc.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 and
+@@ -434,7 +435,9 @@ static long gsl_kmod_ioctl(struct file *fd, unsigned int cmd, unsigned long arg)
+                 {
+                     add_memblock_to_allocated_list(fd, &tmp);
+                 }
+-            }
++	    } else {
++		    printk(KERN_ERR "GPU %s:%d kgsl_sharedmem_alloc failed!\n", __func__, __LINE__);
++	    }
+             break;
+         }
+     case IOCTL_KGSL_SHAREDMEM_FREE:
+-- 
+1.7.7.4
+

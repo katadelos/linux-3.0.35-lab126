@@ -1,0 +1,49 @@
+From 1f2d2a5af464e575c8baf7ff4ac4c01cf5b3457b Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Mon, 4 Mar 2013 17:42:52 +0800
+Subject: [PATCH 2419/2463] ENGR00251209-8 usb: fix the build error when
+ building usb as loadable module
+
+export usb_suspend, usb_resume, and pm_mutex
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/core/driver.c |    2 ++
+ kernel/power/main.c       |    1 +
+ 2 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/core/driver.c b/drivers/usb/core/driver.c
+index f147c62..3eaea9d 100644
+--- a/drivers/usb/core/driver.c
++++ b/drivers/usb/core/driver.c
+@@ -1319,6 +1319,7 @@ int usb_suspend(struct device *dev, pm_message_t msg)
+ 	choose_wakeup(udev, msg);
+ 	return usb_suspend_both(udev, msg);
+ }
++EXPORT_SYMBOL(usb_suspend);
+ 
+ /* The device lock is held by the PM core */
+ int usb_resume(struct device *dev, pm_message_t msg)
+@@ -1353,6 +1354,7 @@ int usb_resume(struct device *dev, pm_message_t msg)
+ 		status = 0;
+ 	return status;
+ }
++EXPORT_SYMBOL(usb_resume);
+ 
+ #endif /* CONFIG_PM */
+ 
+diff --git a/kernel/power/main.c b/kernel/power/main.c
+index b7d0e30..0fae580 100644
+--- a/kernel/power/main.c
++++ b/kernel/power/main.c
+@@ -16,6 +16,7 @@
+ #include "power.h"
+ 
+ DEFINE_MUTEX(pm_mutex);
++EXPORT_SYMBOL(pm_mutex);
+ 
+ #ifdef CONFIG_PM_SLEEP
+ 
+-- 
+1.7.7.4
+

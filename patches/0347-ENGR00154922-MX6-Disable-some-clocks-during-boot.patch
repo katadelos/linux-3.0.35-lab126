@@ -1,0 +1,73 @@
+From b6efbc7bd96971765bc29a5b518b683f762cefe7 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Wed, 17 Aug 2011 12:34:28 +0800
+Subject: [PATCH 0347/2463] ENGR00154922 [MX6]Disable some clocks during boot
+
+To save power, we should disable as much as possible
+when kernel boot up, only leaving the necessary clocks
+on, devices should enable their clock in init.This is
+necessary for our MX6q, or the chip will be too hot,
+may damage.
+
+After doing this change, we can save more than 150mA@5V.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |   34 ++++++++++++++++++++++++++--------
+ 1 files changed, 26 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 1c192b7..4e1ee83 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -36,6 +36,7 @@
+ #define __INIT_CLK_DEBUG(n)
+ #endif
+ 
++extern int mxc_jtag_enabled;
+ void __iomem *apll_base;
+ static struct clk pll1_sys_main_clk;
+ static struct clk pll2_528_bus_main_clk;
+@@ -4132,14 +4133,31 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	/* set the NAND to 11MHz. Too fast will cause dma timeout. */
+ 	clk_set_rate(&enfc_clk, enfc_clk.round_rate(&enfc_clk, 11000000));
+ 
+-	/* Make sure all clocks are ON initially */
+-	__raw_writel(0xFFFFFFFF, MXC_CCM_CCGR0);
+-	__raw_writel(0xFFFFFFFF, MXC_CCM_CCGR1);
+-	__raw_writel(0xFFFFFFFF, MXC_CCM_CCGR2);
+-	__raw_writel(0xFFFFFFFF, MXC_CCM_CCGR3);
+-	__raw_writel(0xFFFFFFFF, MXC_CCM_CCGR4);
+-	__raw_writel(0xFFFFFFFF, MXC_CCM_CCGR5);
+-	__raw_writel(0xFFFFFFFF, MXC_CCM_CCGR6);
++	/* Gate off all possible clocks */
++	if (mxc_jtag_enabled) {
++		__raw_writel(3 << MXC_CCM_CCGRx_CG11_OFFSET |
++			     3 << MXC_CCM_CCGRx_CG2_OFFSET |
++			     3 << MXC_CCM_CCGRx_CG1_OFFSET |
++			     3 << MXC_CCM_CCGRx_CG0_OFFSET, MXC_CCM_CCGR0);
++	} else {
++		__raw_writel(3 << MXC_CCM_CCGRx_CG2_OFFSET |
++			     3 << MXC_CCM_CCGRx_CG1_OFFSET |
++			     3 << MXC_CCM_CCGRx_CG0_OFFSET, MXC_CCM_CCGR0);
++	}
++	__raw_writel(3 << MXC_CCM_CCGRx_CG10_OFFSET, MXC_CCM_CCGR1);
++	__raw_writel(3 << MXC_CCM_CCGRx_CG10_OFFSET |
++		     3 << MXC_CCM_CCGRx_CG9_OFFSET |
++		     3 << MXC_CCM_CCGRx_CG8_OFFSET, MXC_CCM_CCGR2);
++	__raw_writel(3 << MXC_CCM_CCGRx_CG14_OFFSET |
++		     3 << MXC_CCM_CCGRx_CG13_OFFSET |
++		     3 << MXC_CCM_CCGRx_CG12_OFFSET |
++		     3 << MXC_CCM_CCGRx_CG11_OFFSET |
++		     3 << MXC_CCM_CCGRx_CG10_OFFSET, MXC_CCM_CCGR3);
++	__raw_writel(3 << MXC_CCM_CCGRx_CG7_OFFSET |
++		     3 << MXC_CCM_CCGRx_CG4_OFFSET, MXC_CCM_CCGR4);
++	__raw_writel(3 << MXC_CCM_CCGRx_CG3_OFFSET |
++		     3 << MXC_CCM_CCGRx_CG0_OFFSET, MXC_CCM_CCGR5);
++	__raw_writel(0, MXC_CCM_CCGR6);
+ 
+ 	base = ioremap(GPT_BASE_ADDR, SZ_4K);
+ 	mxc_timer_init(&gpt_clk[0], base, MXC_INT_GPT);
+-- 
+1.7.7.4
+

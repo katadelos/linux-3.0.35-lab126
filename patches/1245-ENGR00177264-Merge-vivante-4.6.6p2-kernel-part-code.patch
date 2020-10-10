@@ -1,0 +1,1138 @@
+From 1b68b2205445a3954f6ef487b88440d2da8b1b5e Mon Sep 17 00:00:00 2001
+From: Loren Huang <b02279@freescale.com>
+Date: Wed, 28 Mar 2012 17:56:48 +0800
+Subject: [PATCH 1245/2463] ENGR00177264 Merge vivante 4.6.6p2 kernel part
+ code
+
+Merge vivante 4.6.6p2 kernel part code
+
+Signed-off-by: Loren Huang <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_context.c   |    6 +
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c  |   40 +-
+ drivers/mxc/gpu-viv/config                         |    9 +-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c     |    2 +
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c   |  597 ++++++++++----------
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c |    6 +
+ .../hal/kernel/gc_hal_kernel_video_memory.c        |   24 +-
+ .../gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h    |  103 ++++-
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h    |    4 -
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h    |    2 +-
+ .../hal/os/linux/kernel/gc_hal_kernel_device.c     |    6 +-
+ 11 files changed, 451 insertions(+), 348 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
+index 1e25ecd..6ddbcee 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
+@@ -689,6 +689,11 @@ _InitializeContextBuffer(
+ 	}
+ 	else if (Context->hardware->identity.instructionCount > 256)
+ 	{
++		/* New Shader instruction memory. */
++		index += _State(Context, index, 0x0085C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++		index += _State(Context, index, 0x0101C >> 2, 0x00000100, 1, gcvFALSE, gcvFALSE);
++		index += _CLOSE_RANGE();
++
+ 		/* VX instruction memory. */
+ 		for (i = 0;
+ 		     i < Context->hardware->identity.instructionCount << 2;
+@@ -787,6 +792,7 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x01670 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x01674 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x016A4 >> 2, 0x00000000, 1, gcvFALSE, gcvTRUE);
++    index += _State(Context, index, 0x016AC >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x016A8 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x01720 >> 2, 0x00000000, 8, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x01740 >> 2, 0x00000000, 8, gcvFALSE, gcvTRUE);
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+index 9b203e1..4b89efe 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+@@ -205,6 +205,17 @@ _IdentifyHardware(
+         }
+     }
+ 
++	/* Disable HZ when EZ is present for older chips. */
++    if (!((((gctUINT32) (Identity->chipMinorFeatures3)) >> (0 ? 8:8) & ((gctUINT32) ((((1 ? 8:8) - (0 ? 8:8) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:8) - (0 ? 8:8) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 8:8) - (0 ? 8:8) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:8) - (0 ? 8:8) + 1)))))))
++        &&
++        !((((gctUINT32) (Identity->chipFeatures)) >> (0 ? 16:16) & ((gctUINT32) ((((1 ? 16:16) - (0 ? 16:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 16:16) - (0 ? 16:16) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 16:16) - (0 ? 16:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 16:16) - (0 ? 16:16) + 1)))))))
++        )
++    {
++        /* Disable HIERARCHICAL_Z. */
++        Identity->chipMinorFeatures
++            = ((((gctUINT32) (Identity->chipMinorFeatures)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1))))))) << (0 ? 27:27))) | (((gctUINT32) (0x0 & ((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1))))))) << (0 ? 27:27)));
++    }
++
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+                    "Identity: chipFeatures=0x%08X",
+                    Identity->chipFeatures);
+@@ -592,9 +603,6 @@ gckHARDWARE_Destroy(
+     /* Verify the arguments. */
+     gcmkVERIFY_OBJECT(Hardware, gcvOBJ_HARDWARE);
+ 
+-    /* Turn off the power. */
+-    gcmkVERIFY_OK(gckOS_SetGPUPower(Hardware->os, Hardware->core, gcvFALSE, gcvFALSE));
+-
+     /* Destroy the power semaphore. */
+     gcmkVERIFY_OK(gckOS_DestroySemaphore(Hardware->os,
+                                          Hardware->globalSemaphore));
+@@ -1752,14 +1760,9 @@ gckHARDWARE_Event(
+ 
+     /* Determine the size of the command. */
+ 
+-#if gcdUSE_OPENCL
+-	/* Temporary workaround for lost events */
+-    size = gcmALIGN(8 + (1 + 5) * 4 * 20, 8); /* EVENT + 100 STATES */
+-#else
+     size = (Hardware->extraEventStates && (FromWhere == gcvKERNEL_PIXEL))
+          ? gcmALIGN(8 + (1 + 5) * 4, 8) /* EVENT + 5 STATES */
+          : 8;
+-#endif
+ 
+     if (Logical != gcvNULL)
+     {
+@@ -1773,12 +1776,7 @@ gckHARDWARE_Event(
+         {
+         case gcvKERNEL_COMMAND:
+             /* From command processor. */
+-#if gcdUSE_OPENCL
+-            /* Send all events via PE */
+-            destination = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 6:6) - (0 ? 6:6) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 6:6) - (0 ? 6:6) + 1))))))) << (0 ? 6:6))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 6:6) - (0 ? 6:6) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 6:6) - (0 ? 6:6) + 1))))))) << (0 ? 6:6)));
+-#else
+             destination = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 5:5) - (0 ? 5:5) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 5:5) - (0 ? 5:5) + 1))))))) << (0 ? 5:5))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 5:5) - (0 ? 5:5) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 5:5) - (0 ? 5:5) + 1))))))) << (0 ? 5:5)));
+-#endif
+             break;
+ 
+         case gcvKERNEL_PIXEL:
+@@ -1816,21 +1814,6 @@ gckHARDWARE_Event(
+         ** collide. */
+         if (size > 8)
+         {
+-#if gcdUSE_OPENCL
+-            gctUINT i;
+-
+-            for (i = 0; i < 20; i++)
+-            {
+-                logical[i*6+2] = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))) | (((gctUINT32) (0x01 & ((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27)))
+-                               | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 15:0) - (0 ? 15:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:0) - (0 ? 15:0) + 1))))))) << (0 ? 15:0))) | (((gctUINT32) ((gctUINT32) (0x0100) & ((gctUINT32) ((((1 ? 15:0) - (0 ? 15:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:0) - (0 ? 15:0) + 1))))))) << (0 ? 15:0)))
+-                               | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 25:16) - (0 ? 25:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 25:16) - (0 ? 25:16) + 1))))))) << (0 ? 25:16))) | (((gctUINT32) ((gctUINT32) (5) & ((gctUINT32) ((((1 ? 25:16) - (0 ? 25:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 25:16) - (0 ? 25:16) + 1))))))) << (0 ? 25:16)));
+-                logical[i*6+3] = 0;
+-                logical[i*6+4] = 0;
+-                logical[i*6+5] = 0;
+-                logical[i*6+6] = 0;
+-                logical[i*6+7] = 0;
+-            }
+-#else
+             logical[2] = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))) | (((gctUINT32) (0x01 & ((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27)))
+                        | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 15:0) - (0 ? 15:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:0) - (0 ? 15:0) + 1))))))) << (0 ? 15:0))) | (((gctUINT32) ((gctUINT32) (0x0100) & ((gctUINT32) ((((1 ? 15:0) - (0 ? 15:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:0) - (0 ? 15:0) + 1))))))) << (0 ? 15:0)))
+                        | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 25:16) - (0 ? 25:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 25:16) - (0 ? 25:16) + 1))))))) << (0 ? 25:16))) | (((gctUINT32) ((gctUINT32) (5) & ((gctUINT32) ((((1 ? 25:16) - (0 ? 25:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 25:16) - (0 ? 25:16) + 1))))))) << (0 ? 25:16)));
+@@ -1839,7 +1822,6 @@ gckHARDWARE_Event(
+             logical[5] = 0;
+             logical[6] = 0;
+             logical[7] = 0;
+-#endif
+         }
+     }
+ 
+diff --git a/drivers/mxc/gpu-viv/config b/drivers/mxc/gpu-viv/config
+index d7d7d5d..bce014f 100644
+--- a/drivers/mxc/gpu-viv/config
++++ b/drivers/mxc/gpu-viv/config
+@@ -31,10 +31,9 @@ VIVANTE_ENABLE_VG                 ?= 1
+ NO_USER_DIRECT_ACCESS_FROM_KERNEL ?= 1
+ VIVANTE_NO_3D                     ?= 0
+ ENABLE_OUTER_CACHE_PATCH          ?= 1
+-USE_BANK_ALIGNMENT                ?= 0
+-BANK_BIT_START                    ?= 0
+-BANK_BIT_END                      ?= 0
+-BANK_CHANNEL_BIT                  ?= 0
+-USE_OPENCL                        ?= 1
++USE_BANK_ALIGNMENT                ?= 1
++BANK_BIT_START                    ?= 13
++BANK_BIT_END                      ?= 15
++BANK_CHANNEL_BIT                  ?= 12
+ ENABLE_GPU_CLOCK_BY_DRIVER        = 1
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
+index 4fe7bb8..90991fd 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
+@@ -288,6 +288,8 @@ OnError:
+ 
+             if (kernel->hardware != gcvNULL)
+             {
++                /* Turn off the power. */
++                gcmkVERIFY_OK(gckOS_SetGPUPower(kernel->hardware->os, kernel->hardware->core, gcvFALSE, gcvFALSE));
+                 gcmkVERIFY_OK(gckHARDWARE_Destroy(kernel->hardware));
+             }
+         }
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
+index 8b6fcf1..c83f630 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
+@@ -1797,6 +1797,8 @@ gckEVENT_Notify(
+ 
+     for (;;)
+     {
++        gcsEVENT_PTR record;
++
+         /* Suspend interrupts. */
+         gcmkONERROR(gckOS_SuspendInterruptEx(Event->os, Event->kernel->core));
+         suspended = gcvTRUE;
+@@ -1926,11 +1928,46 @@ gckEVENT_Notify(
+ #endif
+         }
+ 
++        /* Suspend interrupts. */
++        gcmkONERROR(gckOS_SuspendInterruptEx(Event->os, Event->kernel->core));
++        suspended = gcvTRUE;
++
++        /* Mark pending interrupt as handled. */
++#if gcdSMP
++        gckOS_AtomClearMask(Event->pending, mask);
++#elif defined(__QNXNTO__)
++        atomic_clr(&Event->pending, mask);
++#else
++        Event->pending &= ~mask;
++#endif
++
++        /* Resume interrupts. */
++        gcmkONERROR(gckOS_ResumeInterruptEx(Event->os, Event->kernel->core));
++        suspended = gcvFALSE;
++
++        /* Grab the mutex queue. */
++        gcmkONERROR(gckOS_AcquireMutex(Event->os,
++                                       Event->eventQueueMutex,
++                                       gcvINFINITE));
++        acquired = gcvTRUE;
++
++        /* Grab the event head. */
++        record = queue->head;
++
++        /* Now quickly clear its event list. */
++        queue->head = gcvNULL;
++
++        /* Release the mutex queue. */
++        gcmkONERROR(gckOS_ReleaseMutex(Event->os, Event->eventQueueMutex));
++        acquired = gcvFALSE;
++
++        /* Increase the number of free events. */
++        gcmkONERROR(gckOS_AtomIncrement(Event->os, Event->freeAtom, &free));
++
+         /* Walk all events for this interrupt. */
+-        for (;;)
++        while (record != gcvNULL)
+         {
+-            gcsEVENT_PTR record;
+-            gcsEVENT_PTR recordNext = gcvNULL;
++            gcsEVENT_PTR recordNext;
+ #ifndef __QNXNTO__
+             gctPOINTER logical;
+ #endif
+@@ -1938,378 +1975,336 @@ gckEVENT_Notify(
+             gctSIZE_T bytes;
+ #endif
+ 
+-            /* Grab the mutex queue. */
+-            gcmkONERROR(gckOS_AcquireMutex(Event->os,
+-                                           Event->eventQueueMutex,
+-                                           gcvINFINITE));
+-            acquired = gcvTRUE;
+-
+-            /* Grab the event head. */
+-            record = queue->head;
+-
+-            if (record != gcvNULL)
+-            {
+-                queue->head = record->next;
+-                recordNext = record->next;
+-            }
+-
+-            /* Release the mutex queue. */
+-            gcmkONERROR(gckOS_ReleaseMutex(Event->os, Event->eventQueueMutex));
+-            acquired = gcvFALSE;
++            /* Grab next record. */
++            recordNext = record->next;
+ 
+-            /* Dispatch on event type. */
+-            if (record != gcvNULL)
+-            {
+ #ifdef __QNXNTO__
+-                /* Assign record->processID as the pid for this galcore thread.
+-                 * Used in OS calls like gckOS_UnlockMemory() which do not take a pid.
+-                 */
+-                drv_thread_specific_key_assign(record->processID, 0);
++            /* Assign record->processID as the pid for this galcore thread.
++             * Used in OS calls like gckOS_UnlockMemory() which do not take a pid.
++             */
++            drv_thread_specific_key_assign(record->processID, 0);
+ #endif
+ 
+ #if gcdSECURE_USER
+-                /* Get the cache that belongs to this process. */
+-                gcmkONERROR(gckKERNEL_GetProcessDBCache(Event->kernel,
+-                            record->processID,
+-                            &cache));
++            /* Get the cache that belongs to this process. */
++            gcmkONERROR(gckKERNEL_GetProcessDBCache(Event->kernel,
++                        record->processID,
++                        &cache));
+ #endif
+ 
+-                gcmkTRACE_ZONE_N(
+-                    gcvLEVEL_INFO, gcvZONE_EVENT,
+-                    gcmSIZEOF(record->info.command),
+-                    "Processing event type: %d",
+-                    record->info.command
+-                    );
++            gcmkTRACE_ZONE_N(
++                gcvLEVEL_INFO, gcvZONE_EVENT,
++                gcmSIZEOF(record->info.command),
++                "Processing event type: %d",
++                record->info.command
++                );
+ 
+-                switch (record->info.command)
++            switch (record->info.command)
++            {
++            case gcvHAL_FREE_NON_PAGED_MEMORY:
++                gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, gcvZONE_EVENT,
++                               "gcvHAL_FREE_NON_PAGED_MEMORY: 0x%x",
++                               record->info.u.FreeNonPagedMemory.physical);
++
++                /* Free non-paged memory. */
++                status = gckOS_FreeNonPagedMemory(
++                            Event->os,
++                            record->info.u.FreeNonPagedMemory.bytes,
++                            record->info.u.FreeNonPagedMemory.physical,
++                            record->info.u.FreeNonPagedMemory.logical);
++
++                if (gcmIS_SUCCESS(status))
+                 {
+-                case gcvHAL_FREE_NON_PAGED_MEMORY:
+-                    gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, gcvZONE_EVENT,
+-                                   "gcvHAL_FREE_NON_PAGED_MEMORY: 0x%x",
+-                                   record->info.u.FreeNonPagedMemory.physical);
+-
+-                    /* Free non-paged memory. */
+-                    status = gckOS_FreeNonPagedMemory(
+-                                Event->os,
+-                                record->info.u.FreeNonPagedMemory.bytes,
+-                                record->info.u.FreeNonPagedMemory.physical,
+-                                record->info.u.FreeNonPagedMemory.logical);
+-
+-                    if (gcmIS_SUCCESS(status))
+-                    {
+ #if gcdSECURE_USER
+-                        gcmkVERIFY_OK(gckKERNEL_FlushTranslationCache(
+-                            Event->kernel,
+-                            cache,
+-                            record->event.u.FreeNonPagedMemory.logical,
+-                            record->event.u.FreeNonPagedMemory.bytes));
++                    gcmkVERIFY_OK(gckKERNEL_FlushTranslationCache(
++                        Event->kernel,
++                        cache,
++                        record->event.u.FreeNonPagedMemory.logical,
++                        record->event.u.FreeNonPagedMemory.bytes));
+ #endif
+-                    }
+-                    break;
++                }
++                break;
+ 
+-                case gcvHAL_FREE_CONTIGUOUS_MEMORY:
+-                    gcmkTRACE_ZONE(
+-                        gcvLEVEL_VERBOSE, gcvZONE_EVENT,
+-                        "gcvHAL_FREE_CONTIGUOUS_MEMORY: 0x%x",
+-                        record->info.u.FreeContiguousMemory.physical);
++            case gcvHAL_FREE_CONTIGUOUS_MEMORY:
++                gcmkTRACE_ZONE(
++                    gcvLEVEL_VERBOSE, gcvZONE_EVENT,
++                    "gcvHAL_FREE_CONTIGUOUS_MEMORY: 0x%x",
++                    record->info.u.FreeContiguousMemory.physical);
+ 
+-                    /* Unmap the user memory. */
+-                    status = gckOS_FreeContiguous(
+-                                Event->os,
+-                                record->info.u.FreeContiguousMemory.physical,
+-                                record->info.u.FreeContiguousMemory.logical,
+-                                record->info.u.FreeContiguousMemory.bytes);
++                /* Unmap the user memory. */
++                status = gckOS_FreeContiguous(
++                            Event->os,
++                            record->info.u.FreeContiguousMemory.physical,
++                            record->info.u.FreeContiguousMemory.logical,
++                            record->info.u.FreeContiguousMemory.bytes);
+ 
+-                    if (gcmIS_SUCCESS(status))
+-                    {
++                if (gcmIS_SUCCESS(status))
++                {
+ #if gcdSECURE_USER
+-                        gcmkVERIFY_OK(gckKERNEL_FlushTranslationCache(
+-                            Event->kernel,
+-                            cache,
+-                            event->event.u.FreeContiguousMemory.logical,
+-                            event->event.u.FreeContiguousMemory.bytes));
++                    gcmkVERIFY_OK(gckKERNEL_FlushTranslationCache(
++                        Event->kernel,
++                        cache,
++                        event->event.u.FreeContiguousMemory.logical,
++                        event->event.u.FreeContiguousMemory.bytes));
+ #endif
+-                    }
+-                    break;
++                }
++                break;
+ 
+-                case gcvHAL_FREE_VIDEO_MEMORY:
+-                    gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, gcvZONE_EVENT,
+-                                   "gcvHAL_FREE_VIDEO_MEMORY: 0x%x",
+-                                   record->info.u.FreeVideoMemory.node);
++            case gcvHAL_FREE_VIDEO_MEMORY:
++                gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, gcvZONE_EVENT,
++                               "gcvHAL_FREE_VIDEO_MEMORY: 0x%x",
++                               record->info.u.FreeVideoMemory.node);
+ 
+ #ifdef __QNXNTO__
+-                    node = record->info.u.FreeVideoMemory.node;
++                node = record->info.u.FreeVideoMemory.node;
+ #if gcdUSE_VIDMEM_PER_PID
+-                    /* Check if the VidMem object still exists. */
+-                    if (gckKERNEL_GetVideoMemoryPoolPid(record->kernel,
+-                                                        gcvPOOL_SYSTEM,
+-                                                        record->processID,
+-                                                        gcvNULL) == gcvSTATUS_NOT_FOUND)
+-                    {
+-                        /*printf("Vidmem not found for process:%d\n", queue->processID);*/
+-                        status = gcvSTATUS_OK;
+-                        break;
+-                    }
++                /* Check if the VidMem object still exists. */
++                if (gckKERNEL_GetVideoMemoryPoolPid(record->kernel,
++                                                    gcvPOOL_SYSTEM,
++                                                    record->processID,
++                                                    gcvNULL) == gcvSTATUS_NOT_FOUND)
++                {
++                    /*printf("Vidmem not found for process:%d\n", queue->processID);*/
++                    status = gcvSTATUS_OK;
++                    break;
++                }
+ #else
+-                    if ((node->VidMem.memory->object.type == gcvOBJ_VIDMEM)
+-                    &&  (node->VidMem.logical != gcvNULL)
+-                    )
+-                    {
+-                        gcmkERR_BREAK(
+-                            gckKERNEL_UnmapVideoMemory(record->kernel,
+-                                                       node->VidMem.logical,
+-                                                       record->processID,
+-                                                       node->VidMem.bytes));
+-                        node->VidMem.logical = gcvNULL;
+-                    }
++                if ((node->VidMem.memory->object.type == gcvOBJ_VIDMEM)
++                &&  (node->VidMem.logical != gcvNULL)
++                )
++                {
++                    gcmkERR_BREAK(
++                        gckKERNEL_UnmapVideoMemory(record->kernel,
++                                                   node->VidMem.logical,
++                                                   record->processID,
++                                                   node->VidMem.bytes));
++                    node->VidMem.logical = gcvNULL;
++                }
+ #endif
+ #endif
+ 
+-                    /* Free video memory. */
+-                    status =
+-                        gckVIDMEM_Free(record->info.u.FreeVideoMemory.node);
++                /* Free video memory. */
++                status =
++                    gckVIDMEM_Free(record->info.u.FreeVideoMemory.node);
+ 
+-                    break;
++                break;
+ 
+-                case gcvHAL_WRITE_DATA:
++            case gcvHAL_WRITE_DATA:
+ #ifndef __QNXNTO__
+-                    /* Convert physical into logical address. */
+-                    gcmkERR_BREAK(
+-                        gckOS_MapPhysical(Event->os,
+-                                          record->info.u.WriteData.address,
+-                                          gcmSIZEOF(gctUINT32),
+-                                          &logical));
+-
+-                    /* Write data. */
+-                    gcmkERR_BREAK(
+-                        gckOS_WriteMemory(Event->os,
+-                                          logical,
+-                                          record->info.u.WriteData.data));
+-
+-                    /* Unmap the physical memory. */
+-                    gcmkERR_BREAK(
+-                        gckOS_UnmapPhysical(Event->os,
+-                                            logical,
+-                                            gcmSIZEOF(gctUINT32)));
++                /* Convert physical into logical address. */
++                gcmkERR_BREAK(
++                    gckOS_MapPhysical(Event->os,
++                                      record->info.u.WriteData.address,
++                                      gcmSIZEOF(gctUINT32),
++                                      &logical));
++
++                /* Write data. */
++                gcmkERR_BREAK(
++                    gckOS_WriteMemory(Event->os,
++                                      logical,
++                                      record->info.u.WriteData.data));
++
++                /* Unmap the physical memory. */
++                gcmkERR_BREAK(
++                    gckOS_UnmapPhysical(Event->os,
++                                        logical,
++                                        gcmSIZEOF(gctUINT32)));
+ #else
+-                    /* Write data. */
+-                    gcmkERR_BREAK(
+-                        gckOS_WriteMemory(Event->os,
+-                                          (gctPOINTER)
+-                                              record->info.u.WriteData.address,
+-                                          record->info.u.WriteData.data));
++                /* Write data. */
++                gcmkERR_BREAK(
++                    gckOS_WriteMemory(Event->os,
++                                      (gctPOINTER)
++                                          record->info.u.WriteData.address,
++                                      record->info.u.WriteData.data));
+ #endif
+-                    break;
++                break;
+ 
+-                case gcvHAL_UNLOCK_VIDEO_MEMORY:
+-                    gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, gcvZONE_EVENT,
+-                                   "gcvHAL_UNLOCK_VIDEO_MEMORY: 0x%x",
+-                                   record->info.u.UnlockVideoMemory.node);
++            case gcvHAL_UNLOCK_VIDEO_MEMORY:
++                gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, gcvZONE_EVENT,
++                               "gcvHAL_UNLOCK_VIDEO_MEMORY: 0x%x",
++                               record->info.u.UnlockVideoMemory.node);
+ 
+-                    /* Save node information before it disappears. */
++                /* Save node information before it disappears. */
+ #if gcdSECURE_USER
+-                    node = event->event.u.UnlockVideoMemory.node;
+-                    if (node->VidMem.memory->object.type == gcvOBJ_VIDMEM)
+-                    {
+-                        logical = gcvNULL;
+-                        bytes   = 0;
+-                    }
+-                    else
+-                    {
+-                        logical = node->Virtual.logical;
+-                        bytes   = node->Virtual.bytes;
+-                    }
++                node = event->event.u.UnlockVideoMemory.node;
++                if (node->VidMem.memory->object.type == gcvOBJ_VIDMEM)
++                {
++                    logical = gcvNULL;
++                    bytes   = 0;
++                }
++                else
++                {
++                    logical = node->Virtual.logical;
++                    bytes   = node->Virtual.bytes;
++                }
+ #endif
+ 
+-                    /* Unlock. */
+-                    status = gckVIDMEM_Unlock(
+-                        Event->kernel,
+-                        record->info.u.UnlockVideoMemory.node,
+-                        record->info.u.UnlockVideoMemory.type,
+-                        gcvNULL);
++                /* Unlock. */
++                status = gckVIDMEM_Unlock(
++                    Event->kernel,
++                    record->info.u.UnlockVideoMemory.node,
++                    record->info.u.UnlockVideoMemory.type,
++                    gcvNULL);
+ 
+ #if gcdSECURE_USER
+-                    if (gcmIS_SUCCESS(status) && (logical != gcvNULL))
+-                    {
+-                        gcmkVERIFY_OK(gckKERNEL_FlushTranslationCache(
+-                            Event->kernel,
+-                            cache,
+-                            logical,
+-                            bytes));
+-                    }
++                if (gcmIS_SUCCESS(status) && (logical != gcvNULL))
++                {
++                    gcmkVERIFY_OK(gckKERNEL_FlushTranslationCache(
++                        Event->kernel,
++                        cache,
++                        logical,
++                        bytes));
++                }
+ #endif
+-                    break;
++                break;
+ 
+-                case gcvHAL_SIGNAL:
+-                    gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, gcvZONE_EVENT,
+-                                   "gcvHAL_SIGNAL: 0x%x",
+-                                   record->info.u.Signal.signal);
++            case gcvHAL_SIGNAL:
++                gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, gcvZONE_EVENT,
++                               "gcvHAL_SIGNAL: 0x%x",
++                               record->info.u.Signal.signal);
+ 
+ #ifdef __QNXNTO__
+-                    if ((record->info.u.Signal.coid == 0)
+-                    &&  (record->info.u.Signal.rcvid == 0)
+-                    )
+-                    {
+-                        /* Kernel signal. */
+-                        gcmkERR_BREAK(
+-                            gckOS_Signal(Event->os,
++                if ((record->info.u.Signal.coid == 0)
++                &&  (record->info.u.Signal.rcvid == 0)
++                )
++                {
++                    /* Kernel signal. */
++                    gcmkERR_BREAK(
++                        gckOS_Signal(Event->os,
++                                     record->info.u.Signal.signal,
++                                     gcvTRUE));
++                }
++                else
++                {
++                    /* User signal. */
++                    gcmkERR_BREAK(
++                        gckOS_UserSignal(Event->os,
+                                          record->info.u.Signal.signal,
+-                                         gcvTRUE));
+-                    }
+-                    else
+-                    {
+-                        /* User signal. */
+-                        gcmkERR_BREAK(
+-                            gckOS_UserSignal(Event->os,
+-                                             record->info.u.Signal.signal,
+-                                             record->info.u.Signal.rcvid,
+-                                             record->info.u.Signal.coid));
+-                    }
++                                         record->info.u.Signal.rcvid,
++                                         record->info.u.Signal.coid));
++                }
+ #else
+-                    /* Set signal. */
+-                    if (record->info.u.Signal.process == gcvNULL)
+-                    {
+-                        /* Kernel signal. */
+-                        gcmkERR_BREAK(
+-                            gckOS_Signal(Event->os,
++                /* Set signal. */
++                if (record->info.u.Signal.process == gcvNULL)
++                {
++                    /* Kernel signal. */
++                    gcmkERR_BREAK(
++                        gckOS_Signal(Event->os,
++                                     record->info.u.Signal.signal,
++                                     gcvTRUE));
++                }
++                else
++                {
++                    /* User signal. */
++                    gcmkERR_BREAK(
++                        gckOS_UserSignal(Event->os,
+                                          record->info.u.Signal.signal,
+-                                         gcvTRUE));
+-                    }
+-                    else
+-                    {
+-                        /* User signal. */
+-                        gcmkERR_BREAK(
+-                            gckOS_UserSignal(Event->os,
+-                                             record->info.u.Signal.signal,
+-                                             record->info.u.Signal.process));
+-                    }
++                                         record->info.u.Signal.process));
++                }
+ 
+-                    gcmkASSERT(record->info.u.Signal.auxSignal == gcvNULL);
++                gcmkASSERT(record->info.u.Signal.auxSignal == gcvNULL);
+ #endif
+-                    break;
++                break;
+ 
+-                case gcvHAL_UNMAP_USER_MEMORY:
+-                    gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, gcvZONE_EVENT,
+-                                   "gcvHAL_UNMAP_USER_MEMORY: 0x%x",
+-                                   record->info.u.UnmapUserMemory.info);
++            case gcvHAL_UNMAP_USER_MEMORY:
++                gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, gcvZONE_EVENT,
++                               "gcvHAL_UNMAP_USER_MEMORY: 0x%x",
++                               record->info.u.UnmapUserMemory.info);
+ 
+-                    /* Unmap the user memory. */
+-                    status = gckOS_UnmapUserMemoryEx(
+-                        Event->os,
+-                        Event->kernel->core,
+-                        record->info.u.UnmapUserMemory.memory,
+-                        record->info.u.UnmapUserMemory.size,
+-                        record->info.u.UnmapUserMemory.info,
+-                        record->info.u.UnmapUserMemory.address);
++                /* Unmap the user memory. */
++                status = gckOS_UnmapUserMemoryEx(
++                    Event->os,
++                    Event->kernel->core,
++                    record->info.u.UnmapUserMemory.memory,
++                    record->info.u.UnmapUserMemory.size,
++                    record->info.u.UnmapUserMemory.info,
++                    record->info.u.UnmapUserMemory.address);
+ 
+ #if gcdSECURE_USER
+-                    if (gcmIS_SUCCESS(status))
+-                    {
+-                        gcmkVERIFY_OK(gckKERNEL_FlushTranslationCache(
+-                            Event->kernel,
+-                            cache,
+-                            event->event.u.UnmapUserMemory.memory,
+-                            event->event.u.UnmapUserMemory.size));
+-                    }
++                if (gcmIS_SUCCESS(status))
++                {
++                    gcmkVERIFY_OK(gckKERNEL_FlushTranslationCache(
++                        Event->kernel,
++                        cache,
++                        event->event.u.UnmapUserMemory.memory,
++                        event->event.u.UnmapUserMemory.size));
++                }
+ #endif
+-                    gcmkVERIFY_OK(gckKERNEL_RemoveProcessDB(
+-                            Event->kernel,
+-                            record->processID, gcvDB_MAP_USER_MEMORY,
+-                            record->info.u.UnmapUserMemory.memory));
+-                    break;
++                gcmkVERIFY_OK(gckKERNEL_RemoveProcessDB(
++                        Event->kernel,
++                        record->processID, gcvDB_MAP_USER_MEMORY,
++                        record->info.u.UnmapUserMemory.memory));
++                break;
+ 
+-                case gcvHAL_TIMESTAMP:
+-                    gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, gcvZONE_EVENT,
+-                                   "gcvHAL_TIMESTAMP: %d %d",
+-                                   record->info.u.TimeStamp.timer,
+-                                   record->info.u.TimeStamp.request);
++            case gcvHAL_TIMESTAMP:
++                gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, gcvZONE_EVENT,
++                               "gcvHAL_TIMESTAMP: %d %d",
++                               record->info.u.TimeStamp.timer,
++                               record->info.u.TimeStamp.request);
+ 
+-                    /* Process the timestamp. */
+-                    switch (record->info.u.TimeStamp.request)
+-                    {
+-                    case 0:
+-                        status = gckOS_GetTime(&Event->kernel->timers[
+-                                               record->info.u.TimeStamp.timer].
+-                                               stopTime);
+-                        break;
+-
+-                    case 1:
+-                        status = gckOS_GetTime(&Event->kernel->timers[
+-                                               record->info.u.TimeStamp.timer].
+-                                               startTime);
+-                        break;
+-
+-                    default:
+-                        gcmkTRACE_ZONE_N(
+-                            gcvLEVEL_ERROR, gcvZONE_EVENT,
+-                            gcmSIZEOF(record->info.u.TimeStamp.request),
+-                            "Invalid timestamp request: %d",
+-                            record->info.u.TimeStamp.request
+-                            );
+-
+-                        status = gcvSTATUS_INVALID_ARGUMENT;
+-                        break;
+-                    }
++                /* Process the timestamp. */
++                switch (record->info.u.TimeStamp.request)
++                {
++                case 0:
++                    status = gckOS_GetTime(&Event->kernel->timers[
++                                           record->info.u.TimeStamp.timer].
++                                           stopTime);
+                     break;
+ 
+-                case gcvHAL_COMMIT_DONE:
++                case 1:
++                    status = gckOS_GetTime(&Event->kernel->timers[
++                                           record->info.u.TimeStamp.timer].
++                                           startTime);
+                     break;
+ 
+                 default:
+-                    /* Invalid argument. */
+                     gcmkTRACE_ZONE_N(
+                         gcvLEVEL_ERROR, gcvZONE_EVENT,
+-                        gcmSIZEOF(record->info.command),
+-                        "Unknown event type: %d",
+-                        record->info.command
++                        gcmSIZEOF(record->info.u.TimeStamp.request),
++                        "Invalid timestamp request: %d",
++                        record->info.u.TimeStamp.request
+                         );
+ 
+                     status = gcvSTATUS_INVALID_ARGUMENT;
+                     break;
+                 }
++                break;
+ 
+-                /* Make sure there are no errors generated. */
+-                if (gcmIS_ERROR(status))
+-                {
+-                    gcmkTRACE_ZONE_N(
+-                        gcvLEVEL_WARNING, gcvZONE_EVENT,
+-                        gcmSIZEOF(status),
+-                        "Event produced status: %d(%s)",
+-                        status, gckOS_DebugStatus2Name(status));
+-                }
++            case gcvHAL_COMMIT_DONE:
++                break;
++
++            default:
++                /* Invalid argument. */
++                gcmkTRACE_ZONE_N(
++                    gcvLEVEL_ERROR, gcvZONE_EVENT,
++                    gcmSIZEOF(record->info.command),
++                    "Unknown event type: %d",
++                    record->info.command
++                    );
+ 
+-                /* Free the event. */
+-                gcmkVERIFY_OK(gckEVENT_FreeRecord(Event, record));
++                status = gcvSTATUS_INVALID_ARGUMENT;
++                break;
+             }
+ 
+-            if (recordNext == gcvNULL)
++            /* Make sure there are no errors generated. */
++            if (gcmIS_ERROR(status))
+             {
+-                break;
++                gcmkTRACE_ZONE_N(
++                    gcvLEVEL_WARNING, gcvZONE_EVENT,
++                    gcmSIZEOF(status),
++                    "Event produced status: %d(%s)",
++                    status, gckOS_DebugStatus2Name(status));
+             }
+-        }
+ 
+-        /* Increase the number of free events. */
+-        gcmkONERROR(gckOS_AtomIncrement(Event->os, Event->freeAtom, &free));
++            /* Free the event. */
++            gcmkVERIFY_OK(gckEVENT_FreeRecord(Event, record));
++
++            /* Advance to next record. */
++            record = recordNext;
++        }
+ 
+         gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, gcvZONE_EVENT,
+                        "Handled interrupt 0x%x", mask);
+-
+-        /* Suspend interrupts. */
+-        gcmkONERROR(gckOS_SuspendInterruptEx(Event->os, Event->kernel->core));
+-        suspended = gcvTRUE;
+-
+-        /* Mark pending interrupt as handled. */
+-#if gcdSMP
+-        gckOS_AtomClearMask(Event->pending, mask);
+-#elif defined(__QNXNTO__)
+-        atomic_clr(&Event->pending, mask);
+-#else
+-        Event->pending &= ~mask;
+-#endif
+-
+-        /* Resume interrupts. */
+-        gcmkONERROR(gckOS_ResumeInterruptEx(Event->os, Event->kernel->core));
+-        suspended = gcvFALSE;
+     }
+ 
+     if (IDs == 0)
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
+index cf34118..48e5e09 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
+@@ -827,6 +827,12 @@ gckMMU_Construct(
+ 
+         gcmkONERROR(_Construct(Kernel, MmuSize, &sharedPageTable->mmu));
+     }
++    else if (Kernel->hardware->mmuVersion == 0)
++    {
++        /* Set page table address. */
++        gcmkONERROR(
++            gckHARDWARE_SetMMU(Kernel->hardware, (gctPOINTER) sharedPageTable->mmu->pageTableLogical));
++    }
+ 
+     *Mmu = sharedPageTable->mmu;
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
+index 9fd50e8..288b330 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
+@@ -282,7 +282,12 @@ gckVIDMEM_ConstructVirtual(
+ 
+ #ifdef __QNXNTO__
+     /* Register. */
+-    gckMMU_InsertNode(Kernel->mmu, node);
++#if gcdENABLE_VG
++    if (Kernel->core != gcvCORE_VG)
++#endif
++    {
++        gckMMU_InsertNode(Kernel->mmu, node);
++    }
+ #endif
+ 
+     /* Return pointer to the gcuVIDMEM_NODE union. */
+@@ -349,8 +354,13 @@ gckVIDMEM_DestroyVirtual(
+ 
+ #ifdef __QNXNTO__
+     /* Unregister. */
+-    gcmkVERIFY_OK(
+-            gckMMU_RemoveNode(Node->Virtual.kernel->mmu, Node));
++#if gcdENABLE_VG
++    if (Node->Virtual.kernel->core != gcvCORE_VG)
++#endif
++    {
++        gcmkVERIFY_OK(
++                gckMMU_RemoveNode(Node->Virtual.kernel->mmu, Node));
++    }
+ #endif
+ 
+     /* Delete the mutex. */
+@@ -1306,6 +1316,14 @@ gckVIDMEM_Free(
+                 Node->VidMem.kernelVirtual = gcvNULL;
+             }
+ #endif
++
++            /* Check if Node is already freed. */
++            if (Node->VidMem.nextFree)
++            {
++                /* Node is alread freed. */
++                gcmkONERROR(gcvSTATUS_INVALID_DATA);
++            }
++
+             /* Update the number of free bytes. */
+             memory->freeBytes += Node->VidMem.bytes;
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h
+index e0efba4..08442ae 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h
+@@ -245,6 +245,11 @@ typedef HDC             HALNativeDisplayType;
+ typedef HWND            HALNativeWindowType;
+ typedef HBITMAP         HALNativePixmapType;
+ 
++typedef struct __BITFIELDINFO{
++    BITMAPINFO    bmi;
++    RGBQUAD       bmiColors[2];
++} BITFIELDINFO;
++
+ #elif defined(LINUX) && defined(EGL_API_FB) && !defined(__APPLE__)
+ /* Linux platform for FBDEV. */
+ typedef struct _FBDisplay * HALNativeDisplayType;
+@@ -412,8 +417,8 @@ gceSTATUS
+ gcoOS_GetDisplayBackbuffer(
+     IN HALNativeDisplayType Display,
+     IN HALNativeWindowType Window,
+-    IN gctPOINTER    context,
+-    IN gcoSURF       surface,
++    OUT gctPOINTER  *  context,
++    OUT gcoSURF     *  surface,
+     OUT gctUINT * Offset,
+     OUT gctINT * X,
+     OUT gctINT * Y
+@@ -441,6 +446,49 @@ gcoOS_DestroyDisplay(
+     IN HALNativeDisplayType Display
+     );
+ 
++gceSTATUS
++gcoOS_InitLocalDisplayInfo(
++    IN OUT gctPOINTER * localDisplay
++    );
++
++gceSTATUS
++gcoOS_DeinitLocalDisplayInfo(
++    IN OUT gctPOINTER * localDisplay
++    );
++
++gceSTATUS
++gcoOS_GetDisplayInfoEx2(
++    IN HALNativeDisplayType Display,
++    IN HALNativeWindowType Window,
++    IN gctPOINTER  localDisplay,
++    IN gctUINT DisplayInfoSize,
++    OUT halDISPLAY_INFO * DisplayInfo
++    );
++
++gceSTATUS
++gcoOS_GetDisplayBackbufferEx(
++    IN HALNativeDisplayType Display,
++    IN HALNativeWindowType Window,
++    IN gctPOINTER  localDisplay,
++    OUT gctPOINTER  *  context,
++    OUT gcoSURF     *  surface,
++    OUT gctUINT * Offset,
++    OUT gctINT * X,
++    OUT gctINT * Y
++    );
++
++gceSTATUS
++gcoOS_IsValidDisplay(
++    IN HALNativeDisplayType Display
++    );
++
++gceSTATUS
++gcoOS_GetNativeVisualId(
++    IN HALNativeDisplayType Display,
++    OUT gctINT* nativeVisualId
++    );
++
++
+ /*******************************************************************************
+ ** Windows. ********************************************************************
+ */
+@@ -501,6 +549,34 @@ gcoOS_GetImage(
+     OUT gctPOINTER * Bits
+     );
+ 
++gceSTATUS
++gcoOS_GetWindowInfoEx(
++    IN HALNativeDisplayType Display,
++    IN HALNativeWindowType Window,
++    OUT gctINT * X,
++    OUT gctINT * Y,
++    OUT gctINT * Width,
++    OUT gctINT * Height,
++    OUT gctINT * BitsPerPixel,
++    OUT gctUINT * Offset,
++    OUT gceSURF_FORMAT * Format
++    );
++
++gceSTATUS
++gcoOS_DrawImageEx(
++    IN HALNativeDisplayType Display,
++    IN HALNativeWindowType Window,
++    IN gctINT Left,
++    IN gctINT Top,
++    IN gctINT Right,
++    IN gctINT Bottom,
++    IN gctINT Width,
++    IN gctINT Height,
++    IN gctINT BitsPerPixel,
++    IN gctPOINTER Bits,
++    IN gceSURF_FORMAT  Format
++    );
++
+ /*******************************************************************************
+ ** Pixmaps. ********************************************************************
+ */
+@@ -545,6 +621,29 @@ gcoOS_DestroyPixmap(
+     IN HALNativePixmapType Pixmap
+     );
+ 
++gceSTATUS
++gcoOS_GetPixmapInfoEx(
++    IN HALNativeDisplayType Display,
++    IN HALNativePixmapType Pixmap,
++    OUT gctINT * Width,
++    OUT gctINT * Height,
++    OUT gctINT * BitsPerPixel,
++    OUT gctINT * Stride,
++    OUT gctPOINTER * Bits,
++    OUT gceSURF_FORMAT * Format
++    );
++
++gceSTATUS
++gcoOS_CopyPixmapBits(
++    IN HALNativeDisplayType Display,
++    IN HALNativePixmapType Pixmap,
++    IN gctUINT DstWidth,
++    IN gctUINT DstHeight,
++    IN gctINT DstStride,
++    IN gceSURF_FORMAT DstFormat,
++    OUT gctPOINTER DstBits
++    );
++
+ /*******************************************************************************
+ ** OS relative. ****************************************************************
+ */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+index bcc3186..9d03a66 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+@@ -724,10 +724,6 @@
+ #   define gcdSHARED_PAGETABLE                  1
+ #endif
+ 
+-#ifndef gcdUSE_OPENCL
+-#   define gcdUSE_OPENCL                        0
+-#endif
+-
+ /*
+     gcdBLOB_CACHE_ENABLED
+         When non-zero, Android blob cache extension will be enabled.
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
+index 83db422..2cb52a0 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
+@@ -30,7 +30,7 @@
+ 
+ #define gcvVERSION_PATCH        6
+ 
+-#define gcvVERSION_BUILD        1381
++#define gcvVERSION_BUILD        1394
+ 
+ #define gcvVERSION_DATE      __DATE__
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+index ae6062d..efdaef8 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+@@ -140,7 +140,7 @@ static int threadRoutine(void *ctxt)
+         static int down;
+ 
+         down = down_interruptible(&device->semas[gcvCORE_MAJOR]);
+-        if (down); /*To make gcc4.6 happy*/
++        if (down); /* To make gcc4.6 happy */
+         device->dataReadys[gcvCORE_MAJOR] = gcvFALSE;
+ 
+         if (device->killThread == gcvTRUE)
+@@ -193,7 +193,7 @@ static int threadRoutine2D(void *ctxt)
+         static int down;
+ 
+         down = down_interruptible(&device->semas[gcvCORE_2D]);
+-        if (down); /*To make gcc4.6 happy*/
++        if (down); /* To make gcc4.6 happy */
+         device->dataReadys[gcvCORE_2D] = gcvFALSE;
+ 
+         if (device->killThread == gcvTRUE)
+@@ -244,7 +244,7 @@ static int threadRoutineVG(void *ctxt)
+         static int down;
+ 
+         down = down_interruptible(&device->semas[gcvCORE_VG]);
+-        if (down); /*To make gcc4.6 happy*/
++        if (down); /* To make gcc4.6 happy */
+         device->dataReadys[gcvCORE_VG] = gcvFALSE;
+ 
+         if (device->killThread == gcvTRUE)
+-- 
+1.7.7.4
+

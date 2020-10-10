@@ -1,0 +1,95 @@
+From 92e33b2700ccd125aa2743e4ed4d15d6de20a78a Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Fri, 2 Nov 2012 18:21:08 +0800
+Subject: [PATCH 2407/2463] ENGR00237452 i.MX6:IEEE1588: disable phy Ar8031
+ SmartEEE
+
+Connecting two boards directly more than 2 hours, Ar8031 phy link
+status generates glitch, which cause ethernet link down/up issue, but
+ethernet still be active. There have three cases to validate the issue:
+
+Item#1: If add performance stress test while runing IEEE1588, the link
+	down/up issue cannot be found.
+Item#2: If insert switch between two net nodes and run IEEE1588 test,
+	the issue also cannot be found.
+Item#3: If disable AR8031 SmartEEE feature, after two days overnight test,
+	no such issue found.
+
+The issue is caused by phy Ar8031 SmartEEE feature, Item#1 and Item#2 can
+prevent phy enter lpm mode, which match the Item#3 test result, so disable
+SmartEEE feature to avoid the link issue generation.
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c      |   10 ++++++++++
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   11 +++++++++++
+ arch/arm/mach-mx6/board-mx6q_sabresd.c   |   10 ++++++++++
+ 3 files changed, 31 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index b1c8eaa..1e42f4f 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -336,6 +336,16 @@ static int mx6_arm2_fec_phy_init(struct phy_device *phydev)
+ {
+ 	unsigned short val;
+ 
++	/* Ar8031 phy SmartEEE feature cause link status generates glitch,
++	 * which cause ethernet link down/up issue, so disable SmartEEE
++	 */
++	phy_write(phydev, 0xd, 0x3);
++	phy_write(phydev, 0xe, 0x805d);
++	phy_write(phydev, 0xd, 0x4003);
++	val = phy_read(phydev, 0xe);
++	val &= ~(0x1 << 8);
++	phy_write(phydev, 0xe, val);
++
+ 	/* To enable AR8031 ouput a 125MHz clk from CLK_25M */
+ 	phy_write(phydev, 0xd, 0x7);
+ 	phy_write(phydev, 0xe, 0x8016);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index f028fa8..99db549 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -346,6 +346,17 @@ static int mx6q_sabreauto_fec_phy_init(struct phy_device *phydev)
+ 	unsigned short val;
+ 
+ 	if (!board_is_mx6_reva()) {
++		/* Ar8031 phy SmartEEE feature cause link status generates
++		 * glitch, which cause ethernet link down/up issue, so
++		 * disable SmartEEE
++		 */
++		phy_write(phydev, 0xd, 0x3);
++		phy_write(phydev, 0xe, 0x805d);
++		phy_write(phydev, 0xd, 0x4003);
++		val = phy_read(phydev, 0xe);
++		val &= ~(0x1 << 8);
++		phy_write(phydev, 0xe, val);
++
+ 		/* To enable AR8031 ouput a 125MHz clk from CLK_25M */
+ 		phy_write(phydev, 0xd, 0x7);
+ 		phy_write(phydev, 0xe, 0x8016);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 082de98..8a9645f 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -254,6 +254,16 @@ static int mx6q_sabresd_fec_phy_init(struct phy_device *phydev)
+ {
+ 	unsigned short val;
+ 
++	/* Ar8031 phy SmartEEE feature cause link status generates glitch,
++	 * which cause ethernet link down/up issue, so disable SmartEEE
++	 */
++	phy_write(phydev, 0xd, 0x3);
++	phy_write(phydev, 0xe, 0x805d);
++	phy_write(phydev, 0xd, 0x4003);
++	val = phy_read(phydev, 0xe);
++	val &= ~(0x1 << 8);
++	phy_write(phydev, 0xe, val);
++
+ 	/* To enable AR8031 ouput a 125MHz clk from CLK_25M */
+ 	phy_write(phydev, 0xd, 0x7);
+ 	phy_write(phydev, 0xe, 0x8016);
+-- 
+1.7.7.4
+

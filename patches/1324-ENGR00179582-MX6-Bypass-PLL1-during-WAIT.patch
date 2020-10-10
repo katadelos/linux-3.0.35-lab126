@@ -1,0 +1,273 @@
+From 6079ec044048b2f50f53a22c48df84e123d24535 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Thu, 23 Feb 2012 12:19:23 -0600
+Subject: [PATCH 1324/2463] ENGR00179582 MX6: Bypass PLL1 during WAIT
+
+    When system is going to enter WAIT mode, set PLL1 to 24MHz
+    so that ARM is running at 24MHz. This is a SW workaround for
+    the WAIT mode issue.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c      |    2 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    2 +
+ arch/arm/mach-mx6/board-mx6q_sabresd.c   |    6 ++-
+ arch/arm/mach-mx6/cpu.c                  |   25 +---------
+ arch/arm/mach-mx6/mx6_wfi.S              |   75 ++++++++++++++++++++++++++++--
+ arch/arm/mach-mx6/system.c               |   18 +++----
+ 6 files changed, 90 insertions(+), 38 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index d71c6e2..38e34f9 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -169,6 +169,7 @@ extern char *gp_reg_id;
+ extern int epdc_enabled;
+ extern void mx6_cpu_regulator_init(void);
+ static int max17135_regulator_init(struct max17135 *max17135);
++extern volatile int num_cpu_idle_lock;
+ 
+ enum sd_pad_mode {
+ 	SD_PAD_MODE_LOW_SPEED,
+@@ -1999,6 +2000,7 @@ static void __init mx6_arm2_init(void)
+ 		spdif_pads_cnt =  ARRAY_SIZE(mx6dl_arm2_spdif_pads);
+ 		flexcan_pads_cnt = ARRAY_SIZE(mx6dl_arm2_can_pads);
+ 		i2c3_pads_cnt = ARRAY_SIZE(mx6dl_arm2_i2c3_pads);
++		num_cpu_idle_lock = 0xffff0000;
+ 	}
+ 
+ 	BUG_ON(!common_pads);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 46f32b0..7f19fd3 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -138,6 +138,7 @@ static int mipi_sensor;
+ static int can0_enable;
+ static int uart3_en;
+ static int tuner_en;
++extern volatile int num_cpu_idle_lock;
+ 
+ static int __init uart3_enable(char *p)
+ {
+@@ -1317,6 +1318,7 @@ static void __init mx6_board_init(void)
+ 			i2c3_pads = mx6dl_i2c3_pads_rev_b;
+ 			i2c3_pads_cnt = ARRAY_SIZE(mx6dl_i2c3_pads_rev_b);
+ 		}
++		num_cpu_idle_lock = 0xffff0000;
+ 	}
+ 
+ 	BUG_ON(!common_pads);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 82fb04e..a4e0655 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -199,6 +199,8 @@ static int disable_ldb;
+ 
+ extern char *gp_reg_id;
+ extern int epdc_enabled;
++extern volatile int num_cpu_idle_lock;
++
+ static int max17135_regulator_init(struct max17135 *max17135);
+ 
+ static const struct esdhc_platform_data mx6q_sabresd_sd2_data __initconst = {
+@@ -1485,9 +1487,11 @@ static void __init mx6_sabresd_board_init(void)
+ 	if (cpu_is_mx6q())
+ 		mxc_iomux_v3_setup_multiple_pads(mx6q_sabresd_pads,
+ 			ARRAY_SIZE(mx6q_sabresd_pads));
+-	else if (cpu_is_mx6dl())
++	else if (cpu_is_mx6dl()) {
+ 		mxc_iomux_v3_setup_multiple_pads(mx6dl_sabresd_pads,
+ 			ARRAY_SIZE(mx6dl_sabresd_pads));
++		num_cpu_idle_lock = 0xffff0000;
++	}
+ 
+ #ifdef CONFIG_FEC_1588
+ 	/* Set GPIO_16 input for IEEE-1588 ts_clk and RMII reference clock
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index d485065..8401026 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -31,11 +31,7 @@
+ #include "crm_regs.h"
+ #include "cpu_op-mx6.h"
+ 
+-
+-void *mx6_wait_in_iram_base;
+-void (*mx6_wait_in_iram)(void);
+-extern void mx6_wait(void);
+-
++extern unsigned int num_cpu_idle_lock;
+ 
+ struct cpu_op *(*get_cpu_op)(int *op);
+ bool enable_wait_mode;
+@@ -128,26 +124,11 @@ static int __init post_cpu_init(void)
+ 	reg &= ~0x1;
+ 	__raw_writel(reg, base);
+ 
+-	/* Allocate IRAM for WAIT code. */
+-	/* Move wait routine into iRAM */
+-	cpaddr = (unsigned long)iram_alloc(SZ_4K, &iram_paddr);
+-	/* Need to remap the area here since we want the memory region
+-		 to be executable. */
+-	mx6_wait_in_iram_base = __arm_ioremap(iram_paddr, SZ_4K,
+-					  MT_MEMORY_NONCACHED);
+-	pr_info("cpaddr = %x wait_iram_base=%x\n",
+-		(unsigned int)cpaddr, (unsigned int)mx6_wait_in_iram_base);
+-
+-	/*
+-	 * Need to run the suspend code from IRAM as the DDR needs
+-	 * to be put into low power mode manually.
+-	 */
+-	memcpy((void *)cpaddr, mx6_wait, SZ_4K);
+-	mx6_wait_in_iram = (void *)mx6_wait_in_iram_base;
+-
+ 	gpc_base = MX6_IO_ADDRESS(GPC_BASE_ADDR);
+ 	ccm_base = MX6_IO_ADDRESS(CCM_BASE_ADDR);
+ 
++	num_cpu_idle_lock = 0x0;
++
+ 	return 0;
+ }
+ postcore_initcall(post_cpu_init);
+diff --git a/arch/arm/mach-mx6/mx6_wfi.S b/arch/arm/mach-mx6/mx6_wfi.S
+index 3c63102..6e2972f 100644
+--- a/arch/arm/mach-mx6/mx6_wfi.S
++++ b/arch/arm/mach-mx6/mx6_wfi.S
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2010-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -17,6 +17,7 @@
+  */
+ 
+ #include <linux/linkage.h>
++#include <mach/hardware.h>
+ 
+ /*
+  *  mx6_wait
+@@ -27,14 +28,80 @@
+  */
+ ENTRY(mx6_wait)
+ 
++    push {r4, r5, r6}
++
++      ldr     r2, =ANATOP_BASE_ADDR
++      add   r2, r2, #PERIPBASE_VIRT
++
++    /* get the flags variables into the cache */
++	ldr     r3, [r0]
++
++    /* get CPU ID */
++    mrc     p15,0,r5,c0,c0,5
++    and     r5, r5, #0x3
++
++    mov r4,#0xff
++    strb r4,[r0,r5]
++
++    dsb
++
++    mvn r4, #0x0
++    ldr r3, [r0]
++    cmp r3, r4
++    bne DO_WFI
++
++    mov r4, #0x1
++    ldrex r3, [r1]
++    cmp r3, #0x0
++    strexeq r3, r4, [r1]
++    cmpeq r3, #0x0
++    bne DO_WFI
++
++    mov r3, #0xff
++
++    ldr     r6, =(1 << 16)
++    str     r6, [r2, #0x04]
++
++    /* dmb */
++
++    str r3, [r1]
++
++    dsb
++
++    mvn r4, #0x0
++    ldr r3, [r0]
++    cmp r3, r4
++    movne r3, #0x0
++    strne r6, [r2, #0x08]
++    strne r3, [r1]
++
++DO_WFI:
+ 	dsb
+ 
+ 	wfi
+ 
+- 	isb
+-	isb
++    mov r4, #0x0
++    strb r4, [r0, r5]
++
++    dsb
++
++    ldr r3, [r1]
++    cmp r3, #0xff
++    bne DONE
++
++    mov r4, #0x0
++    ldr     r6, =(1 << 16)
++    str r6, [r2, #0x08]
++
++    mov r3, #0x0
++    str r3, [r1]
++
++DONE:
++
++    pop {r4,r5, r6}
+ 
+-      mov     pc, lr
++    /* Restore registers */
++    mov     pc, lr
+ 
+     .type   mx6_do_wait, #object
+ ENTRY(mx6_do_wait)
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 0eb6592..8210f9a 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -49,9 +49,10 @@ extern int mx6q_revision(void);
+ 
+ static void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ 
+-extern void (*mx6_wait_in_iram)(void);
+-extern void mx6_wait(void);
+-extern void *mx6_wait_in_iram_base;
++volatile unsigned int num_cpu_idle;
++volatile unsigned int num_cpu_idle_lock = 0x0;
++
++extern void mx6_wait(void *num_cpu_idle_lock, void *num_cpu_idle);
+ extern bool enable_wait_mode;
+ 
+ void gpc_set_wakeup(unsigned int irq[4])
+@@ -159,14 +160,9 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+  void arch_idle(void)
+ {
+ 	if (enable_wait_mode) {
+-		if ((num_online_cpus() == num_present_cpus())
+-			&& mx6_wait_in_iram != NULL) {
+-			mxc_cpu_lp_set(WAIT_UNCLOCKED_POWER_OFF);
+-			if (smp_processor_id() == 0)
+-				mx6_wait_in_iram();
+-			else
+-				cpu_do_idle();
+-		}
++		*((char *)(&num_cpu_idle_lock) + smp_processor_id()) = 0x0;
++		mxc_cpu_lp_set(WAIT_UNCLOCKED_POWER_OFF);
++		mx6_wait((void *)&num_cpu_idle_lock, (void *)&num_cpu_idle);
+ 	} else
+ 		cpu_do_idle();
+ }
+-- 
+1.7.7.4
+

@@ -1,0 +1,44 @@
+From 0429bc217a19c1a77022049929df95b32962e0be Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 2 Aug 2011 17:22:56 +0800
+Subject: [PATCH 0311/2463] ENGR00154056-1 [MX6]Enable dormant mode
+
+Enable dormant mode on MX6, need to re-init gic and l2 cache,
+so we must remove the gic init and l2 cache init routine's
+__INIT section.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/common/gic.c    |    2 +-
+ arch/arm/mm/cache-l2x0.c |    2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/common/gic.c b/arch/arm/common/gic.c
+index 4ddd0a6..e60138b 100644
+--- a/arch/arm/common/gic.c
++++ b/arch/arm/common/gic.c
+@@ -350,7 +350,7 @@ static void __cpuinit gic_cpu_init(struct gic_chip_data *gic)
+ 	writel_relaxed(1, base + GIC_CPU_CTRL);
+ }
+ 
+-void __init gic_init(unsigned int gic_nr, unsigned int irq_start,
++void gic_init(unsigned int gic_nr, unsigned int irq_start,
+ 	void __iomem *dist_base, void __iomem *cpu_base)
+ {
+ 	struct gic_chip_data *gic;
+diff --git a/arch/arm/mm/cache-l2x0.c b/arch/arm/mm/cache-l2x0.c
+index 44c0867..5891ea0 100644
+--- a/arch/arm/mm/cache-l2x0.c
++++ b/arch/arm/mm/cache-l2x0.c
+@@ -277,7 +277,7 @@ static void l2x0_disable(void)
+ 	spin_unlock_irqrestore(&l2x0_lock, flags);
+ }
+ 
+-void __init l2x0_init(void __iomem *base, __u32 aux_val, __u32 aux_mask)
++void l2x0_init(void __iomem *base, __u32 aux_val, __u32 aux_mask)
+ {
+ 	__u32 aux;
+ 	__u32 cache_id;
+-- 
+1.7.7.4
+

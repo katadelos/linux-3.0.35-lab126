@@ -1,0 +1,40 @@
+From a8748214d9b6026148aca57e0fae80c015436a83 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Mon, 30 Jul 2012 17:31:32 +0800
+Subject: [PATCH 1838/2463] ENGR00218807 ESAI: fix bootup issue cause by
+ accessing unexist address
+
+To support p2p playback, ESAI driver would copy platform data to
+esai_asrc struct. The platform data only exist on boards that supports
+ESAI. However, for ARM2 board, it supports ESAI but not necessary
+get the codec CS42888. Thus the probe() in ESAI driver would also try to
+copy the platform data from board init file.
+
+The p2p playback now only support ARD board, so the ESAI probe() for
+ARM2 would access unexisted address and cause an kernel dump.
+
+In the patch, check the platform data address before copy.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ sound/soc/imx/imx-cs42888.c |    4 +++-
+ 1 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/sound/soc/imx/imx-cs42888.c b/sound/soc/imx/imx-cs42888.c
+index 5fc128a..e06b1a7 100644
+--- a/sound/soc/imx/imx-cs42888.c
++++ b/sound/soc/imx/imx-cs42888.c
+@@ -376,7 +376,9 @@ static int __devinit imx_3stack_cs42888_probe(struct platform_device *pdev)
+ 		imx_3stack_dai[1].codec_name = plat_data->codec_name;
+ 	}
+ 	esai_asrc = kzalloc(sizeof(struct asrc_p2p_params), GFP_KERNEL);
+-	memcpy(esai_asrc, plat_data->priv,  sizeof(struct asrc_p2p_params));
++	if (plat_data->priv)
++		memcpy(esai_asrc, plat_data->priv,
++				sizeof(struct asrc_p2p_params));
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

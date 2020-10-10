@@ -1,0 +1,41 @@
+From bf839af420f06b2553251440770f048270ce7a04 Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Mon, 2 Jul 2012 16:20:31 +0800
+Subject: [PATCH 1685/2463] ENGR00215516 MX6x HDMI, keep HDMI HPD clock on
+ when display blank
+
+HDMI Hotplug function should work when display blank,
+So keep HDMI HPD clock on.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ drivers/video/mxc_hdmi.c |    6 ------
+ 1 files changed, 0 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index 48ff32f68..b096a88 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -2035,9 +2035,6 @@ static int mxc_hdmi_fb_event(struct notifier_block *nb,
+ 
+ 			hdmi->blank = *((int *)event->data);
+ 
+-			clk_enable(hdmi->hdmi_iahb_clk);
+-			clk_enable(hdmi->hdmi_isfr_clk);
+-
+ 			mxc_hdmi_enable_pins(hdmi);
+ 			if (hdmi->fb_reg && hdmi->cable_plugin)
+ 				mxc_hdmi_setup(hdmi, val);
+@@ -2049,9 +2046,6 @@ static int mxc_hdmi_fb_event(struct notifier_block *nb,
+ 			mxc_hdmi_disable_pins(hdmi);
+ 			mxc_hdmi_phy_disable(hdmi);
+ 
+-			clk_disable(hdmi->hdmi_iahb_clk);
+-			clk_disable(hdmi->hdmi_isfr_clk);
+-
+ 			hdmi->blank = *((int *)event->data);
+ 		} else
+ 			dev_dbg(&hdmi->pdev->dev,
+-- 
+1.7.7.4
+

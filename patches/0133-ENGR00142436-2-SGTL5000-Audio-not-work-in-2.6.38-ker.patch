@@ -1,0 +1,36 @@
+From 9639756cd01a1cc451fbd95d6a1d1f9ddc89f872 Mon Sep 17 00:00:00 2001
+From: Zeng Zhaoming <b32542@freescale.com>
+Date: Thu, 21 Apr 2011 08:06:29 +0800
+Subject: [PATCH 0133/2463] ENGR00142436-2 SGTL5000: Audio not work in 2.6.38
+ kernel
+
+If platform not provide headphone status detect gpio, should not failed
+the audio subsystem.
+
+Fix it by complains with a warning.
+
+Signed-off-by: Zeng Zhaoming <b32542@freescale.com>
+---
+ sound/soc/imx/imx-sgtl5000.c |    6 ++----
+ 1 files changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/sound/soc/imx/imx-sgtl5000.c b/sound/soc/imx/imx-sgtl5000.c
+index 4da55ad..82ee8ec 100644
+--- a/sound/soc/imx/imx-sgtl5000.c
++++ b/sound/soc/imx/imx-sgtl5000.c
+@@ -264,10 +264,8 @@ static int imx_3stack_sgtl5000_init(struct snd_soc_pcm_runtime *rtd)
+ 
+ 	ret = snd_soc_jack_add_gpios(&hs_jack, ARRAY_SIZE(hs_jack_gpios),
+ 				hs_jack_gpios);
+-	if (ret) {
+-		printk(KERN_ERR "failed to call snd_soc_jack_add_gpios\n");
+-		return ret;
+-	}
++	if (ret)
++		printk(KERN_WARNING "failed to call snd_soc_jack_add_gpios\n");
+ 
+ 	return 0;
+ }
+-- 
+1.7.7.4
+

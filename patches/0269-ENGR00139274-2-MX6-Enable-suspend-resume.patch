@@ -1,0 +1,66 @@
+From f41455a6272388fb8f1b57e5402bf470469c1e35 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 19 Jul 2011 13:29:54 +0800
+Subject: [PATCH 0269/2463] ENGR00139274-2 [MX6]Enable suspend/resume
+
+Enable suspend/resume for MX6, using debug
+UART as wake up source due to hardware design
+limitation.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ drivers/tty/serial/imx.c |   18 +++++++++++++++++-
+ 1 files changed, 17 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/tty/serial/imx.c b/drivers/tty/serial/imx.c
+index a544731..850b6d8 100644
+--- a/drivers/tty/serial/imx.c
++++ b/drivers/tty/serial/imx.c
+@@ -502,6 +502,10 @@ static irqreturn_t imx_int(int irq, void *dev_id)
+ 	if (sts & USR1_RTSD)
+ 		imx_rtsint(irq, dev_id);
+ 
++#ifdef CONFIG_ARCH_MX6
++	if (sts & USR1_AWAKE)
++		writel(USR1_AWAKE, sport->port.membase + USR1);
++#endif
+ 	return IRQ_HANDLED;
+ }
+ 
+@@ -1206,20 +1210,32 @@ static struct uart_driver imx_reg = {
+ static int serial_imx_suspend(struct platform_device *dev, pm_message_t state)
+ {
+ 	struct imx_port *sport = platform_get_drvdata(dev);
++	unsigned int val;
+ 
+ 	if (sport)
+ 		uart_suspend_port(&imx_reg, &sport->port);
+-
++#ifdef CONFIG_ARCH_MX6
++	/* enable awake for MX6*/
++	val = readl(sport->port.membase + UCR3);
++	val |= UCR3_AWAKEN;
++	writel(val, sport->port.membase + UCR3);
++#endif
+ 	return 0;
+ }
+ 
+ static int serial_imx_resume(struct platform_device *dev)
+ {
+ 	struct imx_port *sport = platform_get_drvdata(dev);
++	unsigned int val;
+ 
+ 	if (sport)
+ 		uart_resume_port(&imx_reg, &sport->port);
+ 
++#ifdef CONFIG_ARCH_MX6
++	val = readl(sport->port.membase + UCR3);
++	val &= ~UCR3_AWAKEN;
++	writel(val, sport->port.membase + UCR3);
++#endif
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

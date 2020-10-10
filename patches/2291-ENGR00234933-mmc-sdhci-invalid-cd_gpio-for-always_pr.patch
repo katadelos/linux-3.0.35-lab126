@@ -1,0 +1,36 @@
+From 21d674e56156b35e80e936f2fcf945e62025f706 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Wed, 28 Nov 2012 07:54:32 +0800
+Subject: [PATCH 2291/2463] ENGR00234933 mmc: sdhci: invalid cd_gpio for
+ always_present host controller
+
+Issue:
+By default, cd_gpio is 0 for always presented host controller, which is a
+valid gpio. Then it will result to free_irq for 0 in esdhc_pltfm_exit for
+these always_present host controllers.
+
+Fix:
+Invalid cd_gpio if the controller is indicated to be always present.
+
+Acked-by: Dong Aisheng <b29396@freescale.com>
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/host/sdhci-esdhc-imx.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index 59cc92c..35fd825 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -881,6 +881,8 @@ static int esdhc_pltfm_init(struct sdhci_host *host, struct sdhci_pltfm_data *pd
+ 		if (boarddata->always_present) {
+ 			/* remove BROKEN_CD to disable card polling */
+ 			host->quirks &= ~SDHCI_QUIRK_BROKEN_CARD_DETECTION;
++			/* if it is always present, invalid cd_gpio */
++			boarddata->cd_gpio = ARCH_NR_GPIOS + 1;
+ 			if (host->clk_mgr_en)
+ 				clk_disable(pltfm_host->clk);
+ 			return 0;
+-- 
+1.7.7.4
+

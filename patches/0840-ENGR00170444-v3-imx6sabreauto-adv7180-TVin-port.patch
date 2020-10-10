@@ -1,0 +1,339 @@
+From f8e1a3bb62eecf93a31a51c4dbe08a0214fa1d57 Mon Sep 17 00:00:00 2001
+From: b37753 <B37753@freescale.com>
+Date: Fri, 6 Jan 2012 15:50:40 -0600
+Subject: [PATCH 0840/2463] ENGR00170444: [v3]imx6sabreauto adv7180 TVin port
+
+Kconfig and Makefile was modified in order to
+enable adv7180 driver for mx6q architecture.
+adv7180.c mutex was changed to semaphore as is described in
+"https://lwn.net/Articles/304725/ ".
+sensor data structure is added in fsl_devices.h.
+mxc_v4l2_capture.c condition in mxc_v4l2_sparam
+was removed because is going to be always true
+capture mode only have 1 possible value as is described in
+"https://lwn.net/Articles/235023/".
+ipu_capture.c clock divisor setup was added at init the csi.
+
+Signed-off-by: B37753 <B37753@freescale.com>
+---
+ drivers/media/video/mxc/capture/Kconfig            |    2 +-
+ drivers/media/video/mxc/capture/adv7180.c          |   26 +++++---
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |   18 +++---
+ drivers/mxc/ipu3/ipu_capture.c                     |   65 +++++++++++---------
+ include/linux/fsl_devices.h                        |   19 ++++++-
+ 5 files changed, 79 insertions(+), 51 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/Kconfig b/drivers/media/video/mxc/capture/Kconfig
+index c9f3e3b..595f55b 100644
+--- a/drivers/media/video/mxc/capture/Kconfig
++++ b/drivers/media/video/mxc/capture/Kconfig
+@@ -100,7 +100,7 @@ config MXC_CAMERA_OV5642
+ 
+ config MXC_TVIN_ADV7180
+ 	tristate "Analog Device adv7180 TV Decoder Input support"
+-	depends on (MACH_MX35_3DS || MACH_MX51_3DS)
++	depends on (MACH_MX35_3DS || MACH_MX51_3DS || MACH_MX6Q_SABREAUTO)
+ 	---help---
+ 	  If you plan to use the adv7180 video decoder with your MXC system, say Y here.
+ 
+diff --git a/drivers/media/video/mxc/capture/adv7180.c b/drivers/media/video/mxc/capture/adv7180.c
+index 3e811d4..204a322 100644
+--- a/drivers/media/video/mxc/capture/adv7180.c
++++ b/drivers/media/video/mxc/capture/adv7180.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -25,6 +25,7 @@
+ #include <linux/ctype.h>
+ #include <linux/types.h>
+ #include <linux/delay.h>
++#include <linux/semaphore.h>
+ #include <linux/device.h>
+ #include <linux/i2c.h>
+ #include <linux/wait.h>
+@@ -40,7 +41,7 @@ static struct regulator *dvddio_regulator;
+ static struct regulator *dvdd_regulator;
+ static struct regulator *avdd_regulator;
+ static struct regulator *pvdd_regulator;
+-static struct mxc_tvin_platform_data *tvin_plat;
++static struct fsl_mxc_tvin_platform_data *tvin_plat;
+ 
+ extern void gpio_sensor_active(void);
+ extern void gpio_sensor_inactive(void);
+@@ -67,7 +68,7 @@ static struct i2c_driver adv7180_i2c_driver = {
+ };
+ 
+ /*!
+- * Maintains the information on the current state of the sesor.
++ * Maintains the information on the current state of the sensor.
+  */
+ struct sensor {
+ 	struct v4l2_int_device *v4l2_int_device;
+@@ -152,7 +153,7 @@ static video_fmt_idx video_idx = ADV7180_PAL;
+  *  read/write access to the globally accessible data structures
+  *  and variables that were defined above.
+  */
+-static DECLARE_MUTEX(mutex);
++static DEFINE_SEMAPHORE(semaphore);
+ 
+ #define IF_NAME                    "adv7180"
+ #define ADV7180_INPUT_CTL              0x00	/* Input Control */
+@@ -255,7 +256,7 @@ static void adv7180_get_std(v4l2_std_id *std)
+ 	/* Read the AD_RESULT to get the detect output video standard */
+ 	tmp = adv7180_read(ADV7180_STATUS_1) & 0x70;
+ 
+-	down(&mutex);
++	down(&semaphore);
+ 	if (tmp == 0x40) {
+ 		/* PAL */
+ 		*std = V4L2_STD_PAL;
+@@ -268,9 +269,9 @@ static void adv7180_get_std(v4l2_std_id *std)
+ 		*std = V4L2_STD_ALL;
+ 		idx = ADV7180_NOT_LOCKED;
+ 		dev_dbg(&adv7180_data.i2c_client->dev,
+-			"Got invalid video standard! \n");
++			"Got invalid video standard!\n");
+ 	}
+-	up(&mutex);
++	up(&semaphore);
+ 
+ 	/* This assumes autodetect which this device uses. */
+ 	if (*std != adv7180_data.std_id) {
+@@ -314,6 +315,7 @@ static int ioctl_g_ifparm(struct v4l2_int_device *s, struct v4l2_ifparm *p)
+ 	p->if_type = V4L2_IF_TYPE_BT656; /* This is the only possibility. */
+ 	p->u.bt656.mode = V4L2_IF_TYPE_BT656_MODE_NOBT_8BIT;
+ 	p->u.bt656.nobt_hs_inv = 1;
++	p->u.bt656.bt_sync_correct = 1;
+ 
+ 	/* ADV7180 has a dedicated clock so no clock settings needed. */
+ 
+@@ -846,7 +848,7 @@ static int adv7180_probe(struct i2c_client *client,
+ 	int ret = 0;
+ 	tvin_plat = client->dev.platform_data;
+ 
+-	dev_dbg(&adv7180_data.i2c_client->dev, "In adv7180_probe\n");
++	pr_debug("In adv7180_probe\n");
+ 
+ 	if (tvin_plat->dvddio_reg) {
+ 		dvddio_regulator =
+@@ -948,10 +950,12 @@ static int adv7180_probe(struct i2c_client *client,
+  */
+ static int adv7180_detach(struct i2c_client *client)
+ {
+-	struct mxc_tvin_platform_data *plat_data = client->dev.platform_data;
++	struct fsl_mxc_tvin_platform_data *plat_data;
++
++	plat_data = client->dev.platform_data;
+ 
+ 	dev_dbg(&adv7180_data.i2c_client->dev,
+-		"%s:Removing %s video decoder @ 0x%02X from adapter %s \n",
++		"%s:Removing %s video decoder @ 0x%02X from adapter %s\n",
+ 		__func__, IF_NAME, client->addr << 1, client->adapter->name);
+ 
+ 	if (plat_data->pwdn)
+@@ -992,7 +996,7 @@ static __init int adv7180_init(void)
+ {
+ 	u8 err = 0;
+ 
+-	dev_dbg(&adv7180_data.i2c_client->dev, "In adv7180_init\n");
++	pr_debug("In adv7180_init\n");
+ 
+ 	/* Tells the i2c driver what functions to call for this driver. */
+ 	err = i2c_add_driver(&adv7180_i2c_driver);
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index 81fc2cb..ada0e71 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -1241,11 +1241,6 @@ static int mxc_v4l2_s_param(cam_data *cam, struct v4l2_streamparm *parm)
+ 	pr_debug("   Current framerate is %d  change to %d\n",
+ 			current_fps, parm_fps);
+ 
+-	if ((parm->parm.capture.capturemode == currentparm.parm.capture.capturemode)
+-		&& (current_fps == parm_fps)) {
+-		return 0;
+-	}
+-
+ 	/* This will change any camera settings needed. */
+ 	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi, true, true);
+ 	err = vidioc_int_s_parm(cam->sensor, parm);
+@@ -1275,10 +1270,16 @@ static int mxc_v4l2_s_param(cam_data *cam, struct v4l2_streamparm *parm)
+ 	csi_param.csi = 0;
+ 	csi_param.mclk = 0;
+ 
+-	/* This may not work on other platforms. Check when adding a new one.*/
++	/*This may not work on other platforms. Check when adding a new one.*/
++	/*The mclk clock was never set correclty in the ipu register*/
++	/*for now we are going to use this mclk as pixel clock*/
++	/*to set csi0_data_dest register.*/
++	/*This is a workaround which should be fixed*/
+ 	pr_debug("   clock_curr=mclk=%d\n", ifparm.u.bt656.clock_curr);
+ 	if (ifparm.u.bt656.clock_curr == 0) {
+ 		csi_param.clk_mode = IPU_CSI_CLK_MODE_CCIR656_INTERLACED;
++		/*protocol bt656 use 27Mhz pixel clock */
++		csi_param.mclk = 27000000;
+ 	} else {
+ 		csi_param.clk_mode = IPU_CSI_CLK_MODE_GATED_CLK;
+ 	}
+@@ -1351,7 +1352,7 @@ exit:
+  */
+ static int mxc_v4l2_s_std(cam_data *cam, v4l2_std_id e)
+ {
+-	pr_debug("In mxc_v4l2_s_std %Lx\n", e);
++	printk(KERN_ERR "In mxc_v4l2_s_std %Lx\n", e);
+ 	if (e == V4L2_STD_PAL) {
+ 		pr_debug("   Setting standard to PAL %Lx\n", V4L2_STD_PAL);
+ 		cam->standard.id = V4L2_STD_PAL;
+@@ -1548,6 +1549,7 @@ static int mxc_v4l_open(struct file *file)
+ 		csi_param.pack_tight = 0;
+ 		csi_param.force_eof = 0;
+ 		csi_param.data_en_pol = 0;
++
+ 		csi_param.mclk = ifparm.u.bt656.clock_curr;
+ 
+ 		csi_param.pixclk_pol = ifparm.u.bt656.latch_clk_inv;
+diff --git a/drivers/mxc/ipu3/ipu_capture.c b/drivers/mxc/ipu3/ipu_capture.c
+index e35d1b5..7ed2e7d 100644
+--- a/drivers/mxc/ipu3/ipu_capture.c
++++ b/drivers/mxc/ipu3/ipu_capture.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2008-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -31,6 +31,36 @@
+ #include "ipu_regs.h"
+ 
+ /*!
++ * _ipu_csi_mclk_set
++ *
++ * @param	ipu		ipu handler
++ * @param	pixel_clk   desired pixel clock frequency in Hz
++ * @param	csi         csi 0 or csi 1
++ *
++ * @return	Returns 0 on success or negative error code on fail
++ */
++int _ipu_csi_mclk_set(struct ipu_soc *ipu, uint32_t pixel_clk, uint32_t csi)
++{
++	uint32_t temp;
++	uint32_t div_ratio;
++
++	div_ratio = (clk_get_rate(ipu->ipu_clk) / pixel_clk) - 1;
++
++	if (div_ratio > 0xFF || div_ratio < 0) {
++		dev_dbg(ipu->dev, "value of pixel_clk extends normal range\n");
++		return -EINVAL;
++	}
++
++	temp = ipu_csi_read(ipu, csi, CSI_SENS_CONF);
++	temp &= ~CSI_SENS_CONF_DIVRATIO_MASK;
++	ipu_csi_write(ipu, csi, temp |
++			(div_ratio << CSI_SENS_CONF_DIVRATIO_SHIFT),
++			CSI_SENS_CONF);
++
++	return 0;
++}
++
++/*!
+  * ipu_csi_init_interface
+  *	Sets initial values for the CSI registers.
+  *	The width and height of the sensor and the actual frame size will be
+@@ -99,6 +129,10 @@ ipu_csi_init_interface(struct ipu_soc *ipu, uint16_t width, uint16_t height,
+ 
+ 	ipu_csi_write(ipu, csi, data, CSI_SENS_CONF);
+ 
++	/* Setup the mclk */
++	if (cfg_param.mclk > 0)
++		_ipu_csi_mclk_set(ipu, cfg_param.mclk, csi);
++
+ 	/* Setup sensor frame size */
+ 	ipu_csi_write(ipu, csi, (width - 1) | (height - 1) << 16, CSI_SENS_FRM_SIZE);
+ 
+@@ -187,35 +221,6 @@ int32_t ipu_csi_get_sensor_protocol(struct ipu_soc *ipu, uint32_t csi)
+ EXPORT_SYMBOL(ipu_csi_get_sensor_protocol);
+ 
+ /*!
+- * _ipu_csi_mclk_set
+- *
+- * @param	ipu		ipu handler
+- * @param	pixel_clk   desired pixel clock frequency in Hz
+- * @param	csi         csi 0 or csi 1
+- *
+- * @return	Returns 0 on success or negative error code on fail
+- */
+-int _ipu_csi_mclk_set(struct ipu_soc *ipu, uint32_t pixel_clk, uint32_t csi)
+-{
+-	uint32_t temp;
+-	uint32_t div_ratio;
+-
+-	div_ratio = (clk_get_rate(ipu->ipu_clk) / pixel_clk) - 1;
+-
+-	if (div_ratio > 0xFF || div_ratio < 0) {
+-		dev_dbg(ipu->dev, "The value of pixel_clk extends normal range\n");
+-		return -EINVAL;
+-	}
+-
+-	temp = ipu_csi_read(ipu, csi, CSI_SENS_CONF);
+-	temp &= ~CSI_SENS_CONF_DIVRATIO_MASK;
+-	ipu_csi_write(ipu, csi, temp | (div_ratio << CSI_SENS_CONF_DIVRATIO_SHIFT),
+-			CSI_SENS_CONF);
+-
+-	return 0;
+-}
+-
+-/*!
+  * ipu_csi_enable_mclk
+  *
+  * @param	ipu		ipu handler
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index aab2fc8..72c04ee 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -6,7 +6,7 @@
+  *
+  * Maintainer: Kumar Gala <galak@kernel.crashing.org>
+  *
+- * Copyright 2004-2011 Freescale Semiconductor, Inc.
++ * Copyright 2004-2012 Freescale Semiconductor, Inc.
+  *
+  * This program is free software; you can redistribute  it and/or modify it
+  * under  the terms of  the GNU General  Public License as published by the
+@@ -240,6 +240,23 @@ struct fsl_mxc_lcd_platform_data {
+ 	int disp_id;
+ };
+ 
++struct fsl_mxc_tvout_platform_data {
++	char *io_reg;
++	char *core_reg;
++	char *analog_reg;
++	u32 detect_line;
++};
++
++struct fsl_mxc_tvin_platform_data {
++	char *dvddio_reg;
++	char *dvdd_reg;
++	char *avdd_reg;
++	char *pvdd_reg;
++	void (*pwdn) (int pwdn);
++	void (*reset) (void);
++	bool cvbs;
++};
++
+ struct fsl_mxc_dvi_platform_data {
+ 	void (*init) (void);
+ 	int (*update) (void);
+-- 
+1.7.7.4
+

@@ -1,0 +1,41 @@
+From c89e2a928db77ffcbeaddf671b8ad4e073e510ad Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Thu, 1 Sep 2011 13:15:14 +0800
+Subject: [PATCH 0390/2463] ENGR00155731 [MX6]clock disable should function
+
+un-comment __clk_disable function and
+__clk_disable_inwait function.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    7 ++-----
+ 1 files changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 61e69f6..3a83c77 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -136,9 +136,7 @@ static void _clk_disable(struct clk *clk)
+ 	u32 reg;
+ 	reg = __raw_readl(clk->enable_reg);
+ 	reg &= ~(MXC_CCM_CCGRx_CG_MASK << clk->enable_shift);
+-	/* TODO: un-comment the disable code */
+-	/* __raw_writel(reg, clk->enable_reg); */
+-
++	__raw_writel(reg, clk->enable_reg);
+ }
+ 
+ static void _clk_disable_inwait(struct clk *clk)
+@@ -147,8 +145,7 @@ static void _clk_disable_inwait(struct clk *clk)
+ 	reg = __raw_readl(clk->enable_reg);
+ 	reg &= ~(MXC_CCM_CCGRx_CG_MASK << clk->enable_shift);
+ 	reg |= 1 << clk->enable_shift;
+-	/* TODO: un-comment the disable code */
+-	/* __raw_writel(reg, clk->enable_reg); */
++	__raw_writel(reg, clk->enable_reg);
+ }
+ 
+ /*
+-- 
+1.7.7.4
+

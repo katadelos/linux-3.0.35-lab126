@@ -1,0 +1,56 @@
+From 50a2ca9063ceb5b9b8cba5e4d46590deeb1af33f Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Wed, 9 May 2012 11:36:29 +0800
+Subject: [PATCH 1439/2463] ENGR00182346-1 serial/imx : disable the clock when
+ the uart is not used
+
+This patch is just the re-revert of the commit:ENGR00182048
+
+Disable the clock when the uart port is not used.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/tty/serial/imx.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/tty/serial/imx.c b/drivers/tty/serial/imx.c
+index 44564e3..beba185 100644
+--- a/drivers/tty/serial/imx.c
++++ b/drivers/tty/serial/imx.c
+@@ -959,6 +959,8 @@ static int imx_startup(struct uart_port *port)
+ 	unsigned long flags, temp;
+ 	struct tty_struct *tty;
+ 
++	clk_enable(sport->clk);
++
+ #ifndef CONFIG_SERIAL_CORE_CONSOLE
+ 	imx_setup_ufcr(sport, 0);
+ #endif
+@@ -1189,6 +1191,7 @@ static void imx_shutdown(struct uart_port *port)
+ 		writel(temp, sport->port.membase + UCR4);
+ 	}
+ 	spin_unlock_irqrestore(&sport->port.lock, flags);
++	clk_disable(sport->clk);
+ }
+ 
+ static void
+@@ -1803,6 +1806,7 @@ static int serial_imx_probe(struct platform_device *pdev)
+ 		goto deinit;
+ 	platform_set_drvdata(pdev, &sport->port);
+ 
++	clk_disable(sport->clk);
+ 	return 0;
+ deinit:
+ 	if (pdata && pdata->exit)
+@@ -1832,8 +1836,6 @@ static int serial_imx_remove(struct platform_device *pdev)
+ 		clk_put(sport->clk);
+ 	}
+ 
+-	clk_disable(sport->clk);
+-
+ 	if (pdata && pdata->exit)
+ 		pdata->exit(pdev);
+ 
+-- 
+1.7.7.4
+

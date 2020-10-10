@@ -1,0 +1,39 @@
+From 7195c63500819fe99369fdb29f3774b99b94d32a Mon Sep 17 00:00:00 2001
+From: Wu Guoxing <b39297@freescale.com>
+Date: Tue, 29 May 2012 15:22:25 +0800
+Subject: [PATCH 1550/2463] ENGR00211368:dual camera: fix csi 1 camera has
+ wrong image issue
+
+set the correct csi interface
+
+Signed-off-by: Wu Guoxing <b39297@freescale.com>
+---
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |    5 +----
+ 1 files changed, 1 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index d80b842..dcfc868 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -1313,7 +1313,7 @@ static int mxc_v4l2_s_param(cam_data *cam, struct v4l2_streamparm *parm)
+ 	csi_param.force_eof = 0;
+ 	csi_param.data_en_pol = 0;
+ 	csi_param.data_fmt = 0;
+-	csi_param.csi = 0;
++	csi_param.csi = cam->csi;
+ 	csi_param.mclk = 0;
+ 
+ 	/*This may not work on other platforms. Check when adding a new one.*/
+@@ -1600,9 +1600,6 @@ static int mxc_v4l_open(struct file *file)
+ 
+ 		csi_param.pixclk_pol = ifparm.u.bt656.latch_clk_inv;
+ 
+-		/* Once we handle multiple inputs this will need to change. */
+-		csi_param.csi = 0;
+-
+ 		if (ifparm.u.bt656.mode
+ 				== V4L2_IF_TYPE_BT656_MODE_NOBT_8BIT)
+ 			csi_param.data_width = IPU_CSI_DATA_WIDTH_8;
+-- 
+1.7.7.4
+

@@ -1,0 +1,63 @@
+From 243bb28ab9b49c8b54cdd08b9e05017effcd3d34 Mon Sep 17 00:00:00 2001
+From: Loren Huang <b02279@freescale.com>
+Date: Tue, 5 Mar 2013 15:44:28 +0800
+Subject: [PATCH 2411/2463] ENGR00252727-2 [GPU]Power on VG core if there is
+ only VG core in SoC
+
+-Power on VG core to makesure VG can be initalized if there is only
+VG core in SoC.
+-Power off VG core after initalization is done.
+-Adjust VG power and clock state to match above changing.
+
+Signed-off-by: Loren Huang <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../GC350/hal/kernel/gc_hal_kernel_hardware_vg.c   |    7 ++++---
+ .../hal/os/linux/kernel/gc_hal_kernel_device.c     |    5 +++++
+ 2 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+index 4be7d91..4a6010d 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+@@ -308,6 +308,7 @@ gckVGHARDWARE_Construct(
+ 
+     do
+     {
++        gcmkERR_BREAK(gckOS_SetGPUPower(Os, gcvCORE_VG, gcvTRUE, gcvTRUE));
+         status = _ResetGPU(Os);
+ 
+         if (status != gcvSTATUS_OK)
+@@ -340,10 +341,10 @@ gckVGHARDWARE_Construct(
+ 
+         hardware->powerMutex            = gcvNULL;
+         hardware->idleSignal            = gcvNULL;
+-        hardware->chipPowerState        = gcvPOWER_OFF;
++        hardware->chipPowerState        = gcvPOWER_ON;
+         hardware->chipPowerStateGlobal  = gcvPOWER_ON;
+-        hardware->clockState            = gcvFALSE;
+-        hardware->powerState            = gcvFALSE;
++        hardware->clockState            = gcvTRUE;
++        hardware->powerState            = gcvTRUE;
+         hardware->powerOffTimeout       = gcdPOWEROFF_TIMEOUT;
+         hardware->powerOffTime          = 0;
+         hardware->timeIdleThread        = gcvNULL;
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+index 4a8e09c..7168f0e 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+@@ -1632,6 +1632,11 @@ gckGALDEVICE_Start(
+     {
+         /* Setup the ISR routine. */
+         gcmkONERROR(gckGALDEVICE_Setup_ISR_VG(Device));
++
++        /* Switch to SUSPEND power state. */
++        gcmkONERROR(gckVGHARDWARE_SetPowerManagementState(
++            Device->kernels[gcvCORE_VG]->vg->hardware, gcvPOWER_OFF_BROADCAST
++            ));
+     }
+ 
+     gcmkFOOTER_NO();
+-- 
+1.7.7.4
+

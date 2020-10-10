@@ -1,0 +1,30 @@
+From ed26ef43945f388bf47eebf00f16dd0be3019520 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Mon, 21 Nov 2011 14:43:20 +0800
+Subject: [PATCH 0649/2463] ENGR00162681 iMX6 SDIO WIFI AR6003 failed to work
+ on resuming
+
+- Add keep power option to mmc pm_caps, since
+power of SD can not be cut on mx6, which should
+be indicated in host pm cap.
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/host/sdhci-esdhc-imx.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index bb606bb..31c63ed 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -475,6 +475,7 @@ static int esdhc_pltfm_init(struct sdhci_host *host, struct sdhci_pltfm_data *pd
+ 		host->tuning_max = SDHCI_TUNE_CTRL_MAX;
+ 		host->tuning_step = SDHCI_TUNE_CTRL_STEP;
+ 		host->clk_mgr_en = true;
++		host->mmc->pm_caps = MMC_PM_KEEP_POWER;
+ 	}
+ 
+ 	/* disable card interrupt enable bit, and clear status bit
+-- 
+1.7.7.4
+

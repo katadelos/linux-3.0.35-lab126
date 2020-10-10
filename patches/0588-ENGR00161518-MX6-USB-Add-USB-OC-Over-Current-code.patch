@@ -1,0 +1,65 @@
+From 6eeb0efc1094d999201ee98fbc2af1794786c61a Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Wed, 9 Nov 2011 18:59:00 +0800
+Subject: [PATCH 0588/2463] ENGR00161518 [MX6] USB: Add USB OC(Over Current)
+ code
+
+Add config USB OC setting code for mx6q, and make the OC default off.
+After adding it, fixing the loop less code during kernel boot in mx6qLite.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |    4 ++++
+ arch/arm/plat-mxc/usb_common.c           |   14 ++++++++++++++
+ 2 files changed, 18 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index 50c9e9c..4d791f7 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -276,6 +276,10 @@ static iomux_v3_cfg_t mx6q_sabrelite_pads[] = {
+ 	/* USBOTG ID pin */
+ 	MX6Q_PAD_GPIO_1__USBOTG_ID,
+ 
++	/* USB OC pin */
++	MX6Q_PAD_KEY_COL4__USBOH3_USBOTG_OC,
++	MX6Q_PAD_EIM_D30__USBOH3_USBH1_OC,
++
+ 	/* USDHC3 */
+ 	MX6Q_PAD_SD3_CLK__USDHC3_CLK_50MHZ,
+ 	MX6Q_PAD_SD3_CMD__USDHC3_CMD_50MHZ,
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index 5ebbc6e..2c195d8 100755
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -520,6 +520,14 @@ int fsl_usb_host_init(struct platform_device *pdev)
+ 		} else if (xops->xcvr_type == PORTSC_PTS_UTMI) {
+ 			usbh1_set_utmi_xcvr();
+ 		}
++	} else {
++		if (!strcmp("Host 1", pdata->name)) {
++			if (machine_is_mx6q_arm2())
++				USB_H1_CTRL &= ~UCTRL_OVER_CUR_POL;
++			else if (machine_is_mx6q_sabrelite())
++				USB_H1_CTRL |= UCTRL_OVER_CUR_POL;
++			USB_H1_CTRL |= UCTRL_OVER_CUR_DIS;
++		}
+ 	}
+ 
+ 	pr_debug("%s: %s success\n", __func__, pdata->name);
+@@ -827,6 +835,12 @@ int usbotg_init(struct platform_device *pdev)
+ 			} else if (xops->xcvr_type == PORTSC_PTS_UTMI) {
+ 				otg_set_utmi_xcvr();
+ 			}
++		} else {
++			if (machine_is_mx6q_arm2())
++				USB_OTG_CTRL &= ~UCTRL_OVER_CUR_POL;
++			else if (machine_is_mx6q_sabrelite())
++				USB_OTG_CTRL |= UCTRL_OVER_CUR_POL;
++			USB_OTG_CTRL |= UCTRL_OVER_CUR_DIS;
+ 		}
+ 	}
+ 
+-- 
+1.7.7.4
+

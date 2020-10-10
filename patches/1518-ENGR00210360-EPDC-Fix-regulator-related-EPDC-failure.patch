@@ -1,0 +1,38 @@
+From 228bfc462c9dfd65951b5fbe2a8b914a042b08a5 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Tue, 22 May 2012 16:55:18 +0800
+Subject: [PATCH 1518/2463] ENGR00210360 - EPDC: Fix regulator-related EPDC
+ failure on MX6SL ARM2 CPU board
+
+Its similar to ENGR00178581.
+Remove call to regulator_has_full_constraints() from Max17135 EPD PMIC
+initialization code, since leaving it enabled results in a failure of
+system to load properly - key regulators are disabled when 'epdc' is added
+to the kernel command line.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_arm2.c |    7 ++++++-
+ 1 files changed, 6 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 57d26f1..6ec4775 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -315,7 +315,12 @@ static int __init max17135_regulator_init(struct max17135 *max17135)
+ 		}
+ 	}
+ 
+-	regulator_has_full_constraints();
++	/*
++	 * TODO: We cannot enable full constraints for now, since
++	 * it results in the PFUZE regulators being disabled
++	 * at the end of boot, which disables critical regulators.
++	 */
++	/*regulator_has_full_constraints();*/
+ 
+ 	return 0;
+ }
+-- 
+1.7.7.4
+

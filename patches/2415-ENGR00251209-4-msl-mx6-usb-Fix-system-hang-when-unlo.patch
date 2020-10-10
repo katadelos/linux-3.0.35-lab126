@@ -1,0 +1,33 @@
+From 0392a7c327e65512a62bbfc1ca3ced00b90735ab Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Mon, 4 Mar 2013 17:19:20 +0800
+Subject: [PATCH 2415/2463] ENGR00251209-4 msl-mx6: usb: Fix system hang when
+ unload gadget module
+
+At gadget module remove function, it closes the clock, but
+at platform code, it still visits register. In fact,
+The PHY has already been low power mode when driver's remove
+before platform code is called.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ arch/arm/mach-mx6/usb_dr.c |    3 ---
+ 1 files changed, 0 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index efae4ae..372253e 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -163,9 +163,6 @@ static void usbotg_uninit_ext(struct platform_device *pdev)
+ {
+ 	otg_used--;
+ 	if (!otg_used) {
+-		enter_phy_lowpower_suspend(pdev->dev.platform_data, true);
+-		mdelay(3);
+-
+ 		clk_disable(usb_phy1_clk);
+ 		clk_put(usb_phy1_clk);
+ 
+-- 
+1.7.7.4
+

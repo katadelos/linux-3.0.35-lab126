@@ -1,0 +1,70 @@
+From 43ac1c3cbfa629ebbeb2efc5e41d2b5a9fc67323 Mon Sep 17 00:00:00 2001
+From: Dong Aisheng <b29396@freescale.com>
+Date: Fri, 3 Aug 2012 22:33:08 +0800
+Subject: [PATCH 1863/2463] ENGR00217318-3 flexcan: only enter stop mode when
+ device is up
+
+The flexcan is still in disable mode during suspend if it's still
+not up. We do not need to enter stop mode if find the device is not
+up since the stop mode does not work well in disable mode(remote wakeup
+does not work).
+
+Using disable mode for suspend if it's not up.
+
+Signed-off-by: Dong Aisheng <b29396@freescale.com>
+---
+ drivers/net/can/flexcan.c |   25 +++++++++++++------------
+ 1 files changed, 13 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/net/can/flexcan.c b/drivers/net/can/flexcan.c
+index 1d1c224c..920b8a0 100644
+--- a/drivers/net/can/flexcan.c
++++ b/drivers/net/can/flexcan.c
+@@ -1091,15 +1091,16 @@ static int flexcan_suspend(struct platform_device *pdev, pm_message_t state)
+ 	if (netif_running(dev)) {
+ 		netif_stop_queue(dev);
+ 		netif_device_detach(dev);
+-	}
+ 
+-	priv->can.state = CAN_STATE_SLEEPING;
++		/* enter stop mode if device is up */
++		flexcan_enter_stop(priv);
+ 
+-	flexcan_enter_stop(priv);
++		ret = irq_set_irq_wake(dev->irq, 1);
++		if (ret)
++			return ret;
++	}
+ 
+-	ret = irq_set_irq_wake(dev->irq, 1);
+-	if (ret)
+-		return ret;
++	priv->can.state = CAN_STATE_SLEEPING;
+ 
+ 	return 0;
+ }
+@@ -1110,15 +1111,15 @@ static int flexcan_resume(struct platform_device *pdev)
+ 	struct flexcan_priv *priv = netdev_priv(dev);
+ 	int ret;
+ 
+-	ret = irq_set_irq_wake(dev->irq, 0);
+-	if (ret)
+-		return ret;
+-
+-	flexcan_exit_stop(priv);
+-
+ 	priv->can.state = CAN_STATE_ERROR_ACTIVE;
+ 
+ 	if (netif_running(dev)) {
++		ret = irq_set_irq_wake(dev->irq, 0);
++		if (ret)
++			return ret;
++
++		flexcan_exit_stop(priv);
++
+ 		netif_device_attach(dev);
+ 		netif_start_queue(dev);
+ 	}
+-- 
+1.7.7.4
+

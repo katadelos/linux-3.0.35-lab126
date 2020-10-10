@@ -1,0 +1,53 @@
+From 42d5723651fcea1ab7f049bd7802e2dd81637df7 Mon Sep 17 00:00:00 2001
+From: Israel Perez <B37753@freescale.com>
+Date: Wed, 30 May 2012 16:00:06 -0500
+Subject: [PATCH 1735/2463] ENGR00211653 [MX6Q ARD] IMX UART add support for
+ loopback mode.
+
+ttymxc serial uart driver add  support loopback mode.
+returns TIOCM_LOOP set when reading the status.
+
+Signed-off-by: Israel Perez <B37753@freescale.com>
+---
+ drivers/tty/serial/imx.c |   16 ++++++++++++++--
+ 1 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/tty/serial/imx.c b/drivers/tty/serial/imx.c
+index beba185..8a66f3e 100644
+--- a/drivers/tty/serial/imx.c
++++ b/drivers/tty/serial/imx.c
+@@ -697,6 +697,9 @@ static unsigned int imx_get_mctrl(struct uart_port *port)
+ 	if (readl(sport->port.membase + UCR2) & UCR2_CTS)
+ 		tmp |= TIOCM_RTS;
+ 
++	if (readl(sport->port.membase + UTS) & UTS_LOOP)
++		tmp |= TIOCM_LOOP;
++
+ 	return tmp;
+ }
+ 
+@@ -707,10 +710,19 @@ static void imx_set_mctrl(struct uart_port *port, unsigned int mctrl)
+ 
+ 	temp = readl(sport->port.membase + UCR2) & ~UCR2_CTS;
+ 
+-	if (mctrl & TIOCM_RTS)
++	if (mctrl & TIOCM_RTS) {
+ 		temp |= UCR2_CTS;
++		writel(temp, sport->port.membase + UCR2);
++	}
+ 
+-	writel(temp, sport->port.membase + UCR2);
++	if (mctrl & TIOCM_LOOP) {
++		temp = readl(sport->port.membase + UTS) & ~UTS_LOOP;
++		temp |= UTS_LOOP;
++		writel(temp, sport->port.membase + UTS);
++	} else {
++		temp = readl(sport->port.membase + UTS) & ~UTS_LOOP;
++		writel(temp, sport->port.membase + UTS);
++	}
+ }
+ 
+ /*
+-- 
+1.7.7.4
+

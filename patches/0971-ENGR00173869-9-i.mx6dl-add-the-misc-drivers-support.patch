@@ -1,0 +1,321 @@
+From 909ab3ef6cff22339cbf1ec3023170c82c569ce2 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Tue, 7 Feb 2012 14:30:42 +0800
+Subject: [PATCH 0971/2463] ENGR00173869-9: i.mx6dl: add the misc drivers
+ support
+
+This patch change is very trivial and simply just add
+cpu_is_mx6dl() or using cpu_is_mx6 to replace cpu_is_mx6q
+
+each driver owner will check it and adjust it accordingly later,
+such as sdhc etc.
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ drivers/media/video/mxc/capture/sensor_clock.c |    2 +-
+ drivers/mmc/host/sdhci-esdhc-imx.c             |   16 ++++++++--------
+ drivers/mmc/host/sdhci-esdhc.h                 |    4 ++--
+ drivers/mxc/ipu3/ipu_common.c                  |    6 +++---
+ drivers/net/fec.c                              |   10 +++++-----
+ drivers/video/mxc/ldb.c                        |    8 ++++----
+ sound/soc/codecs/cs42888.c                     |    4 ++--
+ sound/soc/imx/imx-cs42888.c                    |   10 +++++-----
+ 8 files changed, 30 insertions(+), 30 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/sensor_clock.c b/drivers/media/video/mxc/capture/sensor_clock.c
+index 2159836..2e758d1 100644
+--- a/drivers/media/video/mxc/capture/sensor_clock.c
++++ b/drivers/media/video/mxc/capture/sensor_clock.c
+@@ -71,7 +71,7 @@ void set_mclk_rate(uint32_t *p_mclk_freq, uint32_t csi)
+ 			pr_err("invalid csi num %d\n", csi);
+ 			return;
+ 		}
+-	} else if (cpu_is_mx6q()) {
++	} else if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+ 		if (csi == 0) {
+ 			if (machine_is_mx6q_sabrelite())
+ 				mclk = "clko2_clk";
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index 496de78..d8fc21a 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -102,7 +102,7 @@ static u32 esdhc_readl_le(struct sdhci_host *host, int reg)
+ 			val |= SDHCI_CARD_PRESENT;
+ 	}
+ 
+-	if (reg == SDHCI_INT_STATUS && cpu_is_mx6q()
++	if (reg == SDHCI_INT_STATUS && cpu_is_mx6()
+ 		&& mx6q_revision() == IMX_CHIP_REVISION_1_0) {
+ 		/*
+ 		 * on mx6q TO1.0, there is low possibility that
+@@ -114,13 +114,13 @@ static u32 esdhc_readl_le(struct sdhci_host *host, int reg)
+ 		if ((val & SDHCI_INT_DATA_END) && \
+ 			!(val & SDHCI_INT_DMA_END))
+ 			val = readl(host->ioaddr + reg);
+-	} else if (reg == SDHCI_CAPABILITIES_1 && cpu_is_mx6q()) {
++	} else if (reg == SDHCI_CAPABILITIES_1 && cpu_is_mx6()) {
+ 		/*
+ 		 * on mx6q, no cap_1 available, fake one.
+ 		 */
+ 		val = SDHCI_SUPPORT_DDR50 | SDHCI_SUPPORT_SDR104 | \
+ 			  SDHCI_SUPPORT_SDR50;
+-	} else if (reg == SDHCI_MAX_CURRENT && cpu_is_mx6q()) {
++	} else if (reg == SDHCI_MAX_CURRENT && cpu_is_mx6()) {
+ 		/*
+ 		 * on mx6q, no max current available, fake one.
+ 		 */
+@@ -130,7 +130,7 @@ static u32 esdhc_readl_le(struct sdhci_host *host, int reg)
+ 		val |= 0xFF << SDHCI_MAX_CURRENT_180_SHIFT;
+ 	}
+ 
+-	if (reg == SDHCI_PRESENT_STATE && cpu_is_mx6q()) {
++	if (reg == SDHCI_PRESENT_STATE && cpu_is_mx6()) {
+ 		u32 fsl_prss = readl(host->ioaddr + SDHCI_PRESENT_STATE);
+ 		/* save the least 20 bits */
+ 		val = fsl_prss & 0x000FFFFF;
+@@ -158,7 +158,7 @@ static void esdhc_writel_le(struct sdhci_host *host, u32 val, int reg)
+ 			val &= ~(SDHCI_INT_CARD_REMOVE | \
+ 				SDHCI_INT_CARD_INSERT);
+ 
+-		if (!(val & SDHCI_INT_CARD_INT) && cpu_is_mx6q()
++		if (!(val & SDHCI_INT_CARD_INT) && cpu_is_mx6()
+ 			&& mx6q_revision() == IMX_CHIP_REVISION_1_0)
+ 			/*
+ 			 * write 1 to clear card interrupt status bit
+@@ -172,7 +172,7 @@ static void esdhc_writel_le(struct sdhci_host *host, u32 val, int reg)
+ 			writel(SDHCI_INT_CARD_INT, \
+ 				host->ioaddr + SDHCI_INT_STATUS);
+ 
+-		if (val & SDHCI_INT_CARD_INT && (!cpu_is_mx6q())) {
++		if (val & SDHCI_INT_CARD_INT && !cpu_is_mx6()) {
+ 			/*
+ 			 * clear D3CD bit and set D3CD bit to avoid
+ 			 * losing card interrupt
+@@ -321,7 +321,7 @@ static void esdhc_writew_le(struct sdhci_host *host, u16 val, int reg)
+ 			val |= SDHCI_CMD_ABORTCMD;
+ 
+ 		writel(0x08800880, host->ioaddr + SDHCI_CAPABILITIES_1);
+-		if (cpu_is_mx6q()) {
++		if (cpu_is_mx6()) {
+ 			imx_data->scratchpad |= \
+ 			(readl(host->ioaddr + SDHCI_MIX_CTRL) & (0xf << 22));
+ 
+@@ -471,7 +471,7 @@ static int esdhc_pltfm_init(struct sdhci_host *host, struct sdhci_pltfm_data *pd
+ 	/* write_protect can't be routed to controller, use gpio */
+ 	sdhci_esdhc_ops.get_ro = esdhc_pltfm_get_ro;
+ 
+-	if (!(cpu_is_mx25() || cpu_is_mx35() || cpu_is_mx51() || cpu_is_mx6q()))
++	if (!(cpu_is_mx25() || cpu_is_mx35() || cpu_is_mx51() || cpu_is_mx6()))
+ 		imx_data->flags |= ESDHC_FLAG_MULTIBLK_NO_INT;
+ 
+ 	if (boarddata) {
+diff --git a/drivers/mmc/host/sdhci-esdhc.h b/drivers/mmc/host/sdhci-esdhc.h
+index 8ee1d62..c64cdcd 100644
+--- a/drivers/mmc/host/sdhci-esdhc.h
++++ b/drivers/mmc/host/sdhci-esdhc.h
+@@ -1,7 +1,7 @@
+ /*
+  * Freescale eSDHC controller driver generics for OF and pltfm.
+  *
+- * Copyright (C) 2007, 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2007, 2011, 2012 Freescale Semiconductor, Inc.
+  * Copyright (c) 2009 MontaVista Software, Inc.
+  * Copyright (c) 2010 Pengutronix e.K.
+  *   Author: Wolfram Sang <w.sang@pengutronix.de>
+@@ -54,7 +54,7 @@ static inline void esdhc_set_clock(struct sdhci_host *host, unsigned int clock)
+ 	int ddr_mode = 0;
+ 
+ 	boarddata = host->mmc->parent->platform_data;
+-	if (cpu_is_mx6q()) {
++	if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+ 		pre_div = 1;
+ 		if (readl(host->ioaddr + SDHCI_MIX_CTRL) &
+ 				SDHCI_MIX_CTRL_DDREN) {
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 40297a8..8a0efa4 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2005-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2005-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -1259,7 +1259,7 @@ int32_t ipu_init_channel_buffer(struct ipu_soc *ipu, ipu_channel_t channel,
+ 	if (idma_is_set(ipu, IDMAC_CHA_PRI, dma_chan)) {
+ 		unsigned reg = IDMAC_CH_LOCK_EN_1;
+ 		uint32_t value = 0;
+-		if (cpu_is_mx53() || cpu_is_mx6q()) {
++		if (cpu_is_mx53() || cpu_is_mx6q() || cpu_is_mx6dl()) {
+ 			_ipu_ch_param_set_axi_id(ipu, dma_chan, 0);
+ 			switch (dma_chan) {
+ 			case 5:
+@@ -1327,7 +1327,7 @@ int32_t ipu_init_channel_buffer(struct ipu_soc *ipu, ipu_channel_t channel,
+ 		} else
+ 			_ipu_ch_param_set_axi_id(ipu, dma_chan, 1);
+ 	} else {
+-		if (cpu_is_mx6q())
++		if (cpu_is_mx6q() || cpu_is_mx6dl())
+ 			_ipu_ch_param_set_axi_id(ipu, dma_chan, 1);
+ 	}
+ 
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index 18d356e..f273314 100755
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -19,7 +19,7 @@
+  * Copyright (c) 2004-2006 Macq Electronique SA.
+  *
+  * Support for FEC IEEE 1588.
+- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2010-2012 Freescale Semiconductor, Inc.
+  */
+ 
+ #include <linux/module.h>
+@@ -838,7 +838,7 @@ static int fec_enet_mii_probe(struct net_device *ndev)
+ 	}
+ 
+ 	/* mask with MAC supported features */
+-	if (cpu_is_mx6q())
++	if (cpu_is_mx6q() || cpu_is_mx6dl())
+ 		phy_dev->supported &= PHY_GBIT_FEATURES;
+ 	else
+ 		phy_dev->supported &= PHY_BASIC_FEATURES;
+@@ -895,7 +895,7 @@ static int fec_enet_mii_init(struct platform_device *pdev)
+ 	 */
+ 	fep->phy_speed = DIV_ROUND_UP(clk_get_rate(fep->clk), 5000000) << 1;
+ 
+-	if (cpu_is_mx6q()) {
++	if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+ 		/* FIXME: non-1588 MII clk: 66MHz, 1588 mode : 40MHz */
+ 		if (fep->ptimer_present)
+ 			fep->phy_speed = 0xe;
+@@ -1458,7 +1458,7 @@ fec_restart(struct net_device *dev, int duplex)
+ 		fep->phy_dev->speed == SPEED_1000)
+ 		val |= (0x1 << 5);
+ 
+-	if (cpu_is_mx6q()) {
++	if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+ 		/* enable endian swap */
+ 		val |= (0x1 << 8);
+ 		/* enable ENET store and forward mode */
+@@ -1489,7 +1489,7 @@ fec_stop(struct net_device *dev)
+ 	writel(1, fep->hwp + FEC_ECNTRL);
+ 	udelay(10);
+ 
+-	if (cpu_is_mx6q())
++	if (cpu_is_mx6q() || cpu_is_mx6dl())
+ 		/* FIXME: we have to enable enet to keep mii interrupt works. */
+ 		writel(2, fep->hwp + FEC_ECNTRL);
+ 
+diff --git a/drivers/video/mxc/ldb.c b/drivers/video/mxc/ldb.c
+index bb34f23..6172c0f 100644
+--- a/drivers/video/mxc/ldb.c
++++ b/drivers/video/mxc/ldb.c
+@@ -532,7 +532,7 @@ static int ldb_disp_init(struct mxc_dispdrv_handle *disp,
+ 		}
+ 
+ 		/* clock setting */
+-		if (cpu_is_mx6q() &&
++		if ((cpu_is_mx6q() || cpu_is_mx6dl()) &&
+ 			((ldb->mode == LDB_SEP0) || (ldb->mode == LDB_SEP1)))
+ 			ldb_clk[6] += lvds_channel;
+ 		else
+@@ -582,7 +582,7 @@ static int ldb_disp_init(struct mxc_dispdrv_handle *disp,
+ 		}
+ 
+ 		setting_idx = 1;
+-		if (cpu_is_mx6q()) {
++		if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+ 			setting->dev_id = plat_data->sec_ipu_id;
+ 			setting->disp_id = plat_data->sec_disp_id;
+ 		} else {
+@@ -628,7 +628,7 @@ static int ldb_disp_init(struct mxc_dispdrv_handle *disp,
+ 		writel(reg, ldb->control_reg);
+ 
+ 		/* clock setting */
+-		if (cpu_is_mx6q())
++		if (cpu_is_mx6q() || cpu_is_mx6dl())
+ 			ldb_clk[6] += lvds_channel;
+ 		else
+ 			ldb_clk[6] += setting->disp_id;
+@@ -653,7 +653,7 @@ static int ldb_disp_init(struct mxc_dispdrv_handle *disp,
+ 	ldb->setting[setting_idx].ch_mask = ch_mask;
+ 	ldb->setting[setting_idx].ch_val = ch_val;
+ 
+-	if (cpu_is_mx6q()) {
++	if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+ 		if ((ldb->mode == LDB_SEP0) || (ldb->mode == LDB_SEP1)) {
+ 			reg = readl(ldb->control_reg);
+ 			reg &= ~(LDB_CH0_MODE_MASK | LDB_CH1_MODE_MASK);
+diff --git a/sound/soc/codecs/cs42888.c b/sound/soc/codecs/cs42888.c
+index f2480cc..bc88a71 100644
+--- a/sound/soc/codecs/cs42888.c
++++ b/sound/soc/codecs/cs42888.c
+@@ -1,6 +1,6 @@
+ /*
+  * cs42888.c  -- CS42888 ALSA SoC Audio Driver
+- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2010-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ /*
+  * The code contained herein is licensed under the GNU General Public
+@@ -807,7 +807,7 @@ static int cs42888_probe(struct snd_soc_codec *codec)
+ 		dev_err(codec->dev, "Failed to set cache I/O: %d\n", ret);
+ 		return ret;
+ 	}
+-	if (cpu_is_mx6q()) {
++	if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+ 		for (i = 0; i < ARRAY_SIZE(cs42888->supplies); i++)
+ 			cs42888->supplies[i].supply = cs42888_supply_names[i];
+ 
+diff --git a/sound/soc/imx/imx-cs42888.c b/sound/soc/imx/imx-cs42888.c
+index 4e97ec2..26745d3 100644
+--- a/sound/soc/imx/imx-cs42888.c
++++ b/sound/soc/imx/imx-cs42888.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2010-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -117,7 +117,7 @@ static int imx_3stack_surround_hw_params(struct snd_pcm_substream *substream,
+ 			pr_info("Rate not support.\n");
+ 			return -EINVAL;;
+ 		}
+-	} else if (cpu_is_mx6q()) {
++	} else if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+ 		switch (rate) {
+ 		case 32000:
+ 			lrclk_ratio = 5;
+@@ -163,7 +163,7 @@ static int imx_3stack_surround_hw_params(struct snd_pcm_substream *substream,
+ 	if (cpu_is_mx53()) {
+ 		snd_soc_dai_set_sysclk(cpu_dai, ESAI_CLK_EXTAL,
+ 			mclk_freq, SND_SOC_CLOCK_OUT);
+-	} else if (cpu_is_mx6q()) {
++	} else if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+ 		snd_soc_dai_set_sysclk(cpu_dai, ESAI_CLK_EXTAL_DIV,
+ 			mclk_freq, SND_SOC_CLOCK_OUT);
+ 	}
+@@ -171,14 +171,14 @@ static int imx_3stack_surround_hw_params(struct snd_pcm_substream *substream,
+ 	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_PSR, 1);
+ 	if (cpu_is_mx53())
+ 		snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_PM, 0);
+-	else if (cpu_is_mx6q())
++	else if (cpu_is_mx6q() || cpu_is_mx6dl())
+ 		snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_PM, 2);
+ 	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_FP, lrclk_ratio);
+ 
+ 	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_PSR, 1);
+ 	if (cpu_is_mx53())
+ 		snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_PM, 0);
+-	else if (cpu_is_mx6q())
++	else if (cpu_is_mx6q() || cpu_is_mx6dl())
+ 		snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_PM, 2);
+ 	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_FP, lrclk_ratio);
+ 
+-- 
+1.7.7.4
+

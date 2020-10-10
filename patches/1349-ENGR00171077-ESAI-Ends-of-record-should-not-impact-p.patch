@@ -1,0 +1,41 @@
+From daf722e7a4b050b482a3b875dddcc4c5615538a9 Mon Sep 17 00:00:00 2001
+From: Lionel Xu <Lionel.Xu@freescale.com>
+Date: Fri, 20 Apr 2012 19:33:33 +0800
+Subject: [PATCH 1349/2463] ENGR00171077 ESAI: Ends of record should not
+ impact playback
+
+The mute process in shutdown function should only be limited to playback, or
+it will influence each other when they running together.
+
+Signed-off-by: Lionel Xu <Lionel.Xu@freescale.com>
+---
+ sound/soc/codecs/cs42888.c |   13 +++++++------
+ 1 files changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/sound/soc/codecs/cs42888.c b/sound/soc/codecs/cs42888.c
+index 63d244a..97a8fc8 100644
+--- a/sound/soc/codecs/cs42888.c
++++ b/sound/soc/codecs/cs42888.c
+@@ -743,12 +743,13 @@ static void cs42888_shutdown(struct snd_pcm_substream *substream,
+ 	u8 val;
+ 
+ 	/* Mute all the channels */
+-	val = snd_soc_read(codec, CS42888_MUTE);
+-
+-	val |= CS42888_MUTE_ALL;
+-	ret = snd_soc_write(codec, CS42888_MUTE, val);
+-	if (ret < 0)
+-		pr_err("i2c write failed\n");
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
++		val = snd_soc_read(codec, CS42888_MUTE);
++		val |= CS42888_MUTE_ALL;
++		ret = snd_soc_write(codec, CS42888_MUTE, val);
++		if (ret < 0)
++			pr_err("i2c write failed\n");
++	}
+ 
+ }
+ 
+-- 
+1.7.7.4
+

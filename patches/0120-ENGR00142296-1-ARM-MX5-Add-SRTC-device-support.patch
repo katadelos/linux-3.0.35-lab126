@@ -1,0 +1,137 @@
+From acaf0f448d9d0f43056b00689e9d94ee10707d73 Mon Sep 17 00:00:00 2001
+From: Anish Trivedi <anish@freescale.com>
+Date: Mon, 18 Apr 2011 13:59:27 -0500
+Subject: [PATCH 0120/2463] ENGR00142296-1 ARM: MX5: Add SRTC device support
+
+Machine layer changes to add SRTC device for MX5x platforms.
+
+Signed-off-by: Anish Trivedi <anish@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx50_rdp.c            |    1 +
+ arch/arm/mach-mx5/board-mx51_babbage.c        |    2 ++
+ arch/arm/mach-mx5/board-mx53_ard.c            |    1 +
+ arch/arm/mach-mx5/board-mx53_evk.c            |    1 +
+ arch/arm/mach-mx5/devices-imx50.h             |    4 ++++
+ arch/arm/mach-mx5/devices-imx51.h             |    4 ++++
+ arch/arm/plat-mxc/devices/platform-imx_srtc.c |   10 ++++++++++
+ arch/arm/plat-mxc/include/mach/mx51.h         |    4 ++--
+ 8 files changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx50_rdp.c b/arch/arm/mach-mx5/board-mx50_rdp.c
+index 8145a03..5cac95a 100755
+--- a/arch/arm/mach-mx5/board-mx50_rdp.c
++++ b/arch/arm/mach-mx5/board-mx50_rdp.c
+@@ -225,6 +225,7 @@ static void __init mx50_rdp_board_init(void)
+ 
+ 	imx50_add_imx_uart(0, NULL);
+ 	imx50_add_imx_uart(1, NULL);
++	imx50_add_srtc();
+ 	mx50_rdp_fec_reset();
+ 	imx50_add_fec(&fec_data);
+ 	imx50_add_imx_i2c(0, &i2c_data);
+diff --git a/arch/arm/mach-mx5/board-mx51_babbage.c b/arch/arm/mach-mx5/board-mx51_babbage.c
+index d6975cb..2961fbc 100755
+--- a/arch/arm/mach-mx5/board-mx51_babbage.c
++++ b/arch/arm/mach-mx5/board-mx51_babbage.c
+@@ -596,6 +596,8 @@ static void __init mx51_babbage_init(void)
+ 	imx51_add_imx_uart(1, &uart_pdata);
+ 	imx51_add_imx_uart(2, &uart_pdata);
+ 
++	imx51_add_srtc();
++
+ 	babbage_fec_reset();
+ 	imx51_add_fec(NULL);
+ 
+diff --git a/arch/arm/mach-mx5/board-mx53_ard.c b/arch/arm/mach-mx5/board-mx53_ard.c
+index 070c26f..d728de1 100755
+--- a/arch/arm/mach-mx5/board-mx53_ard.c
++++ b/arch/arm/mach-mx5/board-mx53_ard.c
+@@ -230,6 +230,7 @@ static void __init mx53_ard_board_init(void)
+ 	mxc_iomux_v3_setup_multiple_pads(mx53_ard_pads,
+ 					ARRAY_SIZE(mx53_ard_pads));
+ 	mx53_ard_init_uart();
++	imx53_add_srtc();
+ 	imx53_add_imx2_wdt(0, NULL);
+ 	imx53_add_sdhci_esdhc_imx(0, &mx53_ard_sd1_data);
+ 	imx53_add_sdhci_esdhc_imx(1, &mx53_ard_sd2_data);
+diff --git a/arch/arm/mach-mx5/board-mx53_evk.c b/arch/arm/mach-mx5/board-mx53_evk.c
+index 5a747fc..20a5c91 100755
+--- a/arch/arm/mach-mx5/board-mx53_evk.c
++++ b/arch/arm/mach-mx5/board-mx53_evk.c
+@@ -724,6 +724,7 @@ static void __init mx53_evk_board_init(void)
+ 	mx53_evk_io_init();
+ 
+ 	mx53_evk_init_uart();
++	imx53_add_srtc();
+ 	mx53_evk_fec_reset();
+ 	imx53_add_fec(&mx53_evk_fec_pdata);
+ 
+diff --git a/arch/arm/mach-mx5/devices-imx50.h b/arch/arm/mach-mx5/devices-imx50.h
+index 9ffce9b..fdce283 100755
+--- a/arch/arm/mach-mx5/devices-imx50.h
++++ b/arch/arm/mach-mx5/devices-imx50.h
+@@ -25,6 +25,10 @@ extern const struct imx_imx_uart_1irq_data imx50_imx_uart_data[];
+ #define imx50_add_imx_uart(id, pdata)	\
+ 	imx_add_imx_uart_1irq(&imx50_imx_uart_data[id], pdata)
+ 
++extern const struct imx_srtc_data imx50_imx_srtc_data __initconst;
++#define imx50_add_srtc()	\
++	imx_add_srtc(&imx50_imx_srtc_data)
++
+ extern const struct imx_fec_data imx50_fec_data;
+ #define imx50_add_fec(pdata)	\
+ 	imx_add_fec(&imx50_fec_data, pdata)
+diff --git a/arch/arm/mach-mx5/devices-imx51.h b/arch/arm/mach-mx5/devices-imx51.h
+index 740fdd4..bbd12bc5 100755
+--- a/arch/arm/mach-mx5/devices-imx51.h
++++ b/arch/arm/mach-mx5/devices-imx51.h
+@@ -15,6 +15,10 @@ extern const struct imx_fec_data imx51_fec_data;
+ 
+ extern const struct imx_imx_i2c_data imx51_imx_i2c_data[];
+ #define imx51_add_imx_i2c(id, pdata)	\
++extern const struct imx_srtc_data imx51_imx_srtc_data __initconst;
++#define imx51_add_srtc()	\
++	imx_add_srtc(&imx51_imx_srtc_data)
++
+ 	imx_add_imx_i2c(&imx51_imx_i2c_data[id], pdata)
+ 
+ extern const struct imx_imx_ssi_data imx51_imx_ssi_data[];
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_srtc.c b/arch/arm/plat-mxc/devices/platform-imx_srtc.c
+index 1f27f48..9e4191e 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx_srtc.c
++++ b/arch/arm/plat-mxc/devices/platform-imx_srtc.c
+@@ -28,6 +28,16 @@
+ 		.irq = soc ## _INT_SRTC_NTZ,				\
+ 	}
+ 
++#ifdef CONFIG_SOC_IMX50
++const struct imx_srtc_data imx50_imx_srtc_data __initconst =
++	imx_imx_srtc_data_entry_single(MX50);
++#endif /* ifdef CONFIG_SOC_IMX50 */
++
++#ifdef CONFIG_SOC_IMX51
++const struct imx_srtc_data imx51_imx_srtc_data __initconst =
++	imx_imx_srtc_data_entry_single(MX51);
++#endif /* ifdef CONFIG_SOC_IMX51 */
++
+ #ifdef CONFIG_SOC_IMX53
+ const struct imx_srtc_data imx53_imx_srtc_data __initconst =
+ 	imx_imx_srtc_data_entry_single(MX53);
+diff --git a/arch/arm/plat-mxc/include/mach/mx51.h b/arch/arm/plat-mxc/include/mach/mx51.h
+index 7a993ef..a2ee1d9 100755
+--- a/arch/arm/plat-mxc/include/mach/mx51.h
++++ b/arch/arm/plat-mxc/include/mach/mx51.h
+@@ -291,8 +291,8 @@
+ #define MX51_INT_SCC_SMN		21
+ #define MX51_INT_SCC_STZ		22
+ #define MX51_INT_SCC_SCM		23
+-#define MX51_MXC_INT_SRTC_NTZ		24
+-#define MX51_MXC_INT_SRTC_TZ		25
++#define MX51_INT_SRTC_NTZ		24
++#define MX51_INT_SRTC_TZ		25
+ #define MX51_MXC_INT_RTIC		26
+ #define MX51_MXC_INT_CSU		27
+ #define MX51_MXC_INT_SLIM_B		28
+-- 
+1.7.7.4
+

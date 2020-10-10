@@ -1,0 +1,84 @@
+From 8d937d8500adf52ffffeca7a146f614a6cd5d09c Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Wed, 3 Apr 2013 16:28:01 +0800
+Subject: [PATCH 2451/2463] ENGR00257130-2 msl: usb: Disable auto power PHY if
+ usb wakeup disabled
+
+- We need to disable auto power PHY if there is a wakeup at USB port,
+but usb as wakeup source is disabled, otherwise, there will be unexpected
+interrupt when the software thinks the controller is still at low power
+mode.
+- Rework usbh1_wakeup_event_clear. The old design was incorrect, align
+it with usb_dr.c.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ arch/arm/mach-mx6/usb_dr.c |    6 ++++++
+ arch/arm/mach-mx6/usb_h1.c |   26 +++++++++++++++++---------
+ 2 files changed, 23 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index 7c8ef2f..aa29325 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -285,6 +285,12 @@ static void otg_wake_up_enable(struct fsl_usb2_platform_data *pdata, bool enable
+ 				| BM_USBPHY_CTRL_ENAUTO_PWRON_PLL , phy_reg + HW_USBPHY_CTRL_SET);
+ 		USB_OTG_CTRL |= UCTRL_OWIE;
+ 	} else {
++		__raw_writel(BM_USBPHY_CTRL_ENDPDMCHG_WKUP
++				| BM_USBPHY_CTRL_ENAUTOSET_USBCLKS
++				| BM_USBPHY_CTRL_ENAUTOCLR_PHY_PWD
++				| BM_USBPHY_CTRL_ENAUTOCLR_CLKGATE
++				| BM_USBPHY_CTRL_ENAUTOCLR_USBCLKGATE
++				| BM_USBPHY_CTRL_ENAUTO_PWRON_PLL , phy_reg + HW_USBPHY_CTRL_CLR);
+ 		USB_OTG_CTRL &= ~UCTRL_OWIE;
+ 		/* The interrupt must be disabled for at least 3 clock
+ 		 * cycles of the standby clock(32k Hz) , that is 0.094 ms*/
+diff --git a/arch/arm/mach-mx6/usb_h1.c b/arch/arm/mach-mx6/usb_h1.c
+index d983e28..b7fa2e9 100644
+--- a/arch/arm/mach-mx6/usb_h1.c
++++ b/arch/arm/mach-mx6/usb_h1.c
+@@ -192,9 +192,14 @@ static void _wake_up_enable(struct fsl_usb2_platform_data *pdata, bool enable)
+ 				| BM_USBPHY_CTRL_ENAUTO_PWRON_PLL , phy_reg + HW_USBPHY_CTRL_SET);
+ 		USB_H1_CTRL |= (UCTRL_OWIE);
+ 	} else {
+-		USB_H1_CTRL &= ~(UCTRL_OWIE);
+ 		__raw_writel(BM_USBPHY_CTRL_ENIDCHG_WKUP | BM_USBPHY_CTRL_ENVBUSCHG_WKUP
+-				| BM_USBPHY_CTRL_ENDPDMCHG_WKUP, phy_reg + HW_USBPHY_CTRL_CLR);
++				| BM_USBPHY_CTRL_ENDPDMCHG_WKUP
++				| BM_USBPHY_CTRL_ENAUTOSET_USBCLKS
++				| BM_USBPHY_CTRL_ENAUTOCLR_PHY_PWD
++				| BM_USBPHY_CTRL_ENAUTOCLR_CLKGATE
++				| BM_USBPHY_CTRL_ENAUTOCLR_USBCLKGATE
++				| BM_USBPHY_CTRL_ENAUTO_PWRON_PLL , phy_reg + HW_USBPHY_CTRL_CLR);
++		USB_H1_CTRL &= ~(UCTRL_OWIE);
+ 		/* The interrupt must be disabled for at least 3
+ 		* cycles of the standby clock(32k Hz) , that is 0.094 ms*/
+ 		udelay(100);
+@@ -351,13 +356,16 @@ static void h1_wakeup_handler(struct fsl_usb2_platform_data *pdata)
+ 
+ static void usbh1_wakeup_event_clear(void)
+ {
+-	void __iomem *phy_reg = MX6_IO_ADDRESS(USB_PHY1_BASE_ADDR);
+-	u32 wakeup_irq_bits;
+-
+-	wakeup_irq_bits = BM_USBPHY_CTRL_RESUME_IRQ | BM_USBPHY_CTRL_WAKEUP_IRQ;
+-	if (__raw_readl(phy_reg + HW_USBPHY_CTRL) && wakeup_irq_bits) {
+-		/* clear the wakeup interrupt status */
+-		__raw_writel(wakeup_irq_bits, phy_reg + HW_USBPHY_CTRL_CLR);
++	int wakeup_req = USB_H1_CTRL & UCTRL_OWIR;
++
++	if (wakeup_req != 0) {
++		printk(KERN_INFO "Unknown wakeup.(H1 OTGSC 0x%x)\n", UH1_PORTSC1);
++		/* Disable OWIE to clear OWIR, wait 3 clock
++		 * cycles of standly clock(32KHz)
++		 */
++		USB_H1_CTRL &= ~UCTRL_OWIE;
++		udelay(100);
++		USB_H1_CTRL |= UCTRL_OWIE;
+ 	}
+ }
+ 
+-- 
+1.7.7.4
+

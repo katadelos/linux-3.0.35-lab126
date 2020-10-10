@@ -1,0 +1,34 @@
+From 3d2b6734885157a98cdf9e6296aaa5cb5271294a Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Wed, 1 Aug 2012 13:53:40 +0800
+Subject: [PATCH 1846/2463] ENGR00219016-1 MX6Q ARM2: Add chip version
+ checking for HDMI SDMA setup
+
+If MX6q version is bigger than 1.2, Select external SDMA request as SDMA
+event 2 for MX6Q ARM2 board.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 7ca4d68..58edfad 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -1408,8 +1408,10 @@ static void hdmi_init(int ipu_id, int disp_id)
+ 
+ 	/* GPR3, bits 2-3 = HDMI_MUX_CTL */
+ 	mxc_iomux_set_gpr_register(3, 2, 2, hdmi_mux_setting);
+-	/* GPR0, bit 0 = 1 */
+-	mxc_iomux_set_gpr_register(0, 0, 1, 1);
++
++	/* Set HDMI event as SDMA event2 while Chip version later than TO1.2 */
++	if ((mx6q_revision() > IMX_CHIP_REVISION_1_1))
++		mxc_iomux_set_gpr_register(0, 0, 1, 1);
+ }
+ 
+ /* On mx6x arm2 board i2c2 iomux with hdmi ddc,
+-- 
+1.7.7.4
+

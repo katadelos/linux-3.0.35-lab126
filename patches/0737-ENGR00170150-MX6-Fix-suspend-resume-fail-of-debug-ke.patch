@@ -1,0 +1,34 @@
+From 6336150ec7d083dde439a4523a7554b9661a92ca Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 13 Dec 2011 16:43:37 +0800
+Subject: [PATCH 0737/2463] ENGR00170150 [MX6]Fix suspend/resume fail of debug
+ kernel
+
+Need to push and pop all registers, otherwise, some registers
+will be modified in the function call, add protection to avoid
+this scenario.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/mx6q_suspend.S |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mx6q_suspend.S b/arch/arm/mach-mx6/mx6q_suspend.S
+index b170043..bbda5aa 100644
+--- a/arch/arm/mach-mx6/mx6q_suspend.S
++++ b/arch/arm/mach-mx6/mx6q_suspend.S
+@@ -559,8 +559,11 @@ use_ttbr0:
+ 	bx	r1
+ mmu_on_label:
+ 	mov 	r8, lr
++	push	{r0}
++
+ 	/* Set up the per-CPU stacks */
+ 	bl	cpu_init
++	pop	{r0}
+ 
+ #ifdef CONFIG_CACHE_L2X0
+ 	ldr r2, =L2_BASE_ADDR
+-- 
+1.7.7.4
+

@@ -1,0 +1,35 @@
+From 671ad1306f82b25fc831e9af5e2ff60dda27e668 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Wed, 14 Dec 2011 13:11:39 +0800
+Subject: [PATCH 0745/2463] ENGR00170244-6 ARM: AHCI: Enable PDDQ mode on mx53
+ smd board
+
+In order to save the power consumption, enable the
+PDDQ mode of AHCI PHY when there is no sata disk
+on the port
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx53_smd.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx53_smd.c b/arch/arm/mach-mx5/board-mx53_smd.c
+index 3f7091c..50fec07 100755
+--- a/arch/arm/mach-mx5/board-mx53_smd.c
++++ b/arch/arm/mach-mx5/board-mx53_smd.c
+@@ -558,9 +558,9 @@ static int mx53_smd_sata_init(struct device *dev, void __iomem *addr)
+ 	tmpdata = clk_get_rate(clk) / 1000;
+ 	clk_put(clk);
+ 
+-	sata_init(addr, tmpdata);
+-
+-	return ret;
++	ret = sata_init(addr, tmpdata);
++	if (ret == 0)
++		return ret;
+ 
+ release_sata_ref_clk:
+ 	clk_disable(sata_ref_clk);
+-- 
+1.7.7.4
+

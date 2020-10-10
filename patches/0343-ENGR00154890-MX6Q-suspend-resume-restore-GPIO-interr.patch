@@ -1,0 +1,114 @@
+From 14e8f6e74d5ab22368439d3853d904f33a9c7bea Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Tue, 16 Aug 2011 17:00:26 +0800
+Subject: [PATCH 0343/2463] ENGR00154890 [MX6Q]suspend/resume restore GPIO
+ interrupt enable status
+
+re-init GPIO interrupt to make GPIO interrupt workable after
+suspend/resume (dormant mode)
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ arch/arm/mach-mx6/devices.c |    2 +-
+ arch/arm/mach-mx6/irq.c     |    2 +-
+ arch/arm/mach-mx6/pm.c      |    6 ++++--
+ arch/arm/plat-mxc/gpio.c    |   10 ++++++----
+ 4 files changed, 12 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/devices.c b/arch/arm/mach-mx6/devices.c
+index 996de31..3eab54d 100644
+--- a/arch/arm/mach-mx6/devices.c
++++ b/arch/arm/mach-mx6/devices.c
+@@ -84,7 +84,7 @@ static struct mxc_gpio_port mxc_gpio_ports[] = {
+ 	},
+ };
+ 
+-int __init mx6q_register_gpios(void)
++int mx6q_register_gpios(void)
+ {
+ 	/* 7 ports for Mx6 */
+ 	return mxc_gpio_init(mxc_gpio_ports, 7);
+diff --git a/arch/arm/mach-mx6/irq.c b/arch/arm/mach-mx6/irq.c
+index 7cc9396..4633607 100644
+--- a/arch/arm/mach-mx6/irq.c
++++ b/arch/arm/mach-mx6/irq.c
+@@ -43,7 +43,7 @@ static int mx6_gic_irq_set_wake(struct irq_data *d, unsigned int enable)
+ 	}
+ 	return 0;
+ }
+-void __init mx6_init_irq(void)
++void mx6_init_irq(void)
+ {
+ 	struct irq_desc *desc;
+ 	unsigned int i;
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index 4c53bb4..2a94689 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -61,6 +61,7 @@ static int org_freq;
+ extern int set_cpu_freq(int wp);
+ #endif
+ extern void mx6q_suspend(suspend_state_t state);
++extern void mx6_init_irq(void);
+ static struct device *pm_dev;
+ struct clk *gpc_dvfs_clk;
+ 
+@@ -115,6 +116,7 @@ static void mx6_suspend_restore(void)
+ 	__raw_writel(local_timer[3], local_twd_base + LOCAL_TWD_INT_OFFSET);
+ #endif
+ }
++
+ static int mx6_suspend_enter(suspend_state_t state)
+ {
+ 	mx6_suspend_store();
+@@ -147,8 +149,8 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 		mx6q_suspend(state);
+ 
+ 		if (state == PM_SUSPEND_MEM) {
+-			/* need to re-init gic */
+-			gic_init(0, 29, gic_dist_base, gic_cpu_base);
++			/* need to re-init irq */
++			mx6_init_irq();
+ 
+ #ifdef CONFIG_LOCAL_TIMERS
+ 			gic_enable_ppi(IRQ_LOCALTIMER);
+diff --git a/arch/arm/plat-mxc/gpio.c b/arch/arm/plat-mxc/gpio.c
+index 0a4743a..cd9958d 100755
+--- a/arch/arm/plat-mxc/gpio.c
++++ b/arch/arm/plat-mxc/gpio.c
+@@ -305,9 +305,10 @@ static int mxc_gpio_direction_output(struct gpio_chip *chip,
+  */
+ static struct lock_class_key gpio_lock_class;
+ 
+-int __init mxc_gpio_init(struct mxc_gpio_port *port, int cnt)
++int mxc_gpio_init(struct mxc_gpio_port *port, int cnt)
+ {
+ 	int i, j;
++	static bool initialed;
+ 
+ 	/* save for local usage */
+ 	mxc_gpio_ports = port;
+@@ -337,8 +338,9 @@ int __init mxc_gpio_init(struct mxc_gpio_port *port, int cnt)
+ 
+ 		spin_lock_init(&port[i].lock);
+ 
+-		/* its a serious configuration bug when it fails */
+-		BUG_ON( gpiochip_add(&port[i].chip) < 0 );
++		if (!initialed)
++			/* its a serious configuration bug when it fails */
++			BUG_ON(gpiochip_add(&port[i].chip) < 0);
+ 
+ 		if (cpu_is_mx1() || cpu_is_mx3() || cpu_is_mx25() ||
+ 			cpu_is_mx51() || cpu_is_mx53() || cpu_is_mx6q()) {
+@@ -355,7 +357,7 @@ int __init mxc_gpio_init(struct mxc_gpio_port *port, int cnt)
+ 			}
+ 		}
+ 	}
+-
++	initialed = true;
+ 	if (cpu_is_mx2()) {
+ 		/* setup one handler for all GPIO interrupts */
+ 		irq_set_chained_handler(port[0].irq, mx2_gpio_irq_handler);
+-- 
+1.7.7.4
+

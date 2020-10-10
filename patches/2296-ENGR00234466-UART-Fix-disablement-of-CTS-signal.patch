@@ -1,0 +1,39 @@
+From 8ddd1ff44c745a94ab7bd2a8f4d0736e7e23c7e5 Mon Sep 17 00:00:00 2001
+From: Alejandro Sierra <b18039@freescale.com>
+Date: Wed, 21 Nov 2012 10:01:26 -0600
+Subject: [PATCH 2296/2463] ENGR00234466 UART: Fix disablement of CTS signal
+
+On Uart driver, CTS signal were never disabled
+on the imx_set_mctrl function since the register was
+written inside of the conditional.
+        if (mctrl & TIOCM_RTS) {
+                temp |= UCR2_CTS;
+                writel(temp, sport->port.membase + UCR2);
+        }
+
+Signed-off-by: Alejandro Sierra <b18039@freescale.com>
+---
+ drivers/tty/serial/imx.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/tty/serial/imx.c b/drivers/tty/serial/imx.c
+index e76e5b9..a512a76 100644
+--- a/drivers/tty/serial/imx.c
++++ b/drivers/tty/serial/imx.c
+@@ -710,10 +710,10 @@ static void imx_set_mctrl(struct uart_port *port, unsigned int mctrl)
+ 
+ 	temp = readl(sport->port.membase + UCR2) & ~UCR2_CTS;
+ 
+-	if (mctrl & TIOCM_RTS) {
++	if (mctrl & TIOCM_RTS)
+ 		temp |= UCR2_CTS;
+-		writel(temp, sport->port.membase + UCR2);
+-	}
++
++	writel(temp, sport->port.membase + UCR2);
+ 
+ 	if (mctrl & TIOCM_LOOP) {
+ 		temp = readl(sport->port.membase + UTS) & ~UTS_LOOP;
+-- 
+1.7.7.4
+

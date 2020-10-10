@@ -1,0 +1,261 @@
+From ff6d11de8a06684cf9b6203d4bb9572c94478002 Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Wed, 18 May 2011 14:02:45 +0800
+Subject: [PATCH 0173/2463] ENGR00143550 camera: change camera platform data
+ name and remove unused function
+
+Change camera platform data name from mxc_camera_platform_data to
+fsl_mxc_camera_platform_data in accordence with include/linux/fsl_devices.h
+and remove unused function gpio_sensor_active(),gpio_sensor_inactive().
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov2640.c |    9 +--------
+ drivers/media/video/mxc/capture/ov3640.c |   18 ------------------
+ drivers/media/video/mxc/capture/ov5640.c |   11 ++---------
+ drivers/media/video/mxc/capture/ov5642.c |   11 ++---------
+ 4 files changed, 5 insertions(+), 44 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov2640.c b/drivers/media/video/mxc/capture/ov2640.c
+index c968655..a0a050b 100644
+--- a/drivers/media/video/mxc/capture/ov2640.c
++++ b/drivers/media/video/mxc/capture/ov2640.c
+@@ -286,8 +286,6 @@ static struct regulator *core_regulator;
+ static struct regulator *analog_regulator;
+ static struct regulator *gpo_regulator;
+ 
+-extern void gpio_sensor_active(void);
+-extern void gpio_sensor_inactive(void);
+ 
+ /* list of image formats supported by this sensor */
+ /*
+@@ -442,7 +440,6 @@ static int ioctl_s_power(struct v4l2_int_device *s, int on)
+ 	pr_debug("In ov2640:ioctl_s_power\n");
+ 
+ 	if (on && !sensor->on) {
+-		gpio_sensor_active();
+ 		if (io_regulator)
+ 			if (regulator_enable(io_regulator) != 0)
+ 				return -EIO;
+@@ -464,7 +461,6 @@ static int ioctl_s_power(struct v4l2_int_device *s, int on)
+ 			regulator_disable(io_regulator);
+ 		if (gpo_regulator)
+ 			regulator_disable(gpo_regulator);
+-		gpio_sensor_inactive();
+ 	}
+ 
+ 	sensor->on = on;
+@@ -796,7 +792,6 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+ 
+ 	pr_debug("In ov2640:ioctl_dev_init\n");
+ 
+-	gpio_sensor_active();
+ 	ov2640_data.on = true;
+ 
+ 	tgt_xclk = ov2640_data.mclk;
+@@ -821,8 +816,6 @@ static int ioctl_dev_exit(struct v4l2_int_device *s)
+ {
+ 	pr_debug("In ov2640:ioctl_dev_exit\n");
+ 
+-	gpio_sensor_inactive();
+-
+ 	return 0;
+ }
+ 
+@@ -878,7 +871,7 @@ static int ov2640_probe(struct i2c_client *client,
+ 			const struct i2c_device_id *id)
+ {
+ 	int retval;
+-	struct mxc_camera_platform_data *plat_data = client->dev.platform_data;
++	struct fsl_mxc_camera_platform_data *plat_data = client->dev.platform_data;
+ 
+ 	pr_debug("In ov2640_probe (RH_BT565)\n");
+ 
+diff --git a/drivers/media/video/mxc/capture/ov3640.c b/drivers/media/video/mxc/capture/ov3640.c
+index 189a5f5..24e12d7 100644
+--- a/drivers/media/video/mxc/capture/ov3640.c
++++ b/drivers/media/video/mxc/capture/ov3640.c
+@@ -722,19 +722,6 @@ static struct i2c_driver ov3640_i2c_driver = {
+ 	.id_table = ov3640_id,
+ };
+ 
+-#if 0
+-extern void gpio_sensor_active(unsigned int csi_index);
+-extern void gpio_sensor_inactive(unsigned int csi);
+-#else
+-void gpio_sensor_active(unsigned int csi_index)
+-{
+-	return;
+-}
+-void gpio_sensor_inactive(unsigned int csi)
+-{
+-	return;
+-}
+-#endif
+ 
+ static s32 ov3640_write_reg(u16 reg, u8 val)
+ {
+@@ -868,7 +855,6 @@ static int ioctl_s_power(struct v4l2_int_device *s, int on)
+ 	struct sensor *sensor = s->priv;
+ 
+ 	if (on && !sensor->on) {
+-		gpio_sensor_active(ov3640_data.csi);
+ 		if (io_regulator)
+ 			if (regulator_enable(io_regulator) != 0)
+ 				return -EIO;
+@@ -894,7 +880,6 @@ static int ioctl_s_power(struct v4l2_int_device *s, int on)
+ 			regulator_disable(io_regulator);
+ 		if (gpo_regulator)
+ 			regulator_disable(gpo_regulator);
+-		gpio_sensor_inactive(ov3640_data.csi);
+ 	}
+ 
+ 	sensor->on = on;
+@@ -1224,7 +1209,6 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+ 	u32 tgt_fps;	/* target frames per secound */
+ 	enum ov3640_frame_rate frame_rate;
+ 
+-	gpio_sensor_active(ov3640_data.csi);
+ 	ov3640_data.on = true;
+ 
+ 	/* mclk */
+@@ -1259,8 +1243,6 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+  */
+ static int ioctl_dev_exit(struct v4l2_int_device *s)
+ {
+-	gpio_sensor_inactive(ov3640_data.csi);
+-
+ 	return 0;
+ }
+ 
+diff --git a/drivers/media/video/mxc/capture/ov5640.c b/drivers/media/video/mxc/capture/ov5640.c
+index cd4b61b..69bbd2a 100644
+--- a/drivers/media/video/mxc/capture/ov5640.c
++++ b/drivers/media/video/mxc/capture/ov5640.c
+@@ -747,7 +747,7 @@ static struct regulator *io_regulator;
+ static struct regulator *core_regulator;
+ static struct regulator *analog_regulator;
+ static struct regulator *gpo_regulator;
+-static struct mxc_camera_platform_data *camera_plat;
++static struct fsl_mxc_camera_platform_data *camera_plat;
+ 
+ static int ov5640_probe(struct i2c_client *adapter,
+ 				const struct i2c_device_id *device_id);
+@@ -773,8 +773,6 @@ static struct i2c_driver ov5640_i2c_driver = {
+ 	.id_table = ov5640_id,
+ };
+ 
+-extern void gpio_sensor_active(unsigned int csi_index);
+-extern void gpio_sensor_inactive(unsigned int csi);
+ 
+ static s32 ov5640_write_reg(u16 reg, u8 val)
+ {
+@@ -908,7 +906,6 @@ static int ioctl_s_power(struct v4l2_int_device *s, int on)
+ 	struct sensor *sensor = s->priv;
+ 
+ 	if (on && !sensor->on) {
+-		gpio_sensor_active(ov5640_data.csi);
+ 		if (io_regulator)
+ 			if (regulator_enable(io_regulator) != 0)
+ 				return -EIO;
+@@ -934,7 +931,6 @@ static int ioctl_s_power(struct v4l2_int_device *s, int on)
+ 			regulator_disable(io_regulator);
+ 		if (gpo_regulator)
+ 			regulator_disable(gpo_regulator);
+-		gpio_sensor_inactive(ov5640_data.csi);
+ 	}
+ 
+ 	sensor->on = on;
+@@ -1264,7 +1260,6 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+ 	u32 tgt_fps;	/* target frames per secound */
+ 	enum ov5640_frame_rate frame_rate;
+ 
+-	gpio_sensor_active(ov5640_data.csi);
+ 	ov5640_data.on = true;
+ 
+ 	/* mclk */
+@@ -1299,8 +1294,6 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+  */
+ static int ioctl_dev_exit(struct v4l2_int_device *s)
+ {
+-	gpio_sensor_inactive(ov5640_data.csi);
+-
+ 	return 0;
+ }
+ 
+@@ -1358,7 +1351,7 @@ static int ov5640_probe(struct i2c_client *client,
+ 			const struct i2c_device_id *id)
+ {
+ 	int retval;
+-	struct mxc_camera_platform_data *plat_data = client->dev.platform_data;
++	struct fsl_mxc_camera_platform_data *plat_data = client->dev.platform_data;
+ 
+ 	/* Set initial values for the sensor struct. */
+ 	memset(&ov5640_data, 0, sizeof(ov5640_data));
+diff --git a/drivers/media/video/mxc/capture/ov5642.c b/drivers/media/video/mxc/capture/ov5642.c
+index 63d85c6..4a295f0 100644
+--- a/drivers/media/video/mxc/capture/ov5642.c
++++ b/drivers/media/video/mxc/capture/ov5642.c
+@@ -1325,7 +1325,7 @@ static struct regulator *io_regulator;
+ static struct regulator *core_regulator;
+ static struct regulator *analog_regulator;
+ static struct regulator *gpo_regulator;
+-static struct mxc_camera_platform_data *camera_plat;
++static struct fsl_mxc_camera_platform_data *camera_plat;
+ 
+ static int ov5642_probe(struct i2c_client *adapter,
+ 				const struct i2c_device_id *device_id);
+@@ -1351,8 +1351,6 @@ static struct i2c_driver ov5642_i2c_driver = {
+ 	.id_table = ov5642_id,
+ };
+ 
+-extern void gpio_sensor_active(unsigned int csi_index);
+-extern void gpio_sensor_inactive(unsigned int csi);
+ 
+ static s32 ov5642_write_reg(u16 reg, u8 val)
+ {
+@@ -1486,7 +1484,6 @@ static int ioctl_s_power(struct v4l2_int_device *s, int on)
+ 	struct sensor *sensor = s->priv;
+ 
+ 	if (on && !sensor->on) {
+-		gpio_sensor_active(ov5642_data.csi);
+ 		if (io_regulator)
+ 			if (regulator_enable(io_regulator) != 0)
+ 				return -EIO;
+@@ -1512,7 +1509,6 @@ static int ioctl_s_power(struct v4l2_int_device *s, int on)
+ 			regulator_disable(io_regulator);
+ 		if (gpo_regulator)
+ 			regulator_disable(gpo_regulator);
+-		gpio_sensor_inactive(ov5642_data.csi);
+ 	}
+ 
+ 	sensor->on = on;
+@@ -1842,7 +1838,6 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+ 	u32 tgt_fps;	/* target frames per secound */
+ 	enum ov5642_frame_rate frame_rate;
+ 
+-	gpio_sensor_active(ov5642_data.csi);
+ 	ov5642_data.on = true;
+ 
+ 	/* mclk */
+@@ -1877,8 +1872,6 @@ static int ioctl_dev_init(struct v4l2_int_device *s)
+  */
+ static int ioctl_dev_exit(struct v4l2_int_device *s)
+ {
+-	gpio_sensor_inactive(ov5642_data.csi);
+-
+ 	return 0;
+ }
+ 
+@@ -1936,7 +1929,7 @@ static int ov5642_probe(struct i2c_client *client,
+ 			const struct i2c_device_id *id)
+ {
+ 	int retval;
+-	struct mxc_camera_platform_data *plat_data = client->dev.platform_data;
++	struct fsl_mxc_camera_platform_data *plat_data = client->dev.platform_data;
+ 
+ 	/* Set initial values for the sensor struct. */
+ 	memset(&ov5642_data, 0, sizeof(ov5642_data));
+-- 
+1.7.7.4
+

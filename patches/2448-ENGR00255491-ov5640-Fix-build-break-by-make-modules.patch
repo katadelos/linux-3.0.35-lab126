@@ -1,0 +1,52 @@
+From edf1b57b91aceaaca14ed5a84ebec277585d633b Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Fri, 22 Mar 2013 13:27:11 +0800
+Subject: [PATCH 2448/2463] ENGR00255491 ov5640: Fix build break by make
+ modules
+
+Fix the kernel modules building error for mx6q/mx6dl as follows:
+
+LD [M] drivers/usb/gadget/g_serial.o
+Building modules, stage 2.
+MODPOST 48 modules
+ERROR: "csi_enable_mclk" [drivers/media/video/mxc/capture/ov5640_camera.ko]
+			undefined!
+make[1]: *** [__modpost] Error 1
+make: *** [modules] Error 2
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov5640.c |   10 ++++++----
+ 1 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov5640.c b/drivers/media/video/mxc/capture/ov5640.c
+index fabbc23..eb62019 100644
+--- a/drivers/media/video/mxc/capture/ov5640.c
++++ b/drivers/media/video/mxc/capture/ov5640.c
+@@ -1823,8 +1823,9 @@ static int ov5640_probe(struct i2c_client *client,
+ 	if (plat_data->pwdn)
+ 		plat_data->pwdn(0);
+ 
+-	if (cpu_is_mx6sl())
+-		csi_enable_mclk(CSI_MCLK_I2C, true, true);
++#ifdef CONFIG_SOC_IMX6SL
++	csi_enable_mclk(CSI_MCLK_I2C, true, true);
++#endif
+ 	retval = ov5640_read_reg(OV5640_CHIP_ID_HIGH_BYTE, &chip_id_high);
+ 	if (retval < 0 || chip_id_high != 0x56) {
+ 		pr_warning("camera ov5640 is not found\n");
+@@ -1841,8 +1842,9 @@ static int ov5640_probe(struct i2c_client *client,
+ 	if (plat_data->pwdn)
+ 		plat_data->pwdn(1);
+ 
+-	if (cpu_is_mx6sl())
+-		csi_enable_mclk(CSI_MCLK_I2C, false, false);
++#ifdef CONFIG_SOC_IMX6SL
++	csi_enable_mclk(CSI_MCLK_I2C, false, false);
++#endif
+ 
+ 	camera_plat = plat_data;
+ 
+-- 
+1.7.7.4
+

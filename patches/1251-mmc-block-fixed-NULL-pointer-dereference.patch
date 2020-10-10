@@ -1,0 +1,37 @@
+From ac32d8ed078871bd31c5fbf899fb800869d0b451 Mon Sep 17 00:00:00 2001
+From: Jaehoon Chung <jh80.chung@samsung.com>
+Date: Wed, 13 Jul 2011 17:02:16 +0900
+Subject: [PATCH 1251/2463] mmc: block: fixed NULL pointer dereference
+
+We already check for ongoing async transfers when handling discard
+requests, but not in mmc_blk_issue_flush().  This patch fixes that
+omission.
+
+Tested with an SDHCI controller and eMMC4.41.
+
+Signed-off-by: Jaehoon Chung <jh80.chung@samsung.com>
+Signed-off-by: Kyungmin Park <kyungmin.park@samsung.com>
+Acked-by: Per Forlin <per.forlin@linaro.org>
+Cc: <stable@kernel.org>
+Signed-off-by: Chris Ball <cjb@laptop.org>
+---
+ drivers/mmc/card/block.c |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mmc/card/block.c b/drivers/mmc/card/block.c
+index b7d22dd..453695e 100644
+--- a/drivers/mmc/card/block.c
++++ b/drivers/mmc/card/block.c
+@@ -1208,6 +1208,9 @@ static int mmc_blk_issue_rq(struct mmc_queue *mq, struct request *req)
+ 		else
+ 			ret = mmc_blk_issue_discard_rq(mq, req);
+ 	} else if (req && req->cmd_flags & REQ_FLUSH) {
++		/* complete ongoing async transfer before issuing flush */
++		if (card->host->areq)
++			mmc_blk_issue_rw_rq(mq, NULL);
+ 		ret = mmc_blk_issue_flush(mq, req);
+ 	} else {
+ 		ret = mmc_blk_issue_rw_rq(mq, req);
+-- 
+1.7.7.4
+

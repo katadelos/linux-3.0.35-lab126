@@ -1,0 +1,31 @@
+From 9285c73237990f5b4e461d0a634c711abb5d05e4 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Fri, 10 Aug 2012 09:25:34 +0800
+Subject: [PATCH 1877/2463] ENGR00220011-2 IPU: Show video to DP/fb0 when
+ bootup, the color space incorrect
+
+Show video to IPU DP/fb0 when bootup, the color space incorrect
+It needs to set the correct SRM_MODE when enable DP.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_disp.c |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index 9522c94..7a34431 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -909,6 +909,9 @@ void _ipu_dp_dc_enable(struct ipu_soc *ipu, ipu_channel_t channel)
+ 		reg = ipu_cm_read(ipu, IPU_SRM_PRI2) | 0x8;
+ 		ipu_cm_write(ipu, reg, IPU_SRM_PRI2);
+ 		return;
++	} else if (channel == MEM_BG_SYNC) {
++		reg = ipu_cm_read(ipu, IPU_SRM_PRI2) | 0x8;
++		ipu_cm_write(ipu, reg, IPU_SRM_PRI2);
+ 	}
+ 
+ 	di = ipu->dc_di_assignment[dc_chan];
+-- 
+1.7.7.4
+

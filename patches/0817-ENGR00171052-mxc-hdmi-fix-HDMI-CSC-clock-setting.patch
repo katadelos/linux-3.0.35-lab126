@@ -1,0 +1,63 @@
+From b8cfc2de35d44ddec88808afcb2b091d5f06d94c Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Thu, 29 Dec 2011 16:25:51 +0800
+Subject: [PATCH 0817/2463] ENGR00171052 mxc hdmi: fix HDMI CSC clock setting
+
+Move HDMI csc clock setting to fucntion mxc_hdmi_enable_video_path.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ drivers/video/mxc_hdmi.c |   16 ++++++++--------
+ 1 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index 46d93ef..e73ec45 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -826,7 +826,7 @@ static void mxc_hdmi_phy_sel_interface_control(u8 enable)
+ static int hdmi_phy_configure(struct mxc_hdmi *hdmi, unsigned char pRep,
+ 			      unsigned char cRes, int cscOn)
+ {
+-	u8 val, clkdis;
++	u8 val;
+ 
+ 	dev_dbg(&hdmi->pdev->dev, "%s\n", __func__);
+ 
+@@ -839,6 +839,7 @@ static int hdmi_phy_configure(struct mxc_hdmi *hdmi, unsigned char pRep,
+ 	else if (cRes != 8 && cRes != 12)
+ 		return false;
+ 
++	/* Enable csc path */
+ 	if (cscOn)
+ 		val = HDMI_MC_FLOWCTRL_FEED_THROUGH_OFF_CSC_IN_PATH;
+ 	else
+@@ -846,13 +847,6 @@ static int hdmi_phy_configure(struct mxc_hdmi *hdmi, unsigned char pRep,
+ 
+ 	hdmi_writeb(val, HDMI_MC_FLOWCTRL);
+ 
+-	/* Enable csc path */
+-	if (cscOn) {
+-		clkdis = hdmi_readb(HDMI_MC_CLKDIS);
+-		clkdis &= ~HDMI_MC_CLKDIS_CSCCLK_DISABLE;
+-		hdmi_writeb(clkdis, HDMI_MC_CLKDIS);
+-	}
+-
+ 	/* gen2 tx power off */
+ 	mxc_hdmi_phy_gen2_txpwron(0);
+ 
+@@ -1438,6 +1432,12 @@ static void mxc_hdmi_enable_video_path(struct mxc_hdmi *hdmi)
+ 
+ 	clkdis &= ~HDMI_MC_CLKDIS_TMDSCLK_DISABLE;
+ 	hdmi_writeb(clkdis, HDMI_MC_CLKDIS);
++
++	/* Enable csc path */
++	if (isColorSpaceConversion(hdmi)) {
++		clkdis &= ~HDMI_MC_CLKDIS_CSCCLK_DISABLE;
++		hdmi_writeb(clkdis, HDMI_MC_CLKDIS);
++	}
+ }
+ 
+ static void hdmi_enable_audio_clk(struct mxc_hdmi *hdmi)
+-- 
+1.7.7.4
+

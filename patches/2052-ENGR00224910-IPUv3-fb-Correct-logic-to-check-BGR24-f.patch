@@ -1,0 +1,35 @@
+From 4a4da80daf5178442991572ef884690a32143749 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.liu@freescale.com>
+Date: Wed, 19 Sep 2012 10:26:25 +0800
+Subject: [PATCH 2052/2463] ENGR00224910 IPUv3 fb:Correct logic to check BGR24
+ for if= option
+
+This patch corrects the logic to check BGR24 pixel format for
+'if=' option in kernel bootup command line of framebuffer.
+After applying the patch, users may use 'if=BGR24' to specify
+the display data format to be BGR24. For example, 'video=mxcfb0:
+dev=lcd,LCD_VIDEO_NAME,if=BGR24' makes IPUv3 output BGR24 data
+to fb0's lcd panel.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit 7ab85674f63eb1388e44a61e17891f0e283c409a)
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 745c485..8152c47 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -1887,7 +1887,7 @@ static int mxcfb_option_setup(struct platform_device *pdev)
+ 			if (!strncmp(opt+3, "RGB24", 5)) {
+ 				pdata->interface_pix_fmt = IPU_PIX_FMT_RGB24;
+ 				continue;
+-			} else if (!strncmp(opt+6, "BGR24", 5)) {
++			} else if (!strncmp(opt+3, "BGR24", 5)) {
+ 				pdata->interface_pix_fmt = IPU_PIX_FMT_BGR24;
+ 				continue;
+ 			}
+-- 
+1.7.7.4
+

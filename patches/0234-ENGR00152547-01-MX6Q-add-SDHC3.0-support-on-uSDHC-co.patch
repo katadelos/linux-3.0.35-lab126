@@ -1,0 +1,81 @@
+From 6265c198207bd26042a2bc62e3c2aaa5386427cf Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Tue, 12 Jul 2011 11:04:35 +0800
+Subject: [PATCH 0234/2463] ENGR00152547-01 [MX6Q]add SDHC3.0 support on uSDHC
+ controller
+
+enable uSDHC slot 3 in board file
+add parameter in platform data to indicate whether the slot
+supports 1.8 voltage
+add pinmux to support voltage switch between 1.8V and 3.3V
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c    |    4 ++++
+ arch/arm/plat-mxc/include/mach/esdhc.h      |    3 ++-
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h |    2 +-
+ 3 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 0baf7b4..fbe4e96 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -131,6 +131,8 @@ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 	MX6Q_PAD_SD3_DAT6__USDHC3_DAT6,
+ 	MX6Q_PAD_SD3_DAT7__USDHC3_DAT7,
+ 	MX6Q_PAD_SD3_RST__USDHC3_RST,
++	/* SD3 VSelect */
++	MX6Q_PAD_GPIO_18__USDHC3_VSELECT,
+ 	/* SD3_CD and SD3_WP */
+ 	MX6Q_PAD_NANDF_CS0__GPIO_6_11,
+ 	MX6Q_PAD_NANDF_CS1__GPIO_6_14,
+@@ -198,6 +200,7 @@ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ static const struct esdhc_platform_data mx6q_sabreauto_sd3_data __initconst = {
+ 	.cd_gpio = MX6Q_SABREAUTO_SD3_CD,
+ 	.wp_gpio = MX6Q_SABREAUTO_SD3_WP,
++	.support_18v = 1,
+ };
+ 
+ /* No card detect signal for SD4 */
+@@ -492,6 +495,7 @@ static void __init mx6_board_init(void)
+ 	imx6q_init_fec();
+ 
+ 	imx6q_add_sdhci_usdhc_imx(3, &mx6q_sabreauto_sd4_data);
++	imx6q_add_sdhci_usdhc_imx(2, &mx6q_sabreauto_sd3_data);
+ 	imx_add_viv_gpu("gc2000", &imx6_gc2000_data, &imx6q_gc2000_pdata);
+ 	imx_add_viv_gpu("gc355", &imx6_gc355_data, NULL);
+ 	imx_add_viv_gpu("gc320", &imx6_gc320_data, NULL);
+diff --git a/arch/arm/plat-mxc/include/mach/esdhc.h b/arch/arm/plat-mxc/include/mach/esdhc.h
+index f6f5ca2..de64035 100644
+--- a/arch/arm/plat-mxc/include/mach/esdhc.h
++++ b/arch/arm/plat-mxc/include/mach/esdhc.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2010 Wolfram Sang <w.sang@pengutronix.de>
++ * Copyright 2011 Wolfram Sang <w.sang@pengutronix.de>
+  *
+  * This program is free software; you can redistribute it and/or
+  * modify it under the terms of the GNU General Public License
+@@ -23,5 +23,6 @@ struct esdhc_platform_data {
+ 	unsigned int wp_gpio;
+ 	unsigned int cd_gpio;
+ 	unsigned int always_present;
++	unsigned int support_18v;
+ };
+ #endif /* __ASM_ARCH_IMX_ESDHC_H */
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index 75e3728..ee90624 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -48,7 +48,7 @@ typedef enum iomux_config {
+ 		PAD_CTL_DSE_40ohm | PAD_CTL_SRE_FAST | PAD_CTL_HYS)
+ 
+ #define MX6Q_USDHC_PAD_CTRL	(PAD_CTL_PKE | PAD_CTL_PUE |	\
+-		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED |	\
++		PAD_CTL_PUS_47K_UP | PAD_CTL_SPEED_HIGH |	\
+ 		PAD_CTL_DSE_40ohm | PAD_CTL_SRE_FAST | PAD_CTL_HYS)
+ 
+ #define MX6Q_ENET_PAD_CTRL	(PAD_CTL_PKE | PAD_CTL_PUE |	\
+-- 
+1.7.7.4
+

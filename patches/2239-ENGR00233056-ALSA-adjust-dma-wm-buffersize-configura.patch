@@ -1,0 +1,131 @@
+From ac604d90ceb7ee0e0367a0f6ba51efa01d33b0e9 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <b42378@freescale.com>
+Date: Fri, 9 Nov 2012 15:44:33 +0800
+Subject: [PATCH 2239/2463] ENGR00233056 ALSA: adjust dma wm & buffersize
+ configuration strategy
+
+ Previously SSI/ESAI/SPDIF used one same-sized buffers and watermark(the
+WM in the title) for every alsa driver.
+
+ This patch allow each driver config its own buffer size and watermark,
+which is obviously more flexible.
+
+ Also, it sets SSI's buffersize from 256k to 64k.
+
+Signed-off-by: Nicolin Chen <b42378@freescale.com>
+---
+ sound/soc/imx/imx-esai.h        |    2 --
+ sound/soc/imx/imx-pcm-dma-mx2.c |   18 +++++++++++++++---
+ sound/soc/imx/imx-pcm.h         |    5 +++++
+ sound/soc/imx/imx-ssi.c         |    3 ++-
+ sound/soc/imx/imx-ssi.h         |    3 ---
+ 5 files changed, 22 insertions(+), 9 deletions(-)
+
+diff --git a/sound/soc/imx/imx-esai.h b/sound/soc/imx/imx-esai.h
+index d27cbd0..53c899e 100644
+--- a/sound/soc/imx/imx-esai.h
++++ b/sound/soc/imx/imx-esai.h
+@@ -298,8 +298,6 @@
+ #define ESAI_RX_DIV_PM	4
+ #define ESAI_RX_DIV_FP	5
+ 
+-#define IMX_ESAI_DMABUF_SIZE     (64 * 1024)
+-
+ #define DRV_NAME "imx-esai"
+ 
+ #include <linux/dmaengine.h>
+diff --git a/sound/soc/imx/imx-pcm-dma-mx2.c b/sound/soc/imx/imx-pcm-dma-mx2.c
+index ad8d5a3..3065dfd 100644
+--- a/sound/soc/imx/imx-pcm-dma-mx2.c
++++ b/sound/soc/imx/imx-pcm-dma-mx2.c
+@@ -405,7 +405,7 @@ static struct snd_pcm_hardware snd_imx_hardware = {
+ 	.rate_min = 8000,
+ 	.channels_min = 2,
+ 	.channels_max = 2,
+-	.buffer_bytes_max = IMX_SSI_DMABUF_SIZE,
++	.buffer_bytes_max = IMX_DEFAULT_DMABUF_SIZE,
+ 	.period_bytes_min = 128,
+ 	.period_bytes_max = 65535, /* Limited by SDMA engine */
+ 	.periods_min = 2,
+@@ -439,6 +439,15 @@ static int snd_imx_open(struct snd_pcm_substream *substream)
+ 		return ret;
+ 	}
+ 
++	if (!strncmp(rtd->cpu_dai->name, "imx-ssi", strlen("imx-ssi")))
++		snd_imx_hardware.buffer_bytes_max = IMX_SSI_DMABUF_SIZE;
++	else if (!strncmp(rtd->cpu_dai->name, "imx-esai", strlen("imx-esai")))
++		snd_imx_hardware.buffer_bytes_max = IMX_ESAI_DMABUF_SIZE;
++	else if (!strncmp(rtd->cpu_dai->name, "imx-spdif", strlen("imx-spdif")))
++		snd_imx_hardware.buffer_bytes_max = IMX_SPDIF_DMABUF_SIZE;
++	else
++		snd_imx_hardware.buffer_bytes_max = IMX_DEFAULT_DMABUF_SIZE;
++
+ 	snd_soc_set_runtime_hwparams(substream, &snd_imx_hardware);
+ 
+ 	return 0;
+@@ -476,8 +485,11 @@ static int __devinit imx_soc_platform_probe(struct platform_device *pdev)
+ {
+ 	struct imx_ssi *ssi = platform_get_drvdata(pdev);
+ 
+-	ssi->dma_params_tx.burstsize = 6;
+-	ssi->dma_params_rx.burstsize = 4;
++	if (ssi->dma_params_tx.burstsize == 0
++			&& ssi->dma_params_rx.burstsize == 0) {
++		ssi->dma_params_tx.burstsize = 6;
++		ssi->dma_params_rx.burstsize = 4;
++	}
+ 
+ 	return snd_soc_register_platform(&pdev->dev, &imx_soc_platform_mx2);
+ }
+diff --git a/sound/soc/imx/imx-pcm.h b/sound/soc/imx/imx-pcm.h
+index c612621..9b5e1e0 100644
+--- a/sound/soc/imx/imx-pcm.h
++++ b/sound/soc/imx/imx-pcm.h
+@@ -43,6 +43,11 @@
+ 
+ #include <mach/dma.h>
+ 
++#define IMX_DEFAULT_DMABUF_SIZE		(64 * 1024)
++#define IMX_SSI_DMABUF_SIZE			(64 * 1024)
++#define IMX_ESAI_DMABUF_SIZE		(256 * 1024)
++#define IMX_SPDIF_DMABUF_SIZE		(64 * 1024)
++
+ struct imx_pcm_runtime_data {
+ 	int period_bytes;
+ 	int periods;
+diff --git a/sound/soc/imx/imx-ssi.c b/sound/soc/imx/imx-ssi.c
+index e9b102d..b4c3aea 100644
+--- a/sound/soc/imx/imx-ssi.c
++++ b/sound/soc/imx/imx-ssi.c
+@@ -56,6 +56,7 @@
+ #include <mach/hardware.h>
+ 
+ #include "imx-ssi.h"
++#include "imx-pcm.h"
+ 
+ #define SSI_SACNT_DEFAULT (SSI_SACNT_AC97EN | SSI_SACNT_FV)
+ #define IMX_SSI_FORMATS \
+@@ -743,7 +744,7 @@ static int imx_ssi_probe(struct platform_device *pdev)
+ 	ssi->dma_params_rx.dma_addr = res->start + SSI_SRX0;
+ 	ssi->dma_params_tx.dma_addr = res->start + SSI_STX0;
+ 
+-	ssi->dma_params_tx.burstsize = 4;
++	ssi->dma_params_tx.burstsize = 6;
+ 	ssi->dma_params_rx.burstsize = 4;
+ 
+ 	ssi->dma_params_tx.peripheral_type = IMX_DMATYPE_SSI_SP;
+diff --git a/sound/soc/imx/imx-ssi.h b/sound/soc/imx/imx-ssi.h
+index c57f9fe..af8e5a2 100644
+--- a/sound/soc/imx/imx-ssi.h
++++ b/sound/soc/imx/imx-ssi.h
+@@ -222,7 +222,4 @@ int snd_imx_pcm_mmap(struct snd_pcm_substream *substream, struct vm_area_struct
+ int imx_pcm_new(struct snd_card *card, struct snd_soc_dai *dai,
+ 	struct snd_pcm *pcm);
+ void imx_pcm_free(struct snd_pcm *pcm);
+-
+-#define IMX_SSI_DMABUF_SIZE	(256 * 1024)
+-
+ #endif /* _IMX_SSI_H */
+-- 
+1.7.7.4
+

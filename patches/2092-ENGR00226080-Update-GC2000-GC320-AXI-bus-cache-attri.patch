@@ -1,0 +1,41 @@
+From e3d71bec6f48ad04d65b63d5ae6871a6ba88c965 Mon Sep 17 00:00:00 2001
+From: Loren Huang <b02279@freescale.com>
+Date: Thu, 27 Sep 2012 16:43:10 +0800
+Subject: [PATCH 2092/2463] ENGR00226080 Update GC2000/GC320 AXI bus cache
+ attribute
+
+This patch changed the GPU AXI bus cache attribute
+to improve the performance of fillrate bound case.
+
+Here is some test result: BEFORE:AFTER (larger better)
+mm06 samruai fps:    117.74:137.64
+mm06 proxycon fps:   117.90:135.00
+Fillrate with 1 tex: 251.3M:331.1M
+Fillrate with 2 tex: 402.6M:475.4M
+
+Signed-off-by: Loren Huang <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c  |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+index 0455b10..36b7bcf 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+@@ -1012,6 +1012,12 @@ gckHARDWARE_InitializeHardware(
+         }
+     }
+ 
++    /* Update GPU AXI cache atttribute. */
++    gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os,
++                                      Hardware->core,
++                                      0x00008,
++                                      0x00002200));
++
+     /* Success. */
+     gcmkFOOTER_NO();
+     return gcvSTATUS_OK;
+-- 
+1.7.7.4
+

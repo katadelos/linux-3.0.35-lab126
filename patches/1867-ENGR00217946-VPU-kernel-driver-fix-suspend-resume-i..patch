@@ -1,0 +1,38 @@
+From a471d39302638ad37c37d6bd4fc477a0a72f93a9 Mon Sep 17 00:00:00 2001
+From: Hongzhang Yang <Hongzhang.Yang@freescale.com>
+Date: Thu, 9 Aug 2012 11:00:56 +0800
+Subject: [PATCH 1867/2463] ENGR00217946 VPU kernel driver: fix suspend/resume
+ i.MX6DL hang issue
+
+Bug: VPU easily hang during suspend/resume standby mode i.MX6Q/i.MX6DL
+
+Fix: standby mode doesn't power off/on PU but changes voltage instead, thus
+VPU requires a reset cause there's always chance some cell is on
+unstable state after voltage change
+
+suspend/resume DSM is OK because it power off/on PU and probably there is a
+power-on-reset sequence embedded in SOC
+
+Signed-off-by: Hongzhang Yang <Hongzhang.Yang@freescale.com>
+---
+ drivers/mxc/vpu/mxc_vpu.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/vpu/mxc_vpu.c b/drivers/mxc/vpu/mxc_vpu.c
+index 26fc95a..8904568 100644
+--- a/drivers/mxc/vpu/mxc_vpu.c
++++ b/drivers/mxc/vpu/mxc_vpu.c
+@@ -821,6 +821,10 @@ static int vpu_resume(struct platform_device *pdev)
+ 
+ 		clk_enable(vpu_clk);
+ 
++		/* reset VPU in case of voltage change */
++		if (vpu_plat->reset)
++			vpu_plat->reset();
++
+ 		pc = READ_REG(BIT_CUR_PC);
+ 		if (pc) {
+ 			clk_disable(vpu_clk);
+-- 
+1.7.7.4
+

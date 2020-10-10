@@ -1,0 +1,84 @@
+From 64f571a6bcba48d5db5cb6fd4ba6bfbd900534c6 Mon Sep 17 00:00:00 2001
+From: Mahesh Mahadevan <r9aadq@freescale.com>
+Date: Fri, 11 Nov 2011 08:39:16 -0600
+Subject: [PATCH 0598/2463] ENGR00162048 Align the MX6 Sabrelite
+ set_cpu_voltage() with ARM2
+
+Align the implementation, eventually this should go to a common place
+across MX6 platforms
+
+Signed-off-by: Mahesh Mahadevan <r9aadq@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |   19 +++++++++++++++----
+ 1 files changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index 8fef605..aa7be0b 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -16,7 +16,6 @@
+  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+  */
+ 
+-
+ #include <linux/types.h>
+ #include <linux/sched.h>
+ #include <linux/delay.h>
+@@ -30,6 +29,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/fsl_devices.h>
+ #include <linux/spi/spi.h>
++#include <linux/spi/flash.h>
+ #include <linux/i2c.h>
+ #include <linux/i2c/pca953x.h>
+ #include <linux/ata.h>
+@@ -46,9 +46,10 @@
+ #include <linux/memblock.h>
+ #include <linux/gpio.h>
+ #include <linux/etherdevice.h>
++#include <linux/regulator/anatop-regulator.h>
++#include <linux/regulator/consumer.h>
+ #include <linux/regulator/machine.h>
+ #include <linux/regulator/fixed.h>
+-#include <linux/spi/flash.h>
+ 
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+@@ -90,6 +91,8 @@ extern struct regulator *(*get_cpu_regulator)(void);
+ extern void (*put_cpu_regulator)(void);
+ extern int (*set_cpu_voltage)(u32 volt);
+ extern int mx6_set_cpu_voltage(u32 cpu_volt);
++static struct regulator *cpu_regulator;
++static char *gp_reg_id;
+ 
+ static iomux_v3_cfg_t mx6q_sabrelite_pads[] = {
+ 	/* AUDMUX */
+@@ -464,7 +467,7 @@ static struct spi_board_info imx6_sabrelite_spi_nor_device[] __initdata = {
+ #if defined(CONFIG_MTD_M25P80)
+ 	{
+ 		.modalias = "m25p80",
+-		.max_speed_hz = 10000000, /* max spi clock (SCK) speed in HZ */
++		.max_speed_hz = 20000000, /* max spi clock (SCK) speed in HZ */
+ 		.bus_num = 0,
+ 		.chip_select = 0,
+ 		.platform_data = &imx6_sabrelite__spi_flash_data,
+@@ -826,7 +829,15 @@ static struct mxc_dvfs_platform_data sabrelite_dvfscore_data = {
+ 
+ static int mx6_sabre_set_cpu_voltage(u32 cpu_volt)
+ {
+-	return mx6_set_cpu_voltage(cpu_volt);
++	int ret = -EINVAL;
++
++	if (cpu_regulator == NULL)
++		cpu_regulator = regulator_get(NULL, gp_reg_id);
++
++	if (!IS_ERR(cpu_regulator))
++		ret = regulator_set_voltage(cpu_regulator,
++						    cpu_volt, cpu_volt);
++	return ret;
+ }
+ 
+ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+-- 
+1.7.7.4
+

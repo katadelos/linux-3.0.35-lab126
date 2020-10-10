@@ -1,0 +1,230 @@
+From 9097d4e27b4a1afc64e3f8479ce68387ed9b1755 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Wed, 8 Feb 2012 11:39:25 +0800
+Subject: [PATCH 0976/2463] ENGR00172274-02 - IEEE-1588: rework ts_clk in MX6
+ ARIK CPU board.
+
+Default use RMII 50MHz clock for ts_clk.
+Test result:
+	Enet work fine at 100/1000Mbps in TO1.1 and Rigel.
+	IEEE 1588 timestamp is convergent for 25M & 50M & 100MHz
+	timestamp clock.
+
+Signed-off-by: Fugang Duan <B38611@freescale.com>
+---
+ drivers/net/fec.c      |   28 +++++++++++++++++-----------
+ drivers/net/fec_1588.c |   30 +++++++++++++++---------------
+ drivers/net/fec_1588.h |   12 +++++-------
+ 3 files changed, 37 insertions(+), 33 deletions(-)
+
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index f273314..872b7c4 100755
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -145,6 +145,8 @@ MODULE_PARM_DESC(macaddr, "FEC Ethernet MAC address");
+ #define FEC_ENET_EBERR	((uint)0x00400000)	/* SDMA bus error */
+ #define FEC_ENET_TS_AVAIL       ((uint)0x00010000)
+ #define FEC_ENET_TS_TIMER       ((uint)0x00008000)
++#define FEC_ENET_MII_CLK       ((uint)2500000)
++#define FEC_ENET_HOLD_TIME     ((uint)0x100)  /* 2 internal clock cycle*/
+ 
+ #if defined(CONFIG_FEC_1588) && (defined(CONFIG_ARCH_MX28) || \
+ 				defined(CONFIG_ARCH_MX6))
+@@ -608,6 +610,7 @@ fec_enet_interrupt(int irq, void *dev_id)
+ {
+ 	struct net_device *ndev = dev_id;
+ 	struct fec_enet_private *fep = netdev_priv(ndev);
++	struct fec_ptp_private *fpp = fep->ptp_priv;
+ 	uint int_events;
+ 	irqreturn_t ret = IRQ_NONE;
+ 
+@@ -629,6 +632,12 @@ fec_enet_interrupt(int irq, void *dev_id)
+ 			fec_enet_tx(ndev);
+ 		}
+ 
++		if (int_events & FEC_ENET_TS_TIMER) {
++			ret = IRQ_HANDLED;
++			if (fep->ptimer_present && fpp)
++				fpp->prtc++;
++		}
++
+ 		if (int_events & FEC_ENET_MII) {
+ 			ret = IRQ_HANDLED;
+ 			complete(&fep->mdio_done);
+@@ -838,7 +847,7 @@ static int fec_enet_mii_probe(struct net_device *ndev)
+ 	}
+ 
+ 	/* mask with MAC supported features */
+-	if (cpu_is_mx6q() || cpu_is_mx6dl())
++	if (cpu_is_mx6())
+ 		phy_dev->supported &= PHY_GBIT_FEATURES;
+ 	else
+ 		phy_dev->supported &= PHY_BASIC_FEATURES;
+@@ -893,15 +902,12 @@ static int fec_enet_mii_init(struct platform_device *pdev)
+ 	/*
+ 	 * Set MII speed to 2.5 MHz (= clk_get_rate() / 2 * phy_speed)
+ 	 */
+-	fep->phy_speed = DIV_ROUND_UP(clk_get_rate(fep->clk), 5000000) << 1;
++	fep->phy_speed = DIV_ROUND_UP(clk_get_rate(fep->clk),
++					(FEC_ENET_MII_CLK << 2)) << 1;
+ 
+-	if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+-		/* FIXME: non-1588 MII clk: 66MHz, 1588 mode : 40MHz */
+-		if (fep->ptimer_present)
+-			fep->phy_speed = 0xe;
+-		else
+-			fep->phy_speed = 0x11a;
+-	}
++	/* set hold time to 2 internal clock cycle */
++	if (cpu_is_mx6())
++		fep->phy_speed |= FEC_ENET_HOLD_TIME;
+ 
+ 	writel(fep->phy_speed, fep->hwp + FEC_MII_SPEED);
+ 
+@@ -1458,7 +1464,7 @@ fec_restart(struct net_device *dev, int duplex)
+ 		fep->phy_dev->speed == SPEED_1000)
+ 		val |= (0x1 << 5);
+ 
+-	if (cpu_is_mx6q() || cpu_is_mx6dl()) {
++	if (cpu_is_mx6()) {
+ 		/* enable endian swap */
+ 		val |= (0x1 << 8);
+ 		/* enable ENET store and forward mode */
+@@ -1489,7 +1495,7 @@ fec_stop(struct net_device *dev)
+ 	writel(1, fep->hwp + FEC_ECNTRL);
+ 	udelay(10);
+ 
+-	if (cpu_is_mx6q() || cpu_is_mx6dl())
++	if (cpu_is_mx6())
+ 		/* FIXME: we have to enable enet to keep mii interrupt works. */
+ 		writel(2, fep->hwp + FEC_ECNTRL);
+ 
+diff --git a/drivers/net/fec_1588.c b/drivers/net/fec_1588.c
+index c7d3a63..43b6094 100644
+--- a/drivers/net/fec_1588.c
++++ b/drivers/net/fec_1588.c
+@@ -1,7 +1,7 @@
+ /*
+  * drivers/net/fec_1588.c
+  *
+- * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+  * Copyright (C) 2009 IXXAT Automation, GmbH
+  *
+  * FEC Ethernet Driver -- IEEE 1588 interface functionality
+@@ -164,7 +164,7 @@ int fec_ptp_start(struct fec_ptp_private *priv)
+ 	 * enable FEC1 timer's slave mode. */
+ 	if ((fpp == ptp_private[0]) || !(ptp_private[0]->ptp_active)) {
+ 		writel(FEC_T_CTRL_RESTART, fpp->hwp + FEC_ATIME_CTRL);
+-		writel(FEC_T_INC_40MHZ << FEC_T_INC_OFFSET,
++		writel(FEC_T_INC_CLK << FEC_T_INC_OFFSET,
+ 				fpp->hwp + FEC_ATIME_INC);
+ 		writel(FEC_T_PERIOD_ONE_SEC, fpp->hwp + FEC_ATIME_EVT_PERIOD);
+ 		/* start counter */
+@@ -180,7 +180,7 @@ int fec_ptp_start(struct fec_ptp_private *priv)
+ 			fpp->prtc = ptp_private[1]->prtc;
+ 			writel(FEC_T_CTRL_RESTART,
+ 					ptp_private[1]->hwp + FEC_ATIME_CTRL);
+-			writel(FEC_T_INC_40MHZ << FEC_T_INC_OFFSET,
++			writel(FEC_T_INC_CLK << FEC_T_INC_OFFSET,
+ 					ptp_private[1]->hwp + FEC_ATIME_INC);
+ 			/* Set the timer as slave mode */
+ 			writel(FEC_T_CTRL_SLAVE,
+@@ -190,7 +190,7 @@ int fec_ptp_start(struct fec_ptp_private *priv)
+ 		}
+ 		#endif
+ 	} else {
+-		writel(FEC_T_INC_40MHZ << FEC_T_INC_OFFSET,
++		writel(FEC_T_INC_CLK << FEC_T_INC_OFFSET,
+ 				fpp->hwp + FEC_ATIME_INC);
+ 		/* Set the timer as slave mode */
+ 		writel(FEC_T_CTRL_SLAVE, fpp->hwp + FEC_ATIME_CTRL);
+@@ -584,18 +584,18 @@ static void fec_handle_ptpdrift(struct ptp_set_comp *comp,
+ 		ptc->corr_inc = 0;
+ 		ptc->corr_period = 0;
+ 		return;
+-	} else if (ndrift >= FEC_ATIME_40MHZ) {
+-		ptc->corr_inc = (u32)(ndrift / FEC_ATIME_40MHZ);
++	} else if (ndrift >= FEC_ATIME_CLK) {
++		ptc->corr_inc = (u32)(ndrift / FEC_ATIME_CLK);
+ 		ptc->corr_period = 1;
+ 		return;
+ 	} else {
+ 		tmp_winner = 0xFFFFFFFF;
+ 		adj_inc = 1;
+ 
+-		if (ndrift > (FEC_ATIME_40MHZ / FEC_T_INC_40MHZ)) {
+-			adj_inc = FEC_T_INC_40MHZ / 2;
+-		} else if (ndrift > (FEC_ATIME_40MHZ / (FEC_T_INC_40MHZ * 4))) {
+-			adj_inc = FEC_T_INC_40MHZ / 4;
++		if (ndrift > (FEC_ATIME_CLK / FEC_T_INC_CLK)) {
++			adj_inc = FEC_T_INC_CLK / 2;
++		} else if (ndrift > (FEC_ATIME_CLK / (FEC_T_INC_CLK * 4))) {
++			adj_inc = FEC_T_INC_CLK / 4;
+ 			adj_period = 2;
+ 		} else {
+ 			adj_inc = 4;
+@@ -603,15 +603,15 @@ static void fec_handle_ptpdrift(struct ptp_set_comp *comp,
+ 		}
+ 
+ 		for (i = 1; i < adj_inc; i++) {
+-			tmp_current = (FEC_ATIME_40MHZ * i) % ndrift;
++			tmp_current = (FEC_ATIME_CLK * i) % ndrift;
+ 			if (tmp_current == 0) {
+ 				ptc->corr_inc = i;
+-				ptc->corr_period = (u32)((FEC_ATIME_40MHZ *
++				ptc->corr_period = (u32)((FEC_ATIME_CLK *
+ 						adj_period * i)	/ ndrift);
+ 				break;
+ 			} else if (tmp_current < tmp_winner) {
+ 				ptc->corr_inc = i;
+-				ptc->corr_period = (u32)((FEC_ATIME_40MHZ *
++				ptc->corr_period = (u32)((FEC_ATIME_CLK *
+ 						adj_period * i)	/ ndrift);
+ 				tmp_winner = tmp_current;
+ 			}
+@@ -632,9 +632,9 @@ static void fec_set_drift(struct fec_ptp_private *priv,
+ 		return;
+ 
+ 	if (comp->o_ops == TRUE)
+-		corr_ns = FEC_T_INC_40MHZ + tc.corr_inc;
++		corr_ns = FEC_T_INC_CLK + tc.corr_inc;
+ 	else
+-		corr_ns = FEC_T_INC_40MHZ - tc.corr_inc;
++		corr_ns = FEC_T_INC_CLK - tc.corr_inc;
+ 
+ 	if (!priv->ptp_slave)
+ 		fpp = priv;
+diff --git a/drivers/net/fec_1588.h b/drivers/net/fec_1588.h
+index e947abd..8e21519 100644
+--- a/drivers/net/fec_1588.h
++++ b/drivers/net/fec_1588.h
+@@ -1,7 +1,7 @@
+ /*
+  * drivers/net/fec_1588.h
+  *
+- * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -42,12 +42,10 @@
+ #define FEC_T_INC_CORR_OFFSET		8
+ 
+ 
+-#define FEC_T_INC_40MHZ			25
+-#define FEC_ATIME_40MHZ			40000000
+-/*
+-#define FEC_T_INC_40MHZ			15
+-#define FEC_ATIME_40MHZ			66000000
+-*/
++#define FEC_T_INC_50MHZ			20
++#define FEC_ATIME_50MHZ			50000000
++#define FEC_T_INC_CLK			FEC_T_INC_50MHZ
++#define FEC_ATIME_CLK			FEC_ATIME_50MHZ
+ 
+ #define FEC_T_PERIOD_ONE_SEC		0x3B9ACA00
+ 
+-- 
+1.7.7.4
+

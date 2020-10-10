@@ -1,0 +1,115 @@
+From 1cfaf830c074ea51b3f41a0ba42b220c7df68758 Mon Sep 17 00:00:00 2001
+From: Mahesh Mahadevan <r9aadq@freescale.com>
+Date: Fri, 4 Nov 2011 09:45:37 -0500
+Subject: [PATCH 0571/2463] ENGR00161483 Add SPI-NOR support on MX6 Sabre-lite
+
+Add support to access SST SPI-NOR on MX6 Sabre-lite
+
+Signed-off-by: Mahesh Mahadevan <r9aadq@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |   54 +++++++++++++++++++++++++----
+ 1 files changed, 46 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index e168ccd..ee94133 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -48,6 +48,7 @@
+ #include <linux/etherdevice.h>
+ #include <linux/regulator/machine.h>
+ #include <linux/regulator/fixed.h>
++#include <linux/spi/flash.h>
+ 
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+@@ -65,7 +66,6 @@
+ #include <asm/mach-types.h>
+ #include <asm/mach/arch.h>
+ #include <asm/mach/time.h>
+-#include <asm/mach/flash.h>
+ 
+ #include "usb.h"
+ #include "devices-imx6q.h"
+@@ -109,6 +109,7 @@ static iomux_v3_cfg_t mx6q_sabrelite_pads[] = {
+ 	MX6Q_PAD_EIM_D17__ECSPI1_MISO,
+ 	MX6Q_PAD_EIM_D18__ECSPI1_MOSI,
+ 	MX6Q_PAD_EIM_D16__ECSPI1_SCLK,
++	MX6Q_PAD_EIM_D19__GPIO_3_19,	/*SS1*/
+ 
+ 	/* ENET */
+ 	MX6Q_PAD_ENET_MDIO__ENET_MDIO,
+@@ -182,13 +183,6 @@ static iomux_v3_cfg_t mx6q_sabrelite_pads[] = {
+ 	MX6Q_PAD_GPIO_17__GPIO_7_12,	/* USB Hub Reset */
+ 	MX6Q_PAD_GPIO_18__GPIO_7_13,	/* J14 - Volume Up */
+ 
+-	/* HDMI */
+-	MX6Q_PAD_EIM_EB2__HDMI_TX_DDC_SCL,
+-	MX6Q_PAD_EIM_D16__HDMI_TX_DDC_SDA,
+-	MX6Q_PAD_EIM_A25__HDMI_TX_CEC_LINE,
+-	MX6Q_PAD_SD1_DAT1__HDMI_TX_OPHYDTB_0,
+-	MX6Q_PAD_SD1_DAT0__HDMI_TX_OPHYDTB_1,
+-
+ 	/* I2C1, SGTL5000 */
+ 	MX6Q_PAD_EIM_D21__I2C1_SCL,	/* GPIO3[21] */
+ 	MX6Q_PAD_EIM_D28__I2C1_SDA,	/* GPIO3[28] */
+@@ -442,6 +436,46 @@ static const struct spi_imx_master mx6q_sabrelite_spi_data __initconst = {
+ 	.num_chipselect = ARRAY_SIZE(mx6q_sabrelite_spi_cs),
+ };
+ 
++#if defined(CONFIG_MTD_M25P80) || defined(CONFIG_MTD_M25P80_MODULE)
++static struct mtd_partition imx6_sabrelite_spi_nor_partitions[] = {
++	{
++	 .name = "bootloader",
++	 .offset = 0,
++	 .size = 0x00010000,
++	},
++	{
++	 .name = "kernel",
++	 .offset = MTDPART_OFS_APPEND,
++	 .size = MTDPART_SIZ_FULL,
++	},
++};
++
++static struct flash_platform_data imx6_sabrelite__spi_flash_data = {
++	.name = "m25p80",
++	.parts = imx6_sabrelite_spi_nor_partitions,
++	.nr_parts = ARRAY_SIZE(imx6_sabrelite_spi_nor_partitions),
++	.type = "sst25vf016b",
++};
++#endif
++
++static struct spi_board_info imx6_sabrelite_spi_nor_device[] __initdata = {
++#if defined(CONFIG_MTD_M25P80)
++	{
++		.modalias = "m25p80",
++		.max_speed_hz = 10000000, /* max spi clock (SCK) speed in HZ */
++		.bus_num = 0,
++		.chip_select = 0,
++		.platform_data = &imx6_sabrelite__spi_flash_data,
++	},
++#endif
++};
++
++static void spi_device_init(void)
++{
++	spi_register_board_info(imx6_sabrelite_spi_nor_device,
++				ARRAY_SIZE(imx6_sabrelite_spi_nor_device));
++}
++
+ static struct mxc_audio_platform_data mx6_sabrelite_audio_data;
+ 
+ static int mx6_sabrelite_sgtl5000_init(void)
+@@ -834,6 +868,10 @@ static void __init mx6_sabrelite_board_init(void)
+ 	i2c_register_board_info(2, mxc_i2c2_board_info,
+ 			ARRAY_SIZE(mxc_i2c2_board_info));
+ 
++	/* SPI */
++	imx6q_add_ecspi(0, &mx6q_sabrelite_spi_data);
++	spi_device_init();
++
+ 	imx6q_add_mxc_hdmi(&hdmi_data);
+ 
+ 	imx6q_add_anatop_thermal_imx(1, &mx6q_sabrelite_anatop_thermal_data);
+-- 
+1.7.7.4
+

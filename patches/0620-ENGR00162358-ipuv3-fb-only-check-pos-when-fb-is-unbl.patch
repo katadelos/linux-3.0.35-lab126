@@ -1,0 +1,52 @@
+From 0f49b56c858771a3e075c525a76211716a53c9dc Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Wed, 16 Nov 2011 17:29:19 +0800
+Subject: [PATCH 0620/2463] ENGR00162358 ipuv3 fb: only check pos when fb is
+ unblank
+
+only check pos when fb is unblank
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |   25 ++++++++++++++-----------
+ 1 files changed, 14 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index e7ad137..d1036c8 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -1028,17 +1028,20 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 				break;
+ 			}
+ 
+-			if (fbi->var.xres + pos.x > bg_fbi->var.xres) {
+-				if (bg_fbi->var.xres < fbi->var.xres)
+-					pos.x = 0;
+-				else
+-					pos.x = bg_fbi->var.xres - fbi->var.xres;
+-			}
+-			if (fbi->var.yres + pos.y > bg_fbi->var.yres) {
+-				if (bg_fbi->var.yres < fbi->var.yres)
+-					pos.y = 0;
+-				else
+-					pos.y = bg_fbi->var.yres - fbi->var.yres;
++			/* if fb is unblank, check if the pos fit the display */
++			if (mxc_fbi->cur_blank == FB_BLANK_UNBLANK) {
++				if (fbi->var.xres + pos.x > bg_fbi->var.xres) {
++					if (bg_fbi->var.xres < fbi->var.xres)
++						pos.x = 0;
++					else
++						pos.x = bg_fbi->var.xres - fbi->var.xres;
++				}
++				if (fbi->var.yres + pos.y > bg_fbi->var.yres) {
++					if (bg_fbi->var.yres < fbi->var.yres)
++						pos.y = 0;
++					else
++						pos.y = bg_fbi->var.yres - fbi->var.yres;
++				}
+ 			}
+ 
+ 			retval = ipu_disp_set_window_pos(mxc_fbi->ipu, mxc_fbi->ipu_ch,
+-- 
+1.7.7.4
+

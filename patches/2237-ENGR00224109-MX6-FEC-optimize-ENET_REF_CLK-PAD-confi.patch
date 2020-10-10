@@ -1,0 +1,73 @@
+From 5722518fcba2dffcabcf3c2d5e2bd6c390392699 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Thu, 20 Sep 2012 15:26:49 +0800
+Subject: [PATCH 2237/2463] ENGR00224109 - MX6 : FEC : optimize ENET_REF_CLK
+ PAD configuration.
+
+In MX6 Arik and Rigel platforms, RGMII tx_clk clock source is from
+ENET_REF_CLK pad supplied by phy. To optimize the clk signal path,
+the ENET_REF_CLK I/O must have this configuration:
+	1. Disable on-chip pull-up, pull-down, and keeper
+	2. Disable hysteresis
+	3. Speed = 100 MHz
+	4. Slew rate = fast
+
+The optimizition make the bias point match the optimum point, which
+can maximize design margin.
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ arch/arm/plat-mxc/include/mach/iomux-mx6dl.h |    5 ++++-
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h  |    6 +++++-
+ 2 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6dl.h b/arch/arm/plat-mxc/include/mach/iomux-mx6dl.h
+index df528bc..e2740ff 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6dl.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6dl.h
+@@ -58,6 +58,9 @@
+ 		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED |		\
+ 		PAD_CTL_DSE_40ohm   | PAD_CTL_HYS)
+ 
++#define MX6DL_ENET_REF_CLK_PAD_CTRL     (PAD_CTL_PUE |  \
++		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED |       \
++		PAD_CTL_DSE_40ohm | PAD_CTL_SRE_FAST)
+ 
+ #define MX6DL_I2C_PAD_CTRL (PAD_CTL_PKE | PAD_CTL_PUE   |		\
+ 		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED |		\
+@@ -2257,7 +2260,7 @@
+ 		IOMUX_PAD(0x05BC, 0x01EC, 6, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6DL_PAD_ENET_REF_CLK__ENET_TX_CLK                                    \
+-		IOMUX_PAD(0x05C0, 0x01F0, 1, 0x0000, 0, MX6DL_ENET_PAD_CTRL)
++		IOMUX_PAD(0x05C0, 0x01F0, 1, 0x0000, 0, MX6DL_ENET_REF_CLK_PAD_CTRL)
+ #define MX6DL_PAD_ENET_REF_CLK__ESAI1_FSR                                      \
+ 		IOMUX_PAD(0x05C0, 0x01F0, 2, 0x082C, 0, NO_PAD_CTRL)
+ #define MX6DL_PAD_ENET_REF_CLK__SDMA_DEBUG_BUS_DEVICE_4                        \
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index fe107cf..cdff320 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -57,6 +57,10 @@
+ 		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED |	\
+ 		PAD_CTL_DSE_40ohm | PAD_CTL_HYS)
+ 
++#define MX6Q_ENET_REF_CLK_PAD_CTRL	(PAD_CTL_PUE |	\
++		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED |	\
++		PAD_CTL_DSE_40ohm | PAD_CTL_SRE_FAST)
++
+ #define MX6Q_GPIO_16_PAD_CTRL (PAD_CTL_PKE | PAD_CTL_PUE |    \
+ 		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED  |    \
+ 		PAD_CTL_DSE_40ohm | PAD_CTL_HYS)
+@@ -5216,7 +5220,7 @@
+ #define  MX6Q_PAD_ENET_REF_CLK__RESERVED_RESERVED		\
+ 		(_MX6Q_PAD_ENET_REF_CLK__RESERVED_RESERVED | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_REF_CLK__ENET_TX_CLK		\
+-		(_MX6Q_PAD_ENET_REF_CLK__ENET_TX_CLK | MUX_PAD_CTRL(MX6Q_ENET_PAD_CTRL))
++		(_MX6Q_PAD_ENET_REF_CLK__ENET_TX_CLK | MUX_PAD_CTRL(MX6Q_ENET_REF_CLK_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_REF_CLK__ESAI1_FSR		\
+ 		(_MX6Q_PAD_ENET_REF_CLK__ESAI1_FSR | MUX_PAD_CTRL(MX6Q_ESAI_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_REF_CLK__SDMA_DEBUG_BUS_DEVICE_4		\
+-- 
+1.7.7.4
+

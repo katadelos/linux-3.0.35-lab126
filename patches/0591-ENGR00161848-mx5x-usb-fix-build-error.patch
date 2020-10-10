@@ -1,0 +1,66 @@
+From 13949965a4a4a58ba2e50b2d4ade4f418dfbc3ea Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Thu, 10 Nov 2011 10:45:23 +0800
+Subject: [PATCH 0591/2463] ENGR00161848 mx5x: usb: fix build error
+
+Fix the build error for mx5x
+
+arch/arm/plat-mxc/usb_common.c: In function 'fsl_usb_host_init':
+arch/arm/plat-mxc/usb_common.c:526:
+error: 'UCTRL_OVER_CUR_POL' undeclared (first use in this function)
+arch/arm/plat-mxc/usb_common.c:526: error:
+(Each undeclared identifier is reported only once
+		arch/arm/plat-mxc/usb_common.c:526:
+error: for each function it appears in.)
+arch/arm/plat-mxc/usb_common.c:529:
+error: 'UCTRL_OVER_CUR_DIS' undeclared (first use in this function)
+arch/arm/plat-mxc/usb_common.c: In function 'usbotg_init':
+arch/arm/plat-mxc/usb_common.c:840:
+error: 'UCTRL_OVER_CUR_POL' undeclared (first use in this function)
+arch/arm/plat-mxc/usb_common.c:843:
+error: 'UCTRL_OVER_CUR_DIS' undeclared (first use in this function)
+make[1]: *** [arch/arm/plat-mxc/usb_common.o] Error 1
+make: *** [arch/arm/plat-mxc] Error 2
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ arch/arm/plat-mxc/usb_common.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index 2c195d8..798aa9a 100755
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -521,6 +521,7 @@ int fsl_usb_host_init(struct platform_device *pdev)
+ 			usbh1_set_utmi_xcvr();
+ 		}
+ 	} else {
++#ifdef CONFIG_ARCH_MX6
+ 		if (!strcmp("Host 1", pdata->name)) {
+ 			if (machine_is_mx6q_arm2())
+ 				USB_H1_CTRL &= ~UCTRL_OVER_CUR_POL;
+@@ -528,6 +529,7 @@ int fsl_usb_host_init(struct platform_device *pdev)
+ 				USB_H1_CTRL |= UCTRL_OVER_CUR_POL;
+ 			USB_H1_CTRL |= UCTRL_OVER_CUR_DIS;
+ 		}
++#endif
+ 	}
+ 
+ 	pr_debug("%s: %s success\n", __func__, pdata->name);
+@@ -836,11 +838,13 @@ int usbotg_init(struct platform_device *pdev)
+ 				otg_set_utmi_xcvr();
+ 			}
+ 		} else {
++#ifdef CONFIG_ARCH_MX6
+ 			if (machine_is_mx6q_arm2())
+ 				USB_OTG_CTRL &= ~UCTRL_OVER_CUR_POL;
+ 			else if (machine_is_mx6q_sabrelite())
+ 				USB_OTG_CTRL |= UCTRL_OVER_CUR_POL;
+ 			USB_OTG_CTRL |= UCTRL_OVER_CUR_DIS;
++#endif
+ 		}
+ 	}
+ 
+-- 
+1.7.7.4
+

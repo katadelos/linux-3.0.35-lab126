@@ -1,0 +1,116 @@
+From 261d069a7193ab6854b8ce5884e101722fa1f26e Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Thu, 8 Nov 2012 00:39:05 -0700
+Subject: [PATCH 2241/2463] ENGR00232945-2: CAAM: Add SNVS state handler
+ startup
+
+Add SNVS state handler startup to CAAM controller driver.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/crypto/caam/ctrl.c     |   12 +++++++++++-
+ drivers/crypto/caam/intern.h   |   10 ++++++++++
+ drivers/crypto/caam/snvsregs.h |   14 ++++++++------
+ 3 files changed, 29 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/crypto/caam/ctrl.c b/drivers/crypto/caam/ctrl.c
+index 2eba900..0cadb8e 100644
+--- a/drivers/crypto/caam/ctrl.c
++++ b/drivers/crypto/caam/ctrl.c
+@@ -26,6 +26,10 @@ static int caam_remove(struct platform_device *pdev)
+ 	topregs = (struct caam_full __iomem *)ctrlpriv->ctrl;
+ 
+ #ifndef CONFIG_OF
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_SECVIO
++	caam_secvio_shutdown(pdev);
++#endif /* SECVIO */
++
+ #ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_SM
+ 	caam_sm_shutdown(pdev);
+ #endif
+@@ -296,7 +300,9 @@ static int caam_probe(struct platform_device *pdev)
+ 	ctrlpriv->sm_base = (void __force *)sm_base;
+ 	ctrlpriv->sm_size = res->end - res->start + 1;
+ 
+-	/* Get the IRQ for security violations only */
++	/*
++	 * Get the IRQ for security violations
++	 */
+ #ifdef CONFIG_OF
+ 	ctrlpriv->secvio_irq = of_irq_to_resource(nprop, 0, NULL);
+ #else
+@@ -585,6 +591,10 @@ static int caam_probe(struct platform_device *pdev)
+ #endif /* SM_TEST */
+ #endif /* SM */
+ 
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_SECVIO
++	caam_secvio_startup(pdev);
++#endif /* SECVIO */
++
+ #endif /* CONFIG_OF */
+ 	return status;
+ }
+diff --git a/drivers/crypto/caam/intern.h b/drivers/crypto/caam/intern.h
+index 87c3b68..991ce0b 100644
+--- a/drivers/crypto/caam/intern.h
++++ b/drivers/crypto/caam/intern.h
+@@ -124,6 +124,11 @@ struct caam_drv_private {
+ #ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_SM
+ 	struct device *smdev;	/* Secure Memory dev */
+ #endif
++
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_SECVIO
++	struct device *secviodev;
++#endif
++
+ 	/*
+ 	 * debugfs entries for developer view into driver/device
+ 	 * variables at runtime.
+@@ -173,6 +178,11 @@ void caam_sm_shutdown(struct platform_device *pdev);
+ int caam_sm_example_init(struct platform_device *pdev);
+ #endif
+ 
++#ifdef CONFIG_CRYPTO_DEV_FSL_CAAM_SECVIO
++int caam_secvio_startup(struct platform_device *pdev);
++void caam_secvio_shutdown(struct platform_device *pdev);
++#endif /* SECVIO */
++
+ #endif /* CONFIG_OF */
+ 
+ #endif /* INTERN_H */
+diff --git a/drivers/crypto/caam/snvsregs.h b/drivers/crypto/caam/snvsregs.h
+index 4a1e4a8..5655f6e 100644
+--- a/drivers/crypto/caam/snvsregs.h
++++ b/drivers/crypto/caam/snvsregs.h
+@@ -77,6 +77,7 @@ struct snvs_hp {
+ #define HP_SECVIO_INTEN_SRC2	0x00000004
+ #define HP_SECVIO_INTEN_SRC1	0x00000002
+ #define HP_SECVIO_INTEN_SRC0	0x00000001
++#define HP_SECVIO_INTEN_ALL	0x8000003f
+ 
+ #define HP_SECVIO_ICTL_CFG_SHIFT	30
+ #define HP_SECVIO_ICTL_CFG_MASK		(0x3 << HP_SECVIO_ICTL_CFG_SHIFT)
+@@ -109,12 +110,13 @@ struct snvs_hp {
+ #define HP_SECVIOST_ZMK_ECC_FAIL	0x08000000	/* write to clear */
+ #define HP_SECVIOST_ZMK_SYN_SHIFT	16
+ #define HP_SECVIOST_ZMK_SYN_MASK	(0x1ff << HP_SECVIOST_ZMK_SYN_SHIFT)
+-#define HP_SECVIOST_ZMK_SECVIO5		0x00000020
+-#define HP_SECVIOST_ZMK_SECVIO4		0x00000010
+-#define HP_SECVIOST_ZMK_SECVIO3		0x00000008
+-#define HP_SECVIOST_ZMK_SECVIO2		0x00000004
+-#define HP_SECVIOST_ZMK_SECVIO1		0x00000002
+-#define HP_SECVIOST_ZMK_SECVIO0		0x00000001
++#define HP_SECVIOST_SECVIO5		0x00000020
++#define HP_SECVIOST_SECVIO4		0x00000010
++#define HP_SECVIOST_SECVIO3		0x00000008
++#define HP_SECVIOST_SECVIO2		0x00000004
++#define HP_SECVIOST_SECVIO1		0x00000002
++#define HP_SECVIOST_SECVIO0		0x00000001
++#define HP_SECVIOST_SECVIOMASK		0x0000003f
+ 
+ /*
+  * SNVS Low Power Domain
+-- 
+1.7.7.4
+

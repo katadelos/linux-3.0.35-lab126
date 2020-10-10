@@ -1,0 +1,37 @@
+From 7f0ba255f32ed609d0b1b7f153577f23311cc3ba Mon Sep 17 00:00:00 2001
+From: Jaccon Bastiaansen <jaccon.bastiaansen@gmail.com>
+Date: Mon, 30 Apr 2012 11:53:43 +0200
+Subject: [PATCH 1775/2463] ARM i.MX imx21ads: Fix overlapping static i/o
+ mappings
+
+commit 350ab15bb2ffe7103bc6bf6c634f3c5b286eaf2a upstream.
+
+The statically defined I/O memory regions for the i.MX21 on chip
+peripherals and the on board I/O peripherals of the i.MX21ADS board
+overlap. This results in a kernel crash during startup. This is fixed
+by reducing the memory range for the on board I/O peripherals to the
+actually required range.
+
+Signed-off-by: Jaccon Bastiaansen <jaccon.bastiaansen@gmail.com>
+Signed-off-by: Sascha Hauer <s.hauer@pengutronix.de>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ arch/arm/mach-imx/mach-mx21ads.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-imx/mach-mx21ads.c b/arch/arm/mach-imx/mach-mx21ads.c
+index 74ac889..a37fe02 100644
+--- a/arch/arm/mach-imx/mach-mx21ads.c
++++ b/arch/arm/mach-imx/mach-mx21ads.c
+@@ -32,7 +32,7 @@
+  * Memory-mapped I/O on MX21ADS base board
+  */
+ #define MX21ADS_MMIO_BASE_ADDR   0xf5000000
+-#define MX21ADS_MMIO_SIZE        SZ_16M
++#define MX21ADS_MMIO_SIZE        0xc00000
+ 
+ #define MX21ADS_REG_ADDR(offset)    (void __force __iomem *) \
+ 		(MX21ADS_MMIO_BASE_ADDR + (offset))
+-- 
+1.7.7.4
+

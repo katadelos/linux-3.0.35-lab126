@@ -1,0 +1,35 @@
+From ac3711f7f24b94db9f78fd7e9bf134c2ecd025ab Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Thu, 15 Dec 2011 10:12:53 +0800
+Subject: [PATCH 0746/2463] ENGR00170342 PWM: fix pwm output can't be set to
+ 100% full duty
+
+The chip document says the counter counts up to period_cycles + 1
+and then is reset to 0, so the actual period of the PWM wave is
+period_cycles + 2
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ arch/arm/plat-mxc/pwm.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/pwm.c b/arch/arm/plat-mxc/pwm.c
+index c95622c..c663acf 100755
+--- a/arch/arm/plat-mxc/pwm.c
++++ b/arch/arm/plat-mxc/pwm.c
+@@ -86,7 +86,11 @@ int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns)
+ 		prescale = period_cycles / 0x10000 + 1;
+ 
+ 		period_cycles /= prescale;
+-		c = (unsigned long long)period_cycles * duty_ns;
++		/* the chip document says the counter counts up to
++		 * period_cycles + 1 and then is reset to 0, so the
++		 *  actual period of the PWM wave is period_cycles + 2
++		 */
++		c = (unsigned long long)(period_cycles + 2) * duty_ns;
+ 		do_div(c, period_ns);
+ 		duty_cycles = c;
+ 
+-- 
+1.7.7.4
+

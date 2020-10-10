@@ -1,0 +1,71 @@
+From f0a1559d5224b8f0c121a13c7bfaa77a419dadce Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Tue, 31 Jan 2012 14:10:49 +0800
+Subject: [PATCH 0937/2463] ENGR00173378-2 usb: device: the udc stop flag
+ should not be set at suspend
+
+It should not do re-enumeration at udc resume if the vbus is on and host
+just sends suspend to device
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |   16 ++++++++--------
+ 1 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 3e1bd86..55fc066 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -3288,12 +3288,12 @@ static int udc_suspend(struct fsl_udc *udc)
+ 		goto out;
+ 	}
+ 
+-	udc->stopped = 1;
+ 
+ 	if (!(fsl_readl(&dr_regs->otgsc) & OTGSC_A_BUS_VALID)) {
+ 		/* stop the controller */
+ 		usbcmd = fsl_readl(&dr_regs->usbcmd) & ~USB_CMD_RUN_STOP;
+ 		fsl_writel(usbcmd, &dr_regs->usbcmd);
++		udc->stopped = 1;
+ 	}
+ 
+ 	dr_phy_low_power_mode(udc, true);
+@@ -3323,10 +3323,11 @@ static int fsl_udc_suspend(struct platform_device *pdev, pm_message_t state)
+ {
+ 	int ret;
+ 	printk(KERN_DEBUG "udc suspend begins\n");
+-#ifdef CONFIG_USB_OTG
+-	if (udc_controller->transceiver->gadget == NULL)
++	if (get_gadget_data(&udc_controller->gadget) == NULL) {
++		/* if no gadget is binded, quit */
+ 		return 0;
+-#endif
++	}
++
+ 	if (udc_controller->stopped)
+ 		dr_clk_gate(true);
+ 	if (((!(udc_controller->gadget.is_otg)) ||
+@@ -3356,11 +3357,10 @@ static int fsl_udc_resume(struct platform_device *pdev)
+ 	wait_event_interruptible(wake_up_pdata->wq, !wake_up_pdata->usb_wakeup_is_pending);
+ 
+ 
+-#ifdef CONFIG_USB_OTG
+-	if (udc_controller->transceiver->gadget == NULL) {
++	if (get_gadget_data(&udc_controller->gadget) == NULL) {
++		/* if no gadget is binded, quit */
+ 		return 0;
+ 	}
+-#endif
+ 	mutex_lock(&udc_resume_mutex);
+ 
+ 	pr_debug("%s(): stopped %d  suspended %d\n", __func__,
+-- 
+1.7.7.4
+

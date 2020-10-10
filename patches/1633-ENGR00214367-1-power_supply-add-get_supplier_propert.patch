@@ -1,0 +1,76 @@
+From 83093cf018bf03dbb3a2400fca95107b850cabf7 Mon Sep 17 00:00:00 2001
+From: Rong Dian <b38775@freescale.com>
+Date: Thu, 21 Jun 2012 11:22:33 +0800
+Subject: [PATCH 1633/2463] ENGR00214367-1 power_supply: add
+ get_supplier_property
+
+add get_supplier_property interface.
+This patch was written by: Heikki Krogerus <heikki.krogerus@linux.intel.com>
+originally.
+
+Signed-off-by: Rong Dian <b38775@freescale.com>
+---
+ drivers/power/power_supply_core.c |   31 +++++++++++++++++++++++++++++++
+ include/linux/power_supply.h      |    4 +++-
+ 2 files changed, 34 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/power/power_supply_core.c b/drivers/power/power_supply_core.c
+index 329b46b..338d4a6 100644
+--- a/drivers/power/power_supply_core.c
++++ b/drivers/power/power_supply_core.c
+@@ -94,6 +94,37 @@ int power_supply_am_i_supplied(struct power_supply *psy)
+ }
+ EXPORT_SYMBOL_GPL(power_supply_am_i_supplied);
+ 
++static int power_supply_find_supplier(struct device *dev, void *data)
++{
++	struct power_supply *psy = (struct power_supply *)data;
++	struct power_supply *epsy = dev_get_drvdata(dev);
++	int i;
++
++	for (i = 0; i < epsy->num_supplicants; i++)
++		if (!strcmp(epsy->supplied_to[i], psy->name))
++			return 1;
++	return 0;
++}
++
++int power_supply_get_supplier_property(struct power_supply *psy,
++					enum power_supply_property psp,
++					union power_supply_propval *val)
++{
++	struct power_supply *epsy;
++	struct device *dev;
++
++	dev = class_find_device(power_supply_class, NULL, psy,
++				power_supply_find_supplier);
++	if (!dev)
++		return 1;
++
++	epsy = dev_get_drvdata(dev);
++	put_device(dev);
++
++	return epsy->get_property(epsy, psp, val);
++}
++EXPORT_SYMBOL_GPL(power_supply_get_supplier_property);
++
+ static int __power_supply_is_system_supplied(struct device *dev, void *data)
+ {
+ 	union power_supply_propval ret = {0,};
+diff --git a/include/linux/power_supply.h b/include/linux/power_supply.h
+index 204c18d..b13bb89 100644
+--- a/include/linux/power_supply.h
++++ b/include/linux/power_supply.h
+@@ -207,7 +207,9 @@ extern int power_supply_is_system_supplied(void);
+ #else
+ static inline int power_supply_is_system_supplied(void) { return -ENOSYS; }
+ #endif
+-
++extern int power_supply_get_supplier_property(struct power_supply *psy,
++					enum power_supply_property psp,
++					union power_supply_propval *val);
+ extern int power_supply_register(struct device *parent,
+ 				 struct power_supply *psy);
+ extern void power_supply_unregister(struct power_supply *psy);
+-- 
+1.7.7.4
+

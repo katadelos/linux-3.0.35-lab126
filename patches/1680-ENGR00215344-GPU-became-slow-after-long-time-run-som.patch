@@ -1,0 +1,64 @@
+From 2ed4075ecdeffef53f9a72adfd6de1d8ad5d13bc Mon Sep 17 00:00:00 2001
+From: Richard Liu <r66033@freescale.com>
+Date: Mon, 2 Jul 2012 09:34:31 +0800
+Subject: [PATCH 1680/2463] ENGR00215344 GPU became slow after long time run
+ some applications
+
+GPU became slow after long time run some applications
+root cause is when GPU reserved memory exhaust, GPU will request continue physical
+memory which will trigger defregment operation in kernel and cause system slow
+
+Signed-off-by: Richard Liu <r66033@freescale.com>
+Acked-by: Lily Zhang
+---
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c     |   14 ++++++++++++--
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h    |    8 ++++++++
+ 2 files changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
+index 773a262..c7a05a5 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
+@@ -509,8 +509,18 @@ _AllocateMemory(
+         else
+         if (pool == gcvPOOL_CONTIGUOUS)
+         {
+-            /* Create a gcuVIDMEM_NODE for contiguous memory. */
+-            status = gckVIDMEM_ConstructVirtual(Kernel, gcvTRUE, Bytes, &node);
++#if gcdCONTIGUOUS_SIZE_LIMIT
++            if (Bytes > gcdCONTIGUOUS_SIZE_LIMIT)
++            {
++                status = gcvSTATUS_OUT_OF_MEMORY;
++            }
++            else
++#endif
++            {
++                /* Create a gcuVIDMEM_NODE from contiguous memory. */
++                status = gckVIDMEM_ConstructVirtual(Kernel, gcvTRUE, Bytes, &node);
++            }
++
+             if (gcmIS_SUCCESS(status))
+             {
+                 /* Memory allocated. */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+index 35743c6..0b7c42c 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+@@ -759,6 +759,14 @@
+ #   define gcdRATIO_FOR_SMALL_MEMORY            32
+ #endif
+ 
++/*
++    gcdCONTIGUOUS_SIZE_LIMIT
++        When non-zero, size of video node from gcvPOOL_CONTIGUOUS is
++        limited by gcdCONTIGUOUS_SIZE_LIMIT.
++ */
++#ifndef gcdCONTIGUOUS_SIZE_LIMIT
++#   define gcdCONTIGUOUS_SIZE_LIMIT             4096
++#endif
+ 
+ /*  gcdALPHA_KILL_IN_SHADER
+  *
+-- 
+1.7.7.4
+

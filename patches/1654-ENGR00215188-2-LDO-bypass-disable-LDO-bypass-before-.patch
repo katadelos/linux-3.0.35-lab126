@@ -1,0 +1,53 @@
+From e39f9bdb0d27018ad159e086d4a72ea3b22148cf Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Thu, 28 Jun 2012 14:24:40 +0800
+Subject: [PATCH 1654/2463] ENGR00215188-2 LDO bypass: disable LDO bypass
+ before suspend and back in resume
+
+There is one SOC bug if use LDO bypass, VDDARM_CAP will take 2ms to raise up
+normal voltage when system resume back, longer than 40us before. Then it will
+cause cpu hang if resume back.
+
+Workaround:
+We can disable LDO bypass at the last minute of suspend and enable LDO bypass
+again as long as system resume back.
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ arch/arm/mach-mx6/mx6_suspend.S |   14 ++++++++++++++
+ 1 files changed, 14 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mx6_suspend.S b/arch/arm/mach-mx6/mx6_suspend.S
+index e295e18..59b6760 100644
+--- a/arch/arm/mach-mx6/mx6_suspend.S
++++ b/arch/arm/mach-mx6/mx6_suspend.S
+@@ -812,6 +812,14 @@ save resume pointer into SRC_GPR1
+ 	ldr	r1, =SRC_BASE_ADDR
+ 	add	r1, r1, #PERIPBASE_VIRT
+ 	str	r3, [r1, #SRC_GPR1_OFFSET]
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++	ldr	r1, =0x20c8140
++	add	r1, r1, #PERIPBASE_VIRT
++	ldr	r3, [r1]
++	bic	r3, r3, #0x1f
++	orr	r3, r3, #0x1e
++	str	r3, [r1]
++#endif
+ /****************************************************************
+ execute a wfi instruction to let SOC go into stop mode.
+ ****************************************************************/
+@@ -860,6 +868,12 @@ when SOC exit stop mode, arm core restart from here, currently
+ are running with MMU off.
+ ****************************************************************/
+ resume:
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++	ldr	r1, =0x20c8140
++	ldr	r3, [r1]
++	orr	r3, r3, #0x1f
++	str	r3, [r1]
++#endif
+ 	/* Invalidate L1 I-cache first */
+ 	mov	r1,	#0x0
+ 	mcr	p15, 0, r1, c7, c5, 0	@ Invalidate I-Cache
+-- 
+1.7.7.4
+

@@ -1,0 +1,56 @@
+From 3671b62291072114717b70e4785c2bbe7140d5d5 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Tue, 21 Feb 2012 09:28:50 +0800
+Subject: [PATCH 1059/2463] ENGR00174892 [MX6]MMC: support SD3.0 UHS-I DDR50
+ mode.
+
+- align UHS-I trial sequence with community that first DDR50
+then SDR50.
+- escape DDR50 from tuning procedure, only SDR104 will be tuned
+so far.
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/core/sd.c |   13 +++++++------
+ 1 files changed, 7 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
+index 52b3171..8fddc55 100644
+--- a/drivers/mmc/core/sd.c
++++ b/drivers/mmc/core/sd.c
+@@ -477,17 +477,17 @@ static int sd_set_bus_speed_mode(struct mmc_card *card, u8 *status)
+ 			bus_speed = UHS_SDR104_BUS_SPEED;
+ 			timing = MMC_TIMING_UHS_SDR104;
+ 			card->sw_caps.uhs_max_dtr = UHS_SDR104_MAX_DTR;
++	} else if ((card->host->caps & MMC_CAP_UHS_DDR50) &&
++		   (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_DDR50)) {
++			bus_speed = UHS_DDR50_BUS_SPEED;
++			timing = MMC_TIMING_UHS_DDR50;
++			card->sw_caps.uhs_max_dtr = UHS_DDR50_MAX_DTR;
+ 	} else if ((card->host->caps & (MMC_CAP_UHS_SDR104 |
+ 		    MMC_CAP_UHS_SDR50)) && (card->sw_caps.sd3_bus_mode &
+ 		    SD_MODE_UHS_SDR50)) {
+ 			bus_speed = UHS_SDR50_BUS_SPEED;
+ 			timing = MMC_TIMING_UHS_SDR50;
+ 			card->sw_caps.uhs_max_dtr = UHS_SDR50_MAX_DTR;
+-	} else if ((card->host->caps & MMC_CAP_UHS_DDR50) &&
+-		   (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_DDR50)) {
+-			bus_speed = UHS_DDR50_BUS_SPEED;
+-			timing = MMC_TIMING_UHS_DDR50;
+-			card->sw_caps.uhs_max_dtr = UHS_DDR50_MAX_DTR;
+ 	} else if ((card->host->caps & (MMC_CAP_UHS_SDR104 |
+ 		    MMC_CAP_UHS_SDR50 | MMC_CAP_UHS_SDR25)) &&
+ 		   (card->sw_caps.sd3_bus_mode & SD_MODE_UHS_SDR25)) {
+@@ -625,7 +625,8 @@ static int mmc_sd_init_uhs_card(struct mmc_card *card)
+ 
+ 	/* SPI mode doesn't define CMD19 */
+ #ifdef CONFIG_MMC_SDHCI_ESDHC_IMX
+-	if (!mmc_host_is_spi(card->host)) {
++	if (!mmc_host_is_spi(card->host) &&
++		(card->sd_bus_speed == UHS_SDR104_BUS_SPEED)) {
+ 		int min, max, avg;
+ 
+ 		min = card->host->tuning_min;
+-- 
+1.7.7.4
+

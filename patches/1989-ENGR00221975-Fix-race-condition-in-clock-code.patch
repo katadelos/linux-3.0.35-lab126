@@ -1,0 +1,104 @@
+From 5fc5eda2ef69b50e6004ca2a377ea6f1133ba4d3 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Wed, 29 Aug 2012 17:05:11 -0500
+Subject: [PATCH 1989/2463] ENGR00221975 Fix race condition in clock code.
+
+Need to ensure that check for usecount in clk_set_parent
+occurs within the protection of the clock mutex. Else
+there is a chance that the usecount can be decremented
+(and the clock disabled) after the check.
+Also add back the code to maintain the correct usecount
+for pll2_pfd_400.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c       |    3 +++
+ arch/arm/mach-mx6/clock_mx6sl.c |    3 +++
+ arch/arm/plat-mxc/clock.c       |   20 ++++++++++++++------
+ 3 files changed, 20 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 81b63a5..c2bf201 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -1262,6 +1262,7 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		  */
+ 		if (pll1_sw_clk.parent != &pll2_pfd_400M) {
+ 			pll2_pfd_400M.enable(&pll2_pfd_400M);
++			pll2_pfd_400M.usecount++;
+ 			arm_needs_pll2_400 = true;
+ 			pll1_sw_clk.set_parent(&pll1_sw_clk, &pll2_pfd_400M);
+ 			pll1_sw_clk.parent = &pll2_pfd_400M;
+@@ -1287,6 +1288,8 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		/* Make sure pll1_sw_clk is from pll1_sys_main_clk */
+ 		pll1_sw_clk.set_parent(&pll1_sw_clk, &pll1_sys_main_clk);
+ 		pll1_sw_clk.parent = &pll1_sys_main_clk;
++		if (arm_needs_pll2_400)
++			pll2_pfd_400M.usecount--;
+ 		arm_needs_pll2_400 = false;
+ 		if (pll2_pfd_400M.usecount == 0)
+ 			pll2_pfd_400M.disable(&pll2_pfd_400M);
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 7a66d10..43b2bd1 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -1169,6 +1169,7 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		if (pll1_sw_clk.parent != &pll2_pfd2_400M) {
+ 			pll2_pfd2_400M.enable(&pll2_pfd2_400M);
+ 			arm_needs_pll2_400 = true;
++			pll2_pfd2_400M.usecount++;
+ 			pll1_sw_clk.set_parent(&pll1_sw_clk, &pll2_pfd2_400M);
+ 			pll1_sw_clk.parent = &pll2_pfd2_400M;
+ 		}
+@@ -1191,6 +1192,8 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		pll1_sw_clk.set_parent(&pll1_sw_clk, &pll1_sys_main_clk);
+ 		pll1_sw_clk.parent = &pll1_sys_main_clk;
+ 
++		if (arm_needs_pll2_400)
++			pll2_pfd2_400M.usecount--;
+ 		arm_needs_pll2_400 = false;
+ 		if (pll2_pfd2_400M.usecount == 0)
+ 			pll2_pfd2_400M.disable(&pll2_pfd2_400M);
+diff --git a/arch/arm/plat-mxc/clock.c b/arch/arm/plat-mxc/clock.c
+index ee4ea63..93347eb 100755
+--- a/arch/arm/plat-mxc/clock.c
++++ b/arch/arm/plat-mxc/clock.c
+@@ -225,10 +225,18 @@ int clk_set_parent(struct clk *clk, struct clk *parent)
+ 	    IS_ERR(parent) || clk->set_parent == NULL)
+ 		return ret;
+ 
+-	if (clk->usecount)
+-		clk_enable(parent);
+-
+ 	mutex_lock(&clocks_mutex);
++
++	if (clk->usecount) {
++		if (in_interrupt()) {
++			printk(KERN_ERR " clk_enable cannot be called in an interrupt context\n");
++			dump_stack();
++			mutex_unlock(&clocks_mutex);
++			BUG();
++		}
++		__clk_enable(parent);
++	}
++
+ 	ret = clk->set_parent(clk, parent);
+ 	if (ret == 0) {
+ 		old = clk->parent;
+@@ -236,10 +244,10 @@ int clk_set_parent(struct clk *clk, struct clk *parent)
+ 	} else {
+ 		old = parent;
+ 	}
+-	mutex_unlock(&clocks_mutex);
+-
+ 	if (clk->usecount)
+-		clk_disable(old);
++		__clk_disable(old);
++
++	mutex_unlock(&clocks_mutex);
+ 
+ 	return ret;
+ }
+-- 
+1.7.7.4
+

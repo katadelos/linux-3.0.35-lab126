@@ -1,0 +1,56 @@
+From 5f3a53b2d9b636707d4652195397f6122b21dfcd Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Mon, 26 Mar 2012 17:57:45 +0800
+Subject: [PATCH 1228/2463] ENGR00177944 v4l2 capture: enable mclk and power
+ up when open camera
+
+Set mclk enable and power up camera when open camera, and disable
+mclk, powerdown camera when close.
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |    9 ++++-----
+ 1 files changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index 03864a8..e3af2f8 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -1666,7 +1666,9 @@ static int mxc_v4l_open(struct file *file)
+ 
+ 		ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+ 				       true, true);
++		vidioc_int_s_power(cam->sensor, 1);
+ 		vidioc_int_init(cam->sensor);
++		vidioc_int_dev_init(cam->sensor);
+ }
+ 
+ 	file->private_data = dev;
+@@ -1708,6 +1710,7 @@ static int mxc_v4l_close(struct file *file)
+ 	}
+ 
+ 	if (--cam->open_count == 0) {
++		vidioc_int_s_power(cam->sensor, 0);
+ 		ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+ 			false, false);
+ 
+@@ -2840,15 +2843,11 @@ static int mxc_v4l2_master_attach(struct v4l2_int_device *slave)
+ 		return -1;
+ 	}
+ 
+-	for (i = 0; i < sensor_index - 1; i++) {
++	for (i = 0; i < sensor_index; i++) {
+ 		vidioc_int_dev_exit(cam->all_sensors[i]);
+ 		vidioc_int_s_power(cam->all_sensors[i], 0);
+ 	}
+ 
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi, true, true);
+-	vidioc_int_s_power(cam->sensor, 1);
+-	vidioc_int_dev_init(slave);
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi, false, false);
+ 	cam_fmt.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+ 	vidioc_int_g_fmt_cap(cam->sensor, &cam_fmt);
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,38 @@
+From d044a9cb4216edf3792746a47a27638b560cda34 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Wed, 13 Jul 2011 12:17:37 +0800
+Subject: [PATCH 0228/2463] ENGR00152845-6 fb: add PREMODE_CHANGE event
+ support.
+
+change fbmem.c to support PREMODE_CHANGE event.
+
+Signed-off-by: Jason Chen <jason.chen@freescale.com>
+---
+ drivers/video/fbmem.c |   11 +++++++++++
+ 1 files changed, 11 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/video/fbmem.c b/drivers/video/fbmem.c
+index 7a41220..c4be50b 100644
+--- a/drivers/video/fbmem.c
++++ b/drivers/video/fbmem.c
+@@ -991,6 +991,17 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
+ 			old_var = info->var;
+ 			info->var = *var;
+ 
++			/* call pre-mode change */
++			if (flags & FBINFO_MISC_USEREVENT) {
++				struct fb_event event;
++				int evnt = FB_EVENT_PREMODE_CHANGE;
++
++				info->flags &= ~FBINFO_MISC_USEREVENT;
++				event.info = info;
++				event.data = &mode;
++				fb_notifier_call_chain(evnt, &event);
++			}
++
+ 			if (info->fbops->fb_set_par) {
+ 				ret = info->fbops->fb_set_par(info);
+ 
+-- 
+1.7.7.4
+

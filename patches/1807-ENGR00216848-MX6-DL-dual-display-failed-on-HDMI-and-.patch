@@ -1,0 +1,32 @@
+From ad373c687c56cd1a8e8c47e00b1a07deb84c6310 Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Wed, 18 Jul 2012 17:43:39 +0800
+Subject: [PATCH 1807/2463] ENGR00216848 MX6 DL dual display failed on HDMI
+ and LVDS
+
+HDMI output video mode is 1080p, LVDS output is XGA.
+The IPU bandwidth is not enough to support the two display output
+when IPU HSP clock setting to 200MHz,
+increase the IPU HSP clock to 270MHz and dual display can work.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 600cd8b..0f87ce4 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5383,7 +5383,7 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 		/* on mx6dl gpu2d_axi_clk source from mmdc0 directly */
+ 		clk_set_parent(&gpu2d_axi_clk, &mmdc_ch0_axi_clk[0]);
+ 
+-		clk_set_parent(&ipu1_clk, &pll2_pfd_400M);
++		clk_set_parent(&ipu1_clk, &pll3_pfd_540M);
+ 		/* pxp & epdc */
+ 		clk_set_parent(&ipu2_clk, &pll2_pfd_400M);
+ 		clk_set_rate(&ipu2_clk, 200000000);
+-- 
+1.7.7.4
+

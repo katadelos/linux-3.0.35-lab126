@@ -1,0 +1,32 @@
+From 6345faccb435226703293582c61154c6bdd77d76 Mon Sep 17 00:00:00 2001
+From: Sheng Nan <b38800@freescale.com>
+Date: Mon, 4 Mar 2013 14:47:48 +0800
+Subject: [PATCH 2409/2463] ENGR00252559: mxc_v4l2_capture: ov5640: incorrect
+ warning for XGA@15fps
+
+The following warning information should be displayed
+only when the format is XGA and frame rate is 30fps:
+
+pr_warning("ov5640: actual frame rate of XGA is 22.5fps\n");
+
+Signed-off-by: Sheng Nan <b38800@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov5640.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov5640.c b/drivers/media/video/mxc/capture/ov5640.c
+index ae057c3..2a1bc98 100644
+--- a/drivers/media/video/mxc/capture/ov5640.c
++++ b/drivers/media/video/mxc/capture/ov5640.c
+@@ -1042,7 +1042,7 @@ static int ov5640_change_mode_direct(enum ov5640_frame_rate frame_rate,
+ 	ov5640_set_night_mode(night_mode);
+ 
+ 	/* skip 9 vysnc: start capture at 10th vsync */
+-	if (mode == ov5640_mode_XGA_1024_768) {
++	if (mode == ov5640_mode_XGA_1024_768 && frame_rate == ov5640_30_fps) {
+ 		pr_warning("ov5640: actual frame rate of XGA is 22.5fps\n");
+ 		/* 1/22.5 * 9*/
+ 		msleep(400);
+-- 
+1.7.7.4
+

@@ -1,0 +1,63 @@
+From 4630c97b33a135026560d4d17c6b0b8e14253ff5 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 28 Aug 2012 17:43:01 +0800
+Subject: [PATCH 1979/2463] ENGR00221643 [MX6]Fix race condition of pfd 400
+ usecount
+
+We can't modify the usecount of pfd 400M clock when ARM freq
+is changed, as when the children of pfd 400M do clock enable/disable,
+they will also modify this usecount, these two modification is
+out of same lock protection. And this wrong usecount may lead to
+pfd 400M or pll2 disabled accidently, and it will cause system hang!
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c       |    3 ---
+ arch/arm/mach-mx6/clock_mx6sl.c |    3 ---
+ 2 files changed, 0 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index c2bf201..81b63a5 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -1262,7 +1262,6 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		  */
+ 		if (pll1_sw_clk.parent != &pll2_pfd_400M) {
+ 			pll2_pfd_400M.enable(&pll2_pfd_400M);
+-			pll2_pfd_400M.usecount++;
+ 			arm_needs_pll2_400 = true;
+ 			pll1_sw_clk.set_parent(&pll1_sw_clk, &pll2_pfd_400M);
+ 			pll1_sw_clk.parent = &pll2_pfd_400M;
+@@ -1288,8 +1287,6 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		/* Make sure pll1_sw_clk is from pll1_sys_main_clk */
+ 		pll1_sw_clk.set_parent(&pll1_sw_clk, &pll1_sys_main_clk);
+ 		pll1_sw_clk.parent = &pll1_sys_main_clk;
+-		if (arm_needs_pll2_400)
+-			pll2_pfd_400M.usecount--;
+ 		arm_needs_pll2_400 = false;
+ 		if (pll2_pfd_400M.usecount == 0)
+ 			pll2_pfd_400M.disable(&pll2_pfd_400M);
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 4839f15..7a66d10 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -1168,7 +1168,6 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		  */
+ 		if (pll1_sw_clk.parent != &pll2_pfd2_400M) {
+ 			pll2_pfd2_400M.enable(&pll2_pfd2_400M);
+-			pll2_pfd2_400M.usecount++;
+ 			arm_needs_pll2_400 = true;
+ 			pll1_sw_clk.set_parent(&pll1_sw_clk, &pll2_pfd2_400M);
+ 			pll1_sw_clk.parent = &pll2_pfd2_400M;
+@@ -1192,8 +1191,6 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		pll1_sw_clk.set_parent(&pll1_sw_clk, &pll1_sys_main_clk);
+ 		pll1_sw_clk.parent = &pll1_sys_main_clk;
+ 
+-		if (arm_needs_pll2_400)
+-			pll2_pfd2_400M.usecount--;
+ 		arm_needs_pll2_400 = false;
+ 		if (pll2_pfd2_400M.usecount == 0)
+ 			pll2_pfd2_400M.disable(&pll2_pfd2_400M);
+-- 
+1.7.7.4
+

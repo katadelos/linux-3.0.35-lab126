@@ -1,0 +1,45 @@
+From 7b015b8373dcebcf492602194cc56533b87d6283 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Fri, 26 Oct 2012 10:13:34 +0800
+Subject: [PATCH 2234/2463] ENGR00231273-02 mmc: sdhci: fix failed to call
+ platform exit on removal
+
+Since sdhci_pltfm_data is stored in platform_device_id, but in
+sdhci_pltfm_remove, it tried to get sdhci_pltfm_data directly from
+pdev->dev.platform_data. It will result that it could not get the correct
+sdhci_pltfm_data, so that platform exit will not be called on sdhci module's
+removal.
+
+Acked-by: Dong Aisheng <b29396@freescale.com>
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/host/sdhci-pltfm.c |    8 +++++++-
+ 1 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-pltfm.c b/drivers/mmc/host/sdhci-pltfm.c
+index dbab040..61f3aaf 100644
+--- a/drivers/mmc/host/sdhci-pltfm.c
++++ b/drivers/mmc/host/sdhci-pltfm.c
+@@ -140,12 +140,18 @@ err:
+ 
+ static int __devexit sdhci_pltfm_remove(struct platform_device *pdev)
+ {
+-	struct sdhci_pltfm_data *pdata = pdev->dev.platform_data;
++	const struct platform_device_id *platid = platform_get_device_id(pdev);
++	struct sdhci_pltfm_data *pdata;
+ 	struct sdhci_host *host = platform_get_drvdata(pdev);
+ 	struct resource *iomem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	int dead;
+ 	u32 scratch;
+ 
++	if (platid && platid->driver_data)
++		pdata = (void *)platid->driver_data;
++	else
++		pdata = pdev->dev.platform_data;
++
+ 	dead = 0;
+ 	scratch = readl(host->ioaddr + SDHCI_INT_STATUS);
+ 	if (scratch == (u32)-1)
+-- 
+1.7.7.4
+

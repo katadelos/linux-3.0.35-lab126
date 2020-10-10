@@ -1,0 +1,165 @@
+From 77d20a691393a98e2b3dcd1e7eeb319b59f80d77 Mon Sep 17 00:00:00 2001
+From: Rong Dian <b38775@freescale.com>
+Date: Mon, 10 Sep 2012 17:55:11 +0800
+Subject: [PATCH 2028/2463] ENGR00223679-1 mx6sl_evk: Add pin config for
+ MAX8903
+
+Configure PINMUX for max8903 driver on mx6sl_evk board.
+
+Signed-off-by: Rong Dian <b38775@freescale.com>
+---
+ arch/arm/configs/imx6s_defconfig             |    4 +-
+ arch/arm/mach-mx6/board-mx6sl_common.h       |    9 +++++++
+ arch/arm/mach-mx6/board-mx6sl_evk.c          |   31 +++++++++++++++++++++++++-
+ arch/arm/plat-mxc/include/mach/iomux-mx6sl.h |    9 +++++--
+ 4 files changed, 47 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/configs/imx6s_defconfig b/arch/arm/configs/imx6s_defconfig
+index f03e456..5f66b3e 100644
+--- a/arch/arm/configs/imx6s_defconfig
++++ b/arch/arm/configs/imx6s_defconfig
+@@ -1287,7 +1287,7 @@ CONFIG_POWER_SUPPLY=y
+ # CONFIG_BATTERY_MAX17040 is not set
+ # CONFIG_BATTERY_MAX17042 is not set
+ # CONFIG_CHARGER_ISP1704 is not set
+-CONFIG_CHARGER_MAX8903=y
++CONFIG_SABRESD_MAX8903=y
+ # CONFIG_CHARGER_GPIO is not set
+ CONFIG_HWMON=y
+ # CONFIG_HWMON_VID is not set
+@@ -1995,7 +1995,7 @@ CONFIG_USB_GADGET=y
+ CONFIG_USB_GADGET_VBUS_DRAW=2
+ CONFIG_USB_GADGET_SELECTED=y
+ CONFIG_USB_GADGET_ARC=y
+-CONFIG_IMX_USB_CHARGER=y
++# CONFIG_IMX_USB_CHARGER is not set
+ CONFIG_USB_ARC=y
+ # CONFIG_USB_GADGET_FSL_USB2 is not set
+ # CONFIG_USB_GADGET_FUSB300 is not set
+diff --git a/arch/arm/mach-mx6/board-mx6sl_common.h b/arch/arm/mach-mx6/board-mx6sl_common.h
+index d005e02..e5ddcd1 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_common.h
++++ b/arch/arm/mach-mx6/board-mx6sl_common.h
+@@ -31,6 +31,10 @@
+ #define MX6_BRD_SD2_CD		IMX_GPIO_NR(5, 0)	/* SD2_DAT7 */
+ #define MX6_BRD_SD3_CD		IMX_GPIO_NR(3, 22)	/* REF_CLK_32K */
+ #define MX6_BRD_FEC_PWR_EN	IMX_GPIO_NR(4, 21)	/* FEC_TX_CLK */
++#define MX6_BRD_CHG_FLT	IMX_GPIO_NR(4, 14)	/* ECSPI2_MISO  */
++#define MX6_BRD_CHG_UOK	IMX_GPIO_NR(4, 13)	/* ECSPI2_MOSI */
++#define MX6_BRD_CHG_DOK	IMX_GPIO_NR(4, 13)	/* ECSPI2_MOSI */
++#define MX6_BRD_CHG_STATUS	IMX_GPIO_NR(4, 15)	/* ECSPI2_SS0  */
+ 
+ /* EPDC GPIO pins */
+ #define MX6SL_BRD_EPDC_SDDO_0		IMX_GPIO_NR(1, 7)
+@@ -213,6 +217,11 @@ static iomux_v3_cfg_t mx6sl_brd_pads[] = {
+ 
+ 	/* WDOG */
+ 	MX6SL_PAD_WDOG_B__WDOG1_WDOG_B,
++
++	/* Charge */
++	MX6SL_PAD_ECSPI2_MISO__GPIO_4_14,  /* CHG_FLT */
++	MX6SL_PAD_ECSPI2_SS0__GPIO_4_15, /* CHG_STATUS */
++	MX6SL_PAD_ECSPI2_MOSI__GPIO_4_13, /* CHG_UOK ,CHG_DOK*/
+ };
+ 
+ static iomux_v3_cfg_t mx6sl_brd_epdc_enable_pads[] = {
+diff --git a/arch/arm/mach-mx6/board-mx6sl_evk.c b/arch/arm/mach-mx6/board-mx6sl_evk.c
+index 23fcff5..825217d 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_evk.c
++++ b/arch/arm/mach-mx6/board-mx6sl_evk.c
+@@ -52,6 +52,7 @@
+ #include <linux/mfd/max17135.h>
+ #include <sound/wm8962.h>
+ #include <sound/pcm.h>
++#include <linux/power/sabresd_battery.h>
+ 
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+@@ -1174,6 +1175,33 @@ static void __init elan_ts_init(void)
+ 	gpio_direction_output(MX6SL_BRD_ELAN_CE, 1);
+ }
+ 
++/*
++ *Usually UOK and DOK should have separate
++ *line to differentiate its behaviour (with different
++ * GPIO irq),because connect max8903 pin UOK to
++ *pin DOK from hardware design,cause software cannot
++ *process and distinguish two interrupt, so default
++ *enable dc_valid for ac charger
++ */
++static struct max8903_pdata charger1_data = {
++	.dok = MX6_BRD_CHG_DOK,
++	.uok = MX6_BRD_CHG_UOK,
++	.chg = MX6_BRD_CHG_STATUS,
++	.flt = MX6_BRD_CHG_FLT,
++	.dcm_always_high = true,
++	.dc_valid = true,
++	.usb_valid = false,
++	.feature_flag = 1,
++};
++
++static struct platform_device evk_max8903_charger_1 = {
++	.name	= "max8903-charger",
++	.dev	= {
++		.platform_data = &charger1_data,
++	},
++};
++
++
+ #define SNVS_LPCR 0x38
+ static void mx6_snvs_poweroff(void)
+ {
+@@ -1274,7 +1302,8 @@ static void __init mx6_evk_init(void)
+ 	imx6q_add_perfmon(0);
+ 	imx6q_add_perfmon(1);
+ 	imx6q_add_perfmon(2);
+-
++	/* Register charger chips */
++	platform_device_register(&evk_max8903_charger_1);
+ 	pm_power_off = mx6_snvs_poweroff;
+ }
+ 
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h b/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
+index 296df42..90de1dd 100755
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
+@@ -77,6 +77,9 @@
+ #define MX6SL_ADU_PAD_CTRL	(PAD_CTL_PKE | PAD_CTL_PUE |		\
+ 		PAD_CTL_DSE_40ohm | PAD_CTL_PUS_100K_DOWN |		\
+ 		PAD_CTL_HYS | PAD_CTL_SPEED_MED)
++#define MX6SL_CHG_PAD_CTRL	(PAD_CTL_HYS | PAD_CTL_PKE | PAD_CTL_PUE | \
++		PAD_CTL_PUS_47K_UP)
++
+ 
+ #define MX6SL_PAD_AUD_MCLK		0x02A4
+ #define MX6SL_PAD_AUD_RXD		0x02AC
+@@ -510,7 +513,7 @@
+ 		IOMUX_PAD(0x0364, 0x0074, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_ECSPI2_MISO__GPIO_4_14                                      \
+-		IOMUX_PAD(0x0368, 0x0078, 5, 0x0000, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x0368, 0x0078, 5, 0x0000, 0, MX6SL_CHG_PAD_CTRL)
+ #define MX6SL_PAD_ECSPI2_MISO__USB_USBOTG1_OC                                 \
+ 		IOMUX_PAD(0x0368, 0x0078, 6, 0x0824, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_ECSPI2_MISO__TPSMP_HDATA_23                                 \
+@@ -541,7 +544,7 @@
+ #define MX6SL_PAD_ECSPI2_MOSI__USDHC1_VSELECT                                 \
+ 		IOMUX_PAD(0x036C, 0x007C, 4, 0x0000, 0, MX6SL_USDHC_PAD_CTRL)
+ #define MX6SL_PAD_ECSPI2_MOSI__GPIO_4_13                                      \
+-		IOMUX_PAD(0x036C, 0x007C, 5, 0x0000, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x036C, 0x007C, 5, 0x0000, 0, MX6SL_CHG_PAD_CTRL)
+ #define MX6SL_PAD_ECSPI2_MOSI__ANATOP_ANATOP_TESTO_1                          \
+ 		IOMUX_PAD(0x036C, 0x007C, 6, 0x0000, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_ECSPI2_MOSI__TPSMP_HDATA_22                                 \
+@@ -579,7 +582,7 @@
+ #define MX6SL_PAD_ECSPI2_SS0__USDHC1_CD                                       \
+ 		IOMUX_PAD(0x0374, 0x0084, 4, 0x0828, 0, MX6SL_USDHC_PAD_CTRL)
+ #define MX6SL_PAD_ECSPI2_SS0__GPIO_4_15                                       \
+-		IOMUX_PAD(0x0374, 0x0084, 5, 0x0000, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x0374, 0x0084, 5, 0x0000, 0, MX6SL_CHG_PAD_CTRL)
+ #define MX6SL_PAD_ECSPI2_SS0__USB_USBOTG1_PWR                                 \
+ 		IOMUX_PAD(0x0374, 0x0084, 6, 0x0000, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_ECSPI2_SS0__PL301_SIM_MX6SL_PER1_HADDR_24                   \
+-- 
+1.7.7.4
+

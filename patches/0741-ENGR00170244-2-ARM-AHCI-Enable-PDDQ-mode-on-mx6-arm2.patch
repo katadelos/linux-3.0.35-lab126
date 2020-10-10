@@ -1,0 +1,58 @@
+From 1e25eda7323a1dc21bbf8cd92952c5d727bb7bc6 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Wed, 14 Dec 2011 12:55:52 +0800
+Subject: [PATCH 0741/2463] ENGR00170244-2 ARM: AHCI: Enable PDDQ mode on mx6
+ arm2 board
+
+In order to save the power consumption, enable the
+PDDQ mode of AHCI PHY when there is no sata disk
+on the port
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c |   22 ++++------------------
+ 1 files changed, 4 insertions(+), 18 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index a6d4697..54c7fc0 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -818,7 +818,7 @@ static struct viv_gpu_platform_data imx6q_gpu_pdata __initdata = {
+ static int mx6q_arm2_sata_init(struct device *dev, void __iomem *addr)
+ {
+ 	u32 tmpdata;
+-	int ret = 0, iterations = 20;
++	int ret = 0;
+ 	struct clk *clk;
+ 
+ 	/* Enable SATA PWR CTRL_0 of MAX7310 */
+@@ -867,23 +867,9 @@ static int mx6q_arm2_sata_init(struct device *dev, void __iomem *addr)
+ 	tmpdata = clk_get_rate(clk) / 1000;
+ 	clk_put(clk);
+ 
+-	sata_init(addr, tmpdata);
+-
+-	/* Release resources when there is no device on the port */
+-	do {
+-		if ((readl(addr + PORT_SATA_SR) & 0xF) == 0)
+-			msleep(25);
+-		else
+-			break;
+-
+-		if (iterations == 0) {
+-			dev_info(dev, "NO sata disk.\n");
+-			ret = -ENODEV;
+-			goto release_sata_clk;
+-		}
+-	} while (iterations-- > 0);
+-
+-	return ret;
++	ret = sata_init(addr, tmpdata);
++	if (ret == 0)
++		return ret;
+ 
+ release_sata_clk:
+ 	clk_disable(sata_clk);
+-- 
+1.7.7.4
+

@@ -1,0 +1,51 @@
+From 5924d4a74c5b459f0c12d63ae3072525230188c9 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Tue, 12 Mar 2013 14:59:49 +0800
+Subject: [PATCH 2443/2463] ENGR00253849 EPDC: fix build warnings in epdc fb
+ driver
+
+This patch is to fix the following warnings:
+
+drivers/video/mxc/mxc_epdc_fb.c:5062:2: warning: initialization from
+				incompatible pointer type [enabled by default]
+drivers/video/mxc/mxc_epdc_fb.c:5062:2: warning: (near initialization for
+			'mxc_epdc_fb_driver.shutdown') [enabled by default]
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+(cherry picked from commit a086f9782435b51f494c618236907894dfeff3ad)
+---
+ drivers/video/mxc/mxc_epdc_fb.c |    6 ++----
+ 1 files changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_epdc_fb.c b/drivers/video/mxc/mxc_epdc_fb.c
+index 3450a65..743b084 100644
+--- a/drivers/video/mxc/mxc_epdc_fb.c
++++ b/drivers/video/mxc/mxc_epdc_fb.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2010-2012 Freescale Semiconductor, Inc.
++ * Copyright (C) 2010-2013 Freescale Semiconductor, Inc.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -5026,7 +5026,7 @@ static int mxc_epdc_fb_resume(struct platform_device *pdev)
+ 	return 0;
+ }
+ 
+-static int mxc_epdc_fb_shutdown(struct platform_device *pdev)
++static void mxc_epdc_fb_shutdown(struct platform_device *pdev)
+ {
+ 	struct mxc_epdc_fb_data *fb_data = platform_get_drvdata(pdev);
+ 
+@@ -5045,8 +5045,6 @@ static int mxc_epdc_fb_shutdown(struct platform_device *pdev)
+ 
+ 	/* turn off the V3p3 */
+ 	regulator_disable(fb_data->v3p3_regulator);
+-
+-	return 0;
+ }
+ #else
+ #define mxc_epdc_fb_suspend	NULL
+-- 
+1.7.7.4
+

@@ -1,0 +1,67 @@
+From bf14d133e9cdb8101858d6623f5aa590a6cfe97c Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Thu, 31 May 2012 10:24:10 +0800
+Subject: [PATCH 1559/2463] ENGR00210686 USB:fix unplug&plug device during
+ suspend without wakeup enabled
+
+For High speed device ,we need clear BM_USBPHY_CTRL_ENHOSTDISCONDETECT
+after suspend.For Low and full speed device, we should power on and power
+off the USB port to make sure USB internal state machine work well.
+
+Add a config to enable/disable this code,the code is enabled by default.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ drivers/usb/core/hub.c      |    9 ++++-----
+ drivers/usb/host/ehci-arc.c |   15 +++++++++++++++
+ 2 files changed, 19 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/usb/core/hub.c b/drivers/usb/core/hub.c
+index 4554046..f293c69 100644
+--- a/drivers/usb/core/hub.c
++++ b/drivers/usb/core/hub.c
+@@ -3209,11 +3209,10 @@ static void hub_port_connect_change(struct usb_hub *hub, int port1,
+ 				pdata->init(NULL);
+ 		}
+ 		if ((port1 == 1) && (hdev->level == 0)) {
+-			if (!(portstatus & USB_PORT_STAT_CONNECTION)) {
+-				/* Must clear HOSTDISCONDETECT when disconnect*/
+-				if (pdata->platform_set_disconnect_det)
+-					pdata->platform_set_disconnect_det(pdata, 0);
+-			}
++			/* Must clear HOSTDISCONDETECT when port connect change happen*/
++			if (pdata->platform_set_disconnect_det)
++				pdata->platform_set_disconnect_det(pdata, 0);
++
+ 		}
+ 	}
+ #endif
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index 3fddb2f..08324a6 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -771,6 +771,21 @@ static int ehci_fsl_drv_resume(struct platform_device *pdev)
+ 
+ 			usb_host_set_wakeup(hcd->self.controller, true);
+ 
++#ifndef NO_FIX_DISCONNECT_ISSUE
++			/*Unplug&plug device during suspend without remote wakeup enabled
++			For Low and full speed device, we should power on and power off
++			the USB port to make sure USB internal state machine work well.
++			*/
++			tmp = ehci_readl(ehci, &ehci->regs->port_status[0]);
++			if ((tmp & PORT_CONNECT) && !(tmp & PORT_SUSPEND) &&
++				((tmp & (0x3<<26)) != (0x2<<26))) {
++					printk(KERN_DEBUG "%s will do power off and power on port.\n", pdata->name);
++					ehci_writel(ehci, tmp & ~(PORT_RWC_BITS | PORT_POWER),
++						&ehci->regs->port_status[0]);
++					ehci_writel(ehci, tmp | PORT_POWER,
++						&ehci->regs->port_status[0]);
++			}
++#endif
+ 			fsl_usb_clk_gate(hcd->self.controller->platform_data, false);
+ 		}
+ 		return 0;
+-- 
+1.7.7.4
+

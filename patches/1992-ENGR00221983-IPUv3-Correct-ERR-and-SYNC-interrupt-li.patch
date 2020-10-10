@@ -1,0 +1,34 @@
+From e57c591b1fe32b21226d327ed7e59c4c7b5f8e39 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Thu, 30 Aug 2012 09:33:01 +0800
+Subject: [PATCH 1992/2463] ENGR00221983 IPUv3:Correct ERR and SYNC interrupt
+ line numbers
+
+As we define ERR interrupt with 0 irq resource id and SYNC
+interrupt with 1 irq resource id in platform-imx_ipuv3.c,
+we wrongly assign them in IPUv3 driver.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit 52c9fc323e0f72e53de6fe0c6f7012fe7adf14b4)
+---
+ drivers/mxc/ipu3/ipu_common.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index c97d159..ae8b4ed 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -248,8 +248,8 @@ static int __devinit ipu_probe(struct platform_device *pdev)
+ 	if (plat_data->init)
+ 		plat_data->init(pdev->id);
+ 
+-	ipu->irq_sync = platform_get_irq(pdev, 0);
+-	ipu->irq_err = platform_get_irq(pdev, 1);
++	ipu->irq_err = platform_get_irq(pdev, 0);
++	ipu->irq_sync = platform_get_irq(pdev, 1);
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 
+ 	if (!res || ipu->irq_sync < 0 || ipu->irq_err < 0) {
+-- 
+1.7.7.4
+

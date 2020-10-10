@@ -1,0 +1,31 @@
+From e250ad70250ea04c8390aac505a4061358ad6baa Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Wed, 31 Aug 2011 13:28:37 +0800
+Subject: [PATCH 0388/2463] ENGR00155612-3 [mx6q]add delay after cmd6 for eMMC
+ compatibility
+
+sandisk eMMC4.4 cards need a 1ms delay after cmd6 (switch cmd)
+which is confirm by sandisk errata.
+add 1ms delay after cmd6 to provide more robustness and compatiblity
+of our driver supporting eMMC4.4 cards.
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ drivers/mmc/core/mmc_ops.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mmc/core/mmc_ops.c b/drivers/mmc/core/mmc_ops.c
+index 845ce7c..b11876c 100644
+--- a/drivers/mmc/core/mmc_ops.c
++++ b/drivers/mmc/core/mmc_ops.c
+@@ -397,6 +397,7 @@ int mmc_switch(struct mmc_card *card, u8 set, u8 index, u8 value,
+ 	err = mmc_wait_for_cmd(card->host, &cmd, MMC_CMD_RETRIES);
+ 	if (err)
+ 		return err;
++	mdelay(1);
+ 
+ 	/* Must check status to be sure of no errors */
+ 	do {
+-- 
+1.7.7.4
+

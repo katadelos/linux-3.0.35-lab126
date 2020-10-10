@@ -1,0 +1,50 @@
+From 6770d5cee037cdfa80df811659e6a38c2a8a81f4 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Sun, 7 Oct 2012 16:25:28 -0500
+Subject: [PATCH 2112/2463] ENGR00227250 MX6SL/MX6DL-Fix IRAM size
+
+MX6SL and MX6DL have only 128KB of IRAM. Fix the
+code so the right size is passed to iram_init()
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/cpu.c              |    8 +++++++-
+ arch/arm/plat-mxc/include/mach/mx6.h |    2 +-
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index be5011a..fbb3827 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -119,8 +119,14 @@ static int __init post_cpu_init(void)
+ {
+ 	unsigned int reg;
+ 	void __iomem *base;
++	u32	iram_size;
+ 
+-	iram_init(MX6Q_IRAM_BASE_ADDR, MX6Q_IRAM_SIZE);
++	if (cpu_is_mx6q())
++		iram_size = MX6Q_IRAM_SIZE;
++	else
++		iram_size = MX6DL_MX6SL_IRAM_SIZE;
++
++	iram_init(MX6Q_IRAM_BASE_ADDR, iram_size);
+ 
+ 	base = ioremap(AIPS1_ON_BASE_ADDR, PAGE_SIZE);
+ 	__raw_writel(0x0, base + 0x40);
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index ef41cad..f8e1d1c 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -77,7 +77,7 @@
+ #define MX6Q_IRAM_BASE_ADDR		IRAM_BASE_ADDR
+ /* The last 4K is for cpu hotplug to workaround wdog issue*/
+ #define MX6Q_IRAM_SIZE			(SZ_256K - SZ_4K)
+-#define MX6DL_IRAM_SIZE			(SZ_128K - SZ_4K)
++#define MX6DL_MX6SL_IRAM_SIZE			(SZ_128K - SZ_4K)
+ 
+ /* Blocks connected via pl301periph */
+ #define ROMCP_ARB_BASE_ADDR		0x00000000
+-- 
+1.7.7.4
+

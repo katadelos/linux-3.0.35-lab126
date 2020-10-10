@@ -1,0 +1,41 @@
+From 15b6f85d381fa521d7208e98a07f2a519fb13683 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Sat, 31 Dec 2011 19:00:55 +0800
+Subject: [PATCH 0864/2463] ENGR00171116 [MX6]Remove unnecessary workaround
+ for suspend/resume
+
+The root cause of suspend/resume fail has been found,
+the i-cache should be invalidated before resume. So
+the workaround can be removed.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/system.c |    7 +------
+ 1 files changed, 1 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 8ce35e0..9288b9f 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -132,11 +132,6 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 			anatop_val = __raw_readl(anatop_base + ANATOP_REG_2P5_OFFSET);
+ 			anatop_val |= 1 << 18;
+ 			__raw_writel(anatop_val, anatop_base + ANATOP_REG_2P5_OFFSET);
+-			/* Make sure ARM and SOC domain has same voltage */
+-			anatop_val = __raw_readl(anatop_base + ANATOP_REG_CORE_OFFSET);
+-			anatop_val &= ~(0x1f << 18);
+-			anatop_val |= (anatop_val & 0x1f) << 18;
+-			__raw_writel(anatop_val, anatop_base + ANATOP_REG_CORE_OFFSET);
+ 			__raw_writel(__raw_readl(MXC_CCM_CCR) | MXC_CCM_CCR_RBC_EN, MXC_CCM_CCR);
+ 			ccm_clpcr |= MXC_CCM_CLPCR_WB_PER_AT_LPM;
+ 		}
+-- 
+1.7.7.4
+

@@ -1,0 +1,57 @@
+From 26bab298cb07713bc25f46c7a41ae8a340c254dd Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Tue, 26 Apr 2011 13:44:40 +0800
+Subject: [PATCH 0137/2463] ENGR00142517-2 camera clk initialization
+
+Modified camera clk initialization and camera platform data
+name to coincide with history.
+
+Signed-off-by: Sun Yuxi <b36102@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov3640.c |    4 ++--
+ drivers/mxc/ipu3/ipu_common.c            |    7 ++-----
+ 2 files changed, 4 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov3640.c b/drivers/media/video/mxc/capture/ov3640.c
+index dc93b72..189a5f5 100644
+--- a/drivers/media/video/mxc/capture/ov3640.c
++++ b/drivers/media/video/mxc/capture/ov3640.c
+@@ -696,7 +696,7 @@ static struct regulator *io_regulator;
+ static struct regulator *core_regulator;
+ static struct regulator *analog_regulator;
+ static struct regulator *gpo_regulator;
+-static struct mxc_camera_platform_data *camera_plat;
++static struct fsl_mxc_camera_platform_data *camera_plat;
+ 
+ static int ov3640_probe(struct i2c_client *adapter,
+ 				const struct i2c_device_id *device_id);
+@@ -1318,7 +1318,7 @@ static int ov3640_probe(struct i2c_client *client,
+ 			const struct i2c_device_id *id)
+ {
+ 	int retval;
+-	struct mxc_camera_platform_data *plat_data = client->dev.platform_data;
++	struct fsl_mxc_camera_platform_data *plat_data = client->dev.platform_data;
+ 
+ 	/* Set initial values for the sensor struct. */
+ 	memset(&ov3640_data, 0, sizeof(ov3640_data));
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 9d99f55..f19be46 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -414,11 +414,8 @@ static int ipu_probe(struct platform_device *pdev)
+ 	clk_set_parent(g_pixel_clk[1], g_ipu_clk);
+ 	clk_enable(g_ipu_clk);
+ 
+-	g_di_clk[0] = clk_get(&pdev->dev, "ipu_di0_clk");
+-	g_di_clk[1] = clk_get(&pdev->dev, "ipu_di1_clk");
+-
+-	/*g_csi_clk[0] = plat_data->csi_clk[0];
+-	g_csi_clk[1] = plat_data->csi_clk[1];*/
++	g_csi_clk[0] = plat_data->csi_clk[0];
++	g_csi_clk[1] = plat_data->csi_clk[1];
+ 
+ 	__raw_writel(0x807FFFFF, IPU_MEM_RST);
+ 	while (__raw_readl(IPU_MEM_RST) & 0x80000000)
+-- 
+1.7.7.4
+

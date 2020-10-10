@@ -1,0 +1,30 @@
+From c1a7c48666b662a7a67c7da8493d565dce8d6b27 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Thu, 6 Dec 2012 18:15:27 +0800
+Subject: [PATCH 2317/2463] ENGR00236137 mx6sl: csi: Change video buffer
+ access mode to writecombine
+
+Change buffer access mode from noncached to writecombine for better
+performance.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ drivers/media/video/mxc/capture/csi_v4l2_capture.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/csi_v4l2_capture.c b/drivers/media/video/mxc/capture/csi_v4l2_capture.c
+index 6cf06c4..74266b0 100644
+--- a/drivers/media/video/mxc/capture/csi_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/csi_v4l2_capture.c
+@@ -1428,7 +1428,7 @@ static int csi_mmap(struct file *file, struct vm_area_struct *vma)
+ 		return -EINTR;
+ 
+ 	size = vma->vm_end - vma->vm_start;
+-	vma->vm_page_prot = pgprot_noncached(vma->vm_page_prot);
++	vma->vm_page_prot = pgprot_writecombine(vma->vm_page_prot);
+ 
+ 	if (remap_pfn_range(vma, vma->vm_start,
+ 			    vma->vm_pgoff, size, vma->vm_page_prot)) {
+-- 
+1.7.7.4
+

@@ -1,0 +1,155 @@
+From 765af27537bbbdea4e280823e6eeecbd73f2c604 Mon Sep 17 00:00:00 2001
+From: Wu Guoxing <b39297@freescale.com>
+Date: Tue, 13 Mar 2012 15:04:47 +0800
+Subject: [PATCH 1157/2463] ENGR00176656:gpu-viv:separate gpu 2d and vg core
+ clock and axi clock operation
+
+separate gpu 2d and vg core clock and axi clock operation
+
+Signed-off-by: Wu Guoxing <b39297@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../hal/os/linux/kernel/gc_hal_kernel_device.c     |   29 ++++++++++++-
+ .../hal/os/linux/kernel/gc_hal_kernel_device.h     |    3 +-
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |   44 +++++++------------
+ 3 files changed, 46 insertions(+), 30 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+index ed980bc..afac3fc 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+@@ -405,7 +405,24 @@ gckGALDEVICE_Construct(
+             IrqLine2D = -1;
+             IrqLineVG = -1;
+             device->clk_2d_core = NULL;
+-            gckOS_Print("galcore: clk_get 2d clock failed, disable 2d/vg!\n");
++            gckOS_Print("galcore: clk_get 2d core clock failed, disable 2d/vg!\n");
++        } else {
++	    if (IrqLine2D != -1) {
++                device->clk_2d_axi = clk_get(NULL, "gpu2d_axi_clk");
++                if (IS_ERR(device->clk_2d_axi)) {
++                    device->clk_2d_axi = NULL;
++                    IrqLine2D = -1;
++                    gckOS_Print("galcore: clk_get 2d axi clock failed, disable 2d\n");
++                }
++            }
++            if (IrqLineVG != -1) {
++                device->clk_vg_axi = clk_get(NULL, "openvg_axi_clk");
++                if (IS_ERR(device->clk_vg_axi)) {
++                    IrqLineVG = -1;
++	                device->clk_vg_axi = NULL;
++	                gckOS_Print("galcore: clk_get vg clock failed, disable vg!\n");
++                }
++            }
+         }
+     }
+ 
+@@ -994,6 +1011,16 @@ gckGALDEVICE_Destroy(
+            clk_put(Device->clk_2d_core);
+            Device->clk_2d_core = NULL;
+         }
++        if (Device->clk_2d_axi) {
++           clk_put(Device->clk_2d_axi);
++           Device->clk_2d_axi = NULL;
++        }
++        if (Device->clk_vg_axi) {
++           clk_put(Device->clk_vg_axi);
++           Device->clk_vg_axi = NULL;
++        }
++
++
+ 
+         /* Destroy the gckOS object. */
+         if (Device->os != gcvNULL)
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
+index 923978d..f0b806f 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
+@@ -89,7 +89,8 @@ typedef struct _gckGALDEVICE
+     struct clk         *clk_3d_core;
+     struct clk         *clk_3d_shader;
+     struct clk         *clk_2d_core;
+-    gctBOOL clk_flag[gcdCORE_COUNT];
++    struct clk         *clk_2d_axi;
++    struct clk         *clk_vg_axi;
+ 
+ #if gcdPOWEROFF_TIMEOUT
+     struct task_struct  *pmThreadCtxts;
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index 3cd8e24..53489ffa 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -6848,29 +6848,24 @@ gckOS_SetGPUPower(
+     struct clk *clk_3dcore = Os->device->clk_3d_core;
+     struct clk *clk_3dshader = Os->device->clk_3d_shader;
+     struct clk *clk_2dcore = Os->device->clk_2d_core;
++    struct clk *clk_2d_axi = Os->device->clk_2d_axi;
++    struct clk *clk_vg_axi = Os->device->clk_vg_axi;
+ 
+     gcmkHEADER_ARG("Os=0x%X Core=%d Clock=%d Power=%d", Os, Core, Clock, Power);
+     if (Clock == gcvTRUE) {
+         switch (Core) {
+         case gcvCORE_MAJOR:
+-            if (!Os->device->clk_flag[gcvCORE_MAJOR]) {
+-                clk_enable(clk_3dcore);
+-                if (cpu_is_mx6q())
+-                    clk_enable(clk_3dshader);
+-            }
+-            Os->device->clk_flag[gcvCORE_MAJOR] = gcvTRUE;
++            clk_enable(clk_3dcore);
++            if (cpu_is_mx6q())
++                clk_enable(clk_3dshader);
+             break;
+         case gcvCORE_2D:
+-            if (!(Os->device->clk_flag[gcvCORE_2D] || Os->device->clk_flag[gcvCORE_VG])) {
+-                clk_enable(clk_2dcore);
+-            }
+-            Os->device->clk_flag[gcvCORE_2D] = gcvTRUE;
++            clk_enable(clk_2dcore);
++            clk_enable(clk_2d_axi);
+             break;
+         case gcvCORE_VG:
+-            if (!(Os->device->clk_flag[gcvCORE_2D] || Os->device->clk_flag[gcvCORE_VG])) {
+-                clk_enable(clk_2dcore);
+-            }
+-            Os->device->clk_flag[gcvCORE_VG] = gcvTRUE;
++            clk_enable(clk_2dcore);
++            clk_enable(clk_vg_axi);
+             break;
+         default:
+             break;
+@@ -6878,24 +6873,17 @@ gckOS_SetGPUPower(
+     } else {
+         switch (Core) {
+         case gcvCORE_MAJOR:
+-            if (Os->device->clk_flag[gcvCORE_MAJOR]) {
+-                if (cpu_is_mx6q())
+-                    clk_disable(clk_3dshader);
+-                clk_disable(clk_3dcore);
+-            }
+-            Os->device->clk_flag[gcvCORE_MAJOR] = gcvFALSE;
++            if (cpu_is_mx6q())
++                clk_disable(clk_3dshader);
++            clk_disable(clk_3dcore);
+             break;
+         case gcvCORE_2D:
+-            if (Os->device->clk_flag[gcvCORE_2D] && (!Os->device->clk_flag[gcvCORE_VG])) {
+-                clk_disable(clk_2dcore);
+-            }
+-            Os->device->clk_flag[gcvCORE_2D] = gcvFALSE;
++            clk_disable(clk_2dcore);
++            clk_disable(clk_2d_axi);
+             break;
+         case gcvCORE_VG:
+-            if ((!Os->device->clk_flag[gcvCORE_2D]) && Os->device->clk_flag[gcvCORE_VG]) {
+-                clk_disable(clk_2dcore);
+-            }
+-            Os->device->clk_flag[gcvCORE_VG] = gcvFALSE;
++            clk_disable(clk_2dcore);
++            clk_disable(clk_vg_axi);
+             break;
+         default:
+             break;
+-- 
+1.7.7.4
+

@@ -1,0 +1,49 @@
+From 39267932cfdc33e99afa1b29fae19acdfb19b111 Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Fri, 22 Jun 2012 16:13:53 -0700
+Subject: [PATCH 1660/2463] ENGR00215228-4: Synchronize scatter/gather table
+ definitions with QorIQ defs
+
+Update scatter/gather definitions to more closely correspond with
+those in the QorIQ 1.2 release tree. Note that the definition of
+the CAAM-local scatter-gather table for QorIQ/Power-based devices
+assumed big-endian, and therefore does not burst-read properly into
+an ARM-based little-endian instantiation. Therefore, applied
+close-as-practical definitions to at least get close until a merge
+can be accomplished.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+---
+ drivers/crypto/caam/desc.h |   16 ++++++++--------
+ 1 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/crypto/caam/desc.h b/drivers/crypto/caam/desc.h
+index 3a7ae44..adaeb28 100644
+--- a/drivers/crypto/caam/desc.h
++++ b/drivers/crypto/caam/desc.h
+@@ -15,14 +15,14 @@
+  * and this selection is visible in the Compile Time Parameters Register
+  */
+ 
+-#define LINKTBL_EXT		0x80000000	/* Entry points to table */
+-#define LINKTBL_FINAL		0x40000000	/* Last ent in table */
+-#define LINKTBL_BPID_MASK	0x000000ff
+-#define LINKTBL_BPID_SHIFT	16
+-#define LINKTBL_LEN_MASK	0x3fffffff	/* Excludes EXT and FINAL */
+-#define LINKTBL_OFFS_MASK	0x00001fff
+-
+-struct link_tbl_entry {
++#define SEC4_SG_LEN_EXT		0x80000000	/* Entry points to table */
++#define SEC4_SG_LEN_FIN		0x40000000	/* Last ent in table */
++#define SEC4_SG_BPID_MASK	0x000000ff
++#define SEC4_SG_BPID_SHIFT	16
++#define SEC4_SG_LEN_MASK	0x3fffffff	/* Excludes EXT and FINAL */
++#define SEC4_SG_OFFS_MASK	0x00001fff
++
++struct sec4_sg_entry {
+ #ifdef CONFIG_64BIT
+ 	u64 ptr;
+ #else
+-- 
+1.7.7.4
+

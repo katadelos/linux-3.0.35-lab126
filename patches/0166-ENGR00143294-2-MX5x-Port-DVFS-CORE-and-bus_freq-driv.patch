@@ -1,0 +1,533 @@
+From 834568d182c171812f39c2f820a19ccab028dcc7 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Wed, 11 May 2011 19:17:17 -0500
+Subject: [PATCH 0166/2463] ENGR00143294-2: MX5x-Port DVFS-CORE and bus_freq
+ driver to 2.6.38
+
+Port low power mode drivers to 2.6.38
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/plat-mxc/clock.c                     |   64 +++++++++++-
+ arch/arm/plat-mxc/cpufreq.c                   |    1 +
+ arch/arm/plat-mxc/devices/platform-imx_dvfs.c |    9 +-
+ arch/arm/plat-mxc/dvfs_core.c                 |  147 ++++++++++++++----------
+ arch/arm/plat-mxc/include/mach/mxc_dvfs.h     |    4 +-
+ 5 files changed, 158 insertions(+), 67 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/clock.c b/arch/arm/plat-mxc/clock.c
+index be4a389..bec9ad9 100755
+--- a/arch/arm/plat-mxc/clock.c
++++ b/arch/arm/plat-mxc/clock.c
+@@ -4,7 +4,7 @@
+  * Copyright (C) 2004 - 2005 Nokia corporation
+  * Written by Tuukka Tikkanen <tuukka.tikkanen@elektrobit.com>
+  * Modified for omap shared clock framework by Tony Lindgren <tony@atomide.com>
+- * Copyright 2007-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2007-2011 Freescale Semiconductor, Inc.
+  * Copyright 2008 Juergen Beisert, kernel@pengutronix.de
+  *
+  * This program is free software; you can redistribute it and/or
+@@ -39,10 +39,21 @@
+ #include <linux/string.h>
+ #include <linux/slab.h>
+ #include <linux/debugfs.h>
++#include <linux/hardirq.h>
+ 
+ #include <mach/clock.h>
+ #include <mach/hardware.h>
+ 
++extern int dvfs_core_is_active;
++extern int lp_high_freq;
++extern int lp_med_freq;
++extern int low_bus_freq_mode;
++extern int high_bus_freq_mode;
++extern int med_bus_freq_mode;
++extern int set_high_bus_freq(int high_freq);
++extern int set_low_bus_freq(void);
++extern int low_freq_bus_used(void);
++
+ static LIST_HEAD(clocks);
+ static DEFINE_MUTEX(clocks_mutex);
+ 
+@@ -84,11 +95,38 @@ static int __clk_enable(struct clk *clk)
+  */
+ int clk_enable(struct clk *clk)
+ {
++	unsigned long flags;
+ 	int ret = 0;
+ 
++	if (in_interrupt()) {
++		printk(KERN_ERR " clk_enable cannot be called in an interrupt context\n");
++		dump_stack();
++		BUG();
++	}
++
+ 	if (clk == NULL || IS_ERR(clk))
+ 		return -EINVAL;
+ 
++	if ((clk->flags & CPU_FREQ_TRIG_UPDATE)
++			&& (clk_get_usecount(clk) == 0)) {
++		if (!(clk->flags &
++			(AHB_HIGH_SET_POINT | AHB_MED_SET_POINT)))  {
++			if (low_freq_bus_used() && !low_bus_freq_mode)
++				set_low_bus_freq();
++		} else {
++			if ((clk->flags & AHB_MED_SET_POINT)
++				&& !med_bus_freq_mode)
++				/* Set to Medium setpoint */
++				set_high_bus_freq(0);
++			else if ((clk->flags & AHB_HIGH_SET_POINT)
++				&& !high_bus_freq_mode)
++				/* Currently at low or medium set point,
++				  * need to set to high setpoint
++				  */
++				set_high_bus_freq(1);
++		}
++	}
++
+ 	mutex_lock(&clocks_mutex);
+ 	ret = __clk_enable(clk);
+ 	mutex_unlock(&clocks_mutex);
+@@ -103,13 +141,30 @@ EXPORT_SYMBOL(clk_enable);
+  */
+ void clk_disable(struct clk *clk)
+ {
++	unsigned long flags;
++
++	if (in_interrupt()) {
++		printk(KERN_ERR " clk_disable cannot be called in an interrupt context\n");
++		dump_stack();
++		BUG();
++	}
++
+ 	if (clk == NULL || IS_ERR(clk))
+ 		return;
+ 
+ 	mutex_lock(&clocks_mutex);
+ 	__clk_disable(clk);
+ 	mutex_unlock(&clocks_mutex);
++	if ((clk->flags & CPU_FREQ_TRIG_UPDATE)
++			&& (clk_get_usecount(clk) == 0)) {
++		if (low_freq_bus_used() && !low_bus_freq_mode)
++			set_low_bus_freq();
++		else
++			/* Set to either high or medium setpoint. */
++			set_high_bus_freq(0);
++	}
+ }
++
+ EXPORT_SYMBOL(clk_disable);
+ 
+ /*!
+@@ -317,6 +372,13 @@ static int clk_debug_register_one(struct clk *clk)
+ 		goto err_out;
+ 	}
+ 
++	d = debugfs_create_u32("flags", S_IRUGO, clk->dentry,
++			(u32 *)&clk->flags);
++	if (!d) {
++		err = -ENOMEM;
++		goto err_out;
++	}
++
+ 	return 0;
+ 
+ err_out:
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index 24a6d35..5587650 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -28,6 +28,7 @@
+ #define NANOSECOND	(1000 * 1000 * 1000)
+ 
+ struct cpu_op *(*get_cpu_op)(int *op);
++int cpufreq_trig_needed;
+ 
+ static int cpu_freq_khz_min;
+ static int cpu_freq_khz_max;
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_dvfs.c b/arch/arm/plat-mxc/devices/platform-imx_dvfs.c
+index 1f40fdd..ab8f78e 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx_dvfs.c
++++ b/arch/arm/plat-mxc/devices/platform-imx_dvfs.c
+@@ -15,6 +15,11 @@
+ 		.irq = soc ## _INT_GPC1,				\
+ 	}
+ 
++#ifdef CONFIG_SOC_IMX50
++const struct imx_dvfs_core_data imx50_dvfs_core_data __initconst =
++			imx5_dvfs_core_data_entry_single(MX50);
++#endif /* ifdef CONFIG_SOC_IMX50 */
++
+ #ifdef CONFIG_SOC_IMX51
+ const struct imx_dvfs_core_data imx51_dvfs_core_data __initconst =
+ 			imx5_dvfs_core_data_entry_single(MX51);
+@@ -41,13 +46,13 @@ struct platform_device *__init imx_add_dvfs_core(
+ 		},
+ 	};
+ 
+-	return imx_add_platform_device("mxc_dvfs_core", 0,
++	return imx_add_platform_device("imx_dvfscore", 0,
+ 			res, ARRAY_SIZE(res), pdata, sizeof(*pdata));
+ }
+ 
+ struct platform_device *__init imx_add_busfreq(
+ 		const struct mxc_bus_freq_platform_data *pdata)
+ {
+-	return imx_add_platform_device("busfreq", 0,
++	return imx_add_platform_device("imx_busfreq", 0,
+ 			NULL, 0, pdata, sizeof(*pdata));
+ }
+diff --git a/arch/arm/plat-mxc/dvfs_core.c b/arch/arm/plat-mxc/dvfs_core.c
+index 6f6e9c5..79c90b9 100755
+--- a/arch/arm/plat-mxc/dvfs_core.c
++++ b/arch/arm/plat-mxc/dvfs_core.c
+@@ -40,7 +40,9 @@
+ #include <linux/regulator/consumer.h>
+ #include <linux/input.h>
+ #include <linux/platform_device.h>
++#if defined(CONFIG_CPU_FREQ)
+ #include <linux/cpufreq.h>
++#endif
+ #include <mach/hardware.h>
+ #include <mach/mxc_dvfs.h>
+ 
+@@ -78,21 +80,29 @@
+ 
+ #define CCM_CDCR_SW_DVFS_EN			0x20
+ #define CCM_CDCR_ARM_FREQ_SHIFT_DIVIDER		0x4
++#define CCM_CDHIPR_ARM_PODF_BUSY		0x10000
+ 
+ int dvfs_core_is_active;
+-extern void setup_pll(void);
+ static struct mxc_dvfs_platform_data *dvfs_data;
+ static struct device *dvfs_dev;
+ static struct cpu_op *cpu_op_tbl;
+-int dvfs_core_resume;
+-int curr_op;
+-int old_op;
++static int dvfs_core_resume;
++static int curr_op;
++static int old_op;
++static int dvfs_core_op;
++static int dvfs_config_setpoint;
+ 
+-int cpufreq_trig_needed;
++static int maxf;
++static int minf;
++
++extern void setup_pll(void);
++extern int cpufreq_trig_needed;
+ struct timeval core_prev_intr;
+ 
+ void dump_dvfs_core_regs(void);
+ void stop_dvfs(void);
++struct dvfs_op *(*get_dvfs_core_op)(int *op);
++
+ static struct delayed_work dvfs_core_handler;
+ 
+ /*
+@@ -120,7 +130,7 @@ enum {
+  */
+ #define DVFS_LTBRSR		(2 << MXC_DVFSCNTR_LTBRSR_OFFSET)
+ 
+-extern struct dvfs_wp dvfs_core_setpoint[4];
++static struct dvfs_op *dvfs_core_setpoint;
+ extern int low_bus_freq_mode;
+ extern int high_bus_freq_mode;
+ extern int set_low_bus_freq(void);
+@@ -152,7 +162,7 @@ static void dvfs_load_config(int set_point)
+ 					dvfs_data->membase
+ 					+ MXC_DVFSCORE_EMAC);
+ 
+-
++	dvfs_config_setpoint = set_point;
+ }
+ 
+ static int set_cpu_freq(int op)
+@@ -293,12 +303,16 @@ static int set_cpu_freq(int op)
+ 		spin_lock_irqsave(&mxc_dvfs_core_lock, flags);
+ 
+ 		reg1 = __raw_readl(ccm_base + dvfs_data->ccm_cdhipr_offset);
+-		if ((reg1 & 0x00010000) == 0)
+-			__raw_writel(reg,
+-				ccm_base + dvfs_data->ccm_cacrr_offset);
+-		else {
+-			printk(KERN_DEBUG "ARM_PODF still in busy!!!!\n");
+-			return 0;
++		while (1) {
++			if ((reg1 & CCM_CDHIPR_ARM_PODF_BUSY) == 0) {
++				__raw_writel(reg,
++					ccm_base + dvfs_data->ccm_cacrr_offset);
++				break;
++			} else {
++				reg1 = __raw_readl(
++				ccm_base + dvfs_data->ccm_cdhipr_offset);
++				printk(KERN_DEBUG "ARM_PODF still in busy!!!!\n");
++			}
+ 		}
+ 		/* set VINC */
+ 		reg = __raw_readl(gpc_base + dvfs_data->gpc_vcr_offset);
+@@ -366,8 +380,6 @@ static int start_dvfs(void)
+ 
+ 	clk_enable(dvfs_clk);
+ 
+-	dvfs_load_config(0);
+-
+ 	/* get current working point */
+ 	cpu_rate = clk_get_rate(cpu_clk);
+ 	curr_op = cpu_op_nr - 1;
+@@ -376,6 +388,18 @@ static int start_dvfs(void)
+ 			break;
+ 	} while (--curr_op >= 0);
+ 	old_op = curr_op;
++
++	dvfs_load_config(curr_op);
++
++	if (curr_op == 0)
++		maxf = 1;
++	else
++		maxf = 0;
++	if (curr_op == (cpu_op_nr - 1))
++		minf = 1;
++	else
++		minf = 0;
++
+ 	/* config reg GPC_CNTR */
+ 	reg = __raw_readl(gpc_base + dvfs_data->gpc_cntr_offset);
+ 
+@@ -474,7 +498,6 @@ static void dvfs_core_work_handler(struct work_struct *work)
+ 	u32 reg;
+ 	u32 curr_cpu;
+ 	int ret = 0;
+-	int maxf = 0, minf = 0;
+ 	int low_freq_bus_ready = 0;
+ 	int bus_incr = 0, cpu_dcr = 0;
+ 
+@@ -490,7 +513,7 @@ static void dvfs_core_work_handler(struct work_struct *work)
+ 	}
+ 	curr_cpu = clk_get_rate(cpu_clk);
+ 	/* If FSVAI indicate freq down,
+-	   check arm-clk is not in lowest frequency 200 MHz */
++	   check arm-clk is not in lowest frequency*/
+ 	if (fsvai == FSVAI_FREQ_DECREASE) {
+ 		if (curr_cpu == cpu_op_tbl[cpu_op_nr - 1].cpu_rate) {
+ 			minf = 1;
+@@ -499,31 +522,29 @@ static void dvfs_core_work_handler(struct work_struct *work)
+ 		} else {
+ 			/* freq down */
+ 			curr_op++;
++			maxf = 0;
+ 			if (curr_op >= cpu_op_nr) {
+ 				curr_op = cpu_op_nr - 1;
+ 				goto END;
+ 			}
+-
+-			if (curr_op == cpu_op_nr - 1 && !low_freq_bus_ready) {
+-				minf = 1;
+-				dvfs_load_config(1);
+-			} else {
+-				cpu_dcr = 1;
+-			}
++			cpu_dcr = 1;
++			dvfs_load_config(curr_op);
+ 		}
+ 	} else {
+ 		if (curr_cpu == cpu_op_tbl[0].cpu_rate) {
+ 			maxf = 1;
+ 			goto END;
+ 		} else {
+-			if (!high_bus_freq_mode && !cpu_is_mx50()) {
++			if (!high_bus_freq_mode &&
++				dvfs_config_setpoint == (cpu_op_nr + 1)) {
+ 				/* bump up LP freq first. */
+ 				bus_incr = 1;
+-				dvfs_load_config(2);
++				dvfs_load_config(cpu_op_nr);
+ 			} else {
+ 				/* freq up */
+ 				curr_op = 0;
+ 				maxf = 1;
++				minf = 0;
+ 				dvfs_load_config(0);
+ 			}
+ 		}
+@@ -532,14 +553,14 @@ static void dvfs_core_work_handler(struct work_struct *work)
+ 	low_freq_bus_ready = low_freq_bus_used();
+ 	if ((curr_op == cpu_op_nr - 1) && (!low_bus_freq_mode)
+ 	    && (low_freq_bus_ready) && !bus_incr) {
+-		if (cpu_dcr)
+-			ret = set_cpu_freq(curr_op);
+-		if (!cpu_dcr) {
++		if (!minf)
++			set_cpu_freq(curr_op);
++		/* If dvfs_core_op is greater than cpu_op_nr, it implies
++		 * we support LPAPM mode for this platform.
++		 */
++		if (dvfs_core_op > cpu_op_nr) {
+ 			set_low_bus_freq();
+-			dvfs_load_config(3);
+-		} else {
+-			dvfs_load_config(2);
+-			cpu_dcr = 0;
++			dvfs_load_config(cpu_op_nr + 1);
+ 		}
+ 	} else {
+ 		if (!high_bus_freq_mode)
+@@ -549,7 +570,6 @@ static void dvfs_core_work_handler(struct work_struct *work)
+ 		bus_incr = 0;
+ 	}
+ 
+-
+ END:	/* Set MAXF, MINF */
+ 	reg = __raw_readl(dvfs_data->membase + MXC_DVFSCORE_CNTR);
+ 	reg = (reg & ~(MXC_DVFSCNTR_MAXF_MASK | MXC_DVFSCNTR_MINF_MASK));
+@@ -571,8 +591,15 @@ END:	/* Set MAXF, MINF */
+ 
+ #if defined(CONFIG_CPU_FREQ)
+ 	if (cpufreq_trig_needed == 1) {
++		struct cpufreq_freqs freqs;
++		unsigned int target_freq;
+ 		cpufreq_trig_needed = 0;
+-		cpufreq_update_policy(0);
++		freqs.old = curr_cpu/1000;
++		freqs.new = clk_get_rate(cpu_clk) / 1000;
++		freqs.cpu = 0;
++		freqs.flags = 0;
++		cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
++		cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
+ 	}
+ #endif
+ }
+@@ -606,8 +633,17 @@ void stop_dvfs(void)
+ 			set_cpu_freq(curr_op);
+ #if defined(CONFIG_CPU_FREQ)
+ 			if (cpufreq_trig_needed == 1) {
++				struct cpufreq_freqs freqs;
++				unsigned int target_freq;
+ 				cpufreq_trig_needed = 0;
+-				cpufreq_update_policy(0);
++				freqs.old = curr_cpu/1000;
++				freqs.new = clk_get_rate(cpu_clk) / 1000;
++				freqs.cpu = 0;
++				freqs.flags = 0;
++				cpufreq_notify_transition(&freqs,
++						CPUFREQ_PRECHANGE);
++				cpufreq_notify_transition(&freqs,
++						CPUFREQ_POSTCHANGE);
+ 			}
+ #endif
+ 		}
+@@ -775,12 +811,10 @@ static ssize_t dvfs_regs_store(struct device *dev,
+ 	return size;
+ }
+ 
+-static DEVICE_ATTR(enable, 0644, dvfs_enable_show, dvfs_enable_store);
+-static DEVICE_ATTR(show_regs, 0644, dvfs_regs_show, dvfs_regs_store);
+-
+-static DEVICE_ATTR(down_threshold, 0644, downthreshold_show,
+-						downthreshold_store);
+-static DEVICE_ATTR(down_count, 0644, downcount_show, downcount_store);
++static DEVICE_ATTR(enable, S_IRUGO | S_IWUSR,
++				dvfs_enable_show, dvfs_enable_store);
++static DEVICE_ATTR(show_regs, S_IRUGO, dvfs_regs_show,
++				dvfs_regs_store);
+ 
+ /*!
+  * This is the probe routine for the DVFS driver.
+@@ -822,7 +856,8 @@ static int __devinit mxc_dvfs_core_probe(struct platform_device *pdev)
+ 	if (IS_ERR(core_regulator)) {
+ 		clk_put(cpu_clk);
+ 		clk_put(dvfs_clk);
+-		printk(KERN_ERR "%s: failed to get gp regulator\n", __func__);
++		printk(KERN_ERR "%s: failed to get gp regulator %s\n",
++				__func__, dvfs_data->reg_id);
+ 		return PTR_ERR(core_regulator);
+ 	}
+ 
+@@ -851,6 +886,12 @@ static int __devinit mxc_dvfs_core_probe(struct platform_device *pdev)
+ 		goto err2;
+ 	}
+ 
++	dvfs_core_setpoint = get_dvfs_core_op(&dvfs_core_op);
++	if (dvfs_core_setpoint == NULL) {
++		printk(KERN_ERR "No dvfs_core working point table defined\n");
++		goto err3;
++	}
++
+ 	clk_enable(dvfs_clk);
+ 	err = init_dvfs_controller();
+ 	if (err) {
+@@ -859,7 +900,7 @@ static int __devinit mxc_dvfs_core_probe(struct platform_device *pdev)
+ 	}
+ 	clk_disable(dvfs_clk);
+ 
+-	err = sysfs_create_file(&dvfs_dev->kobj, &dev_attr_enable.attr);
++	err = sysfs_create_file(&pdev->dev.kobj, &dev_attr_enable.attr);
+ 	if (err) {
+ 		printk(KERN_ERR
+ 		       "DVFS: Unable to register sysdev entry for DVFS");
+@@ -873,21 +914,6 @@ static int __devinit mxc_dvfs_core_probe(struct platform_device *pdev)
+ 		goto err3;
+ 	}
+ 
+-
+-	err = sysfs_create_file(&dvfs_dev->kobj, &dev_attr_down_threshold.attr);
+-	if (err) {
+-		printk(KERN_ERR
+-		       "DVFS: Unable to register sysdev entry for DVFS");
+-		goto err3;
+-	}
+-
+-	err = sysfs_create_file(&dvfs_dev->kobj, &dev_attr_down_count.attr);
+-	if (err) {
+-		printk(KERN_ERR
+-		       "DVFS: Unable to register sysdev entry for DVFS");
+-		goto err3;
+-	}
+-
+ 	/* Set the current working point. */
+ 	cpu_op_tbl = get_cpu_op(&cpu_op_nr);
+ 	old_op = 0;
+@@ -945,7 +971,7 @@ static int mxc_dvfs_core_resume(struct platform_device *pdev)
+ 
+ static struct platform_driver mxc_dvfs_core_driver = {
+ 	.driver = {
+-		   .name = "mxc_dvfs_core",
++		   .name = "imx_dvfscore",
+ 		   },
+ 	.probe = mxc_dvfs_core_probe,
+ 	.suspend = mxc_dvfs_core_suspend,
+@@ -972,7 +998,6 @@ static void __exit dvfs_cleanup(void)
+ 	free_irq(dvfs_data->irq, dvfs_dev);
+ 
+ 	sysfs_remove_file(&dvfs_dev->kobj, &dev_attr_enable.attr);
+-
+ 	/* Unregister the device structure */
+ 	platform_driver_unregister(&mxc_dvfs_core_driver);
+ 
+diff --git a/arch/arm/plat-mxc/include/mach/mxc_dvfs.h b/arch/arm/plat-mxc/include/mach/mxc_dvfs.h
+index 35aefaa..1077a47 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc_dvfs.h
++++ b/arch/arm/plat-mxc/include/mach/mxc_dvfs.h
+@@ -124,7 +124,7 @@ extern void __iomem *ccm_base;
+ /*
+  * DVFS structure
+  */
+-struct dvfs_wp {
++struct dvfs_op {
+ 	int upthr;
+ 	int downthr;
+ 	int panicthr;
+@@ -185,8 +185,6 @@ struct mxc_dvfs_platform_data {
+ 	int dncnt_val;
+ 	/* Delay time in us */
+ 	int delay_time;
+-	/* Number of woking points supported */
+-	int num_wp;
+ };
+ 
+ /*!
+-- 
+1.7.7.4
+

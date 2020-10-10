@@ -1,0 +1,40 @@
+From ec0f8d02397dd7b330dcaf30718f7b9fbe8c17fb Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Thu, 23 Feb 2012 13:51:03 +0800
+Subject: [PATCH 1092/2463] ENGR00175222-2 IPUv3 fb:Check mem resource start
+ address
+
+This patch checks memory resource start address before
+using the memory resource.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit 2d16313abad65330cb03d365d307f2d0caafe955)
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 97238d8..6434d82 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -1956,7 +1956,7 @@ static int mxcfb_setup_overlay(struct platform_device *pdev,
+ 	ovfbi->var.xres = 240;
+ 	ovfbi->var.yres = 320;
+ 
+-	if (res && res->end) {
++	if (res && res->start && res->end) {
+ 		ovfbi->fix.smem_len = res->end - res->start + 1;
+ 		ovfbi->fix.smem_start = res->start;
+ 		ovfbi->screen_base = ioremap(
+@@ -2048,7 +2048,7 @@ static int mxcfb_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+-	if (res && res->end) {
++	if (res && res->start && res->end) {
+ 		fbi->fix.smem_len = res->end - res->start + 1;
+ 		fbi->fix.smem_start = res->start;
+ 		fbi->screen_base = ioremap(fbi->fix.smem_start, fbi->fix.smem_len);
+-- 
+1.7.7.4
+

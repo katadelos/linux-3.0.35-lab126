@@ -1,0 +1,111 @@
+From d436a2da3c529642e1e4950c4095be094a7e659b Mon Sep 17 00:00:00 2001
+From: Lionel Xu <Lionel.Xu@freescale.com>
+Date: Wed, 16 Nov 2011 16:57:27 +0800
+Subject: [PATCH 0623/2463] ENGR00139276-1 MX6 BT: Add basic bluetooth support
+ to mx6 platform
+
+Add basic bluetooth support to mx6q platform:
+1) Enable bluetooth driver by default
+2) Configure uart2 which is used by bluetooth
+
+Signed-off-by: Lionel Xu <Lionel.Xu@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig             |    6 +++++-
+ arch/arm/mach-mx6/board-mx6q_arm2.c         |   15 +++++++++++----
+ arch/arm/plat-mxc/include/mach/imx-uart.h   |    1 +
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h |    4 ++++
+ 4 files changed, 21 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 621b76f..06ee86f 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -608,7 +608,11 @@ CONFIG_BT_HIDP=y
+ #
+ CONFIG_BT_HCIBTUSB=y
+ # CONFIG_BT_HCIBTSDIO is not set
+-# CONFIG_BT_HCIUART is not set
++CONFIG_BT_HCIUART=y
++# CONFIG_BT_HCIUART_H4 is not set
++# CONFIG_BT_HCIUART_BCSP is not set
++CONFIG_BT_HCIUART_ATH3K=y
++# CONFIG_BT_HCIUART_LL is not set
+ # CONFIG_BT_HCIBCM203X is not set
+ # CONFIG_BT_HCIBPA10X is not set
+ # CONFIG_BT_HCIBFUSB is not set
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 21296ee..99a183c 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -273,12 +273,15 @@ static iomux_v3_cfg_t mx6q_arm2_pads[] = {
+ 
+ 	MX6Q_PAD_EIM_D24__GPIO_3_24,
+ 
++	/* UART2 */
++	MX6Q_PAD_EIM_D26__UART2_RXD,
++	MX6Q_PAD_EIM_D27__UART2_TXD,
++	MX6Q_PAD_EIM_D28__UART2_RTS,
++	MX6Q_PAD_EIM_D29__UART2_CTS,
++
+ 	/* PWM1 */
+ 	MX6Q_PAD_GPIO_9__PWM1_PWMO,
+ 
+-	/* DISP0 I2C ENABLE*/
+-	MX6Q_PAD_EIM_D28__GPIO_3_28,
+-
+ 	/* DISP0 DET */
+ 	MX6Q_PAD_EIM_D31__GPIO_3_31,
+ 
+@@ -469,10 +472,14 @@ static const struct anatop_thermal_platform_data
+ 	.name = "anatop_thermal",
+ };
+ 
++static const struct imxuart_platform_data mx6q_uart1_data __initconst = {
++	.flags = IMXUART_HAVE_RTSCTS | IMXUART_USE_DCEDTE,
++};
++
+ static inline void mx6q_arm2_init_uart(void)
+ {
+ 	imx6q_add_imx_uart(0, NULL);
+-	imx6q_add_imx_uart(1, NULL);
++	imx6q_add_imx_uart(1, &mx6q_uart1_data);
+ 	imx6q_add_imx_uart(3, NULL);
+ }
+ 
+diff --git a/arch/arm/plat-mxc/include/mach/imx-uart.h b/arch/arm/plat-mxc/include/mach/imx-uart.h
+index 4adec9b..15b1a6c 100644
+--- a/arch/arm/plat-mxc/include/mach/imx-uart.h
++++ b/arch/arm/plat-mxc/include/mach/imx-uart.h
+@@ -21,6 +21,7 @@
+ 
+ #define IMXUART_HAVE_RTSCTS (1<<0)
+ #define IMXUART_IRDA        (1<<1)
++#define IMXUART_USE_DCEDTE  (1<<2)
+ 
+ struct imxuart_platform_data {
+ 	int (*init)(struct platform_device *pdev);
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index a1c53aa..c0e2287 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -526,6 +526,8 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_EIM_D28__IPU2_CSI1_D_12				\
+ 		IOMUX_PAD(0x03D8, 0x00C4, 3, 0x08B8, 0, 0)
+ #define _MX6Q_PAD_EIM_D28__UART2_CTS			\
++		IOMUX_PAD(0x03D8, 0x00C4, 4, 0x0000, 0, 0)
++#define _MX6Q_PAD_EIM_D28__UART2_RTS			\
+ 		IOMUX_PAD(0x03D8, 0x00C4, 4, 0x0924, 0, 0)
+ #define _MX6Q_PAD_EIM_D28__GPIO_3_28			\
+ 		IOMUX_PAD(0x03D8, 0x00C4, 5, 0x0000, 0, 0)
+@@ -4128,6 +4130,8 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_EIM_D28__IPU2_CSI1_D_12 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D28__UART2_CTS		\
+ 		(_MX6Q_PAD_EIM_D28__UART2_CTS | MUX_PAD_CTRL(MX6Q_UART_PAD_CTRL))
++#define  MX6Q_PAD_EIM_D28__UART2_RTS		\
++		(_MX6Q_PAD_EIM_D28__UART2_RTS | MUX_PAD_CTRL(MX6Q_UART_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D28__GPIO_3_28		\
+ 		(_MX6Q_PAD_EIM_D28__GPIO_3_28 | MUX_PAD_CTRL(MX6Q_HIGH_DRV))
+ #define  MX6Q_PAD_EIM_D28__IPU1_EXT_TRIG		\
+-- 
+1.7.7.4
+

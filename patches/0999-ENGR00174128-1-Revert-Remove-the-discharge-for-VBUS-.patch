@@ -1,0 +1,63 @@
+From 5764af87b50f2cc7abd29cbe0a74ea30a7dbf537 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Thu, 9 Feb 2012 17:38:59 +0800
+Subject: [PATCH 0999/2463] ENGR00174128-1 Revert "Remove the discharge for
+ VBUS and DP-1"
+
+As dp/dm is floating with no usb cable and switch host mode to
+device mode situation, it do needs this discharge dp patch
+But, discharge vbus doesn't be needed at suspend_irq, so
+keep it removing.
+
+This reverts commit 0924b71278650fa3891a8f6ea70f91242ca6e5fd.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |   10 +++++++++-
+ 1 files changed, 9 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 55fc066..fc49aaa 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -2026,6 +2026,7 @@ static void suspend_irq(struct fsl_udc *udc)
+ 
+ 	udc->resume_state = udc->usb_state;
+ 	udc->usb_state = USB_STATE_SUSPENDED;
++
+ 	/* report suspend to the driver, serial.c does not support this */
+ 	if (udc->driver->suspend)
+ 		udc->driver->suspend(&udc->gadget);
+@@ -2147,6 +2148,10 @@ static void fsl_gadget_disconnect_event(struct work_struct *work)
+ 	u32 tmp;
+ 
+ 	pdata = udc->pdata;
++
++	/* enable pulldown dp */
++	if (pdata->gadget_discharge_dp)
++		pdata->gadget_discharge_dp(true);
+ 	/*
+ 	 * Some boards are very slow change line state from J to SE0 for DP,
+ 	 * So, we need to discharge DP, otherwise there is a wakeup interrupt
+@@ -2154,6 +2159,10 @@ static void fsl_gadget_disconnect_event(struct work_struct *work)
+ 	 */
+ 	gadget_wait_line_to_se0();
+ 
++	/* Disable pulldown dp */
++	if (pdata->gadget_discharge_dp)
++		pdata->gadget_discharge_dp(false);
++
+ 	/*
+ 	 * Wait class drivers finish, an well-behaviour class driver should
+ 	 * call ep_disable when it is notified to be disconnected.
+@@ -2211,7 +2220,6 @@ bool try_wake_up_udc(struct fsl_udc *udc)
+ 			fsl_writel(tmp | USB_CMD_RUN_STOP, &dr_regs->usbcmd);
+ 			printk(KERN_DEBUG "%s: udc out low power mode\n", __func__);
+ 		} else {
+-			printk(KERN_INFO "USB device disconnected\n");
+ 			fsl_writel(tmp & ~USB_CMD_RUN_STOP, &dr_regs->usbcmd);
+ 			/* here we need disable B_SESSION_IRQ, after
+ 			 * schedule_work finished, it need to be enabled again.
+-- 
+1.7.7.4
+

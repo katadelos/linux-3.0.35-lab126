@@ -1,0 +1,188 @@
+From 6f389a2ac1c68c48f0bbdbb733168f59e67bcd6a Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Tue, 24 May 2011 10:04:02 +0800
+Subject: [PATCH 0177/2463] ENGR00142551-2 IPUv3 FB:Support HW triple buffer
+
+This patch supports HW triple buffer for IPUv3
+framebuffer.
+1) Remove buf ready check in EOF irq handler, as we
+   think the swap logic will not fail for HW triple
+   buffer case.
+2) When V4L2 output/overlay are used, switch to double
+   buffer mode.
+3) Changes IPU interface for IPUv1 framebuffer to pass
+   building.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+Signed-off-by: Jason Chen <b02280@freescale.com>
+(cherry picked from commit 4ada3031e13207902f8c90b33c082759889cb22a)
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |   63 +++++++++++++++++---------------------
+ drivers/video/mxc/mxcfb.c        |    1 +
+ include/linux/mxcfb.h            |    2 +
+ 3 files changed, 31 insertions(+), 35 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index b3bf655..efdb664 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -83,7 +83,6 @@ struct mxcfb_info {
+ 	u32 pseudo_palette[16];
+ 
+ 	bool wait4vsync;
+-	uint32_t waitcnt;
+ 	struct semaphore flip_sem;
+ 	struct semaphore alpha_flip_sem;
+ 	struct completion vsync_complete;
+@@ -305,7 +304,7 @@ static int _setup_disp_channel2(struct fb_info *fbi)
+ 		fb_stride = fbi->fix.line_length;
+ 	}
+ 
+-	mxc_fbi->cur_ipu_buf = 1;
++	mxc_fbi->cur_ipu_buf = 2;
+ 	sema_init(&mxc_fbi->flip_sem, 1);
+ 	if (mxc_fbi->alpha_chan_en) {
+ 		mxc_fbi->cur_ipu_alpha_buf = 1;
+@@ -324,6 +323,8 @@ static int _setup_disp_channel2(struct fb_info *fbi)
+ 					 IPU_ROTATE_NONE,
+ 					 base,
+ 					 base,
++					 (fbi->var.accel_flags ==
++					  FB_ACCEL_TRIPLE_FLAG) ? base : 0,
+ 					 0, 0);
+ 	if (retval) {
+ 		dev_err(fbi->device,
+@@ -339,6 +340,7 @@ static int _setup_disp_channel2(struct fb_info *fbi)
+ 						 IPU_ROTATE_NONE,
+ 						 mxc_fbi->alpha_phy_addr1,
+ 						 mxc_fbi->alpha_phy_addr0,
++						 0,
+ 						 0, 0);
+ 		if (retval) {
+ 			dev_err(fbi->device,
+@@ -1300,12 +1302,13 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 				loc_alpha_en = true;
+ 				mxc_graphic_fbi = (struct mxcfb_info *)
+ 						(registered_fb[i]->par);
+-				active_alpha_phy_addr = mxc_fbi->cur_ipu_buf ?
++				active_alpha_phy_addr =
++					mxc_fbi->cur_ipu_alpha_buf ?
+ 					mxc_graphic_fbi->alpha_phy_addr1 :
+ 					mxc_graphic_fbi->alpha_phy_addr0;
+-				dev_dbg(info->device, "Updating SDC graphic "
++				dev_dbg(info->device, "Updating SDC alpha "
+ 					"buf %d address=0x%08lX\n",
+-					mxc_fbi->cur_ipu_buf,
++					!mxc_fbi->cur_ipu_alpha_buf,
+ 					active_alpha_phy_addr);
+ 				break;
+ 			}
+@@ -1314,7 +1317,8 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 
+ 	down(&mxc_fbi->flip_sem);
+ 
+-	mxc_fbi->cur_ipu_buf = !mxc_fbi->cur_ipu_buf;
++	mxc_fbi->cur_ipu_buf = (++mxc_fbi->cur_ipu_buf) % 3;
++	mxc_fbi->cur_ipu_alpha_buf = !mxc_fbi->cur_ipu_alpha_buf;
+ 
+ 	dev_dbg(info->device, "Updating SDC %s buf %d address=0x%08lX\n",
+ 		info->fix.id, mxc_fbi->cur_ipu_buf, base);
+@@ -1325,11 +1329,11 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 		if (loc_alpha_en && mxc_graphic_fbi == mxc_fbi &&
+ 		    ipu_update_channel_buffer(mxc_graphic_fbi->ipu_ch,
+ 					      IPU_ALPHA_IN_BUFFER,
+-					      mxc_fbi->cur_ipu_buf,
++					      mxc_fbi->cur_ipu_alpha_buf,
+ 					      active_alpha_phy_addr) == 0) {
+ 			ipu_select_buffer(mxc_graphic_fbi->ipu_ch,
+ 					  IPU_ALPHA_IN_BUFFER,
+-					  mxc_fbi->cur_ipu_buf);
++					  mxc_fbi->cur_ipu_alpha_buf);
+ 		}
+ 
+ 		ipu_select_buffer(mxc_fbi->ipu_ch, IPU_INPUT_BUFFER,
+@@ -1338,9 +1342,20 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 		ipu_enable_irq(mxc_fbi->ipu_ch_irq);
+ 	} else {
+ 		dev_err(info->device,
+-			"Error updating SDC buf %d to address=0x%08lX\n",
+-			mxc_fbi->cur_ipu_buf, base);
+-		mxc_fbi->cur_ipu_buf = !mxc_fbi->cur_ipu_buf;
++			"Error updating SDC buf %d to address=0x%08lX, "
++			"current buf %d, buf0 ready %d, buf1 ready %d, "
++			"buf2 ready %d\n", mxc_fbi->cur_ipu_buf, base,
++			ipu_get_cur_buffer_idx(mxc_fbi->ipu_ch,
++					       IPU_INPUT_BUFFER),
++			ipu_check_buffer_ready(mxc_fbi->ipu_ch,
++					       IPU_INPUT_BUFFER, 0),
++			ipu_check_buffer_ready(mxc_fbi->ipu_ch,
++					       IPU_INPUT_BUFFER, 1),
++			ipu_check_buffer_ready(mxc_fbi->ipu_ch,
++					       IPU_INPUT_BUFFER, 2));
++		mxc_fbi->cur_ipu_buf = (++mxc_fbi->cur_ipu_buf) % 3;
++		mxc_fbi->cur_ipu_buf = (++mxc_fbi->cur_ipu_buf) % 3;
++		mxc_fbi->cur_ipu_alpha_buf = !mxc_fbi->cur_ipu_alpha_buf;
+ 		ipu_clear_irq(mxc_fbi->ipu_ch_irq);
+ 		ipu_enable_irq(mxc_fbi->ipu_ch_irq);
+ 		return -EBUSY;
+@@ -1436,30 +1451,8 @@ static irqreturn_t mxcfb_irq_handler(int irq, void *dev_id)
+ 		ipu_disable_irq(irq);
+ 		mxc_fbi->wait4vsync = 0;
+ 	} else {
+-		if (!ipu_check_buffer_ready(mxc_fbi->ipu_ch,
+-				IPU_INPUT_BUFFER, mxc_fbi->cur_ipu_buf)
+-				|| (mxc_fbi->waitcnt > 1)) {
+-			/*
+-			 * This code wait for EOF irq to make sure current
+-			 * buffer showed.
+-			 *
+-			 * Buffer ready will be clear after this buffer
+-			 * begin to show. If it keep 1, it represents this
+-			 * irq come from previous buffer. If so, wait for
+-			 * EOF irq again.
+-			 *
+-			 * Normally, waitcnt will not > 1, if so, something
+-			 * is wrong, then clear it manually.
+-			 */
+-			if (mxc_fbi->waitcnt > 1)
+-				ipu_clear_buffer_ready(mxc_fbi->ipu_ch,
+-						IPU_INPUT_BUFFER,
+-						mxc_fbi->cur_ipu_buf);
+-			up(&mxc_fbi->flip_sem);
+-			ipu_disable_irq(irq);
+-			mxc_fbi->waitcnt = 0;
+-		} else
+-			mxc_fbi->waitcnt++;
++		up(&mxc_fbi->flip_sem);
++		ipu_disable_irq(irq);
+ 	}
+ 	return IRQ_HANDLED;
+ }
+diff --git a/drivers/video/mxc/mxcfb.c b/drivers/video/mxc/mxcfb.c
+index 52694e4..4dffee5 100644
+--- a/drivers/video/mxc/mxcfb.c
++++ b/drivers/video/mxc/mxcfb.c
+@@ -241,6 +241,7 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 					 fbi->fix.smem_start +
+ 					 (fbi->fix.line_length * fbi->var.yres),
+ 					 fbi->fix.smem_start,
++					 0,
+ 					 0, 0);
+ 	if (retval) {
+ 		dev_err(fbi->device,
+diff --git a/include/linux/mxcfb.h b/include/linux/mxcfb.h
+index c097eef..c7c555b 100644
+--- a/include/linux/mxcfb.h
++++ b/include/linux/mxcfb.h
+@@ -29,6 +29,8 @@
+ #define FB_SYNC_CLK_IDLE_EN	0x10000000
+ #define FB_SYNC_SHARP_MODE	0x08000000
+ #define FB_SYNC_SWAP_RGB	0x04000000
++#define FB_ACCEL_TRIPLE_FLAG	0x00000000
++#define FB_ACCEL_DOUBLE_FLAG	0x00000001
+ 
+ struct mxcfb_gbl_alpha {
+ 	int enable;
+-- 
+1.7.7.4
+

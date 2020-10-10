@@ -1,0 +1,84 @@
+From ac58d07866bea0dfab35a7520388b46d81e92340 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Arve=20Hj=C3=B8nnev=C3=A5g?= <arve@android.com>
+Date: Wed, 28 Mar 2012 21:03:13 -0700
+Subject: [PATCH 2075/2463] ARM: etm: Wait for etm/ptm(s) to stop before
+ requesting PowerDown
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+When PowerDown was requested at the same time as ProgBit, the
+formatter flush command that follows could get stuck.
+
+Change-Id: Iafb665f61f055819e64ca1dcb60398c656f593e4
+Signed-off-by: Arve Hjønnevåg <arve@android.com>
+---
+ arch/arm/kernel/etm.c |   36 ++++++++++++++++++++++++++++--------
+ 1 files changed, 28 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/kernel/etm.c b/arch/arm/kernel/etm.c
+index 496b8b8..845287b 100644
+--- a/arch/arm/kernel/etm.c
++++ b/arch/arm/kernel/etm.c
+@@ -199,11 +199,13 @@ static int trace_stop_etm(struct tracectx *t, int id)
+ 
+ 	etm_unlock(t, id);
+ 
+-	etm_writel(t, id, 0x441, ETMR_CTRL);
++	etm_writel(t, id, 0x440, ETMR_CTRL);
+ 	while (!(etm_readl(t, id, ETMR_CTRL) & ETMCTRL_PROGRAM) && --timeout)
+ 		;
+ 	if (!timeout) {
+-		dev_dbg(t->dev, "Waiting for progbit to assert timed out\n");
++		dev_err(t->dev,
++			"etm%d: Waiting for progbit to assert timed out\n",
++			id);
+ 		etm_lock(t, id);
+ 		return -EFAULT;
+ 	}
+@@ -212,18 +214,36 @@ static int trace_stop_etm(struct tracectx *t, int id)
+ 	return 0;
+ }
+ 
++static int trace_power_down_etm(struct tracectx *t, int id)
++{
++	unsigned long timeout = TRACER_TIMEOUT;
++	etm_unlock(t, id);
++	while (!(etm_readl(t, id, ETMR_STATUS) & ETMST_PROGBIT) && --timeout)
++		;
++	if (!timeout) {
++		dev_err(t->dev, "etm%d: Waiting for status progbit to assert timed out\n",
++			id);
++		etm_lock(t, id);
++		return -EFAULT;
++	}
++
++	etm_writel(t, id, 0x441, ETMR_CTRL);
++
++	etm_lock(t, id);
++	return 0;
++}
++
+ static int trace_stop(struct tracectx *t)
+ {
+ 	int id;
+-	int ret;
+ 	unsigned long timeout = TRACER_TIMEOUT;
+ 	u32 etb_fc = t->etb_fc;
+ 
+-	for (id = 0; id < t->etm_regs_count; id++) {
+-		ret = trace_stop_etm(t, id);
+-		if (ret)
+-			return ret;
+-	}
++	for (id = 0; id < t->etm_regs_count; id++)
++		trace_stop_etm(t, id);
++
++	for (id = 0; id < t->etm_regs_count; id++)
++		trace_power_down_etm(t, id);
+ 
+ 	etb_unlock(t);
+ 	if (etb_fc) {
+-- 
+1.7.7.4
+

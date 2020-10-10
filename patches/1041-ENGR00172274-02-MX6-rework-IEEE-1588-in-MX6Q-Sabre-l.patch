@@ -1,0 +1,112 @@
+From b7d98a9c24be29d1622cab4f6bdb261faba3e4d0 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Tue, 14 Feb 2012 16:56:26 +0800
+Subject: [PATCH 1041/2463] ENGR00172274-02 - [MX6]: rework IEEE-1588 in MX6Q
+ Sabre-lite/sd board.
+
+- Config GPIO_16 pad to ENET_ANATOP_ETHERNET_REF_OUT.
+- IEEE-1588 ts_clk and i2c3 are mutually exclusive, because
+  all of them use GPIO_16, so it only for one function work
+  at a moment.
+- Test result:
+	TO1.1 IEEE 1588 is convergent in Sabrelite board.
+
+  Signed-off-by: Fugang Duan <B38611@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c    |   13 +++++++++++++
+ arch/arm/mach-mx6/board-mx6q_sabresd.c      |   13 +++++++++++++
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h |    7 ++++++-
+ 3 files changed, 32 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index cb22baa..a18862c 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -212,7 +212,11 @@ static iomux_v3_cfg_t mx6q_sabrelite_pads[] = {
+ 
+ 	/* I2C3 */
+ 	MX6Q_PAD_GPIO_5__I2C3_SCL,	/* GPIO1[5] - J7 - Display card */
++#ifdef CONFIG_FEC_1588
++	MX6Q_PAD_GPIO_16__ENET_ANATOP_ETHERNET_REF_OUT,
++#else
+ 	MX6Q_PAD_GPIO_16__I2C3_SDA,	/* GPIO7[11] - J15 - RGB connector */
++#endif
+ 
+ 	/* DISPLAY */
+ 	MX6Q_PAD_DI0_DISP_CLK__IPU1_DI0_DISP_CLK,
+@@ -1059,6 +1063,15 @@ static void __init mx6_sabrelite_board_init(void)
+ 	mxc_iomux_v3_setup_multiple_pads(mx6q_sabrelite_pads,
+ 					ARRAY_SIZE(mx6q_sabrelite_pads));
+ 
++#ifdef CONFIG_FEC_1588
++	/* Set GPIO_16 input for IEEE-1588 ts_clk and RMII reference clock
++	 * For MX6 GPR1 bit21 meaning:
++	 * Bit21:       0 - GPIO_16 pad output
++	 *              1 - GPIO_16 pad input
++	 */
++	mxc_iomux_set_gpr_register(1, 21, 1, 1);
++#endif
++
+ 	gp_reg_id = sabrelite_dvfscore_data.reg_id;
+ 	mx6q_sabrelite_init_uart();
+ 	imx6q_add_mxc_hdmi_core(&hdmi_core_data);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 349e47c..55290c2 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -227,7 +227,11 @@ static iomux_v3_cfg_t mx6q_sabresd_pads[] = {
+ 
+ 	/* I2C3 */
+ 	MX6Q_PAD_GPIO_3__I2C3_SCL,	/* GPIO1[3] */
++#ifdef CONFIG_FEC_1588
++	MX6Q_PAD_GPIO_16__ENET_ANATOP_ETHERNET_REF_OUT,
++#else
+ 	MX6Q_PAD_GPIO_16__I2C3_SDA,	/* GPIO7[11]*/
++#endif
+ 
+ 	/* DISPLAY */
+ 	MX6Q_PAD_DI0_DISP_CLK__IPU1_DI0_DISP_CLK,
+@@ -1111,6 +1115,15 @@ static void __init mx6_sabresd_board_init(void)
+ 	mxc_iomux_v3_setup_multiple_pads(mx6q_sabresd_pads,
+ 					ARRAY_SIZE(mx6q_sabresd_pads));
+ 
++#ifdef CONFIG_FEC_1588
++	/* Set GPIO_16 input for IEEE-1588 ts_clk and RMII reference clock
++	 * For MX6 GPR1 bit21 meaning:
++	 * Bit21:       0 - GPIO_16 pad output
++	 *              1 - GPIO_16 pad input
++	 */
++	 mxc_iomux_set_gpr_register(1, 21, 1, 1);
++#endif
++
+ 	gp_reg_id = sabresd_dvfscore_data.reg_id;
+ 	mx6q_sabresd_init_uart();
+ 	imx6q_add_mxc_hdmi_core(&hdmi_core_data);
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index 3345cca..c6b932e 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -70,6 +70,10 @@ typedef enum iomux_config {
+ 		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED |	\
+ 		PAD_CTL_DSE_40ohm | PAD_CTL_HYS)
+ 
++#define MX6Q_GPIO_16_PAD_CTRL (PAD_CTL_PKE | PAD_CTL_PUE |    \
++		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED  |    \
++		PAD_CTL_DSE_40ohm | PAD_CTL_HYS)
++
+ #define MX6Q_DISP_PAD_CLT	MX6Q_HIGH_DRV
+ 
+ #define MX6Q_I2C_PAD_CTRL      (PAD_CTL_SRE_FAST | PAD_CTL_ODE | \
+@@ -6032,7 +6036,8 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_GPIO_16__ENET_1588_EVENT2_IN		\
+ 		(_MX6Q_PAD_GPIO_16__ENET_1588_EVENT2_IN | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_16__ENET_ANATOP_ETHERNET_REF_OUT		\
+-		(_MX6Q_PAD_GPIO_16__ENET_ANATOP_ETHERNET_REF_OUT | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_GPIO_16__ENET_ANATOP_ETHERNET_REF_OUT | \
++		MUX_PAD_CTRL(MX6Q_GPIO_16_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_16__USDHC1_LCTL		\
+ 		(_MX6Q_PAD_GPIO_16__USDHC1_LCTL | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_16__SPDIF_IN1		\
+-- 
+1.7.7.4
+

@@ -1,0 +1,90 @@
+From 8449220d6931f572f20f62a20b745949c65d1a7b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Arve=20Hj=C3=B8nnev=C3=A5g?= <arve@android.com>
+Date: Mon, 2 Apr 2012 20:18:56 -0700
+Subject: [PATCH 2076/2463] ARM: etm: Check arch version and disable data
+ tracing for ptm
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Change-Id: If2cb7928d0711f48348443d882a12416be9c5910
+Signed-off-by: Arve Hjønnevåg <arve@android.com>
+---
+ arch/arm/include/asm/hardware/coresight.h |    5 +++++
+ arch/arm/kernel/etm.c                     |   23 ++++++++++++++++++-----
+ 2 files changed, 23 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/include/asm/hardware/coresight.h b/arch/arm/include/asm/hardware/coresight.h
+index 6643d6c..0fad8f8 100644
+--- a/arch/arm/include/asm/hardware/coresight.h
++++ b/arch/arm/include/asm/hardware/coresight.h
+@@ -60,6 +60,7 @@
+ 
+ /* ETM configuration code register */
+ #define ETMR_CONFCODE		(0x04)
++#define ETMCCR_ETMIDR_PRESENT	BIT(31)
+ 
+ /* ETM trace start/stop resource control register */
+ #define ETMR_TRACESSCTRL	(0x18)
+@@ -126,6 +127,10 @@
+ 				ETMCTRL_BRANCH_OUTPUT | \
+ 				ETMCTRL_DO_CONTEXTID)
+ 
++#define ETMR_ID			0x1e4
++#define ETMIDR_VERSION(x)	(((x) >> 4) & 0xff)
++#define ETMIDR_VERSION_PFT_1_0	0x30
++
+ #define ETMR_TRACEIDR		0x200
+ 
+ /* ETM management registers, "ETM Architecture", 3.5.24 */
+diff --git a/arch/arm/kernel/etm.c b/arch/arm/kernel/etm.c
+index 845287b..9cdbb6d 100644
+--- a/arch/arm/kernel/etm.c
++++ b/arch/arm/kernel/etm.c
+@@ -723,6 +723,9 @@ static int __devinit etm_probe(struct amba_device *dev, const struct amba_id *id
+ 	int ret = 0;
+ 	void __iomem **new_regs;
+ 	int new_count;
++	u32 etmccr;
++	u32 etmidr;
++	u8 etm_version = 0;
+ 
+ 	mutex_lock(&t->mutex);
+ 	new_count = t->etm_regs_count + 1;
+@@ -757,7 +760,12 @@ static int __devinit etm_probe(struct amba_device *dev, const struct amba_id *id
+ 	/* dummy first read */
+ 	(void)etm_readl(&tracer, t->etm_regs_count, ETMMR_OSSRR);
+ 
+-	t->ncmppairs = etm_readl(t, t->etm_regs_count, ETMR_CONFCODE) & 0xf;
++	etmccr = etm_readl(t, t->etm_regs_count, ETMR_CONFCODE);
++	t->ncmppairs = etmccr & 0xf;
++	if (etmccr & ETMCCR_ETMIDR_PRESENT) {
++		etmidr = etm_readl(t, t->etm_regs_count, ETMR_ID);
++		etm_version = ETMIDR_VERSION(etmidr);
++	}
+ 	etm_writel(t, t->etm_regs_count, 0x441, ETMR_CTRL);
+ 	etm_writel(t, t->etm_regs_count, new_count, ETMR_TRACEIDR);
+ 	etm_lock(t, t->etm_regs_count);
+@@ -780,10 +788,15 @@ static int __devinit etm_probe(struct amba_device *dev, const struct amba_id *id
+ 	if (ret)
+ 		dev_dbg(&dev->dev, "Failed to create trace_range in sysfs\n");
+ 
+-	ret = sysfs_create_file(&dev->dev.kobj, &trace_data_range_attr.attr);
+-	if (ret)
+-		dev_dbg(&dev->dev,
+-			"Failed to create trace_data_range in sysfs\n");
++	if (etm_version < ETMIDR_VERSION_PFT_1_0) {
++		ret = sysfs_create_file(&dev->dev.kobj,
++					&trace_data_range_attr.attr);
++		if (ret)
++			dev_dbg(&dev->dev,
++				"Failed to create trace_data_range in sysfs\n");
++	} else {
++		tracer.flags &= ~TRACER_TRACE_DATA;
++	}
+ 
+ 	dev_dbg(&dev->dev, "ETM AMBA driver initialized.\n");
+ 
+-- 
+1.7.7.4
+

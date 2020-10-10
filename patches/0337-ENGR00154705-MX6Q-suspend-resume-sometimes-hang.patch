@@ -1,0 +1,57 @@
+From 9363ea4435af5683a40ba3f0c1bb2280a4cd563b Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Thu, 11 Aug 2011 12:39:11 +0800
+Subject: [PATCH 0337/2463] ENGR00154705 [MX6Q]suspend/resume sometimes hang
+
+1. Better to write disable and reset together into
+SRC_SCR register;
+2. Should wait for reset done.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/plat_hotplug.c |   20 ++++++++++++++++----
+ 1 files changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/plat_hotplug.c b/arch/arm/mach-mx6/plat_hotplug.c
+index 3a124b0..67e8196 100644
+--- a/arch/arm/mach-mx6/plat_hotplug.c
++++ b/arch/arm/mach-mx6/plat_hotplug.c
+@@ -33,19 +33,31 @@ int platform_cpu_kill(unsigned int cpu)
+ 	unsigned int val;
+ 
+ 	val = jiffies;
+-	/* wait secondary cpu to die, timeout is 500ms */
++	/* wait secondary cpu to die, timeout is 50ms */
+ 	while (atomic_read(&cpu_die_done) == 0) {
+-		if (time_after(jiffies, (unsigned long)(val + HZ / 2))) {
++		if (time_after(jiffies, (unsigned long)(val + HZ / 20))) {
+ 			printk(KERN_WARNING "cpu %d: cpu could not die\n", cpu);
+ 			break;
+ 		}
+ 	}
++
+ 	/*
+ 	 * we're ready for shutdown now, so do it
+ 	 */
+-	val = readl(src_base + SRC_SCR_OFFSET);
++	val = __raw_readl(src_base + SRC_SCR_OFFSET);
+ 	val &= ~(1 << (BP_SRC_SCR_CORES_DBG_RST + cpu));
+-	writel(val, src_base + SRC_SCR_OFFSET);
++	val |= (1 << (BP_SRC_SCR_CORE0_RST + cpu));
++	__raw_writel(val, src_base + SRC_SCR_OFFSET);
++
++	val = jiffies;
++	/* wait secondary cpu reset done, timeout is 10ms */
++	while ((__raw_readl(src_base + SRC_SCR_OFFSET) &
++		(1 << (BP_SRC_SCR_CORE0_RST + cpu))) != 0) {
++		if (time_after(jiffies, (unsigned long)(val + HZ / 100))) {
++			printk(KERN_WARNING "cpu %d: cpu reset fail\n", cpu);
++			break;
++		}
++	}
+ 
+ 	atomic_set(&cpu_die_done, 0);
+ 	return 1;
+-- 
+1.7.7.4
+

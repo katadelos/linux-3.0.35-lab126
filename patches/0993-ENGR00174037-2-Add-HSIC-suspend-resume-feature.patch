@@ -1,0 +1,49 @@
+From 0aa2fe45b508b0b73715abfc579e08983863b173 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Wed, 8 Feb 2012 15:42:22 +0800
+Subject: [PATCH 0993/2463] ENGR00174037-2 Add HSIC suspend/resume feature
+
+device part
+
+- implement reset_device interface for HSIC host
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ drivers/usb/host/ehci-arc.c |   14 ++++++++++++++
+ 1 files changed, 14 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index d34e7de..39d288d 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -553,6 +553,19 @@ static int ehci_fsl_setup(struct usb_hcd *hcd)
+ 	return retval;
+ }
+ 
++/* called after hcd send port_reset cmd */
++static int ehci_fsl_reset_device(struct usb_hcd *hcd, struct usb_device *udev)
++{
++	struct fsl_usb2_platform_data *pdata;
++
++	pdata = hcd->self.controller->platform_data;
++
++	if (pdata->hsic_device_connected)
++		pdata->hsic_device_connected();
++
++	return 0;
++}
++
+ static const struct hc_driver ehci_fsl_hc_driver = {
+ 	.description = hcd_name,
+ 	.product_desc = "Freescale On-Chip EHCI Host Controller",
+@@ -596,6 +609,7 @@ static const struct hc_driver ehci_fsl_hc_driver = {
+ 	.port_handed_over = ehci_port_handed_over,
+ 
+ 	.clear_tt_buffer_complete = ehci_clear_tt_buffer_complete,
++	.reset_device = ehci_fsl_reset_device,
+ };
+ 
+ static int ehci_fsl_drv_probe(struct platform_device *pdev)
+-- 
+1.7.7.4
+

@@ -1,0 +1,58 @@
+From ad7f34362535feae2fb2a97003f7ebce5898728b Mon Sep 17 00:00:00 2001
+From: "guoyin.chen" <guoyin.chen@freescale.com>
+Date: Tue, 25 Dec 2012 10:48:23 +0800
+Subject: [PATCH 2326/2463] ENGR00238201-1 V4L2:ADV7180:Support
+ ioctrl_enum_framesizes
+
+Add ioctl_enum_framesizes function to align the requirement
+of Camera HAL in Android
+
+Signed-off-by: guoyin.chen <guoyin.chen@freescale.com>
+(cherry picked from commit fd0a1be3e55c3ca5b16f5bf89a24c62b1f3f3abe)
+---
+ drivers/media/video/mxc/capture/adv7180.c |   22 ++++++++++++++++++++++
+ 1 files changed, 22 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/adv7180.c b/drivers/media/video/mxc/capture/adv7180.c
+index 2656afb..70c6512 100644
+--- a/drivers/media/video/mxc/capture/adv7180.c
++++ b/drivers/media/video/mxc/capture/adv7180.c
+@@ -680,6 +680,26 @@ static int ioctl_s_ctrl(struct v4l2_int_device *s, struct v4l2_control *vc)
+ }
+ 
+ /*!
++ * ioctl_enum_framesizes - V4L2 sensor interface handler for
++ *			   VIDIOC_ENUM_FRAMESIZES ioctl
++ * @s: pointer to standard V4L2 device structure
++ * @fsize: standard V4L2 VIDIOC_ENUM_FRAMESIZES ioctl structure
++ *
++ * Return 0 if successful, otherwise -EINVAL.
++ */
++static int ioctl_enum_framesizes(struct v4l2_int_device *s,
++				 struct v4l2_frmsizeenum *fsize)
++{
++	if (fsize->index >= 1)
++		return -EINVAL;
++
++	fsize->discrete.width = video_fmts[video_idx].active_width;
++	fsize->discrete.height  = video_fmts[video_idx].active_height;
++
++	return 0;
++}
++
++/*!
+  * ioctl_g_chip_ident - V4L2 sensor interface handler for
+  *			VIDIOC_DBG_G_CHIP_IDENT ioctl
+  * @s: pointer to standard V4L2 device structure
+@@ -768,6 +788,8 @@ static struct v4l2_int_ioctl_desc adv7180_ioctl_desc[] = {
+ 	{vidioc_int_queryctrl_num, (v4l2_int_ioctl_func*)ioctl_queryctrl},
+ 	{vidioc_int_g_ctrl_num, (v4l2_int_ioctl_func*)ioctl_g_ctrl},
+ 	{vidioc_int_s_ctrl_num, (v4l2_int_ioctl_func*)ioctl_s_ctrl},
++	{vidioc_int_enum_framesizes_num,
++				(v4l2_int_ioctl_func *) ioctl_enum_framesizes},
+ 	{vidioc_int_g_chip_ident_num,
+ 				(v4l2_int_ioctl_func *)ioctl_g_chip_ident},
+ };
+-- 
+1.7.7.4
+

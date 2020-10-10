@@ -1,0 +1,100 @@
+From ea4f073f9f8d9d655bfb30d7f14606337c49a106 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Tue, 10 Jul 2012 10:31:06 +0800
+Subject: [PATCH 1731/2463] ENGR00215810-1 AHCI: sata drops to 1.5Gbps after
+ suspend/resume several times
+
+Add the AHCI platform suspend/resume function callback to
+fix this issue.
+
+Signed-off-by: Richard Zhu <Hong-Xing.Zhu@freescale.com>
+---
+ drivers/ata/ahci_platform.c |   66 +++++++++++++++++++++++++++++++++++++++++++
+ 1 files changed, 66 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/ata/ahci_platform.c b/drivers/ata/ahci_platform.c
+index 6fef1fa..936babd 100644
+--- a/drivers/ata/ahci_platform.c
++++ b/drivers/ata/ahci_platform.c
+@@ -171,12 +171,78 @@ static int __devexit ahci_remove(struct platform_device *pdev)
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_PM
++static int ahci_device_suspend(struct platform_device *pdev, pm_message_t msg)
++{
++	struct device *dev = &pdev->dev;
++	struct ahci_platform_data *pdata = dev_get_platdata(dev);
++	struct ata_host *host = dev_get_drvdata(dev);
++	struct ahci_host_priv *hpriv = host->private_data;
++	void __iomem *mmio = hpriv->mmio;
++	u32 ctl;
++	int rc;
++
++	if (hpriv->flags & AHCI_HFLAG_NO_SUSPEND) {
++		dev_err(dev, "firmware update required for suspend/resume\n");
++		return -EIO;
++	}
++
++	/*
++	* AHCI spec rev1.1 section 8.3.3:
++	* Software must disable interrupts prior to requesting a
++	* transition of the HBA to D3 state.
++	*/
++	ctl = readl(mmio + HOST_CTL);
++	ctl &= ~HOST_IRQ_EN;
++	writel(ctl, mmio + HOST_CTL);
++	readl(mmio + HOST_CTL); /*  flush */
++
++	rc = ata_host_suspend(host, msg);
++	if (rc)
++		return rc;
++
++	if (pdata && pdata->suspend)
++		return pdata->suspend(dev);
++	return 0;
++}
++
++static int ahci_device_resume(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct ahci_platform_data *pdata = dev_get_platdata(dev);
++	struct ata_host *host = dev_get_drvdata(dev);
++	int rc;
++
++	if (pdata && pdata->resume) {
++		rc = pdata->resume(dev);
++		if (rc)
++			return rc;
++	}
++
++	if (dev->power.power_state.event == PM_EVENT_SUSPEND) {
++		rc = ahci_reset_controller(host);
++		if (rc)
++			return rc;
++
++		ahci_init_controller(host);
++	}
++
++	ata_host_resume(host);
++
++	return 0;
++}
++#endif	/* CONFIG_PM */
++
+ static struct platform_driver ahci_driver = {
+ 	.remove = __devexit_p(ahci_remove),
+ 	.driver = {
+ 		.name = "ahci",
+ 		.owner = THIS_MODULE,
+ 	},
++#ifdef CONFIG_PM
++	.suspend	= ahci_device_suspend,
++	.resume		= ahci_device_resume,
++#endif
+ };
+ 
+ static int __init ahci_init(void)
+-- 
+1.7.7.4
+

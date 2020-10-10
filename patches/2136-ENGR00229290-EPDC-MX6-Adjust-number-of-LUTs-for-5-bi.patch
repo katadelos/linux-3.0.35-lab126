@@ -1,0 +1,62 @@
+From 76f16bc9bc2bad490094f88b34fc1c3fda7e915f Mon Sep 17 00:00:00 2001
+From: Michael Minnick <michael.minnick@freescale.com>
+Date: Tue, 9 Oct 2012 18:06:31 -0500
+Subject: [PATCH 2136/2463] ENGR00229290 EPDC: MX6: Adjust number of LUTs for
+ 5-bit waveform
+
+When a 5-bit waveform is loaded, the maximum number of available
+LUTs is 16. The LUT allocator must account for this.
+
+Note that 5-bit waveform loading is currently not supported in the
+driver. However, this fix makes sure the LUT allocator is correct
+when 5-bit support is added.
+
+Signed-off-by: Michael Minnick <michael.minnick@freescale.com>
+---
+ drivers/video/mxc/mxc_epdc_fb.c |   14 ++++++++++----
+ 1 files changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_epdc_fb.c b/drivers/video/mxc/mxc_epdc_fb.c
+index b702788..38a183c 100644
+--- a/drivers/video/mxc/mxc_epdc_fb.c
++++ b/drivers/video/mxc/mxc_epdc_fb.c
+@@ -735,18 +735,24 @@ static int epdc_choose_next_lut(int rev, int *next_lut)
+ {
+ 	u64 luts_status, unprocessed_luts;
+ 	bool next_lut_found = false;
++	/* Available LUTs are reduced to 16 in 5-bit waveform mode */
++	u32 format_p5n = __raw_readl(EPDC_FORMAT) &
++		EPDC_FORMAT_BUF_PIXEL_FORMAT_P5N;
+ 
+ 	luts_status = __raw_readl(EPDC_STATUS_LUTS);
+-	if (rev < 20)
++	if ((rev < 20) || format_p5n)
+ 		luts_status &= 0xFFFF;
+ 	else
+ 		luts_status |= ((u64)__raw_readl(EPDC_STATUS_LUTS2) << 32);
+ 
+-	if (rev < 20)
++	if (rev < 20) {
+ 		unprocessed_luts = __raw_readl(EPDC_IRQ) & 0xFFFF;
+-	else
++	} else {
+ 		unprocessed_luts = __raw_readl(EPDC_IRQ1) |
+ 			((u64)__raw_readl(EPDC_IRQ2) << 32);
++		if (format_p5n)
++			unprocessed_luts &= 0xFFFF;
++	}
+ 
+ 	while (!next_lut_found) {
+ 		/*
+@@ -762,7 +768,7 @@ static int epdc_choose_next_lut(int rev, int *next_lut)
+ 		 */
+ 		*next_lut = fls64(luts_status);
+ 
+-		if (rev < 20) {
++		if ((rev < 20) || format_p5n) {
+ 			if (*next_lut > 15)
+ 				*next_lut = ffz(luts_status);
+ 		} else {
+-- 
+1.7.7.4
+

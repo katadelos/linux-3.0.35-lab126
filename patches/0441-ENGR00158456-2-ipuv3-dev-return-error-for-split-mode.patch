@@ -1,0 +1,52 @@
+From 615d417c88d8d4b012e0ea635b04a7cab0d658ee Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Thu, 29 Sep 2011 09:22:32 +0800
+Subject: [PATCH 0441/2463] ENGR00158456-2 ipuv3 dev: return error for split
+ mode with rotation
+
+Currently we do not support split mode with rotation.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_device.c |   16 +++++++++-------
+ 1 files changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_device.c b/drivers/mxc/ipu3/ipu_device.c
+index 5f908be..ecca60a 100644
+--- a/drivers/mxc/ipu3/ipu_device.c
++++ b/drivers/mxc/ipu3/ipu_device.c
+@@ -520,6 +520,9 @@ static void dump_check_err(struct device *dev, int err)
+ 	case IPU_CHECK_ERR_SPLIT_OUTPUTH_OVER:
+ 		dev_err(dev, "split mode output height overflow\n");
+ 		break;
++	case IPU_CHECK_ERR_SPLIT_WITH_ROT:
++		dev_err(dev, "split mode with rotation\n");
++		break;
+ 	default:
+ 		break;
+ 	}
+@@ -605,15 +608,14 @@ static int update_split_setting(struct ipu_task_entry *t)
+ 	struct stripe_param down_stripe;
+ 	u32 iw, ih, ow, oh;
+ 
++	if (t->output.rotate >= IPU_ROTATE_90_RIGHT)
++		return IPU_CHECK_ERR_SPLIT_WITH_ROT;
++
+ 	iw = t->input.crop.w;
+ 	ih = t->input.crop.h;
+-	if (t->output.rotate >= IPU_ROTATE_90_RIGHT) {
+-		ow = t->output.crop.h;
+-		oh = t->output.crop.w;
+-	} else {
+-		ow = t->output.crop.w;
+-		oh = t->output.crop.h;
+-	}
++
++	ow = t->output.crop.w;
++	oh = t->output.crop.h;
+ 
+ 	if (t->set.split_mode & RL_SPLIT) {
+ 		ipu_calc_stripes_sizes(iw,
+-- 
+1.7.7.4
+

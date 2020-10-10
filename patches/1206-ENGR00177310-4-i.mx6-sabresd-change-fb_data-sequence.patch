@@ -1,0 +1,67 @@
+From e94d583b73e5d88cee9f41c011d7bac7f8f114f8 Mon Sep 17 00:00:00 2001
+From: Lily Zhang <r58066@freescale.com>
+Date: Tue, 13 Mar 2012 18:47:50 +0800
+Subject: [PATCH 1206/2463] ENGR00177310-4 i.mx6 sabresd: change fb_data
+ sequence
+
+i.mx6dl only support one single IPU, up to 2 displays.
+change fb_data sequence for i.mx6dl support.
+
+The following command options can be used for the display
+tests on i.mx6dl sabresd boards.
+- HDMI:
+ video=mxcfb0:dev=hdmi,1920x1080M@60,if=RGB24
+- LVDS0:
+ None or ldb=sin0, ldb=sep0
+- LVDS1:
+ ldb=sep1
+- SEIKO-WVGA:
+ video=mxcfb0:dev=lcd,SEIKO-WVGA,if=RGB24
+- CLAA-WVGA:
+ video=mxcfb0:dev=lcd,CLAA-WVGA,if=RGB565
+- HDMI + LVDS0:
+ video=mxcfb0:dev=hdmi,1920x1080M@60,if=RGB24 ldb=sin0
+ (or ldb=sep0)
+ echo 0 > /sys/class/graphics/fb2/blank
+- HDMI + LVDS1:
+ video=mxcfb0:dev=hdmi,1920x1080M@60,if=RGB24 ldb=sep1 (sin1
+ is not supported)
+ echo 0 > /sys/class/graphics/fb2/blank
+- LVDS0 + LVDS1:
+ none
+ echo 0 > /sys/class/graphics/fb2/blank
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |   12 ++++++------
+ 1 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index d2c32ab..5ca5b3d 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1071,15 +1071,15 @@ static struct ipuv3_fb_platform_data sabresd_fb_data[] = {
+ 	.default_bpp = 16,
+ 	.int_clk = false,
+ 	}, {
+-	.disp_dev = "lcd",
+-	.interface_pix_fmt = IPU_PIX_FMT_RGB565,
+-	.mode_str = "CLAA-WVGA",
++	.disp_dev = "ldb",
++	.interface_pix_fmt = IPU_PIX_FMT_RGB666,
++	.mode_str = "LDB-XGA",
+ 	.default_bpp = 16,
+ 	.int_clk = false,
+ 	}, {
+-	.disp_dev = "ldb",
+-	.interface_pix_fmt = IPU_PIX_FMT_RGB666,
+-	.mode_str = "LDB-SVGA",
++	.disp_dev = "lcd",
++	.interface_pix_fmt = IPU_PIX_FMT_RGB565,
++	.mode_str = "CLAA-WVGA",
+ 	.default_bpp = 16,
+ 	.int_clk = false,
+ 	}, {
+-- 
+1.7.7.4
+

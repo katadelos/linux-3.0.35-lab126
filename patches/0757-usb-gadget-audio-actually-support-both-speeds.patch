@@ -1,0 +1,46 @@
+From a53484bbddda82ad24ad15bb415cf1aba738a1e1 Mon Sep 17 00:00:00 2001
+From: Felipe Balbi <balbi@ti.com>
+Date: Fri, 26 Aug 2011 12:48:15 +0300
+Subject: [PATCH 0757/2463] usb: gadget: audio: actually support both speeds
+
+While testing g_audio with HighSpeed UDC on a
+FS Hub, we had no configurations to present to
+the host. That's because both speeds where
+mutually exclusive.
+
+Signed-off-by: Felipe Balbi <balbi@ti.com>
+---
+ drivers/usb/gadget/f_audio.c |   11 ++++++-----
+ 1 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/usb/gadget/f_audio.c b/drivers/usb/gadget/f_audio.c
+index 8ee330a..fd5507f 100644
+--- a/drivers/usb/gadget/f_audio.c
++++ b/drivers/usb/gadget/f_audio.c
+@@ -681,17 +681,18 @@ f_audio_bind(struct usb_configuration *c, struct usb_function *f)
+ 
+ 	status = -ENOMEM;
+ 
+-	/* supcard all relevant hardware speeds... we expect that when
++	/* copy descriptors, and track endpoint copies */
++	f->descriptors = usb_copy_descriptors(f_audio_desc);
++
++	/*
++	 * support all relevant hardware speeds... we expect that when
+ 	 * hardware is dual speed, all bulk-capable endpoints work at
+ 	 * both speeds
+ 	 */
+-
+-	/* copy descriptors, and track endpoint copies */
+ 	if (gadget_is_dualspeed(c->cdev->gadget)) {
+ 		c->highspeed = true;
+ 		f->hs_descriptors = usb_copy_descriptors(f_audio_desc);
+-	} else
+-		f->descriptors = usb_copy_descriptors(f_audio_desc);
++	}
+ 
+ 	return 0;
+ 
+-- 
+1.7.7.4
+

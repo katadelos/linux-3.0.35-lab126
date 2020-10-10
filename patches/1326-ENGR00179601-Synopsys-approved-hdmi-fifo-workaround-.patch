@@ -1,0 +1,219 @@
+From c584dd8c4f744d5faa5ea2811748ac786165c617 Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Thu, 5 Apr 2012 13:27:49 -0500
+Subject: [PATCH 1326/2463] ENGR00179601 Synopsys approved hdmi fifo
+ workaround - rev 3
+
+This patch includes some of the clk enable/disable changes from rev2
+
+Check the version of the HDMI IP to determine whether the fifo
+threshold needs to be high.  The i.Mx6dl version of the HDMI doesn't
+need the workaround.  All other parts of the workaround are used
+for both parts for code simplicity.
+
+----------------------------------------------------------
+For i.Mxq, set the Threshold of audio fifo as: FIFO depth - 2 (fixed
+and independent of the number of channels actually used).
+
+Use unspecified length ahb bursts (using fixed INCRx will make the
+audio dma fail).
+
+Additionally and in order to get it working on all conditions it will
+be necessary to run the following sw steps at startup of video and audio
+(or when video changes or audio changes):
+
+1-Configure AUD_N1 and AUD_CTS1 registers with final value and let the
+  AUD_N2, AUD_N3, AUD_CTS2 and AUD_CTS3 to 0s.
+2-Configure start and end addresses of audio DMA registers.
+3-Start DMA operation
+4-Configure the AUD_CTS2 and AUD_CTS3 with the final value.
+5-Configure the AUD_N2 and AUD_N3 with final value.
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ drivers/mfd/mxc-hdmi-core.c       |   29 +++++++++++++++++++++--------
+ include/linux/mfd/mxc-hdmi-core.h |    1 +
+ sound/soc/imx/imx-hdmi-dma.c      |   35 +++++++++++++++++++++++++++++------
+ 3 files changed, 51 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/mfd/mxc-hdmi-core.c b/drivers/mfd/mxc-hdmi-core.c
+index 18fd1a6..92fdf71 100644
+--- a/drivers/mfd/mxc-hdmi-core.c
++++ b/drivers/mfd/mxc-hdmi-core.c
+@@ -64,6 +64,7 @@ int mxc_hdmi_ipu_id;
+ int mxc_hdmi_disp_id;
+ static struct mxc_edid_cfg hdmi_core_edid_cfg;
+ static int hdmi_core_init;
++static unsigned int hdmi_dma_running;
+ 
+ u8 hdmi_readb(unsigned int reg)
+ {
+@@ -243,6 +244,12 @@ static void hdmi_set_clock_regenerator_n(unsigned int value)
+ {
+ 	u8 val;
+ 
++	if (!hdmi_dma_running) {
++		hdmi_writeb(value & 0xff, HDMI_AUD_N1);
++		hdmi_writeb(0, HDMI_AUD_N2);
++		hdmi_writeb(0, HDMI_AUD_N3);
++	}
++
+ 	hdmi_writeb(value & 0xff, HDMI_AUD_N1);
+ 	hdmi_writeb((value >> 8) & 0xff, HDMI_AUD_N2);
+ 	hdmi_writeb((value >> 16) & 0x0f, HDMI_AUD_N3);
+@@ -257,6 +264,12 @@ static void hdmi_set_clock_regenerator_cts(unsigned int cts)
+ {
+ 	u8 val;
+ 
++	if (!hdmi_dma_running) {
++		hdmi_writeb(cts & 0xff, HDMI_AUD_CTS1);
++		hdmi_writeb(0, HDMI_AUD_CTS2);
++		hdmi_writeb(0, HDMI_AUD_CTS3);
++	}
++
+ 	/* Must be set/cleared first */
+ 	val = hdmi_readb(HDMI_AUD_CTS3);
+ 	val &= ~HDMI_AUD_CTS3_CTS_MANUAL;
+@@ -433,18 +446,12 @@ static void hdmi_set_clk_regenerator(void)
+ 		return;
+ 	}
+ 
+-	clk_enable(isfr_clk);
+-	clk_enable(iahb_clk);
+-
+ 	pr_debug("%s: samplerate=%d  ratio=%d  pixelclk=%d  N=%d  cts=%d\n",
+ 		__func__, sample_rate, hdmi_ratio, (int)pixel_clk_rate,
+ 		clk_n, clk_cts);
+ 
+-	hdmi_set_clock_regenerator_n(clk_n);
+ 	hdmi_set_clock_regenerator_cts(clk_cts);
+-
+-	clk_disable(iahb_clk);
+-	clk_disable(isfr_clk);
++	hdmi_set_clock_regenerator_n(clk_n);
+ }
+ 
+ /* Need to run this before phy is enabled the first time to prevent
+@@ -464,10 +471,15 @@ void hdmi_clk_regenerator_update_pixel_clock(void)
+ 	hdmi_set_clk_regenerator();
+ }
+ 
++void hdmi_set_dma_mode(unsigned int dma_running)
++{
++	hdmi_dma_running = dma_running;
++	hdmi_set_clk_regenerator();
++}
++
+ void hdmi_set_sample_rate(unsigned int rate)
+ {
+ 	sample_rate = rate;
+-	hdmi_set_clk_regenerator();
+ }
+ 
+ void hdmi_set_edid_cfg(struct mxc_edid_cfg *cfg)
+@@ -511,6 +523,7 @@ static int mxc_hdmi_core_probe(struct platform_device *pdev)
+ #endif
+ 
+ 	hdmi_core_init = 0;
++	hdmi_dma_running = 0;
+ 
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (!res)
+diff --git a/include/linux/mfd/mxc-hdmi-core.h b/include/linux/mfd/mxc-hdmi-core.h
+index 0b24183..8681053 100644
+--- a/include/linux/mfd/mxc-hdmi-core.h
++++ b/include/linux/mfd/mxc-hdmi-core.h
+@@ -37,6 +37,7 @@ void hdmi_irq_enable(int irq);
+ unsigned int hdmi_irq_disable(int irq);
+ 
+ void hdmi_set_sample_rate(unsigned int rate);
++void hdmi_set_dma_mode(unsigned int dma_running);
+ void hdmi_init_clk_regenerator(void);
+ void hdmi_clk_regenerator_update_pixel_clock(void);
+ 
+diff --git a/sound/soc/imx/imx-hdmi-dma.c b/sound/soc/imx/imx-hdmi-dma.c
+index c8e88ff..1bd36ca 100644
+--- a/sound/soc/imx/imx-hdmi-dma.c
++++ b/sound/soc/imx/imx-hdmi-dma.c
+@@ -35,6 +35,11 @@
+ #include <mach/mxc_hdmi.h>
+ #include "imx-hdmi.h"
+ 
++#define HDMI_DMA_BURST_UNSPECIFIED_LEGNTH	0
++#define HDMI_DMA_BURST_INCR4			1
++#define HDMI_DMA_BURST_INCR8			2
++#define HDMI_DMA_BURST_INCR16			3
++
+ struct imx_hdmi_dma_runtime_data {
+ 	struct snd_pcm_substream *tx_substream;
+ 
+@@ -315,16 +320,16 @@ static void hdmi_dma_set_incr_type(int incr_type)
+ 			  HDMI_AHB_DMA_CONF0_INCR_TYPE_MASK);
+ 
+ 	switch (incr_type) {
+-	case 1:
++	case HDMI_DMA_BURST_UNSPECIFIED_LEGNTH:
+ 		break;
+-	case 4:
++	case HDMI_DMA_BURST_INCR4:
+ 		value |= HDMI_AHB_DMA_CONF0_BURST_MODE;
+ 		break;
+-	case 8:
++	case HDMI_DMA_BURST_INCR8:
+ 		value |= HDMI_AHB_DMA_CONF0_BURST_MODE |
+ 			 HDMI_AHB_DMA_CONF0_INCR8;
+ 		break;
+-	case 16:
++	case HDMI_DMA_BURST_INCR16:
+ 		value |= HDMI_AHB_DMA_CONF0_BURST_MODE |
+ 			 HDMI_AHB_DMA_CONF0_INCR16;
+ 		break;
+@@ -359,11 +364,27 @@ static void hdmi_dma_enable_channels(int channels)
+ 	}
+ }
+ 
++static void hdmi_dma_set_thrsld(void)
++{
++	int rev = hdmi_readb(HDMI_REVISION_ID);
++
++	switch (rev) {
++	case 0x0a:
++		hdmi_writeb(126, HDMI_AHB_DMA_THRSLD);
++		break;
++	default:
++		hdmi_writeb(64, HDMI_AHB_DMA_THRSLD);
++		break;
++	}
++
++	pr_debug("HDMI_AHB_DMA_THRSLD          0x%02x\n", hdmi_readb(HDMI_AHB_DMA_THRSLD));
++}
++
+ static void hdmi_dma_configure_dma(int channels)
+ {
+ 	hdmi_dma_enable_hlock(1);
+-	hdmi_dma_set_incr_type(4);
+-	hdmi_writeb(64, HDMI_AHB_DMA_THRSLD);
++	hdmi_dma_set_incr_type(HDMI_DMA_BURST_UNSPECIFIED_LEGNTH);
++	hdmi_dma_set_thrsld();
+ 	hdmi_dma_enable_channels(channels);
+ }
+ 
+@@ -548,6 +569,7 @@ static int hdmi_dma_trigger(struct snd_pcm_substream *substream, int cmd)
+ 		hdmi_dma_irq_mask(0);
+ 		hdmi_dma_priv->tx_active = true;
+ 		hdmi_dma_start();
++		hdmi_set_dma_mode(1);
+ 		break;
+ 
+ 	case SNDRV_PCM_TRIGGER_STOP:
+@@ -555,6 +577,7 @@ static int hdmi_dma_trigger(struct snd_pcm_substream *substream, int cmd)
+ 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+ 		hdmi_dma_priv->tx_active = false;
+ 		hdmi_dma_stop();
++		hdmi_set_dma_mode(0);
+ 		hdmi_dma_irq_mask(1);
+ 		break;
+ 
+-- 
+1.7.7.4
+

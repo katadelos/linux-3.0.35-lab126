@@ -1,0 +1,261 @@
+From bb2428e8b38b2323c435bf67a3913f09ced65e32 Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Mon, 31 Oct 2011 09:55:25 +0800
+Subject: [PATCH 0513/2463] ENGR00157253-1 MX6Q spi: add ecspi for MX6Q
+
+1.modify config
+2.add board level support ecspi
+3.add ecspi pad configure
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig             |   11 +++---
+ arch/arm/mach-mx6/board-mx6q_arm2.c         |   51 ++++++++++++++++++++++++++-
+ arch/arm/mach-mx6/clock.c                   |   10 +++---
+ arch/arm/mach-mx6/devices-imx6q.h           |    4 ++
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h |   15 +++++---
+ 5 files changed, 74 insertions(+), 17 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 4944c00..679b857 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux/arm 2.6.38 Kernel Configuration
+-# Sat Oct  8 10:55:25 2011
++# Wed Oct 26 15:45:36 2011
+ #
+ CONFIG_ARM=y
+ CONFIG_HAVE_PWM=y
+@@ -691,7 +691,8 @@ CONFIG_MTD_CFI_I2=y
+ # Self-contained MTD device drivers
+ #
+ # CONFIG_MTD_DATAFLASH is not set
+-# CONFIG_MTD_M25P80 is not set
++CONFIG_MTD_M25P80=y
++CONFIG_M25PXX_USE_FAST_READ=y
+ # CONFIG_MTD_SST25L is not set
+ # CONFIG_MTD_SLRAM is not set
+ # CONFIG_MTD_PHRAM is not set
+@@ -1079,9 +1080,10 @@ CONFIG_SPI_MASTER=y
+ #
+ # SPI Master Controller Drivers
+ #
+-# CONFIG_SPI_BITBANG is not set
++CONFIG_SPI_BITBANG=y
+ # CONFIG_SPI_GPIO is not set
+-# CONFIG_SPI_IMX is not set
++CONFIG_SPI_IMX_VER_2_3=y
++CONFIG_SPI_IMX=y
+ # CONFIG_SPI_PXA2XX_PCI is not set
+ # CONFIG_SPI_XILINX is not set
+ # CONFIG_SPI_DESIGNWARE is not set
+@@ -1150,7 +1152,6 @@ CONFIG_WATCHDOG_NOWAYOUT=y
+ # Watchdog Device Drivers
+ #
+ # CONFIG_SOFT_WATCHDOG is not set
+-# CONFIG_MPCORE_WATCHDOG is not set
+ # CONFIG_MAX63XX_WATCHDOG is not set
+ CONFIG_IMX2_WDT=y
+ 
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index cb0f91e..9d3e982 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -31,6 +31,7 @@
+ #include <linux/fsl_devices.h>
+ #include <linux/smsc911x.h>
+ #include <linux/spi/spi.h>
++#include <linux/spi/flash.h>
+ #include <linux/i2c.h>
+ #include <linux/i2c/pca953x.h>
+ #include <linux/ata.h>
+@@ -69,7 +70,6 @@
+ #include <asm/mach-types.h>
+ #include <asm/mach/arch.h>
+ #include <asm/mach/time.h>
+-#include <asm/mach/flash.h>
+ 
+ #include "usb.h"
+ #include "devices-imx6q.h"
+@@ -175,9 +175,13 @@ static iomux_v3_cfg_t mx6q_arm2_pads[] = {
+ 	MX6Q_PAD_SD4_DAT7__USDHC4_DAT7_50MHZ,
+ 	MX6Q_PAD_NANDF_ALE__USDHC4_RST,
+ 	/* eCSPI1 */
++	MX6Q_PAD_EIM_EB2__ECSPI1_SS0,
+ 	MX6Q_PAD_EIM_D16__ECSPI1_SCLK,
+ 	MX6Q_PAD_EIM_D17__ECSPI1_MISO,
+ 	MX6Q_PAD_EIM_D18__ECSPI1_MOSI,
++	MX6Q_PAD_EIM_D19__ECSPI1_SS1,
++	MX6Q_PAD_EIM_EB2__GPIO_2_30,	/*SS0*/
++	MX6Q_PAD_EIM_D19__GPIO_3_19,	/*SS1*/
+ 
+ 	/* ESAI */
+ 	MX6Q_PAD_ENET_RXD0__ESAI1_HCKT,
+@@ -474,6 +478,47 @@ static const struct spi_imx_master mx6q_arm2_spi_data __initconst = {
+ 	.num_chipselect = ARRAY_SIZE(mx6q_arm2_spi_cs),
+ };
+ 
++#if defined(CONFIG_MTD_M25P80) || defined(CONFIG_MTD_M25P80_MODULE)
++static struct mtd_partition m25p32_partitions[] = {
++	{
++		.name = "bootloader",
++		.offset = 0,
++		.size = 0x00040000,
++	},
++	{
++		.name = "kernel",
++		.offset = MTDPART_OFS_APPEND,
++		.size = MTDPART_SIZ_FULL,
++	},
++};
++
++static struct flash_platform_data m25p32_spi_flash_data = {
++	.name = "m25p32",
++	.parts = m25p32_partitions,
++	.nr_parts = ARRAY_SIZE(m25p32_partitions),
++	.type = "m25p32",
++};
++#endif
++
++static struct spi_board_info m25p32_spi0_board_info[] __initdata = {
++#if defined(CONFIG_MTD_M25P80)
++	{
++		/* The modalias must be the same as spi device driver name */
++		.modalias = "m25p80",
++		.max_speed_hz = 20000000,
++		.bus_num = 0,
++		.chip_select = 1,
++		.platform_data = &m25p32_spi_flash_data,
++	},
++#endif
++};
++
++static void spi_device_init(void)
++{
++	spi_register_board_info(m25p32_spi0_board_info,
++				ARRAY_SIZE(m25p32_spi0_board_info));
++}
++
+ static int max7310_1_setup(struct i2c_client *client,
+ 	unsigned gpio_base, unsigned ngpio,
+ 	void *context)
+@@ -1069,6 +1114,10 @@ static void __init mx6_board_init(void)
+ 	i2c_register_board_info(2, mxc_i2c2_board_info,
+ 			ARRAY_SIZE(mxc_i2c2_board_info));
+ 
++	/* SPI */
++	imx6q_add_ecspi(0, &mx6q_arm2_spi_data);
++	spi_device_init();
++
+ 	imx6q_add_mxc_hdmi(&hdmi_data);
+ 
+ 	imx6q_add_anatop_thermal_imx(1, &mx6q_arm2_anatop_thermal_data);
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index cdb602a..a837918 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4620,11 +4620,11 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "ldb_di1_clk", ldb_di1_clk),
+ 	_REGISTER_CLOCK("mxc_spdif.0", NULL, spdif0_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "esai_clk", esai_clk),
+-	_REGISTER_CLOCK("mxc_spi.0", NULL, ecspi_clk[0]),
+-	_REGISTER_CLOCK("mxc_spi.1", NULL, ecspi_clk[1]),
+-	_REGISTER_CLOCK("mxc_spi.2", NULL, ecspi_clk[2]),
+-	_REGISTER_CLOCK("mxc_spi.3", NULL, ecspi_clk[3]),
+-	_REGISTER_CLOCK("mxc_spi.4", NULL, ecspi_clk[4]),
++	_REGISTER_CLOCK("imx6q-ecspi.0", NULL, ecspi_clk[0]),
++	_REGISTER_CLOCK("imx6q-ecspi.1", NULL, ecspi_clk[1]),
++	_REGISTER_CLOCK("imx6q-ecspi.2", NULL, ecspi_clk[2]),
++	_REGISTER_CLOCK("imx6q-ecspi.3", NULL, ecspi_clk[3]),
++	_REGISTER_CLOCK("imx6q-ecspi.4", NULL, ecspi_clk[4]),
+ 	_REGISTER_CLOCK(NULL, "emi_slow_clk", emi_slow_clk),
+ 	_REGISTER_CLOCK(NULL, "emi_clk", emi_clk),
+ 	_REGISTER_CLOCK(NULL, "enfc_clk", enfc_clk),
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index d010b62..90d5c69 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -143,6 +143,10 @@ extern const struct imx_imx_asrc_data imx6q_imx_asrc_data[] __initconst;
+ #define imx6q_add_asrc(pdata)	\
+ 	imx_add_imx_asrc(imx6q_imx_asrc_data, pdata)
+ 
++extern const struct imx_spi_imx_data imx6q_ecspi_data[] __initconst;
++#define imx6q_add_ecspi(id, pdata)      \
++	imx_add_spi_imx(&imx6q_ecspi_data[id], pdata)
++
+ extern const struct imx_dvfs_core_data imx6q_dvfs_core_data __initconst;
+ #define imx6q_add_dvfs_core(pdata)	\
+ 	imx_add_dvfs_core(&imx6q_dvfs_core_data, pdata)
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index 8927779..778354e 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -80,6 +80,9 @@ typedef enum iomux_config {
+ 
+ #define MX6Q_SPDIF_OUT_PAD_CTRL (PAD_CTL_DSE_120ohm | PAD_CTL_SRE_FAST)
+ 
++#define MX6Q_ECSPI_PAD_CTRL	(PAD_CTL_SRE_FAST | PAD_CTL_SPEED_MED | \
++		PAD_CTL_DSE_40ohm | PAD_CTL_HYS)
++
+ #define _MX6Q_PAD_SD2_DAT1__USDHC2_DAT1				\
+ 		IOMUX_PAD(0x0360, 0x004C, 0, 0x0000, 0, 0)
+ #define _MX6Q_PAD_SD2_DAT1__ECSPI5_SS0				\
+@@ -3864,7 +3867,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_EIM_EB2__WEIM_WEIM_EB_2		\
+ 		(_MX6Q_PAD_EIM_EB2__WEIM_WEIM_EB_2 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_EB2__ECSPI1_SS0		\
+-		(_MX6Q_PAD_EIM_EB2__ECSPI1_SS0 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_EIM_EB2__ECSPI1_SS0 | MUX_PAD_CTRL(MX6Q_ECSPI_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_EB2__CCM_DI1_EXT_CLK		\
+ 		(_MX6Q_PAD_EIM_EB2__CCM_DI1_EXT_CLK | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_EB2__IPU2_CSI1_D_19		\
+@@ -3881,7 +3884,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_EIM_D16__WEIM_WEIM_D_16		\
+ 		(_MX6Q_PAD_EIM_D16__WEIM_WEIM_D_16 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D16__ECSPI1_SCLK		\
+-		(_MX6Q_PAD_EIM_D16__ECSPI1_SCLK | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_EIM_D16__ECSPI1_SCLK | MUX_PAD_CTRL(MX6Q_ECSPI_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D16__IPU1_DI0_PIN5		\
+ 		(_MX6Q_PAD_EIM_D16__IPU1_DI0_PIN5 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D16__IPU2_CSI1_D_18		\
+@@ -3896,7 +3899,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_EIM_D17__WEIM_WEIM_D_17		\
+ 		(_MX6Q_PAD_EIM_D17__WEIM_WEIM_D_17 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D17__ECSPI1_MISO		\
+-		(_MX6Q_PAD_EIM_D17__ECSPI1_MISO | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_EIM_D17__ECSPI1_MISO | MUX_PAD_CTRL(MX6Q_ECSPI_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D17__IPU1_DI0_PIN6		\
+ 		(_MX6Q_PAD_EIM_D17__IPU1_DI0_PIN6 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D17__IPU2_CSI1_PIXCLK		\
+@@ -3913,7 +3916,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_EIM_D18__WEIM_WEIM_D_18		\
+ 		(_MX6Q_PAD_EIM_D18__WEIM_WEIM_D_18 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D18__ECSPI1_MOSI		\
+-		(_MX6Q_PAD_EIM_D18__ECSPI1_MOSI | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_EIM_D18__ECSPI1_MOSI | MUX_PAD_CTRL(MX6Q_ECSPI_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D18__IPU1_DI0_PIN7		\
+ 		(_MX6Q_PAD_EIM_D18__IPU1_DI0_PIN7 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D18__IPU2_CSI1_D_17		\
+@@ -3930,7 +3933,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_EIM_D19__WEIM_WEIM_D_19		\
+ 		(_MX6Q_PAD_EIM_D19__WEIM_WEIM_D_19 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D19__ECSPI1_SS1		\
+-		(_MX6Q_PAD_EIM_D19__ECSPI1_SS1 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_EIM_D19__ECSPI1_SS1 | MUX_PAD_CTRL(MX6Q_ECSPI_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D19__IPU1_DI0_PIN8		\
+ 		(_MX6Q_PAD_EIM_D19__IPU1_DI0_PIN8 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D19__IPU2_CSI1_D_16		\
+@@ -3938,7 +3941,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_EIM_D19__UART1_CTS		\
+ 		(_MX6Q_PAD_EIM_D19__UART1_CTS | MUX_PAD_CTRL(MX6Q_UART_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D19__GPIO_3_19		\
+-		(_MX6Q_PAD_EIM_D19__GPIO_3_19 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_EIM_D19__GPIO_3_19 | MUX_PAD_CTRL(MX6Q_ECSPI_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D19__EPIT1_EPITO		\
+ 		(_MX6Q_PAD_EIM_D19__EPIT1_EPITO | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_EIM_D19__PL301_MX6QPER1_HRESP		\
+-- 
+1.7.7.4
+

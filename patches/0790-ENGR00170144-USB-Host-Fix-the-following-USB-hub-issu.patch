@@ -1,0 +1,101 @@
+From 8fe7ab5117564605c800f90467f7d22ca858de66 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Thu, 22 Dec 2011 19:07:03 +0800
+Subject: [PATCH 0790/2463] ENGR00170144 [USB-Host] Fix the following USB hub
+ issue on mx6q
+
+- After auto suspend, attach device to hub will cause host can't work any more
+- after system suspend, attach device to hub will cause host can't work any more
+- HSDISCONNECTDEC logic error
+- Set RUNSTOP in bus suspend, if no short delay, host can't work any more
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ drivers/usb/core/hub.c      |    6 +++---
+ drivers/usb/host/ehci-arc.c |   16 ++++++++++++++--
+ 2 files changed, 17 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/usb/core/hub.c b/drivers/usb/core/hub.c
+index 1fc9e2e..2eb71ec 100644
+--- a/drivers/usb/core/hub.c
++++ b/drivers/usb/core/hub.c
+@@ -3031,7 +3031,7 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
+ 	}
+ #ifdef MX6_USB_HOST_HACK
+ 	{	/*Must enable HOSTDISCONDETECT after second reset*/
+-		if (port1 == 1) {
++		if ((port1 == 1) && (udev->level == 1)) {
+ 			if (udev->speed == USB_SPEED_HIGH) {
+ 				struct device *dev = hcd->self.controller;
+ 				struct fsl_usb2_platform_data *pdata;
+@@ -3185,11 +3185,11 @@ static void hub_port_connect_change(struct usb_hub *hub, int port1,
+ 		struct fsl_usb2_platform_data *pdata;
+ 
+ 		pdata = (struct fsl_usb2_platform_data *)dev->platform_data;
+-		if (dev->parent && dev->type) {
++		if (dev->parent && (hdev->level == 0) && dev->type) {
+ 			if (port1 == 1 && pdata->init)
+ 				pdata->init(NULL);
+ 		}
+-		if (port1 == 1) {
++		if ((port1 == 1) && (hdev->level == 0)) {
+ 			if (!(portstatus&USB_PORT_STAT_CONNECTION)) {
+ 				/* Must clear HOSTDISCONDETECT when disconnect*/
+ 				fsl_platform_set_usb_phy_dis(pdata, 0);
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index 6419273..bed3056 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -28,6 +28,7 @@
+ #include "../core/usb.h"
+ #include "ehci-fsl.h"
+ #include <mach/fsl_usb.h>
++
+ extern void usb_host_set_wakeup(struct device *wkup_dev, bool para);
+ static void fsl_usb_lowpower_mode(struct fsl_usb2_platform_data *pdata, bool enable)
+ {
+@@ -123,7 +124,7 @@ void fsl_usb_recover_hcd(struct platform_device *pdev)
+ 	 * CMDRUN bit in 20ms to keep port status.
+ 	 */
+ 	cmd = ehci_readl(ehci, &ehci->regs->command);
+-	if (!(cmd & CMD_RUN)) {
++	if (!(cmd & CMD_RUN) || (hcd->state == HC_STATE_SUSPENDED)) {
+ 		ehci_writel(ehci, ehci->command, &ehci->regs->command);
+ 		/* Resume root hub here? */
+ 		usb_hcd_resume_root_hub(hcd);
+@@ -410,6 +411,7 @@ static int ehci_fsl_bus_suspend(struct usb_hcd *hcd)
+ {
+ 	int ret = 0;
+ 	struct fsl_usb2_platform_data *pdata;
++	u32 tmp, portsc, cmd;
+ 	struct ehci_hcd *ehci = hcd_to_ehci(hcd);
+ 	unsigned long flags;
+ 
+@@ -421,13 +423,23 @@ static int ehci_fsl_bus_suspend(struct usb_hcd *hcd)
+ 		return 0;
+ 	}
+ 
++	portsc = ehci_readl(ehci, &ehci->regs->port_status[0]);
+ 	ret = ehci_bus_suspend(hcd);
+ 	if (ret != 0)
+ 		return ret;
+ 
++	cmd = ehci_readl(ehci, &ehci->regs->command);
++	if ((portsc & PORT_CONNECT) && ((cmd & CMD_RUN) == 0)) {
++		tmp = ehci_readl(ehci, &ehci->regs->command);
++		tmp |= CMD_RUN;
++		ehci_writel(ehci, tmp, &ehci->regs->command);
++		/* on MX6Q, it need a short delay between set RUNSTOP
++		 * and set PHCD
++		 */
++		udelay(100);
++	}
+ 	if (pdata->platform_suspend)
+ 		pdata->platform_suspend(pdata);
+-
+ 	usb_host_set_wakeup(hcd->self.controller, true);
+ 	spin_lock_irqsave(&ehci->lock, flags);
+ 	fsl_usb_lowpower_mode(pdata, true);
+-- 
+1.7.7.4
+

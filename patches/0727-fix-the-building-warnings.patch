@@ -1,0 +1,78 @@
+From 65b077620331964ad330651267d34feca1d0440f Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Mon, 19 Dec 2011 20:39:18 +0800
+Subject: [PATCH 0727/2463] fix the building warnings
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/plat-mxc/cpufreq.c               |    3 +--
+ arch/arm/plat-mxc/utmixc.c                |    4 ----
+ drivers/media/video/mxc/output/mxc_vout.c |    2 +-
+ sound/soc/codecs/sgtl5000.c               |    2 +-
+ 4 files changed, 3 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index 5efe833..906ecca 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -160,8 +160,7 @@ static int mxc_set_target(struct cpufreq_policy *policy,
+ 	return ret;
+ }
+ 
+-static int mxc_cpufreq_suspend(struct cpufreq_policy *policy,
+-				 pm_message_t state)
++static int mxc_cpufreq_suspend(struct cpufreq_policy *policy)
+ {
+ 	pre_suspend_rate = clk_get_rate(cpu_clk);
+ 	/* Set to max freq and voltage */
+diff --git a/arch/arm/plat-mxc/utmixc.c b/arch/arm/plat-mxc/utmixc.c
+index ab475ee..227943b 100755
+--- a/arch/arm/plat-mxc/utmixc.c
++++ b/arch/arm/plat-mxc/utmixc.c
+@@ -27,8 +27,6 @@
+ #include <mach/arc_otg.h>
+ #include <asm/mach-types.h>
+ 
+-static struct regulator *usbotg_regux;
+-
+ static void usb_utmi_init(struct fsl_xcvr_ops *this)
+ {
+ #if defined(CONFIG_MXC_PMIC_MC13892_MODULE) || defined(CONFIG_MXC_PMIC_MC13892)
+@@ -57,8 +55,6 @@ static void usb_utmi_uninit(struct fsl_xcvr_ops *this)
+ static void set_power(struct fsl_xcvr_ops *this,
+ 		      struct fsl_usb2_platform_data *pdata, int on)
+ {
+-	struct device *dev = &pdata->pdev->dev;
+-
+ 	pr_debug("real %s(on=%d) pdata=0x%p\n", __func__, on, pdata);
+ 	if (pdata && pdata->platform_driver_vbus)
+ 		pdata->platform_driver_vbus(on);
+diff --git a/drivers/media/video/mxc/output/mxc_vout.c b/drivers/media/video/mxc/output/mxc_vout.c
+index 57e684f..b93e148 100644
+--- a/drivers/media/video/mxc/output/mxc_vout.c
++++ b/drivers/media/video/mxc/output/mxc_vout.c
+@@ -678,7 +678,7 @@ static int mxc_vout_release(struct file *file)
+ static int mxc_vout_open(struct file *file)
+ {
+ 	struct mxc_vout_output *vout = NULL;
+-	int ret;
++	int ret = 0;
+ 
+ 	vout = video_drvdata(file);
+ 
+diff --git a/sound/soc/codecs/sgtl5000.c b/sound/soc/codecs/sgtl5000.c
+index 8a42309..98e9c13 100644
+--- a/sound/soc/codecs/sgtl5000.c
++++ b/sound/soc/codecs/sgtl5000.c
+@@ -1200,7 +1200,7 @@ static struct snd_soc_dai_driver sgtl5000_dai = {
+ 	.symmetric_rates = 1,
+ };
+ 
+-static int sgtl5000_volatile_register(unsigned int reg)
++static int sgtl5000_volatile_register(struct snd_soc_codec *codec, unsigned int reg)
+ {
+ 	switch (reg) {
+ 	case SGTL5000_CHIP_ID:
+-- 
+1.7.7.4
+

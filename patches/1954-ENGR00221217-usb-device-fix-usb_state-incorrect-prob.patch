@@ -1,0 +1,61 @@
+From 989995500906ccf3f762c779307a23557f9b1ca6 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Thu, 23 Aug 2012 16:29:55 +0800
+Subject: [PATCH 1954/2463] ENGR00221217 usb: device: fix usb_state incorrect
+ problem after pc sends resume
+
+At pc sends suspend/resume case, the udc_controller->usb_state should
+keep unchange during the suspend/resume process, at former code, the
+fsl_udc_resume set udc_controller->usb_state to USB_STATE_ATTACHED
+unconditionally. In fact, USB_STATE_ATTACHED stands for initial state
+and should be set when we try to run controller.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    9 +++------
+ 1 files changed, 3 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index b6b6190..405dbcc 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -68,7 +68,6 @@
+ #define cpu_to_hc32(x)	cpu_to_le32((x))
+ #define hc32_to_cpu(x)	le32_to_cpu((x))
+ #endif
+-
+ #define	DMA_ADDR_INVALID	(~(dma_addr_t)0)
+ DEFINE_MUTEX(udc_resume_mutex);
+ extern void usb_debounce_id_vbus(void);
+@@ -473,6 +472,9 @@ static void dr_controller_run(struct fsl_udc *udc)
+ {
+ 	u32 temp;
+ 
++	udc_controller->usb_state = USB_STATE_ATTACHED;
++	udc_controller->ep0_dir = 0;
++
+ 	fsl_platform_pullup_enable(udc->pdata);
+ 
+ 	/* Enable DR irq reg */
+@@ -2445,8 +2447,6 @@ int usb_gadget_probe_driver(struct usb_gadget_driver *driver,
+ 		dr_controller_run(udc_controller);
+ 		if (udc_controller->stopped)
+ 			dr_clk_gate(false);
+-		udc_controller->usb_state = USB_STATE_ATTACHED;
+-		udc_controller->ep0_dir = 0;
+ 	}
+ 	printk(KERN_INFO "%s: bind to driver %s \n",
+ 			udc_controller->gadget.name, driver->driver.name);
+@@ -3485,9 +3485,6 @@ static int fsl_udc_resume(struct platform_device *pdev)
+ 		dr_controller_setup(udc_controller);
+ 		dr_controller_run(udc_controller);
+ 	}
+-	udc_controller->usb_state = USB_STATE_ATTACHED;
+-	udc_controller->ep0_dir = 0;
+-
+ end:
+ 	/* if udc is resume by otg id change and no device
+ 	 * connecting to the otg, otg will enter low power mode*/
+-- 
+1.7.7.4
+

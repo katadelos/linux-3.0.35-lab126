@@ -1,0 +1,30 @@
+From 39722e235112fceec7acf96a44eaa84b9bd25c48 Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Thu, 17 Nov 2011 17:39:14 +0800
+Subject: [PATCH 0631/2463] ENGR00162475 ipuv3 fb: fix camera preview failure
+
+fix camera preview failure when using double buffer mode for frame
+buffer
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index d1036c8..4004ddf 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -244,7 +244,8 @@ static int _setup_disp_channel2(struct fb_info *fbi)
+ 					 IPU_ROTATE_NONE,
+ 					 base,
+ 					 base,
+-					 base,
++					 fbi->var.accel_flags &
++						FB_ACCEL_DOUBLE_FLAG ? 0 : base,
+ 					 0, 0);
+ 	if (retval) {
+ 		dev_err(fbi->device,
+-- 
+1.7.7.4
+

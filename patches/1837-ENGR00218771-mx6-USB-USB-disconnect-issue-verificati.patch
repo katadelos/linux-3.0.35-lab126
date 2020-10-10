@@ -1,0 +1,193 @@
+From ba6f00cf2230db0a264566bf3720b4f1db8d3e43 Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Mon, 30 Jul 2012 15:35:11 +0800
+Subject: [PATCH 1837/2463] ENGR00218771 mx6 USB:USB disconnect issue
+ verification on MX6QTO1.2/MX6DLTO1.1
+
+- for Rigel1.1/Arik1.2, bit 17 of HW_USBPHY_IP will be set, it will fix the
+  issue that no wakeup between SUSP/PHCD. And the usb_platform_rh_suspend/
+  usb_platform_rh_resume do not need do complex software workaround, only
+  need set/clear the workaround bit.
+- for Megrez , bit 17 and bit 18 of HW_USBPHY_IP will be set, it will fix the
+  issue that no wakeup between SUSP/PHCD and disconnect after resume. No need
+  do any software workaround.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ arch/arm/mach-mx6/usb_dr.c     |   34 +++++++++++++++++++++++++++-------
+ arch/arm/mach-mx6/usb_h1.c     |   35 ++++++++++++++++++++++++++++-------
+ arch/arm/plat-mxc/usb_common.c |    7 +++++--
+ 3 files changed, 60 insertions(+), 16 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index dbd1e67..1efac33 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -164,8 +164,9 @@ static int usb_phy_enable(struct fsl_usb2_platform_data *pdata)
+ 	}
+ 
+ 	if (!usb_icbug_swfix_need())
+-		__raw_writel(((1 << 17) | (1 << 18)),
+-				phy_reg + HW_USBPHY_IP_SET);
++		__raw_writel((1 << 17), phy_reg + HW_USBPHY_IP_SET);
++	if (cpu_is_mx6sl())
++		__raw_writel((1 << 18), phy_reg + HW_USBPHY_IP_SET);
+ 	return 0;
+ }
+ /* Notes: configure USB clock*/
+@@ -380,7 +381,7 @@ static void usbotg_wakeup_event_clear(void)
+ 
+ #ifdef CONFIG_USB_EHCI_ARC_OTG
+ /* Beginning of host related operation for DR port */
+-static void _host_platform_rh_suspend(struct fsl_usb2_platform_data *pdata)
++static void _host_platform_rh_suspend_swfix(struct fsl_usb2_platform_data *pdata)
+ {
+ 	void __iomem *phy_reg = MX6_IO_ADDRESS(USB_PHY0_BASE_ADDR);
+ 	u32 tmp;
+@@ -419,7 +420,7 @@ static void _host_platform_rh_suspend(struct fsl_usb2_platform_data *pdata)
+ 	fsl_platform_otg_set_usb_phy_dis(pdata, 0);
+ }
+ 
+-static void _host_platform_rh_resume(struct fsl_usb2_platform_data *pdata)
++static void _host_platform_rh_resume_swfix(struct fsl_usb2_platform_data *pdata)
+ {
+ 	u32 index = 0;
+ 
+@@ -438,6 +439,25 @@ static void _host_platform_rh_resume(struct fsl_usb2_platform_data *pdata)
+ 	udelay(500);
+ 	fsl_platform_otg_set_usb_phy_dis(pdata, 1);
+ }
++static void _host_platform_rh_suspend(struct fsl_usb2_platform_data *pdata)
++{
++	/*for mx6sl ,we do not need any sw fix*/
++	if (cpu_is_mx6sl())
++		return ;
++	__raw_writel(BM_USBPHY_CTRL_ENHOSTDISCONDETECT,
++		MX6_IO_ADDRESS(pdata->phy_regs)
++		+ HW_USBPHY_CTRL_CLR);
++}
++
++static void _host_platform_rh_resume(struct fsl_usb2_platform_data *pdata)
++{
++	/*for mx6sl ,we do not need any sw fix*/
++	if (cpu_is_mx6sl())
++		return ;
++	__raw_writel(BM_USBPHY_CTRL_ENHOSTDISCONDETECT,
++		MX6_IO_ADDRESS(pdata->phy_regs)
++		+ HW_USBPHY_CTRL_SET);
++}
+ 
+ static void _host_phy_lowpower_suspend(struct fsl_usb2_platform_data *pdata, bool enable)
+ {
+@@ -579,11 +599,11 @@ void __init mx6_usb_dr_init(void)
+ 	dr_utmi_config.operating_mode = DR_HOST_MODE;
+ 	dr_utmi_config.wake_up_enable = _host_wakeup_enable;
+ 	if (usb_icbug_swfix_need()) {
++		dr_utmi_config.platform_rh_suspend = _host_platform_rh_suspend_swfix;
++		dr_utmi_config.platform_rh_resume  = _host_platform_rh_resume_swfix;
++	} else {
+ 		dr_utmi_config.platform_rh_suspend = _host_platform_rh_suspend;
+ 		dr_utmi_config.platform_rh_resume  = _host_platform_rh_resume;
+-	} else {
+-		dr_utmi_config.platform_rh_suspend = NULL;
+-		dr_utmi_config.platform_rh_resume  = NULL;
+ 	}
+ 	dr_utmi_config.platform_set_disconnect_det = fsl_platform_otg_set_usb_phy_dis;
+ 	dr_utmi_config.phy_lowpower_suspend = _host_phy_lowpower_suspend;
+diff --git a/arch/arm/mach-mx6/usb_h1.c b/arch/arm/mach-mx6/usb_h1.c
+index 01b3ed8..92ef0ec 100644
+--- a/arch/arm/mach-mx6/usb_h1.c
++++ b/arch/arm/mach-mx6/usb_h1.c
+@@ -125,8 +125,9 @@ static int usb_phy_enable(struct fsl_usb2_platform_data *pdata)
+ 	__raw_writel(tmp, phy_reg + HW_USBPHY_CTRL);
+ 
+ 	if (!usb_icbug_swfix_need())
+-		__raw_writel(((1 << 17) | (1 << 18)),
+-				phy_reg + HW_USBPHY_IP_SET);
++		__raw_writel((1 << 17), phy_reg + HW_USBPHY_IP_SET);
++	if (cpu_is_mx6sl())
++		__raw_writel((1 << 18), phy_reg + HW_USBPHY_IP_SET);
+ 	return 0;
+ }
+ static int fsl_usb_host_init_ext(struct platform_device *pdev)
+@@ -193,7 +194,7 @@ static void _wake_up_enable(struct fsl_usb2_platform_data *pdata, bool enable)
+ 	}
+ }
+ 
+-static void usbh1_platform_rh_suspend(struct fsl_usb2_platform_data *pdata)
++static void usbh1_platform_rh_suspend_swfix(struct fsl_usb2_platform_data *pdata)
+ {
+ 	void __iomem *phy_reg = MX6_IO_ADDRESS(USB_PHY1_BASE_ADDR);
+ 	u32 tmp;
+@@ -232,7 +233,7 @@ static void usbh1_platform_rh_suspend(struct fsl_usb2_platform_data *pdata)
+ 	fsl_platform_h1_set_usb_phy_dis(pdata, 0);
+ }
+ 
+-static void usbh1_platform_rh_resume(struct fsl_usb2_platform_data *pdata)
++static void usbh1_platform_rh_resume_swfix(struct fsl_usb2_platform_data *pdata)
+ {
+ 	u32 index = 0;
+ 
+@@ -252,6 +253,26 @@ static void usbh1_platform_rh_resume(struct fsl_usb2_platform_data *pdata)
+ 	fsl_platform_h1_set_usb_phy_dis(pdata, 1);
+ }
+ 
++static void usbh1_platform_rh_suspend(struct fsl_usb2_platform_data *pdata)
++{
++	/*for mx6sl ,we do not need any sw fix*/
++	if (cpu_is_mx6sl())
++		return ;
++	__raw_writel(BM_USBPHY_CTRL_ENHOSTDISCONDETECT,
++		MX6_IO_ADDRESS(pdata->phy_regs)
++		+ HW_USBPHY_CTRL_CLR);
++}
++
++static void usbh1_platform_rh_resume(struct fsl_usb2_platform_data *pdata)
++{
++	/*for mx6sl ,we do not need any sw fix*/
++	if (cpu_is_mx6sl())
++		return ;
++	__raw_writel(BM_USBPHY_CTRL_ENHOSTDISCONDETECT,
++		MX6_IO_ADDRESS(pdata->phy_regs)
++		+ HW_USBPHY_CTRL_SET);
++}
++
+ static void _phy_lowpower_suspend(struct fsl_usb2_platform_data *pdata, bool enable)
+ {
+ 	u32 tmp;
+@@ -379,11 +400,11 @@ static int  __init mx6_usb_h1_init(void)
+ 
+ 	usbh1_config.wakeup_pdata = &usbh1_wakeup_config;
+ 	if (usb_icbug_swfix_need()) {
++		usbh1_config.platform_rh_suspend = usbh1_platform_rh_suspend_swfix;
++		usbh1_config.platform_rh_resume  = usbh1_platform_rh_resume_swfix;
++	} else {
+ 		usbh1_config.platform_rh_suspend = usbh1_platform_rh_suspend;
+ 		usbh1_config.platform_rh_resume  = usbh1_platform_rh_resume;
+-	} else {
+-		usbh1_config.platform_rh_suspend = NULL;
+-		usbh1_config.platform_rh_resume  = NULL;
+ 	}
+ 	if (cpu_is_mx6sl())
+ 		pdev = imx6sl_add_fsl_ehci_hs(1, &usbh1_config);
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index 168808e..97d963a 100755
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -63,8 +63,11 @@ bool usb_icbug_swfix_need(void)
+ {
+ 	if (cpu_is_mx6sl())
+ 		return false;
+-	else
+-		return true;
++	else if ((mx6q_revision() > IMX_CHIP_REVISION_1_1))
++		return false;
++	else if ((mx6dl_revision() > IMX_CHIP_REVISION_1_0))
++		return false;
++	return true;
+ }
+ EXPORT_SYMBOL(usb_icbug_swfix_need);
+ 
+-- 
+1.7.7.4
+

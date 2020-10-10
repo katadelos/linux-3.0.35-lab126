@@ -1,0 +1,68 @@
+From cf43902f8087fc02f3605b04a110170551f54501 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Fri, 25 May 2012 17:50:19 +0800
+Subject: [PATCH 1548/2463] ENGR00211133 IPUv3 fb:Check boot opt to decide if
+ disp fb'll be present
+
+This patch checks video boot option to decide whether we'll register
+certain display framebuffer devices. The user may add video=mxcfbx:off
+to kernel bootup command line to disable a display framebuffer
+register. The 'x' means that the display number presented in kernel.
+Defaultly, all display framebuffers will be registered if the user
+doesn't specify related 'off' option in kernel bootup command line.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |   16 ++++++++++------
+ 1 files changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 2d0ec84..4b2a19d 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -1771,7 +1771,10 @@ static int mxcfb_option_setup(struct platform_device *pdev)
+ 	char name[] = "mxcfb0";
+ 
+ 	name[5] += pdev->id;
+-	fb_get_options(name, &options);
++	if (fb_get_options(name, &options)) {
++		dev_err(&pdev->dev, "Can't get fb option for %s!\n", name);
++		return -ENODEV;
++	}
+ 
+ 	if (!options || !*options)
+ 		return 0;
+@@ -2046,17 +2049,17 @@ static int mxcfb_probe(struct platform_device *pdev)
+ 	struct resource *res;
+ 	int ret = 0;
+ 
+-	/*
+-	 * Initialize FB structures
+-	 */
++	ret = mxcfb_option_setup(pdev);
++	if (ret)
++		goto get_fb_option_failed;
++
++	/* Initialize FB structures */
+ 	fbi = mxcfb_init_fbinfo(&pdev->dev, &mxcfb_ops);
+ 	if (!fbi) {
+ 		ret = -ENOMEM;
+ 		goto init_fbinfo_failed;
+ 	}
+ 
+-	mxcfb_option_setup(pdev);
+-
+ 	mxcfbi = (struct mxcfb_info *)fbi->par;
+ 	mxcfbi->ipu_int_clk = plat_data->int_clk;
+ 	ret = mxcfb_dispdrv_init(pdev, fbi);
+@@ -2166,6 +2169,7 @@ init_dispdrv_failed:
+ 	fb_dealloc_cmap(&fbi->cmap);
+ 	framebuffer_release(fbi);
+ init_fbinfo_failed:
++get_fb_option_failed:
+ 	return ret;
+ }
+ 
+-- 
+1.7.7.4
+

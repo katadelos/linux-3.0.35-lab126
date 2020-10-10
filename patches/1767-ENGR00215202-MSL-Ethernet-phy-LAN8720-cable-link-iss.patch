@@ -1,0 +1,59 @@
+From bc16e1ce1e7106403e524da6717aea1ce63817fd Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Thu, 28 Jun 2012 15:29:43 +0800
+Subject: [PATCH 1767/2463] ENGR00215202 - MSL : Ethernet phy LAN8720 cable
+ link issue
+
+- Phy LAN8720 link status is un-stable when disable clock from clock
+  enabled status. The phy register_1[link status] bit is pulsatile,
+  so driver will print:
+  	PHY: 1:00 - Link is Up - 100/Full
+	PHY: 1:00 - Link is Down
+	PHY: 1:00 - Link is Up - 100/Full
+	PHY: 1:00 - Link is Down
+	...
+
+- Because phy clock source is from FEC internel clock, if disbale clock
+  from enabled status, some LAN8720 phys status machine is in disorder
+  and cannot display link status correctly. So, it need to do phy hw
+  reset before clock enable.
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_arm2.c |   12 +++---------
+ 1 files changed, 3 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 3608e51..00c0fe1 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -670,23 +670,17 @@ static int mx6sl_arm2_fec_phy_init(struct phy_device *phydev)
+ 
+ 	/* power on FEC phy and reset phy */
+ 	gpio_request(MX6_ARM2_FEC_PWR_EN, "fec-pwr");
+-	gpio_direction_output(MX6_ARM2_FEC_PWR_EN, 1);
++	gpio_direction_output(MX6_ARM2_FEC_PWR_EN, 0);
+ 	/* wait RC ms for hw reset */
+-	udelay(50);
++	msleep(1);
++	gpio_direction_output(MX6_ARM2_FEC_PWR_EN, 1);
+ 
+ 	/* check phy power */
+ 	val = phy_read(phydev, 0x0);
+ 	if (val & BMCR_PDOWN) {
+ 		phy_write(phydev, 0x0, (val & ~BMCR_PDOWN));
+-		udelay(50);
+ 	}
+ 
+-	/* sw reset phy */
+-	val = phy_read(phydev, 0x0);
+-	val |= BMCR_RESET;
+-	phy_write(phydev, 0x0, val);
+-	udelay(50);
+-
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

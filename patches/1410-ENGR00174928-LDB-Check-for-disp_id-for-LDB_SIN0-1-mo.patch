@@ -1,0 +1,39 @@
+From e8c49ca5793be3f87a89eb60af3e009b42391c5c Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Wed, 2 May 2012 14:40:59 +0800
+Subject: [PATCH 1410/2463] ENGR00174928 LDB: Check for disp_id for LDB_SIN0/1
+ mode
+
+For LDB_SIN0 mode, lvds channel0 can only connect with ipu di0
+For LDB_SIN1 mode, lvds channel1 can only connect with ipu di1
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/video/mxc/ldb.c |   11 +++++++++++
+ 1 files changed, 11 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/video/mxc/ldb.c b/drivers/video/mxc/ldb.c
+index dacb9b4..41233d4 100644
+--- a/drivers/video/mxc/ldb.c
++++ b/drivers/video/mxc/ldb.c
+@@ -455,6 +455,17 @@ static int ldb_disp_init(struct mxc_dispdrv_handle *disp,
+ 		else
+ 			ldb->mode = plat_data->mode;
+ 
++		if ((ldb->mode == LDB_SIN0) || (ldb->mode == LDB_SIN1)) {
++			ret = ldb->mode - LDB_SIN0;
++			if (plat_data->disp_id != ret) {
++				dev_warn(&ldb->pdev->dev,
++					"change IPU DI%d to IPU DI%d for LDB "
++					"channel%d.\n",
++					plat_data->disp_id, ret, ret);
++				plat_data->disp_id = ret;
++			}
++		}
++
+ 		if (ldb->mode == LDB_SPL_DI0) {
+ 			reg |= LDB_SPLIT_MODE_EN | LDB_CH0_MODE_EN_TO_DI0
+ 				| LDB_CH1_MODE_EN_TO_DI0;
+-- 
+1.7.7.4
+

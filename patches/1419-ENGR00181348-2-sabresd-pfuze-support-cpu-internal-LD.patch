@@ -1,0 +1,69 @@
+From bb66160d603a773c9f85df07f23035ad129597f0 Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Wed, 2 May 2012 15:36:49 +0800
+Subject: [PATCH 1419/2463] ENGR00181348-2 :sabresd pfuze support cpu internal
+ LDO bypass
+
+1. need  add flag to let cpu freq driver know pfuze regulator is ok or not
+,so that cpu freq driver can directly used, otherwise cpu freq should use
+raw i2c write/read interface.
+2. fix one build warning
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ drivers/regulator/core.c               |    2 +-
+ drivers/regulator/pfuze100-regulator.c |   19 +++++++++++++++++++
+ 2 files changed, 20 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/regulator/core.c b/drivers/regulator/core.c
+index bffd22f..5447354 100644
+--- a/drivers/regulator/core.c
++++ b/drivers/regulator/core.c
+@@ -276,7 +276,7 @@ static ssize_t regulator_uV_show(struct device *dev,
+ 	return ret;
+ }
+ static ssize_t regulator_uV_store(struct device *dev,
+-				struct device_attribute *attr, char *buf,
++				struct device_attribute *attr, const char *buf,
+ 				size_t count)
+ {
+ 	struct regulator_dev *rdev = dev_get_drvdata(dev);
+diff --git a/drivers/regulator/pfuze100-regulator.c b/drivers/regulator/pfuze100-regulator.c
+index 34ca0fb4..e2aaa2d 100644
+--- a/drivers/regulator/pfuze100-regulator.c
++++ b/drivers/regulator/pfuze100-regulator.c
+@@ -657,6 +657,21 @@ static int __devexit pfuze100_regulator_remove(struct platform_device *pdev)
+ 	return 0;
+ }
+ 
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++int cpu_freq_suspend_in;	/*judge for in suspend or not*/
++static int pfuze100_regulator_suspend(struct platform_device *pdev,
++					pm_message_t state)
++{
++	cpu_freq_suspend_in = 1;
++	return 0;
++}
++
++static int pfuze100_regulator_resume(struct platform_device *pdev)
++{
++	cpu_freq_suspend_in = 0;
++	return 0;
++}
++#endif
+ static struct platform_driver pfuze100_regulator_driver = {
+ 	.driver = {
+ 		   .name = "pfuze100-regulator",
+@@ -664,6 +679,10 @@ static struct platform_driver pfuze100_regulator_driver = {
+ 		   },
+ 	.remove = __devexit_p(pfuze100_regulator_remove),
+ 	.probe = pfuze100_regulator_probe,
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++	.suspend = pfuze100_regulator_suspend,
++	.resume = pfuze100_regulator_resume,
++#endif
+ };
+ 
+ static int __init pfuze100_regulator_init(void)
+-- 
+1.7.7.4
+

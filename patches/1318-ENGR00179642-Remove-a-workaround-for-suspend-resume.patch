@@ -1,0 +1,32 @@
+From 502d6de4202d458fd0a73c2de304618ff0ca8d87 Mon Sep 17 00:00:00 2001
+From: Loren Huang <b02279@freescale.com>
+Date: Fri, 13 Apr 2012 18:14:02 +0800
+Subject: [PATCH 1318/2463] ENGR00179642 Remove a workaround for
+ suspend/resume
+
+Remove a workaround for suspend/resume:
+The workaround is turn on clock before gpu entering suspend.
+After clock code bug is fixed, this workaround becomes no necessary.
+
+Signed-off-by: Loren Huang <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../hal/os/linux/kernel/gc_hal_kernel_driver.c     |    2 --
+ 1 files changed, 0 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+index 30e6a30..4d544ea 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+@@ -1022,8 +1022,6 @@ static int __devinit gpu_suspend(struct platform_device *dev, pm_message_t state
+             {
+                 status = gckHARDWARE_SetPowerManagementState(device->kernels[i]->hardware, gcvPOWER_OFF);
+             }
+-            /*gpu clock must be turned on before power down*/
+-            gckOS_SetGPUPower(device->os, i, gcvTRUE, gcvFALSE);
+             if (gcmIS_ERROR(status))
+             {
+                 return -1;
+-- 
+1.7.7.4
+

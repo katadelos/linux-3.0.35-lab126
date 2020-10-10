@@ -1,0 +1,31 @@
+From ac92166bfb5efefba5c26e100a6325326dc01ed3 Mon Sep 17 00:00:00 2001
+From: Richard Liu <r66033@freescale.com>
+Date: Wed, 1 Aug 2012 15:24:51 +0800
+Subject: [PATCH 1845/2463] ENGR00216855 suspend resume fail related with
+ clock glitch
+
+GPU 2D core suspend resume fail related with clock glitch
+Switch GPU 2D core clock to PLL2
+PLL3 has an errata TKT094231 To1.2 will fix it
+
+Signed-off-by: Richard Liu <r66033@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 34c26d4..4d98b26 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5377,7 +5377,7 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	/* Need to keep PLL3_PFD_540M enabled until AXI is sourced from it. */
+ 	clk_enable(&axi_clk);
+ 
+-	if (cpu_is_mx6q())
++	if (cpu_is_mx6q() && (mx6q_revision() > IMX_CHIP_REVISION_1_1))
+ 		clk_set_parent(&gpu2d_core_clk[0], &pll3_usb_otg_main_clk);
+ 
+ 	clk_set_parent(&ldb_di0_clk, &pll2_pfd_352M);
+-- 
+1.7.7.4
+

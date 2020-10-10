@@ -1,0 +1,189 @@
+From da5b85b9bd4b78dc068845641cf2f32fb13203cc Mon Sep 17 00:00:00 2001
+From: Sammy He <r62914@freescale.com>
+Date: Sat, 9 Jul 2011 00:43:22 +0800
+Subject: [PATCH 0239/2463] ENGR00152371-2 mx6q: Add vpu support in arch/arm
+
+Change arch/arm files to add vpu support for mx6q.
+
+Signed-off-by: Sammy He <r62914@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig                       |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c        |    1 +
+ arch/arm/mach-mx6/devices-imx6q.h               |    4 +++
+ arch/arm/plat-mxc/devices/platform-imx_vpu.c    |   32 ++++++++++++++++++++---
+ arch/arm/plat-mxc/include/mach/devices-common.h |    3 +-
+ arch/arm/plat-mxc/include/mach/mx6.h            |    6 ++--
+ arch/arm/plat-mxc/include/mach/mxc_vpu.h        |    2 +
+ 7 files changed, 41 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index ab563e9..a9d32f4 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -29,6 +29,7 @@ config MACH_MX6Q_SABREAUTO
+ 	select IMX_HAVE_PLATFORM_SPI_IMX
+ 	select IMX_HAVE_PLATFORM_IMX_I2C
+ 	select IMX_HAVE_PLATFORM_VIV_GPU
++	select IMX_HAVE_PLATFORM_IMX_VPU
+ 	select IMX_HAVE_PLATFORM_IMX_ANATOP_THERMAL
+ 	select IMX_HAVE_PLATFORM_FSL_USB2_UDC
+ 	select IMX_HAVE_PLATFORM_MXC_EHCI
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index fbe4e96..b02c711 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -501,6 +501,7 @@ static void __init mx6_board_init(void)
+ 	imx_add_viv_gpu("gc320", &imx6_gc320_data, NULL);
+ 	imx6q_sabreauto_init_usb();
+ 	imx6q_add_ahci(0, &mx6q_sabreauto_sata_data);
++	imx6q_add_vpu();
+ 
+ 	gpio_request(MX6Q_SABREAUTO_DISP0_PWR, "disp0-pwr");
+ 	gpio_direction_output(MX6Q_SABREAUTO_DISP0_PWR, 1);
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 283a242..4623f1b 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -76,6 +76,7 @@ extern const struct imx_viv_gpu_data imx6_gc355_data __initconst;
+ extern const struct imx_ahci_data imx6q_ahci_data __initconst;
+ #define imx6q_add_ahci(id, pdata)   \
+ 	imx_add_ahci(&imx6q_ahci_data, pdata)
++
+ extern const struct imx_ipuv3_data imx6q_ipuv3_data[] __initconst;
+ #define imx6q_add_ipuv3(id, pdata)	imx_add_ipuv3(id, &imx6q_ipuv3_data[id], pdata)
+ #define imx6q_add_ipuv3fb(id, pdata)	imx_add_ipuv3_fb(id, pdata)
+@@ -95,3 +96,6 @@ extern const struct imx_ldb_data imx6q_ldb_data __initconst;
+ #define imx6q_add_v4l2_capture(id)	\
+ 	platform_device_register_resndata(NULL, "mxc_v4l2_capture",\
+ 			id, NULL, 0, NULL, 0);
++
++extern const struct imx_vpu_data imx6q_vpu_data __initconst;
++#define imx6q_add_vpu() imx_add_vpu(&imx6q_vpu_data)
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_vpu.c b/arch/arm/plat-mxc/devices/platform-imx_vpu.c
+index 4d27cd3..1b72734 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx_vpu.c
++++ b/arch/arm/plat-mxc/devices/platform-imx_vpu.c
+@@ -12,13 +12,24 @@
+ #define imx5_vpu_data_entry_single(soc, flag, size, vpu_reset, vpu_pg)	\
+ 	{							\
+ 		.iobase = soc ## _VPU_BASE_ADDR,		\
+-		.irq = soc ## _INT_VPU,				\
++		.irq_ipi = soc ## _INT_VPU,			\
+ 		.iram_enable = flag,				\
+ 		.iram_size = size,				\
+ 		.reset = vpu_reset,				\
+ 		.pg = vpu_pg,					\
+ 	}
+ 
++#define imx6_vpu_data_entry_single(soc, flag, size, vpu_reset, vpu_pg)  \
++	{                                                       \
++		.iobase = soc ## _VPU_BASE_ADDR,                \
++		.irq_ipi = soc ## _INT_VPU_IPI,                 \
++		.irq_jpg = soc ## _INT_VPU_JPG,			\
++		.iram_enable = flag,                            \
++		.iram_size = size,                              \
++		.reset = vpu_reset,                             \
++		.pg = vpu_pg,                                   \
++	}
++
+ #ifdef CONFIG_SOC_IMX51
+ void mx51_vpu_reset(void)
+ {
+@@ -98,6 +109,12 @@ const struct imx_vpu_data imx53_vpu_data __initconst =
+ 			true, 0x14000, mx53_vpu_reset, mx53_vpu_pg);
+ #endif
+ 
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_vpu_data imx6q_vpu_data __initconst =
++			imx6_vpu_data_entry_single(MX6Q,
++			false, 0x14000, NULL, NULL);
++#endif
++
+ struct platform_device *__init imx_add_vpu(
+ 		const struct imx_vpu_data *data)
+ {
+@@ -105,13 +122,20 @@ struct platform_device *__init imx_add_vpu(
+ 	struct resource res[] = {
+ 		{
+ 			.start = data->iobase,
+-			.end = data->iobase + SZ_4K - 1,
++			.end = data->iobase + SZ_16K - 1,
+ 			.flags = IORESOURCE_MEM,
+ 		}, {
+-			.start = data->irq,
+-			.end = data->irq,
++			.start = data->irq_ipi,
++			.end = data->irq_ipi,
+ 			.flags = IORESOURCE_IRQ,
+ 		},
++#ifdef CONFIG_SOC_IMX6Q
++		{
++			.start = data->irq_jpg,
++			.end = data->irq_jpg,
++			.flags = IORESOURCE_IRQ,
++		},
++#endif
+ 	};
+ 
+ 	pdata.reset = data->reset;
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 87de01f..c384f31 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -330,7 +330,8 @@ struct platform_device *__init imx_add_ipuv3_fb(
+ #include <mach/mxc_vpu.h>
+ struct imx_vpu_data {
+ 	resource_size_t iobase;
+-	resource_size_t irq;
++	resource_size_t irq_ipi;
++	resource_size_t irq_jpg;
+ 	bool iram_enable;
+ 	int iram_size;
+ 	void (*reset) (void);
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index dabb463..6c44cd5 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -141,7 +141,7 @@
+ #define SSI3_BASE_ADDR              (ATZ1_BASE_ADDR + 0x30000) /* slot 12 */
+ #define ASRC_BASE_ADDR              (ATZ1_BASE_ADDR + 0x34000) /* slot 13 */
+ #define SPBA_BASE_ADDR              (ATZ1_BASE_ADDR + 0x3C000) /* slot 15 */
+-#define VPU_BASE_ADDR               (ATZ1_BASE_ADDR + 0x40000) /* slot 33,
++#define MX6Q_VPU_BASE_ADDR          (ATZ1_BASE_ADDR + 0x40000) /* slot 33,
+ 					global en[1], til 0x7BFFF */
+ 
+ /* ATZ#1- On Platform */
+@@ -272,7 +272,7 @@
+ #define MXC_INT_GPR                                32
+ #define MXC_INT_CHEETAH_CSYSPWRUPREQ               33
+ #define MX6Q_INT_SDMA                              34
+-#define MXC_INT_VPU_JPG                            35
++#define MX6Q_INT_VPU_JPG                            35
+ #define MXC_INT_INTERRUPT_36_NUM                   36
+ #define MX6Q_INT_IPU1_ERR                          37
+ #define MX6Q_INT_IPU1_SYN                          38
+@@ -281,7 +281,7 @@
+ #define MXC_INT_GPU3D_IRQ                          41
+ #define MXC_INT_GPU2D_IRQ                          42
+ #define MXC_INT_OPENVG_XAQ2                        43
+-#define MXC_INT_VPU_IPI                            44
++#define MX6Q_INT_VPU_IPI                            44
+ #define MXC_INT_APBHDMA_DMA                        45
+ #define MXC_INT_WEIM                               46
+ #define MXC_INT_RAWNAND_BCH                        47
+diff --git a/arch/arm/plat-mxc/include/mach/mxc_vpu.h b/arch/arm/plat-mxc/include/mach/mxc_vpu.h
+index 2dbe749..dea8ccb 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc_vpu.h
++++ b/arch/arm/plat-mxc/include/mach/mxc_vpu.h
+@@ -60,6 +60,8 @@ struct vpu_mem_desc {
+ #define	BIT_INT_CLEAR			0x00C
+ #define	BIT_INT_STATUS			0x010
+ 
++#define MJPEG_PIC_STATUS_REG		0x3004
++
+ #define BIT_WORK_CTRL_BUF_BASE		0x100
+ #define BIT_WORK_CTRL_BUF_REG(i)	(BIT_WORK_CTRL_BUF_BASE + i * 4)
+ #define BIT_CODE_BUF_ADDR		BIT_WORK_CTRL_BUF_REG(0)
+-- 
+1.7.7.4
+

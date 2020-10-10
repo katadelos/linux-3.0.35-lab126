@@ -1,0 +1,469 @@
+From c1e3dbbcf7a886d2c5c6f1ccb184659a9fa6c832 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Fri, 1 Feb 2013 12:31:21 +0800
+Subject: [PATCH 2383/2463] ENGR00243106 imx: pcie: enable pcie msi on imx6
+ platforms
+
+deprieved from boundary msi support patch
+add the following modifications
+ * use the RC's line address 0x01FF8000 instead of one
+ actual physical memory as the msi start address.
+ The physical memory address is not mandatory required by the
+ msi start address.
+
+ * set PCI_MSI_FLAGS_ENABLE in RC's msi capability
+ structure when the msi int is enabled.
+
+ * the data of msg is only 16bit, set the upper 8bit
+ cputype, and the msi int num to the lower 8bit.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig             |    1 +
+ arch/arm/mach-mx6/Makefile            |    1 +
+ arch/arm/mach-mx6/irq.c               |    8 ++-
+ arch/arm/mach-mx6/msi.c               |  151 +++++++++++++++++++++++++++++++++
+ arch/arm/mach-mx6/msi.h               |   26 ++++++
+ arch/arm/mach-mx6/pcie.c              |  103 +++++++++++++++++++++-
+ arch/arm/plat-mxc/include/mach/irqs.h |   11 ++-
+ 7 files changed, 293 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index fac4d05..59d8ab3 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -5,6 +5,7 @@ config ARCH_MX6Q
+ 	select USB_ARCH_HAS_EHCI
+ 	select ARCH_MXC_IOMUX_V3
+ 	select ARCH_MXC_AUDMUX_V2
++	select ARCH_SUPPORTS_MSI
+ 	select ARM_GIC
+ 	select ARCH_HAS_CPUFREQ
+ 	select OC_ETM
+diff --git a/arch/arm/mach-mx6/Makefile b/arch/arm/mach-mx6/Makefile
+index f26ac15..8c1d754 100644
+--- a/arch/arm/mach-mx6/Makefile
++++ b/arch/arm/mach-mx6/Makefile
+@@ -21,3 +21,4 @@ obj-$(CONFIG_IMX_PCIE) += pcie.o
+ obj-$(CONFIG_USB_FSL_ARC_OTG) += usb_dr.o
+ obj-$(CONFIG_USB_EHCI_ARC_H1) += usb_h1.o
+ obj-$(CONFIG_MACH_IMX_BLUETOOTH_RFKILL) += mx6_bt_rfkill.o
++obj-$(CONFIG_PCI_MSI) += msi.o
+diff --git a/arch/arm/mach-mx6/irq.c b/arch/arm/mach-mx6/irq.c
+index 3281693..d0bde95 100644
+--- a/arch/arm/mach-mx6/irq.c
++++ b/arch/arm/mach-mx6/irq.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -26,6 +26,9 @@
+ #ifdef CONFIG_CPU_FREQ_GOV_INTERACTIVE
+ #include <linux/cpufreq.h>
+ #endif
++#ifdef CONFIG_PCI_MSI
++#include "msi.h"
++#endif
+ 
+ int mx6q_register_gpios(void);
+ unsigned int gpc_wake_irq[4];
+@@ -131,4 +134,7 @@ void mx6_init_irq(void)
+ 	for (i = 0; i < ARRAY_SIZE(mxc_irq_tuner); i++)
+ 		cpufreq_gov_irq_tuner_register(mxc_irq_tuner[i]);
+ #endif
++#ifdef CONFIG_PCI_MSI
++	imx_msi_init();
++#endif
+ }
+diff --git a/arch/arm/mach-mx6/msi.c b/arch/arm/mach-mx6/msi.c
+new file mode 100644
+index 0000000..096d1c2
+--- /dev/null
++++ b/arch/arm/mach-mx6/msi.c
+@@ -0,0 +1,151 @@
++/*
++ * arch/arm/mach-mx6/msi.c
++ *
++ * PCI MSI support for the imx processor
++ *
++ * Copyright (c) 2013 Boundary Devices.
++ * Copyright (C) 2013 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms and conditions of the GNU General Public License,
++ * version 2, as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope it will be useful, but WITHOUT
++ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
++ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
++ * more details.
++ *
++ * You should have received a copy of the GNU General Public License along with
++ * this program; if not, write to the Free Software Foundation, Inc., 59 Temple
++ * Place - Suite 330, Boston, MA 02111-1307 USA.
++ *
++ */
++#include <linux/pci.h>
++#include <linux/msi.h>
++#include <asm/bitops.h>
++#include <asm/mach/irq.h>
++#include <asm/irq.h>
++#include "msi.h"
++
++
++#define IMX_NUM_MSI_IRQS 128
++static DECLARE_BITMAP(msi_irq_in_use, IMX_NUM_MSI_IRQS);
++
++static void imx_msi_handler(unsigned int irq, struct irq_desc *desc)
++{
++	int i, j;
++	unsigned int status;
++	struct irq_chip *chip = irq_get_chip(irq);
++	unsigned int base_irq = IRQ_IMX_MSI_0;
++
++	chained_irq_enter(chip, desc);
++	for (i = 0; i < 8; i++) {
++		status = imx_pcie_msi_pending(i);
++		while (status) {
++			j = __fls(status);
++			generic_handle_irq(base_irq + j);
++			status &= ~(1 << j);
++		}
++		base_irq += 32;
++	}
++	chained_irq_exit(chip, desc);
++}
++
++/*
++* Dynamic irq allocate and deallocation
++*/
++int create_irq(void)
++{
++	int irq, pos;
++
++	do {
++		pos = find_first_zero_bit(msi_irq_in_use, IMX_NUM_MSI_IRQS);
++		if ((unsigned int)pos >= IMX_NUM_MSI_IRQS)
++			return -ENOSPC;
++		/* test_and_set_bit operates on 32-bits at a time */
++	} while (test_and_set_bit(pos, msi_irq_in_use));
++
++	irq = IRQ_IMX_MSI_0 + pos;
++	dynamic_irq_init(irq);
++	return irq;
++}
++
++void destroy_irq(unsigned int irq)
++{
++	int pos = irq - IRQ_IMX_MSI_0;
++
++	dynamic_irq_cleanup(irq);
++	clear_bit(pos, msi_irq_in_use);
++}
++
++void arch_teardown_msi_irq(unsigned int irq)
++{
++	destroy_irq(irq);
++}
++
++static void imx_msi_irq_ack(struct irq_data *d)
++{
++	return;
++}
++
++static void imx_msi_irq_enable(struct irq_data *d)
++{
++	imx_pcie_enable_irq(d->irq - IRQ_IMX_MSI_0, 1);
++	return unmask_msi_irq(d);
++}
++
++static void imx_msi_irq_disable(struct irq_data *d)
++{
++	imx_pcie_enable_irq(d->irq - IRQ_IMX_MSI_0, 0);
++	return mask_msi_irq(d);
++}
++
++static void imx_msi_irq_mask(struct irq_data *d)
++{
++	imx_pcie_mask_irq(d->irq - IRQ_IMX_MSI_0, 1);
++	return mask_msi_irq(d);
++}
++
++static void imx_msi_irq_unmask(struct irq_data *d)
++{
++	imx_pcie_mask_irq(d->irq - IRQ_IMX_MSI_0, 0);
++	return unmask_msi_irq(d);
++}
++
++static struct irq_chip imx_msi_chip = {
++	.name = "PCIe-MSI",
++	.irq_ack = imx_msi_irq_ack,
++	.irq_enable = imx_msi_irq_enable,
++	.irq_disable = imx_msi_irq_disable,
++	.irq_mask = imx_msi_irq_mask,
++	.irq_unmask = imx_msi_irq_unmask,
++};
++
++int arch_setup_msi_irq(struct pci_dev *pdev, struct msi_desc *desc)
++{
++	int irq = create_irq();
++	struct msi_msg msg;
++
++	if (irq < 0)
++		return irq;
++
++	irq_set_msi_desc(irq, desc);
++
++	msg.address_hi = 0x0;
++	msg.address_lo = MSI_MATCH_ADDR;
++	/* 16bits msg.data: set cpu type to the upper 8bits*/
++	msg.data = (mxc_cpu_type << 8) | ((irq - IRQ_IMX_MSI_0) & 0xFF);
++
++	write_msi_msg(irq, &msg);
++	irq_set_chip_and_handler(irq, &imx_msi_chip, handle_simple_irq);
++	set_irq_flags(irq, IRQF_VALID);
++	pr_info("IMX-PCIe: MSI 0x%04x @%#x:%#x, irq = %d\n",
++			msg.data, msg.address_hi,
++			msg.address_lo, irq);
++	return 0;
++}
++
++void imx_msi_init(void)
++{
++	irq_set_chained_handler(MXC_INT_PCIE_0, imx_msi_handler);
++}
+diff --git a/arch/arm/mach-mx6/msi.h b/arch/arm/mach-mx6/msi.h
+new file mode 100644
+index 0000000..ce0e467
+--- /dev/null
++++ b/arch/arm/mach-mx6/msi.h
+@@ -0,0 +1,26 @@
++/*
++ * Copyright (C) 2013 Boundary Devices, Inc. All Rights Reserved.
++ * Copyright (C) 2013 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++extern void imx_pcie_enable_irq(unsigned pos, int set);
++void imx_pcie_mask_irq(unsigned pos, int set);
++unsigned imx_pcie_msi_pending(unsigned index);
++
++#define MSI_MATCH_ADDR  0x01FF8000
++
++void imx_msi_init(void);
+diff --git a/arch/arm/mach-mx6/pcie.c b/arch/arm/mach-mx6/pcie.c
+index 05d828b..b1e6986 100644
+--- a/arch/arm/mach-mx6/pcie.c
++++ b/arch/arm/mach-mx6/pcie.c
+@@ -37,6 +37,9 @@
+ #include <asm/signal.h>
+ 
+ #include "crm_regs.h"
++#ifdef CONFIG_PCI_MSI
++#include "msi.h"
++#endif
+ 
+ /* Register Definitions */
+ #define PRT_LOG_R_BaseAddress 0x700
+@@ -159,6 +162,18 @@
+ #define LNK_CAP_RegisterResetValue 0x011cc12
+ #define LNK_CAP_RegisterResetMask 0xffffffff
+ 
++#ifdef CONFIG_PCI_MSI
++#define PCIE_RC_MSI_CAP   0x50
++
++#define PCIE_PL_MSICA    0x820
++#define PCIE_PL_MSICUA    0x824
++#define PCIE_PL_MSIC_INT  0x828
++
++#define MSIC_INT_EN  0x0
++#define MSIC_INT_MASK  0x4
++#define MSIC_INT_STATUS  0x8
++#endif
++
+ /* End of Register Definitions */
+ 
+ #define PCIE_DBI_BASE_ADDR	(PCIE_ARB_END_ADDR - SZ_16K + 1)
+@@ -313,6 +328,11 @@ static int imx_pcie_link_up(void __iomem *dbi_base)
+ 
+ static void imx_pcie_regions_setup(void __iomem *dbi_base)
+ {
++	unsigned int i;
++#ifdef CONFIG_PCI_MSI
++	void __iomem *p = dbi_base + PCIE_PL_MSIC_INT;
++#endif
++
+ 	/*
+ 	 * i.MX6 defines 16MB in the AXI address map for PCIe.
+ 	 *
+@@ -322,7 +342,7 @@ static void imx_pcie_regions_setup(void __iomem *dbi_base)
+ 	 *
+ 	 * 0x0100_0000 --- 0x010F_FFFF 1MB IORESOURCE_IO
+ 	 * 0x0110_0000 --- 0x01EF_FFFF 14MB IORESOURCE_MEM
+-	 * 0x01F0_0000 --- 0x01FF_FFFF 1MB Cfg + Registers
++	 * 0x01F0_0000 --- 0x01FF_FFFF 1MB Cfg + MSI + Registers
+ 	 */
+ 
+ 	/* CMD reg:I/O space, MEM space, and Bus Master Enable */
+@@ -342,14 +362,88 @@ static void imx_pcie_regions_setup(void __iomem *dbi_base)
+ 	 */
+ 	writel(0, dbi_base + ATU_VIEWPORT_R);
+ 	writel(PCIE_ARB_END_ADDR - SZ_1M + 1, dbi_base + ATU_REGION_LOWBASE_R);
+-	writel(PCIE_ARB_END_ADDR, dbi_base + ATU_REGION_LIMIT_ADDR_R);
++	writel(PCIE_ARB_END_ADDR - SZ_64K, dbi_base + ATU_REGION_LIMIT_ADDR_R);
+ 	writel(0, dbi_base + ATU_REGION_UPBASE_R);
+ 
+ 	writel(0, dbi_base + ATU_REGION_LOW_TRGT_ADDR_R);
+ 	writel(0, dbi_base + ATU_REGION_UP_TRGT_ADDR_R);
+ 	writel(CfgRdWr0, dbi_base + ATU_REGION_CTRL1_R);
+ 	writel((1<<31), dbi_base + ATU_REGION_CTRL2_R);
++
++#ifdef CONFIG_PCI_MSI
++	writel(MSI_MATCH_ADDR, dbi_base + PCIE_PL_MSICA);
++	writel(0, dbi_base + PCIE_PL_MSICUA);
++	for (i = 0; i < 8 ; i++) {
++		writel(0, p + MSIC_INT_EN);
++		writel(0xFFFFFFFF, p + MSIC_INT_MASK);
++		writel(0xFFFFFFFF, p + MSIC_INT_STATUS);
++		p += 12;
++	}
++#endif
++}
++
++#ifdef CONFIG_PCI_MSI
++void imx_pcie_mask_irq(unsigned int pos, int set)
++{
++	unsigned int mask = 1 << (pos & 0x1F);
++	unsigned int val, newval;
++	void __iomem *p;
++
++	p = dbi_base + PCIE_PL_MSIC_INT + MSIC_INT_MASK + ((pos >> 5) * 12);
++
++	if (pos >= (8 * 32))
++		return;
++	val = readl(p);
++	if (set)
++		newval = val | mask;
++	else
++		newval = val & ~mask;
++	if (val != newval)
++		writel(newval, p);
++}
++
++void imx_pcie_enable_irq(unsigned int pos, int set)
++{
++	unsigned int mask = 1 << (pos & 0x1F);
++	unsigned int val, newval;
++	void __iomem *p;
++
++	p = dbi_base + PCIE_PL_MSIC_INT + MSIC_INT_EN + ((pos >> 5) * 12);
++
++	/* RC: MSI CAP enable */
++	if (set) {
++		val = readl(dbi_base + PCIE_RC_MSI_CAP);
++		val |= (PCI_MSI_FLAGS_ENABLE << 16);
++		writel(val, dbi_base + PCIE_RC_MSI_CAP);
++	}
++
++	if (pos >= (8 * 32))
++		return;
++	val = readl(p);
++	if (set)
++		newval = val | mask;
++	else
++		newval = val & ~mask;
++	if (val != newval)
++		writel(newval, p);
++	if (set && (val != newval))
++		imx_pcie_mask_irq(pos, 0);  /* unmask when enabled */
++	}
++
++unsigned int imx_pcie_msi_pending(unsigned int index)
++{
++	unsigned int val, mask;
++	void __iomem *p = dbi_base + PCIE_PL_MSIC_INT + (index * 12);
++
++	if (index >= 8)
++		return 0;
++	val = readl(p + MSIC_INT_STATUS);
++	mask = readl(p + MSIC_INT_MASK);
++	val &= ~mask;
++	writel(val, p + MSIC_INT_STATUS);
++	return val;
+ }
++#endif
+ 
+ static int imx_pcie_rd_conf(struct pci_bus *bus, u32 devfn, int where,
+ 			int size, u32 *val)
+@@ -368,7 +462,7 @@ static int imx_pcie_rd_conf(struct pci_bus *bus, u32 devfn, int where,
+ 
+ 	if (pp) {
+ 		if (devfn != 0) {
+-			*val = 0xffffffff;
++			*val = 0xFFFFFFFF;
+ 			return PCIBIOS_DEVICE_NOT_FOUND;
+ 		}
+ 
+@@ -440,7 +534,6 @@ static int imx_pcie_wr_conf(struct pci_bus *bus, u32 devfn,
+ 	tmp |= val << ((where & 0x3) * 8);
+ 	writel(tmp, va_address);
+ exit:
+-
+ 	return ret;
+ }
+ 
+@@ -545,7 +638,7 @@ static int pcie_phy_cr_read(int addr , int *data)
+ 
+ 	/* after got ack return data */
+ 	temp_rd_data = readl(dbi_base + PHY_STS_R);
+-	*data = (temp_rd_data & (0xffff << PCIE_CR_STAT_DATA_LOC)) ;
++	*data = (temp_rd_data & (0xFFFF << PCIE_CR_STAT_DATA_LOC)) ;
+ 
+ 	/* deassert rd signal */
+ 	temp_wr_data = 0x0;
+diff --git a/arch/arm/plat-mxc/include/mach/irqs.h b/arch/arm/plat-mxc/include/mach/irqs.h
+index 9e44eaa..62282a9 100644
+--- a/arch/arm/plat-mxc/include/mach/irqs.h
++++ b/arch/arm/plat-mxc/include/mach/irqs.h
+@@ -1,5 +1,5 @@
+ /*
+- *  Copyright 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *  Copyright 2004-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -72,7 +72,14 @@
+ #define MX5_IPU_IRQS 0
+ #endif
+ 
+-#define NR_IRQS	(MXC_IPU_IRQ_START + MX3_IPU_IRQS + MX5_IPU_IRQS)
++#ifdef CONFIG_ARCH_MX6
++#define MX6_MSI_IRQS 128
++#else
++#define MX6_MSI_IRQS 0
++#endif
++
++#define IRQ_IMX_MSI_0 (MXC_IPU_IRQ_START + MX3_IPU_IRQS + MX5_IPU_IRQS)
++#define NR_IRQS  (IRQ_IMX_MSI_0 + MX6_MSI_IRQS)
+ 
+ extern int imx_irq_set_priority(unsigned char irq, unsigned char prio);
+ 
+-- 
+1.7.7.4
+

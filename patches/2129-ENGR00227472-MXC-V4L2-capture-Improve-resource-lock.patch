@@ -1,0 +1,138 @@
+From 020ad348c5c6ea039c68e2aa98f28a1e723130bb Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Mon, 8 Oct 2012 15:55:04 +0800
+Subject: [PATCH 2129/2463] ENGR00227472 MXC V4L2 capture:Improve resource
+ lock
+
+1) We get busy_lock semaphore before we get a dqueue event, so, when user
+is blocked at DQBUF ioctrl, the user will also be blocked at QBUF ioctrl,
+then the video performance will drop. This patch changes to get busy_lock
+semaphore to protect DQBUF ioctrl until we successfully get a dqueue event.
+2) Use queue_int_lock and dqueue_int_lock spinlocks to protect working_q/
+ready_q/done_q in the end of frame interrupt handler camera_callback(), in
+case, the handler and VIDIOC_QBUF/VIDIOC_DQBUF ioctrls are called on diff-
+erent cores at the same time.
+3) Protect ready_q with queue_int_lock spinlock in mxc_streamon(), in case,
+VIDIOC_STREAMON and VIDIOC_QBUF ioctrls are called on different cores at
+the same time.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit e92c2307ebcf66badc5db8d4449218e3489a9e78)
+---
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |   32 ++++++++++++-------
+ 1 files changed, 20 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index a451dfb..0e82820 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -379,6 +379,7 @@ static inline int valid_mode(u32 palette)
+ static int mxc_streamon(cam_data *cam)
+ {
+ 	struct mxc_v4l_frame *frame;
++	unsigned long lock_flags;
+ 	int err = 0;
+ 
+ 	pr_debug("In MVC:mxc_streamon\n");
+@@ -418,6 +419,7 @@ static int mxc_streamon(cam_data *cam)
+ 		}
+ 	}
+ 
++	spin_lock_irqsave(&cam->queue_int_lock, lock_flags);
+ 	cam->ping_pong_csi = 0;
+ 	cam->local_buf_num = 0;
+ 	if (cam->enc_update_eba) {
+@@ -436,7 +438,9 @@ static int mxc_streamon(cam_data *cam)
+ 		frame->ipu_buf_num = cam->ping_pong_csi;
+ 		err |= cam->enc_update_eba(cam->ipu, frame->buffer.m.offset,
+ 					   &cam->ping_pong_csi);
++		spin_unlock_irqrestore(&cam->queue_int_lock, lock_flags);
+ 	} else {
++		spin_unlock_irqrestore(&cam->queue_int_lock, lock_flags);
+ 		return -EINVAL;
+ 	}
+ 
+@@ -1513,8 +1517,10 @@ static int mxc_v4l_dqueue(cam_data *cam, struct v4l2_buffer *buf)
+ 		return -ERESTARTSYS;
+ 	}
+ 
+-	spin_lock_irqsave(&cam->dqueue_int_lock, lock_flags);
++	if (down_interruptible(&cam->busy_lock))
++		return -EBUSY;
+ 
++	spin_lock_irqsave(&cam->dqueue_int_lock, lock_flags);
+ 	cam->enc_counter--;
+ 
+ 	frame = list_entry(cam->done_q.next, struct mxc_v4l_frame, queue);
+@@ -1537,8 +1543,9 @@ static int mxc_v4l_dqueue(cam_data *cam, struct v4l2_buffer *buf)
+ 	buf->flags = frame->buffer.flags;
+ 	buf->m = cam->frame[frame->index].buffer.m;
+ 	buf->timestamp = cam->frame[frame->index].buffer.timestamp;
+-
+ 	spin_unlock_irqrestore(&cam->dqueue_int_lock, lock_flags);
++
++	up(&cam->busy_lock);
+ 	return retval;
+ }
+ 
+@@ -1881,8 +1888,9 @@ static long mxc_v4l_do_ioctl(struct file *file,
+ 	pr_debug("In MVC: mxc_v4l_do_ioctl %x\n", ioctlnr);
+ 	wait_event_interruptible(cam->power_queue, cam->low_power == false);
+ 	/* make this _really_ smp-safe */
+-	if (down_interruptible(&cam->busy_lock))
+-		return -EBUSY;
++	if (ioctlnr != VIDIOC_DQBUF)
++		if (down_interruptible(&cam->busy_lock))
++			return -EBUSY;
+ 
+ 	switch (ioctlnr) {
+ 	/*!
+@@ -1943,15 +1951,10 @@ static long mxc_v4l_do_ioctl(struct file *file,
+ 		}
+ 
+ 		mxc_streamoff(cam);
+-		if (req->memory & V4L2_MEMORY_MMAP)
++		if (req->memory & V4L2_MEMORY_MMAP) {
+ 			mxc_free_frame_buf(cam);
+-		cam->enc_counter = 0;
+-		INIT_LIST_HEAD(&cam->ready_q);
+-		INIT_LIST_HEAD(&cam->working_q);
+-		INIT_LIST_HEAD(&cam->done_q);
+-
+-		if (req->memory & V4L2_MEMORY_MMAP)
+ 			retval = mxc_allocate_frame_buf(cam, req->count);
++		}
+ 		break;
+ 	}
+ 
+@@ -2376,7 +2379,8 @@ static long mxc_v4l_do_ioctl(struct file *file,
+ 		break;
+ 	}
+ 
+-	up(&cam->busy_lock);
++	if (ioctlnr != VIDIOC_DQBUF)
++		up(&cam->busy_lock);
+ 	return retval;
+ }
+ 
+@@ -2510,6 +2514,8 @@ static void camera_callback(u32 mask, void *dev)
+ 
+ 	pr_debug("In MVC:camera_callback\n");
+ 
++	spin_lock(&cam->queue_int_lock);
++	spin_lock(&cam->dqueue_int_lock);
+ 	if (!list_empty(&cam->working_q)) {
+ 		do_gettimeofday(&cur_time);
+ 
+@@ -2564,6 +2570,8 @@ next:
+ 	}
+ 
+ 	cam->local_buf_num = (cam->local_buf_num == 0) ? 1 : 0;
++	spin_unlock(&cam->dqueue_int_lock);
++	spin_unlock(&cam->queue_int_lock);
+ 
+ 	return;
+ }
+-- 
+1.7.7.4
+

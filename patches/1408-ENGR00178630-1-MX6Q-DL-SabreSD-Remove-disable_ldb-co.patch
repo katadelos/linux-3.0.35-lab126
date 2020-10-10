@@ -1,0 +1,54 @@
+From ffbab1ef0d9350af61fb444881027a319efadb51 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Wed, 2 May 2012 13:18:30 +0800
+Subject: [PATCH 1408/2463] ENGR00178630-1 MX6Q/DL SabreSD:Remove disable_ldb
+ command line option
+
+Since the ldb clock source is different from mipi display,
+it doesn't need this option.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |   12 +-----------
+ 1 files changed, 1 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index b7e48c7..d1ac2f4 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -200,7 +200,6 @@
+ static struct clk *sata_clk;
+ static int mma8451_position = 3;
+ static int mag3110_position;
+-static int disable_ldb;
+ static int max11801_mode = 1;
+ 
+ 
+@@ -1524,14 +1523,6 @@ static const struct imx_pcie_platform_data mx6_sabresd_pcie_data __initconst = {
+ 	.pcie_dis	= SABRESD_PCIE_DIS_B,
+ };
+ 
+-static int __init early_disable_ldb(char *p)
+-{
+-	/*mipi dsi need pll3_pfd_540M as 540MHz, ldb will change to 454Mhz*/
+-	disable_ldb = 1;
+-	return 0;
+-}
+-
+-early_param("disable_ldb", early_disable_ldb);
+ /*!
+  * Board specific initialization.
+  */
+@@ -1594,8 +1585,7 @@ static void __init mx6_sabresd_board_init(void)
+ 	imx6q_add_vdoa();
+ 	imx6q_add_mipi_dsi(&mipi_dsi_pdata);
+ 	imx6q_add_lcdif(&lcdif_data);
+-	if (!disable_ldb)
+-		imx6q_add_ldb(&ldb_data);
++	imx6q_add_ldb(&ldb_data);
+ 	imx6q_add_v4l2_output(0);
+ 	imx6q_add_v4l2_capture(0);
+ 	imx6q_add_mipi_csi2(&mipi_csi2_pdata);
+-- 
+1.7.7.4
+

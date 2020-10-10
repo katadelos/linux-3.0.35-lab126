@@ -1,0 +1,36 @@
+From f12b68356a27c384bf7d446154c060f60f3ed24c Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Thu, 6 Dec 2012 17:19:30 +0800
+Subject: [PATCH 2306/2463] ENGR00236031 MX6 USB :Change default USB H1 and
+ OTG driver load order
+
+In current linux BSP USB H1 driver default load before otg driver load,
+which cause USBx not match the ehci controller number. like bellow:
+
+root@freescale /sys/devices/platform/fsl-ehci.0$ ls
+driver     modalias   pools      power      subsystem  uevent     usb2
+root@freescale /sys/devices/platform/fsl-ehci.1$ ls
+driver     modalias   pools      power      subsystem  uevent     usb1
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ arch/arm/mach-mx6/Makefile |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Makefile b/arch/arm/mach-mx6/Makefile
+index e84c024..6310673 100644
+--- a/arch/arm/mach-mx6/Makefile
++++ b/arch/arm/mach-mx6/Makefile
+@@ -18,5 +18,5 @@ obj-$(CONFIG_MACH_MX6Q_HDMIDONGLE) += board-mx6q_hdmidongle.o
+ obj-$(CONFIG_SMP) += plat_hotplug.o platsmp.o headsmp.o
+ obj-$(CONFIG_LOCAL_TIMERS) += localtimer.o
+ obj-$(CONFIG_IMX_PCIE) += pcie.o
+-obj-$(CONFIG_USB_EHCI_ARC_H1) += usb_h1.o
+-obj-$(CONFIG_USB_FSL_ARC_OTG) += usb_dr.o
+\ No newline at end of file
++obj-$(CONFIG_USB_FSL_ARC_OTG) += usb_dr.o
++obj-$(CONFIG_USB_EHCI_ARC_H1) += usb_h1.o
+\ No newline at end of file
+-- 
+1.7.7.4
+

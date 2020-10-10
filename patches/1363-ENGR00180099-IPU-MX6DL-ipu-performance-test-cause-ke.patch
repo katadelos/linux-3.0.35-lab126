@@ -1,0 +1,141 @@
+From 29c58a2282bc983cda1da51a2b6b421ee69f97a1 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Wed, 25 Apr 2012 09:03:52 +0800
+Subject: [PATCH 1363/2463] ENGR00180099 IPU-[MX6DL]: ipu performance test
+ cause kernel dump
+
+1. under vte test environment, boot up and run  ipu_test.sh 7.
+kernel dump occur
+
+kernel BUG at drivers/mxc/ipu3/ipu_device.c:1153!
+
+Unable to handle kernel NULL pointer dereference at virtual address 00000000
+pgd = 80004000
+[00000000] *pgd=00000000
+Internal error: Oops: 817 [#1] PREEMPT SMP
+Modules linked in: ov3640_camera adv7180_tvin ov5640_camera_mipi
+	camera_sensor_clock
+CPU: 0    Not tainted  (3.0.15-daily-01339-gddc0ae9 #1)
+PC is at __bug+0x1c/0x28
+LR is at __bug+0x18/0x28
+pc : [<80042210>]    lr : [<8004220c>]    psr: 60000013
+sp : b41bfc80  ip : c0924000  fp : 00000000
+r10: 00000000  r9 : 00000000  r8 : 00000000
+r7 : 80a9e0f0  r6 : 80a9e10a  r5 : 00000001  r4 : b46f0800
+r3 : 00000000  r2 : 80a4e57c  r1 : 60000093  r0 : 00000038
+Flags: nZCv  IRQs on  FIQs on  Mode SVC_32  ISA ARM  Segment kernel
+Control: 10c53c7d  Table: 4481404a  DAC: 00000015
+Process ipu0_task (pid: 400, stack limit = 0xb41be2f0)
+Stack: (0xb41bfc80 to 0xb41c0000)
+fc80: 80a9a180 8036fe24 b46f0800 00000000 60000013 b41be000 b46f0800 80373750
+fca0: b41bfcd4 80065104 b418aadc 80096598 b418a8ac 60000013 00000000 b418a7e0
+fcc0: b41bfcdc b418a7e8 80a4e598 8006a814 b418a7e0 80065268 00000000 00000094
+fce0: 00000000 60000013 b41be000 b46f0800 00000000 00000000 00000000 803742e8
+fd00: 00000000 b41bfd04 b41bfd04 00000000 00000000 00000000 00000000 00000000
+fd20: 00000000 b41be000 00000001 00000000 00000000 b41bfd34 b41bfd34 00000000
+fd40: 00000000 00000000 00000001 00000000 00000000 b41bfd54 b41bfd54 00000000
+fd60: b41bfd60 b41bfd60 00000000 b4198474 00000000 800f9a34 00000000 800f8f4c
+fd80: 00000000 b2000170 b41bfe18 b2001088 80a3bcfc b2000194 b2010bfc b2010bb0
+fda0: b41bfeb8 800f86d0 00000000 b41bfe24 b41bfe34 b41bfeb8 00000000 b2000194
+fdc0: b2010bb0 00000000 b2001088 800f6e00 b400f0a0 b41bfe18 b2010bb0 b2001088
+fde0: b41bfe36 b41bff17 ffffffff b41bff24 b41bfe36 b41bff17 ffffffff b41bff24
+fe00: 0000002f b41bff24 00000002 00000003 0000000a ffffffff 00000000 00000000
+fe20: 00000000 00000000 b2010bb0 b4114700 b400faa0 39316240 ffffff33 b41be000
+fe40: b41be000 b41bff80 00000000 800e69fc 80a3bcc0 8005dc90 80a7b8ec ffffffff
+fe60: b4050000 00000002 00000000 80087e2c 00003e80 00000000 b4189998 8c008f90
+fe80: 28345a72 b41bfeac 00003e80 00000000 b4189960 8c008f90 b4189960 8c008f90
+fea0: 80a7b8ec ffffffff b4126000 00000002 00000000 80087e2c 80a3bcc0 8005dc90
+fec0: 0000091d 00000000 b418a818 8c008f90 299c8c15 b41bfefc b418a818 8c008f90
+fee0: b418a820 8005c700 00000000 8c008f90 b418a818 b418a818 b41bff14 8005e1d8
+ff00: 00000002 8c008f40 b418a7e0 b41be000 b41bffc4 804ba600 8c008f40 b4040000
+ff20: b41bff44 8005f920 b4040000 8c008f40 80037f40 80037f40 800371b4 80037f40
+ff40: 80037f40 80037f40 800371b4 80037f40 b4189960 b403fe38 80064f14 00000001
+ff60: b403fe44 00000000 00000000 00000003 b41bffa4 8005bec0 ffffffff 00000000
+ff80: b4040000 00000000 b418a7e0 80082ebc b41bff90 b41bff90 00000031 803741e5
+ffa0: 00000013 b403fe28 80a9e138 803741e4 00000013 00000000 00000000 00000000
+ffc0: 00000000 80082898 8003fa08 00000000 80a9e138 00000000 00000000 00000000
+ffe0: b41bffe0 b41bffe0 b403fe28 80082818 8003fa08 8003fa08 00000000 00000000
+[<80042210>] (__bug+0x1c/0x28) from [<8036fe24>] (_get_vdoa_ipu_res+0x23c/0x25c)
+[<8036fe24>] (_get_vdoa_ipu_res+0x23c/0x25c) from [<80373750>]
+	(get_res_do_task+0x10/0x458)
+[<80373750>] (get_res_do_task+0x10/0x458) from [<803742e8>]
+	(ipu_task_thread+0x104/0xa60)
+[<803742e8>] (ipu_task_thread+0x104/0xa60) from [<80082898>] (kthread+0x80/0x88)
+[<80082898>] (kthread+0x80/0x88) from [<8003fa08>] (kernel_thread_exit+0x0/0x8)
+Code: e59f0010 e1a01003 eb11d231 e3a03000 (e5833000)
+
+---[ end trace db719a475f81b6f8 ]---
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_device.c |   12 +++++++-----
+ 1 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_device.c b/drivers/mxc/ipu3/ipu_device.c
+index 1479651..ae98278 100644
+--- a/drivers/mxc/ipu3/ipu_device.c
++++ b/drivers/mxc/ipu3/ipu_device.c
+@@ -351,6 +351,7 @@ static DECLARE_WAIT_QUEUE_HEAD(thread_waitq);
+ static DECLARE_WAIT_QUEUE_HEAD(res_waitq);
+ static atomic_t req_cnt;
+ static int major;
++static int max_ipu_no;
+ static int thread_id;
+ static atomic_t frame_no;
+ static struct class *ipu_class;
+@@ -1147,7 +1148,7 @@ static int _get_vdoa_ipu_res(struct ipu_task_entry *t)
+ 		}
+ 	}
+ 
+-	for (i = 0; i < MXC_IPU_MAX_NUM; i++) {
++	for (i = 0; i < max_ipu_no; i++) {
+ 		ipu = ipu_get_soc(i);
+ 		if (IS_ERR(ipu))
+ 			BUG();
+@@ -1176,7 +1177,7 @@ static int _get_vdoa_ipu_res(struct ipu_task_entry *t)
+ 	if (found_ipu)
+ 		goto next;
+ 
+-	for (i = 0; i < MXC_IPU_MAX_NUM; i++) {
++	for (i = 0; i < max_ipu_no; i++) {
+ 		ipu = ipu_get_soc(i);
+ 		if (IS_ERR(ipu))
+ 			BUG();
+@@ -1704,7 +1705,7 @@ static int init_tiled_buf(struct ipu_soc *ipu, struct ipu_task_entry *t,
+ 		return -EINVAL;
+ 	else if (param.band_mode)
+ 		param.band_lines = (1 << t->set.band_lines);
+-	for (i = 0; i < MXC_IPU_MAX_NUM; i++) {
++	for (i = 0; i < max_ipu_no; i++) {
+ 		ipu_idx = ipu_get_soc(i);
+ 		if (!IS_ERR(ipu_idx) && ipu_idx == ipu)
+ 			break;
+@@ -1712,7 +1713,7 @@ static int init_tiled_buf(struct ipu_soc *ipu, struct ipu_task_entry *t,
+ 	if (t->set.task & VDOA_ONLY)
+ 		/* dummy, didn't need ipu res */
+ 		i = 0;
+-	if (MXC_IPU_MAX_NUM == i) {
++	if (max_ipu_no == i) {
+ 		dev_err(t->dev, "ERR:[0x%p] get ipu num\n", t);
+ 		return -EINVAL;
+ 	}
+@@ -2885,7 +2886,7 @@ static void wait_split_task_complete(struct ipu_task_entry *parent,
+ out:
+ 	if (ret == -ETIMEDOUT) {
+ 		/* debug */
+-		for (k = 0; k < MXC_IPU_MAX_NUM; k++) {
++		for (k = 0; k < max_ipu_no; k++) {
+ 			ipu = ipu_get_soc(k);
+ 			if (IS_ERR(ipu)) {
+ 				BUG();
+@@ -3409,6 +3410,7 @@ int register_ipu_device(struct ipu_soc *ipu, int id)
+ 
+ 		mutex_init(&ipu_ch_tbl.lock);
+ 	}
++	max_ipu_no = ++id;
+ 	ipu->rot_dma[0].size = 0;
+ 	ipu->rot_dma[1].size = 0;
+ 
+-- 
+1.7.7.4
+

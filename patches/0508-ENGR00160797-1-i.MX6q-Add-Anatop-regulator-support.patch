@@ -1,0 +1,537 @@
+From 077d4eec63f75afdaf5b140cd9ad4d9c18f949fc Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Thu, 27 Oct 2011 16:49:24 -0500
+Subject: [PATCH 0508/2463] ENGR00160797-1 [i.MX6q] Add Anatop regulator
+ support
+
+1. Add Anatop regulator support.
+2. Add some dummy regulators support for audio codec.
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig          |   20 ++-
+ arch/arm/mach-mx6/Makefile               |    2 +-
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   97 +++++++++-
+ arch/arm/mach-mx6/mx6_anatop_regulator.c |  331 ++++++++++++++++++++++++++++++
+ 4 files changed, 447 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 550d63a..88232b7 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1200,7 +1200,25 @@ CONFIG_MFD_CORE=y
+ # CONFIG_MFD_WL1273_CORE is not set
+ # CONFIG_MFD_MAX17135 is not set
+ CONFIG_MFD_MXC_HDMI=y
+-# CONFIG_REGULATOR is not set
++CONFIG_REGULATOR=y
++# CONFIG_REGULATOR_DEBUG is not set
++# CONFIG_REGULATOR_DUMMY is not set
++# CONFIG_REGULATOR_FIXED_VOLTAGE is not set
++# CONFIG_REGULATOR_VIRTUAL_CONSUMER is not set
++# CONFIG_REGULATOR_USERSPACE_CONSUMER is not set
++# CONFIG_REGULATOR_BQ24022 is not set
++# CONFIG_REGULATOR_MAX1586 is not set
++# CONFIG_REGULATOR_MAX8649 is not set
++# CONFIG_REGULATOR_MAX8660 is not set
++# CONFIG_REGULATOR_MAX8952 is not set
++# CONFIG_REGULATOR_LP3971 is not set
++# CONFIG_REGULATOR_LP3972 is not set
++# CONFIG_REGULATOR_TPS65023 is not set
++# CONFIG_REGULATOR_TPS6507X is not set
++# CONFIG_REGULATOR_ISL6271A is not set
++# CONFIG_REGULATOR_AD5398 is not set
++# CONFIG_REGULATOR_TPS6524X is not set
++CONFIG_REGULATOR_ANATOP=y
+ CONFIG_MEDIA_SUPPORT=y
+ 
+ #
+diff --git a/arch/arm/mach-mx6/Makefile b/arch/arm/mach-mx6/Makefile
+index 9a4c5af..041afc0 100644
+--- a/arch/arm/mach-mx6/Makefile
++++ b/arch/arm/mach-mx6/Makefile
+@@ -3,7 +3,7 @@
+ #
+ 
+ # Object file lists.
+-obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o usb_dr.o usb_h1.o pm.o cpu_op-mx6.o mx6_wfi.o
++obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o usb_dr.o usb_h1.o pm.o cpu_op-mx6.o mx6_wfi.o mx6_anatop_regulator.o
+ 
+ obj-$(CONFIG_ARCH_MX6) += clock.o mx6q_suspend.o
+ obj-$(CONFIG_MACH_MX6Q_SABREAUTO) += board-mx6q_sabreauto.o
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 5f76cbc..1eb4939 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -47,6 +47,10 @@
+ #include <linux/memblock.h>
+ #include <linux/gpio.h>
+ #include <linux/etherdevice.h>
++#include <linux/regulator/anatop-regulator.h>
++#include <linux/regulator/consumer.h>
++#include <linux/regulator/machine.h>
++#include <linux/regulator/fixed.h>
+ 
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+@@ -98,6 +102,8 @@ extern struct regulator *(*get_cpu_regulator)(void);
+ extern void (*put_cpu_regulator)(void);
+ extern int (*set_cpu_voltage)(u32 volt);
+ extern int mx6_set_cpu_voltage(u32 cpu_volt);
++static struct regulator *cpu_regulator;
++static char *gp_reg_id;
+ 
+ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 
+@@ -826,6 +832,86 @@ static struct imx_esai_platform_data sab_esai_pdata = {
+ 	.flags = IMX_ESAI_NET,
+ };
+ 
++#ifdef CONFIG_SND_SOC_SGTL5000
++
++static struct regulator_consumer_supply sgtl5000_consumer_vdda = {
++	.supply = "VDDA",
++	.dev_name = "0-000a",
++};
++
++static struct regulator_consumer_supply sgtl5000_consumer_vddio = {
++	.supply = "VDDIO",
++	.dev_name = "0-000a",
++};
++
++static struct regulator_consumer_supply sgtl5000_consumer_vddd = {
++	.supply = "VDDD",
++	.dev_name = "0-000a",
++};
++
++static struct regulator_init_data sgtl5000_vdda_reg_initdata = {
++	.num_consumer_supplies = 1,
++	.consumer_supplies = &sgtl5000_consumer_vdda,
++};
++
++static struct regulator_init_data sgtl5000_vddio_reg_initdata = {
++	.num_consumer_supplies = 1,
++	.consumer_supplies = &sgtl5000_consumer_vddio,
++};
++
++static struct regulator_init_data sgtl5000_vddd_reg_initdata = {
++	.num_consumer_supplies = 1,
++	.consumer_supplies = &sgtl5000_consumer_vddd,
++};
++
++static struct fixed_voltage_config sgtl5000_vdda_reg_config = {
++	.supply_name		= "VDDA",
++	.microvolts		= 1800000,
++	.gpio			= -1,
++	.init_data		= &sgtl5000_vdda_reg_initdata,
++};
++
++static struct fixed_voltage_config sgtl5000_vddio_reg_config = {
++	.supply_name		= "VDDIO",
++	.microvolts		= 3300000,
++	.gpio			= -1,
++	.init_data		= &sgtl5000_vddio_reg_initdata,
++};
++
++static struct fixed_voltage_config sgtl5000_vddd_reg_config = {
++	.supply_name		= "VDDD",
++	.microvolts		= 0,
++	.gpio			= -1,
++	.init_data		= &sgtl5000_vddd_reg_initdata,
++};
++
++struct platform_device sgtl5000_vdda_reg_devices = {
++	.name	= "reg-fixed-voltage",
++	.id	= 0,
++	.dev	= {
++		.platform_data = &sgtl5000_vdda_reg_config,
++	},
++};
++
++struct platform_device sgtl5000_vddio_reg_devices = {
++	.name	= "reg-fixed-voltage",
++	.id	= 1,
++	.dev	= {
++		.platform_data = &sgtl5000_vddio_reg_config,
++	},
++};
++
++struct platform_device sgtl5000_vddd_reg_devices = {
++	.name	= "reg-fixed-voltage",
++	.id	= 2,
++	.dev	= {
++		.platform_data = &sgtl5000_vddd_reg_config,
++	},
++};
++
++#endif /* CONFIG_SND_SOC_SGTL5000 */
++
++
+ static int imx6q_init_audio(void)
+ {
+ 	struct clk *pll3_pfd, *esai_clk;
+@@ -879,7 +965,15 @@ static struct mxc_dvfs_platform_data sabreauto_dvfscore_data = {
+ 
+ static int mx6_sabre_set_cpu_voltage(u32 cpu_volt)
+ {
+-	return mx6_set_cpu_voltage(cpu_volt);
++	int ret = -EINVAL;
++
++	if (cpu_regulator == NULL)
++		cpu_regulator = regulator_get(NULL, gp_reg_id);
++
++	if (!IS_ERR(cpu_regulator))
++		ret = regulator_set_voltage(cpu_regulator,
++						    cpu_volt, cpu_volt);
++	return ret;
+ }
+ 
+ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+@@ -944,6 +1038,7 @@ static void __init mx6_board_init(void)
+ 	    mxc_iomux_v3_setup_multiple_pads(mx6q_sabreauto_esai_record_pads,
+ 			ARRAY_SIZE(mx6q_sabreauto_esai_record_pads));
+ 
++	gp_reg_id = sabreauto_dvfscore_data.reg_id;
+ 	mx6q_sabreauto_init_uart();
+ 	imx6q_add_mxc_hdmi_core(&hdmi_core_data);
+ 
+diff --git a/arch/arm/mach-mx6/mx6_anatop_regulator.c b/arch/arm/mach-mx6/mx6_anatop_regulator.c
+new file mode 100644
+index 0000000..1bf2107
+--- /dev/null
++++ b/arch/arm/mach-mx6/mx6_anatop_regulator.c
+@@ -0,0 +1,331 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++/*
++ * mx6_anatop_regulator.c  --  i.MX6 Driver for Anatop regulators
++ */
++#include <linux/device.h>
++#include <linux/delay.h>
++#include <linux/platform_device.h>
++#include <linux/regulator/anatop-regulator.h>
++#include <linux/regulator/consumer.h>
++#include <linux/regulator/machine.h>
++#include <linux/io.h>
++#include <linux/slab.h>
++#include <linux/gpio.h>
++
++#include "crm_regs.h"
++#include "regs-anadig.h"
++
++extern struct platform_device sgtl5000_vdda_reg_devices;
++extern struct platform_device sgtl5000_vddio_reg_devices;
++extern struct platform_device sgtl5000_vddd_reg_devices;
++
++static int get_voltage(struct anatop_regulator *sreg)
++{
++	int uv;
++	struct anatop_regulator_data *rdata = sreg->rdata;
++
++	if (sreg->rdata->control_reg) {
++		u32 val = (__raw_readl(rdata->control_reg) <<
++			   rdata->vol_bit_shift) & rdata->vol_bit_mask;
++		uv = rdata->min_voltage + (val - rdata->min_bit_val) * 25000;
++		pr_debug("vddio = %d, val=%u\n", uv, val);
++		return uv;
++	} else {
++		pr_debug("Regulator not supported.\n");
++		return -ENOTSUPP;
++	}
++}
++
++static int set_voltage(struct anatop_regulator *sreg, int uv)
++{
++	u32 val, reg;
++
++	pr_debug("%s: uv %d, min %d, max %d\n", __func__,
++		uv, sreg->rdata->min_voltage, sreg->rdata->max_voltage);
++
++	if (uv < sreg->rdata->min_voltage || uv > sreg->rdata->max_voltage)
++		return -EINVAL;
++
++	if (sreg->rdata->control_reg) {
++		val = sreg->rdata->min_bit_val +
++		      (uv - sreg->rdata->min_voltage) / 25000;
++
++		reg = (__raw_readl(sreg->rdata->control_reg) &
++			~(sreg->rdata->vol_bit_mask <<
++			sreg->rdata->vol_bit_shift));
++		pr_debug("%s: calculated val %d\n", __func__, val);
++		__raw_writel((val << sreg->rdata->vol_bit_shift) | reg,
++			     sreg->rdata->control_reg);
++		return 0;
++	} else {
++		pr_debug("Regulator not supported.\n");
++		return -ENOTSUPP;
++	}
++}
++
++static int enable(struct anatop_regulator *sreg)
++{
++	return 0;
++}
++
++static int disable(struct anatop_regulator *sreg)
++{
++	return 0;
++}
++
++static int is_enabled(struct anatop_regulator *sreg)
++{
++	return 1;
++}
++
++static struct anatop_regulator_data vddpu_data = {
++	.name		= "vddpu",
++	.set_voltage	= set_voltage,
++	.get_voltage	= get_voltage,
++	.enable		= enable,
++	.disable	= disable,
++	.is_enabled	= is_enabled,
++	.control_reg	= (u32)(MXC_PLL_BASE + HW_ANADIG_REG_CORE),
++	.vol_bit_shift	= 9,
++	.vol_bit_mask	= 0x1F,
++	.min_bit_val	= 1,
++	.min_voltage	= 725000,
++	.max_voltage	= 1300000,
++};
++
++static struct anatop_regulator_data vddcore_data = {
++	.name		= "vddcore",
++	.set_voltage	= set_voltage,
++	.get_voltage	= get_voltage,
++	.enable		= enable,
++	.disable	= disable,
++	.is_enabled	= is_enabled,
++	.control_reg	= (u32)(MXC_PLL_BASE + HW_ANADIG_REG_CORE),
++	.vol_bit_shift	= 0,
++	.vol_bit_mask	= 0x1F,
++	.min_bit_val	= 1,
++	.min_voltage	= 725000,
++	.max_voltage	= 1300000,
++};
++
++static struct anatop_regulator_data vddsoc_data = {
++	.name		= "vddsoc",
++	.set_voltage	= set_voltage,
++	.get_voltage	= get_voltage,
++	.enable		= enable,
++	.disable	= disable,
++	.is_enabled	= is_enabled,
++	.control_reg	= (u32)(MXC_PLL_BASE + HW_ANADIG_REG_CORE),
++	.vol_bit_shift	= 18,
++	.vol_bit_mask	= 0x1F,
++	.min_bit_val	= 1,
++	.min_voltage	= 725000,
++	.max_voltage	= 1300000,
++};
++
++static struct anatop_regulator_data vdd2p5_data = {
++	.name		= "vdd2p5",
++	.set_voltage	= set_voltage,
++	.get_voltage	= get_voltage,
++	.enable		= enable,
++	.disable	= disable,
++	.is_enabled	= is_enabled,
++	.control_reg	= (u32)(MXC_PLL_BASE + HW_ANADIG_REG_2P5),
++	.vol_bit_shift	= 8,
++	.vol_bit_mask	= 0x1F,
++	.min_bit_val	= 0,
++	.min_voltage	= 2000000,
++	.max_voltage	= 2775000,
++};
++
++static struct anatop_regulator_data vdd1p1_data = {
++	.name		= "vdd1p1",
++	.set_voltage	= set_voltage,
++	.get_voltage	= get_voltage,
++	.enable		= enable,
++	.disable	= disable,
++	.is_enabled	= is_enabled,
++	.control_reg	= (u32)(MXC_PLL_BASE + HW_ANADIG_REG_1P1),
++	.vol_bit_shift	= 8,
++	.vol_bit_mask	= 0x1F,
++	.min_bit_val	= 4,
++	.min_voltage	= 800000,
++	.max_voltage	= 1400000,
++};
++
++static struct anatop_regulator_data vdd3p0_data = {
++	.name		= "vdd3p0",
++	.set_voltage	= set_voltage,
++	.get_voltage	= get_voltage,
++	.enable		= enable,
++	.disable	= disable,
++	.is_enabled	= is_enabled,
++	.control_reg	= (u32)(MXC_PLL_BASE + HW_ANADIG_REG_3P0),
++	.vol_bit_shift	= 8,
++	.vol_bit_mask	= 0x1F,
++	.min_bit_val	= 7,
++	.min_voltage	= 2800000,
++	.max_voltage	= 3150000,
++};
++
++/* CPU */
++static struct regulator_consumer_supply vddcore_consumers[] = {
++	{
++		.supply = "cpu_vddgp",
++	}
++};
++
++static struct regulator_init_data vddpu_init = {
++	.constraints = {
++		.name			= "vddpu",
++		.min_uV			= 725000,
++		.max_uV			= 1300000,
++		.valid_modes_mask	= REGULATOR_MODE_FAST |
++					  REGULATOR_MODE_NORMAL,
++		.valid_ops_mask		= REGULATOR_CHANGE_VOLTAGE |
++					  REGULATOR_CHANGE_MODE,
++		.always_on		= 1,
++	},
++	.num_consumer_supplies = 0,
++	.consumer_supplies = NULL,
++};
++
++static struct regulator_init_data vddcore_init = {
++	.constraints = {
++		.name			= "vddcore",
++		.min_uV			= 725000,
++		.max_uV			= 1300000,
++		.valid_modes_mask	= REGULATOR_MODE_FAST |
++					  REGULATOR_MODE_NORMAL,
++		.valid_ops_mask		= REGULATOR_CHANGE_VOLTAGE |
++					  REGULATOR_CHANGE_MODE,
++		.always_on		= 1,
++	},
++	.num_consumer_supplies = ARRAY_SIZE(vddcore_consumers),
++	.consumer_supplies = &vddcore_consumers[0],
++};
++
++static struct regulator_init_data vddsoc_init = {
++	.constraints = {
++		.name			= "vddsoc",
++		.min_uV			= 725000,
++		.max_uV			= 1300000,
++		.valid_modes_mask	= REGULATOR_MODE_FAST |
++					  REGULATOR_MODE_NORMAL,
++		.valid_ops_mask		= REGULATOR_CHANGE_VOLTAGE |
++					  REGULATOR_CHANGE_MODE,
++		.always_on		= 1,
++	},
++	.num_consumer_supplies = 0,
++	.consumer_supplies = NULL,
++};
++
++static struct regulator_init_data vdd2p5_init = {
++	.constraints = {
++		.name			= "vdd2p5",
++		.min_uV			= 2000000,
++		.max_uV			= 2775000,
++		.valid_modes_mask	= REGULATOR_MODE_FAST |
++					  REGULATOR_MODE_NORMAL,
++		.valid_ops_mask		= REGULATOR_CHANGE_VOLTAGE |
++					  REGULATOR_CHANGE_MODE,
++		.always_on		= 1,
++	},
++	.num_consumer_supplies = 0,
++	.consumer_supplies = NULL,
++};
++
++
++static struct regulator_init_data vdd1p1_init = {
++	.constraints = {
++		.name			= "vdd1p1",
++		.min_uV			= 800000,
++		.max_uV			= 1400000,
++		.valid_modes_mask	= REGULATOR_MODE_FAST |
++					  REGULATOR_MODE_NORMAL,
++		.valid_ops_mask		= REGULATOR_CHANGE_VOLTAGE |
++					  REGULATOR_CHANGE_MODE,
++		.input_uV		= 5000000,
++		.always_on		= 1,
++	},
++	.num_consumer_supplies = 0,
++	.consumer_supplies = NULL,
++};
++
++
++static struct regulator_init_data vdd3p0_init = {
++	.constraints = {
++		.name			= "vdd3p0",
++		.min_uV			= 2800000,
++		.max_uV			= 3150000,
++		.valid_modes_mask	= REGULATOR_MODE_FAST |
++					  REGULATOR_MODE_NORMAL,
++		.valid_ops_mask		= REGULATOR_CHANGE_VOLTAGE |
++					  REGULATOR_CHANGE_MODE,
++		.always_on		= 1,
++	},
++	.num_consumer_supplies = 0,
++	.consumer_supplies = NULL,
++};
++
++static struct anatop_regulator vddpu_reg = {
++		.rdata = &vddpu_data,
++};
++
++static struct anatop_regulator vddcore_reg = {
++		.rdata = &vddcore_data,
++};
++
++static struct anatop_regulator vddsoc_reg = {
++		.rdata = &vddsoc_data,
++};
++
++static struct anatop_regulator vdd2p5_reg = {
++		.rdata = &vdd2p5_data,
++};
++
++static struct anatop_regulator vdd1p1_reg = {
++		.rdata = &vdd1p1_data,
++};
++
++static struct anatop_regulator vdd3p0_reg = {
++		.rdata = &vdd3p0_data,
++};
++
++static int __init regulators_init(void)
++{
++	anatop_register_regulator(&vddpu_reg, ANATOP_VDDPU, &vddpu_init);
++	anatop_register_regulator(&vddcore_reg, ANATOP_VDDCORE, &vddcore_init);
++	anatop_register_regulator(&vddsoc_reg, ANATOP_VDDSOC, &vddsoc_init);
++	anatop_register_regulator(&vdd2p5_reg, ANATOP_VDD2P5, &vdd2p5_init);
++	anatop_register_regulator(&vdd1p1_reg, ANATOP_VDD1P1, &vdd1p1_init);
++	anatop_register_regulator(&vdd3p0_reg, ANATOP_VDD3P0, &vdd3p0_init);
++
++#ifdef CONFIG_SND_SOC_SGTL5000
++	platform_device_register(&sgtl5000_vdda_reg_devices);
++	platform_device_register(&sgtl5000_vddio_reg_devices);
++	platform_device_register(&sgtl5000_vddd_reg_devices);
++#endif
++
++	return 0;
++}
++postcore_initcall(regulators_init);
+-- 
+1.7.7.4
+

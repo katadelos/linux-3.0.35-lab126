@@ -1,0 +1,77 @@
+From a27cdd5fc08da3b28c4fe8c3397147c8ec6c7d7c Mon Sep 17 00:00:00 2001
+From: Zhang Jiejing <jiejing.zhang@freescale.com>
+Date: Tue, 11 Dec 2012 15:34:25 +0800
+Subject: [PATCH 2310/2463] ENGR00235817 mx6: use SNVS LPGPR register to store
+ boot mode value.
+
+After using POR reset, the content in SRC will be reset.
+See RM: 63.5.1.2.3 IPP_RESET_B(POR)
+
+Because POR reset will reset most of register in IC, so use
+SNVS_LP General Purpose Register (LPGPR) to store the boot mode value.
+
+Below copy from SNVS_BlockGuide.pdf:
+The SNVS_LP General Purpose Register provides a 32 bit read write
+register, which can be used by any application for retaining 32 bit
+data during a power-down mode
+
+This Patch will use [7,8] bits of this register.
+
+Signed-off-by: Zhang Jiejing <jiejing.zhang@freescale.com>
+---
+ arch/arm/mach-mx6/system.c           |   10 +++++-----
+ arch/arm/plat-mxc/include/mach/mx6.h |    2 ++
+ 2 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 6d24f22..61649c5 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -563,7 +563,7 @@ void mxc_clear_mfgmode(void)
+ #endif
+ 
+ #ifdef CONFIG_MXC_REBOOT_ANDROID_CMD
+-/* This function will set a bit on SRC_GPR10[7-8] bits to enter
++/* This function will set a bit on SNVS_LPGPR[7-8] bits to enter
+  * special boot mode.  These bits will not clear by watchdog reset, so
+  * it can be checked by bootloader to choose enter different mode.*/
+ 
+@@ -574,18 +574,18 @@ void do_switch_recovery(void)
+ {
+ 	u32 reg;
+ 
+-	reg = __raw_readl(SRC_BASE_ADDR + SRC_GPR10);
++	reg = __raw_readl(MX6Q_SNVS_BASE_ADDR + SNVS_LPGPR);
+ 	reg |= ANDROID_RECOVERY_BOOT;
+-	__raw_writel(reg, SRC_BASE_ADDR + SRC_GPR10);
++	__raw_writel(reg, MX6Q_SNVS_BASE_ADDR + SNVS_LPGPR);
+ }
+ 
+ void do_switch_fastboot(void)
+ {
+ 	u32 reg;
+ 
+-	reg = __raw_readl(SRC_BASE_ADDR + SRC_GPR10);
++	reg = __raw_readl(MX6Q_SNVS_BASE_ADDR + SNVS_LPGPR);
+ 	reg |= ANDROID_FASTBOOT_BOOT;
+-	__raw_writel(reg, SRC_BASE_ADDR + SRC_GPR10);
++	__raw_writel(reg, MX6Q_SNVS_BASE_ADDR + SNVS_LPGPR);
+ }
+ #endif
+ 
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 48b04b1..bb22de0 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -302,6 +302,8 @@
+ #define SRC_GPR9			0x40
+ #define SRC_GPR10			0x44
+ 
++#define SNVS_LPGPR			0x68
++
+ /* GPC offsets */
+ #define MXC_GPC_CNTR_OFFSET		0x0
+ 
+-- 
+1.7.7.4
+

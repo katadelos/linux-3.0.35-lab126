@@ -1,0 +1,51 @@
+From b298f01d5c3b05b8ee2b16ad55b1dd1c2cde2757 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Sat, 1 Sep 2012 21:31:02 -0500
+Subject: [PATCH 2000/2463] ENGR00222835 MX6x-Fix incorrect enabling/disabling
+ of PLL1
+
+PLL1 was enabled without incrementing the usecount, and was
+thus not getting disabled under certain conditions.
+This causes 2 issues:
+1. Increases the power.
+2. Causes crashes on MX6SL in audio mode as ARM is switched
+to PLL1 assuming its in bypass when entering WAIT mode. But PLL1
+is enabled and not in bypass state.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c       |    3 ---
+ arch/arm/mach-mx6/clock_mx6sl.c |    3 ---
+ 2 files changed, 0 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 8b75aee..a3dc7e4 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -1334,9 +1334,6 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		spin_unlock_irqrestore(&clk_lock, flags);
+ 		return -1;
+ 	}
+-	/* Need PLL1-MAIN to be ON to write to ARM-PODF bit. */
+-	if (!pll1_enabled)
+-		pll1_sys_main_clk.enable(&pll1_sys_main_clk);
+ 
+ 	cur_arm_podf = div;
+ 
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 6bd818a..08212c3 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -1239,9 +1239,6 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		return -1;
+ 	}
+ 
+-	if (!pll1_enabled)
+-		pll1_sys_main_clk.enable(&pll1_sys_main_clk);
+-
+ 	cur_arm_podf = div;
+ 
+ 	__raw_writel(div - 1, MXC_CCM_CACRR);
+-- 
+1.7.7.4
+

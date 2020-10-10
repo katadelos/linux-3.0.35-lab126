@@ -1,0 +1,30 @@
+From 7065eace91eee85e8a90e3440e85b228db5ce6e1 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Mon, 9 Jul 2012 14:05:59 +0800
+Subject: [PATCH 1726/2463] ENGR00216010-3: spdc: Make clock enable/disable
+ paired for PIX and AXI
+
+Really disable pix/axi clock when SPDC is idle.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ drivers/video/mxc/mxc_spdc_fb.c |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_spdc_fb.c b/drivers/video/mxc/mxc_spdc_fb.c
+index 8226dc7..19cbcb5 100644
+--- a/drivers/video/mxc/mxc_spdc_fb.c
++++ b/drivers/video/mxc/mxc_spdc_fb.c
+@@ -770,6 +770,9 @@ spdc_fb_fw_handler(const struct firmware *fw, void *context)
+ 	}
+ 
+ 	clk_set_rate(fb_data->spdc_clk_pix, rounded_pix_clk);
++	/* Disable clocks */
++	clk_disable(fb_data->spdc_clk_axi);
++	clk_disable(fb_data->spdc_clk_pix);
+ 
+ 	if (!spdc_init_sequence(fb_data))
+ 		return;
+-- 
+1.7.7.4
+

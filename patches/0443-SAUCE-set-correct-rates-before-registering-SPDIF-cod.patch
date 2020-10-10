@@ -1,0 +1,55 @@
+From 5fd35fb9fa2de9ca1b28d6551998f14188cd65bd Mon Sep 17 00:00:00 2001
+From: Eric Miao <eric.miao@linaro.org>
+Date: Mon, 26 Sep 2011 10:46:27 +0800
+Subject: [PATCH 0443/2463] SAUCE: set correct rates before registering SPDIF
+ codec DAI
+
+BugLink: http://bugs.launchpad.net/bugs/855281
+
+Playback/capture rates should be configured before the SPDIF codec
+DAI is registered, according to the parameters that passed in by
+the platform data. And this caused pulseaudio not working with the
+SPDIF sound card.
+
+Signed-off-by: Eric Miao <eric.miao@linaro.org>
+---
+ sound/soc/codecs/mxc_spdif.c |   16 ++++++++++++++--
+ 1 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/sound/soc/codecs/mxc_spdif.c b/sound/soc/codecs/mxc_spdif.c
+index 6774ed9..fbcd754 100644
+--- a/sound/soc/codecs/mxc_spdif.c
++++ b/sound/soc/codecs/mxc_spdif.c
+@@ -1152,7 +1152,13 @@ static int __devinit mxc_spdif_probe(struct platform_device *pdev)
+ 		mxc_spdif_codec_dai.playback.stream_name = "Playback";
+ 		mxc_spdif_codec_dai.playback.channels_min = 2;
+ 		mxc_spdif_codec_dai.playback.channels_max = 2;
+-		mxc_spdif_codec_dai.playback.rates = MXC_SPDIF_RATES_PLAYBACK;
++
++		if (plat_data->spdif_clk_44100 >= 0)
++			mxc_spdif_codec_dai.playback.rates |= SNDRV_PCM_RATE_44100;
++		if (plat_data->spdif_clk_48000 >= 0)
++			mxc_spdif_codec_dai.playback.rates |= SNDRV_PCM_RATE_32000 |
++							      SNDRV_PCM_RATE_48000;
++
+ 		mxc_spdif_codec_dai.playback.formats = MXC_SPDIF_FORMATS_PLAYBACK;
+ 	}
+ 
+@@ -1160,7 +1166,13 @@ static int __devinit mxc_spdif_probe(struct platform_device *pdev)
+ 		mxc_spdif_codec_dai.capture.stream_name = "Capture";
+ 		mxc_spdif_codec_dai.capture.channels_min = 2;
+ 		mxc_spdif_codec_dai.capture.channels_max = 2;
+-		mxc_spdif_codec_dai.capture.rates = MXC_SPDIF_RATES_CAPTURE;
++
++		if (plat_data->spdif_clk_44100 >= 0)
++			mxc_spdif_codec_dai.capture.rates |= SNDRV_PCM_RATE_44100;
++		if (plat_data->spdif_clk_48000 >= 0)
++			mxc_spdif_codec_dai.capture.rates |= SNDRV_PCM_RATE_32000 |
++							     SNDRV_PCM_RATE_48000;
++
+ 		mxc_spdif_codec_dai.capture.formats = MXC_SPDIF_FORMATS_CAPTURE;
+ 	}
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,475 @@
+From 5a4ed2abd1a341d835ce3470974b0a5137baeeb7 Mon Sep 17 00:00:00 2001
+From: Alejandro Sierra <b18039@freescale.com>
+Date: Mon, 15 Oct 2012 18:13:47 -0500
+Subject: [PATCH 2162/2463] ENGR00229725 Sabreauto: Support NAND SPINOR NOR SD
+ on same config
+
+Configuration file modified to support NAND flash, SPI-NOR,
+WEIM NOR and SD card on the same image.
+Bootloader arguments will be used to choose between them.
+Arguments on uboot are:
+spi-nor
+weim-nor
+By default NAND is configured if neither spi-nor or weim-nor are used
+
+Signed-off-by: Alejandro Sierra <b18039@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig          |   32 +++++++++++++++++++---
+ arch/arm/configs/imx6_updater_defconfig  |   43 +++++++++++++++++++++--------
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   22 +++++----------
+ 3 files changed, 66 insertions(+), 31 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 173fcc8..f1bab5f 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -317,6 +317,7 @@ CONFIG_MACH_MX6Q_SABREAUTO=y
+ # CONFIG_IMX_PCIE is not set
+ CONFIG_USB_EHCI_ARC_H1=y
+ # CONFIG_MX6_INTER_LDO_BYPASS is not set
++# CONFIG_MX6_CLK_FOR_BOOTUI_TRANS is not set
+ CONFIG_ISP1504_MXC=y
+ # CONFIG_MXC_IRQ_PRIOR is not set
+ CONFIG_MXC_PWM=y
+@@ -383,6 +384,7 @@ CONFIG_ARM_GIC=y
+ #
+ # Bus support
+ #
++CONFIG_ARM_AMBA=y
+ # CONFIG_PCI_SYSCALL is not set
+ # CONFIG_ARCH_SUPPORTS_MSI is not set
+ # CONFIG_PCCARD is not set
+@@ -722,8 +724,10 @@ CONFIG_MTD_BLOCK=y
+ #
+ # RAM/ROM/Flash chip drivers
+ #
+-# CONFIG_MTD_CFI is not set
++CONFIG_MTD_CFI=y
+ # CONFIG_MTD_JEDECPROBE is not set
++CONFIG_MTD_GEN_PROBE=y
++# CONFIG_MTD_CFI_ADV_OPTIONS is not set
+ CONFIG_MTD_MAP_BANK_WIDTH_1=y
+ CONFIG_MTD_MAP_BANK_WIDTH_2=y
+ CONFIG_MTD_MAP_BANK_WIDTH_4=y
+@@ -734,6 +738,10 @@ CONFIG_MTD_CFI_I1=y
+ CONFIG_MTD_CFI_I2=y
+ # CONFIG_MTD_CFI_I4 is not set
+ # CONFIG_MTD_CFI_I8 is not set
++# CONFIG_MTD_CFI_INTELEXT is not set
++CONFIG_MTD_CFI_AMDSTD=y
++# CONFIG_MTD_CFI_STAA is not set
++CONFIG_MTD_CFI_UTIL=y
+ # CONFIG_MTD_RAM is not set
+ # CONFIG_MTD_ROM is not set
+ # CONFIG_MTD_ABSENT is not set
+@@ -742,6 +750,9 @@ CONFIG_MTD_CFI_I2=y
+ # Mapping drivers for chip access
+ #
+ # CONFIG_MTD_COMPLEX_MAPPINGS is not set
++CONFIG_MTD_PHYSMAP=y
++# CONFIG_MTD_PHYSMAP_COMPAT is not set
++# CONFIG_MTD_ARM_INTEGRATOR is not set
+ # CONFIG_MTD_PLATRAM is not set
+ 
+ #
+@@ -773,7 +784,7 @@ CONFIG_MTD_NAND=y
+ CONFIG_MTD_NAND_IDS=y
+ # CONFIG_MTD_NAND_DISKONCHIP is not set
+ # CONFIG_MTD_NAND_NANDSIM is not set
+-# CONFIG_MTD_NAND_GPMI_NAND is not set
++CONFIG_MTD_NAND_GPMI_NAND=y
+ # CONFIG_MTD_NAND_PLATFORM is not set
+ # CONFIG_MTD_ALAUDA is not set
+ # CONFIG_MTD_ONENAND is not set
+@@ -1115,6 +1126,7 @@ CONFIG_INPUT_ISL29023=y
+ #
+ CONFIG_SERIO=y
+ CONFIG_SERIO_SERPORT=y
++# CONFIG_SERIO_AMBAKMI is not set
+ CONFIG_SERIO_LIBPS2=y
+ # CONFIG_SERIO_RAW is not set
+ # CONFIG_SERIO_ALTERA_PS2 is not set
+@@ -1146,6 +1158,8 @@ CONFIG_DEVKMEM=y
+ #
+ # Non-8250 serial port support
+ #
++# CONFIG_SERIAL_AMBA_PL010 is not set
++# CONFIG_SERIAL_AMBA_PL011 is not set
+ # CONFIG_SERIAL_MAX3100 is not set
+ # CONFIG_SERIAL_MAX3107 is not set
+ CONFIG_SERIAL_IMX=y
+@@ -1219,6 +1233,7 @@ CONFIG_SPI_BITBANG=y
+ CONFIG_SPI_IMX_VER_2_3=y
+ CONFIG_SPI_IMX=y
+ # CONFIG_SPI_OC_TINY is not set
++# CONFIG_SPI_PL022 is not set
+ # CONFIG_SPI_PXA2XX_PCI is not set
+ # CONFIG_SPI_XILINX is not set
+ # CONFIG_SPI_DESIGNWARE is not set
+@@ -1254,6 +1269,7 @@ CONFIG_GPIO_SYSFS=y
+ #
+ # CONFIG_GPIO_BASIC_MMIO is not set
+ # CONFIG_GPIO_IT8761E is not set
++# CONFIG_GPIO_PL061 is not set
+ 
+ #
+ # I2C GPIO expanders:
+@@ -1405,6 +1421,7 @@ CONFIG_WATCHDOG_NOWAYOUT=y
+ # Watchdog Device Drivers
+ #
+ # CONFIG_SOFT_WATCHDOG is not set
++# CONFIG_ARM_SP805_WATCHDOG is not set
+ # CONFIG_MPCORE_WATCHDOG is not set
+ # CONFIG_MAX63XX_WATCHDOG is not set
+ CONFIG_IMX2_WDT=y
+@@ -1726,6 +1743,7 @@ CONFIG_FB_MODE_HELPERS=y
+ #
+ # Frame buffer hardware drivers
+ #
++# CONFIG_FB_ARMCLCD is not set
+ # CONFIG_FB_UVESA is not set
+ # CONFIG_FB_S1D13XXX is not set
+ # CONFIG_FB_TMIO is not set
+@@ -1755,6 +1773,7 @@ CONFIG_FB_MXC_TRULY_WVGA_SYNC_PANEL=y
+ # CONFIG_FB_MXC_CLAA_WVGA_SYNC_PANEL is not set
+ # CONFIG_FB_MXC_SEIKO_WVGA_SYNC_PANEL is not set
+ # CONFIG_FB_MXC_SII902X is not set
++# CONFIG_FB_MXC_SII902X_ELCDIF is not set
+ # CONFIG_FB_MXC_CH7026 is not set
+ # CONFIG_FB_MXC_TVOUT_CH7024 is not set
+ # CONFIG_FB_MXC_ASYNC_PANEL is not set
+@@ -1815,6 +1834,7 @@ CONFIG_SND_DRIVERS=y
+ # CONFIG_SND_SERIAL_U16550 is not set
+ # CONFIG_SND_MPU401 is not set
+ CONFIG_SND_ARM=y
++# CONFIG_SND_ARMAACI is not set
+ CONFIG_SND_SPI=y
+ CONFIG_SND_USB=y
+ CONFIG_SND_USB_AUDIO=y
+@@ -2082,6 +2102,7 @@ CONFIG_MMC_BLOCK_BOUNCE=y
+ #
+ # MMC/SD/SDIO Host Controller Drivers
+ #
++# CONFIG_MMC_ARMMMCI is not set
+ CONFIG_MMC_SDHCI=y
+ CONFIG_MMC_SDHCI_IO_ACCESSORS=y
+ CONFIG_MMC_SDHCI_PLTFM=y
+@@ -2203,18 +2224,21 @@ CONFIG_RTC_DRV_SNVS=y
+ #
+ # on-CPU RTC drivers
+ #
++# CONFIG_RTC_DRV_PL030 is not set
++# CONFIG_RTC_DRV_PL031 is not set
+ CONFIG_DMADEVICES=y
+ # CONFIG_DMADEVICES_DEBUG is not set
+ 
+ #
+ # DMA Devices
+ #
++# CONFIG_AMBA_PL08X is not set
+ # CONFIG_DW_DMAC is not set
+ CONFIG_MXC_PXP_V2=y
+ CONFIG_MXC_PXP_CLIENT_DEVICE=y
+ # CONFIG_TIMB_DMA is not set
+ CONFIG_IMX_SDMA=y
+-# CONFIG_MXS_DMA is not set
++CONFIG_MXS_DMA=y
+ CONFIG_DMA_ENGINE=y
+ 
+ #
+@@ -2550,7 +2574,7 @@ CONFIG_HAVE_ARCH_KGDB=y
+ # CONFIG_STRICT_DEVMEM is not set
+ CONFIG_ARM_UNWIND=y
+ # CONFIG_DEBUG_USER is not set
+-# CONFIG_OC_ETM is not set
++CONFIG_OC_ETM=y
+ 
+ #
+ # Security options
+diff --git a/arch/arm/configs/imx6_updater_defconfig b/arch/arm/configs/imx6_updater_defconfig
+index 02b3707..06ffbc5 100644
+--- a/arch/arm/configs/imx6_updater_defconfig
++++ b/arch/arm/configs/imx6_updater_defconfig
+@@ -316,6 +316,7 @@ CONFIG_SOC_IMX6Q=y
+ CONFIG_SOC_IMX6SL=y
+ CONFIG_MACH_MX6Q_ARM2=y
+ CONFIG_MACH_MX6SL_ARM2=y
++# CONFIG_MACH_MX6SL_EVK is not set
+ CONFIG_MACH_MX6Q_SABRELITE=y
+ CONFIG_MACH_MX6Q_SABRESD=y
+ CONFIG_MACH_MX6Q_SABREAUTO=y
+@@ -325,6 +326,7 @@ CONFIG_MACH_MX6Q_SABREAUTO=y
+ #
+ # CONFIG_IMX_PCIE is not set
+ # CONFIG_MX6_INTER_LDO_BYPASS is not set
++# CONFIG_MX6_CLK_FOR_BOOTUI_TRANS is not set
+ CONFIG_ISP1504_MXC=y
+ # CONFIG_MXC_IRQ_PRIOR is not set
+ CONFIG_MXC_PWM=y
+@@ -392,6 +394,7 @@ CONFIG_ARM_GIC=y
+ #
+ # Bus support
+ #
++CONFIG_ARM_AMBA=y
+ # CONFIG_PCI_SYSCALL is not set
+ # CONFIG_ARCH_SUPPORTS_MSI is not set
+ # CONFIG_PCCARD is not set
+@@ -697,8 +700,10 @@ CONFIG_MTD_BLOCK=y
+ #
+ # RAM/ROM/Flash chip drivers
+ #
+-# CONFIG_MTD_CFI is not set
++CONFIG_MTD_CFI=y
+ # CONFIG_MTD_JEDECPROBE is not set
++CONFIG_MTD_GEN_PROBE=y
++# CONFIG_MTD_CFI_ADV_OPTIONS is not set
+ CONFIG_MTD_MAP_BANK_WIDTH_1=y
+ CONFIG_MTD_MAP_BANK_WIDTH_2=y
+ CONFIG_MTD_MAP_BANK_WIDTH_4=y
+@@ -709,6 +714,10 @@ CONFIG_MTD_CFI_I1=y
+ CONFIG_MTD_CFI_I2=y
+ # CONFIG_MTD_CFI_I4 is not set
+ # CONFIG_MTD_CFI_I8 is not set
++# CONFIG_MTD_CFI_INTELEXT is not set
++CONFIG_MTD_CFI_AMDSTD=y
++# CONFIG_MTD_CFI_STAA is not set
++CONFIG_MTD_CFI_UTIL=y
+ # CONFIG_MTD_RAM is not set
+ # CONFIG_MTD_ROM is not set
+ # CONFIG_MTD_ABSENT is not set
+@@ -717,6 +726,9 @@ CONFIG_MTD_CFI_I2=y
+ # Mapping drivers for chip access
+ #
+ # CONFIG_MTD_COMPLEX_MAPPINGS is not set
++CONFIG_MTD_PHYSMAP=y
++# CONFIG_MTD_PHYSMAP_COMPAT is not set
++# CONFIG_MTD_ARM_INTEGRATOR is not set
+ # CONFIG_MTD_PLATRAM is not set
+ 
+ #
+@@ -748,7 +760,7 @@ CONFIG_MTD_NAND=y
+ CONFIG_MTD_NAND_IDS=y
+ # CONFIG_MTD_NAND_DISKONCHIP is not set
+ # CONFIG_MTD_NAND_NANDSIM is not set
+-# CONFIG_MTD_NAND_GPMI_NAND is not set
++CONFIG_MTD_NAND_GPMI_NAND=y
+ # CONFIG_MTD_NAND_PLATFORM is not set
+ # CONFIG_MTD_ALAUDA is not set
+ # CONFIG_MTD_ONENAND is not set
+@@ -1053,6 +1065,8 @@ CONFIG_DEVKMEM=y
+ #
+ # Non-8250 serial port support
+ #
++# CONFIG_SERIAL_AMBA_PL010 is not set
++# CONFIG_SERIAL_AMBA_PL011 is not set
+ # CONFIG_SERIAL_MAX3100 is not set
+ # CONFIG_SERIAL_MAX3107 is not set
+ CONFIG_SERIAL_IMX=y
+@@ -1126,6 +1140,7 @@ CONFIG_SPI_BITBANG=y
+ CONFIG_SPI_IMX_VER_2_3=y
+ CONFIG_SPI_IMX=y
+ # CONFIG_SPI_OC_TINY is not set
++# CONFIG_SPI_PL022 is not set
+ # CONFIG_SPI_PXA2XX_PCI is not set
+ # CONFIG_SPI_XILINX is not set
+ # CONFIG_SPI_DESIGNWARE is not set
+@@ -1161,6 +1176,7 @@ CONFIG_GPIOLIB=y
+ #
+ # CONFIG_GPIO_BASIC_MMIO is not set
+ # CONFIG_GPIO_IT8761E is not set
++# CONFIG_GPIO_PL061 is not set
+ 
+ #
+ # I2C GPIO expanders:
+@@ -1205,6 +1221,7 @@ CONFIG_POWER_SUPPLY=y
+ # CONFIG_BATTERY_MAX17042 is not set
+ # CONFIG_CHARGER_ISP1704 is not set
+ # CONFIG_CHARGER_MAX8903 is not set
++# CONFIG_SABRESD_MAX8903 is not set
+ # CONFIG_CHARGER_GPIO is not set
+ # CONFIG_HWMON is not set
+ CONFIG_THERMAL=y
+@@ -1215,6 +1232,7 @@ CONFIG_WATCHDOG_NOWAYOUT=y
+ # Watchdog Device Drivers
+ #
+ # CONFIG_SOFT_WATCHDOG is not set
++# CONFIG_ARM_SP805_WATCHDOG is not set
+ # CONFIG_MAX63XX_WATCHDOG is not set
+ CONFIG_IMX2_WDT=y
+ 
+@@ -1417,17 +1435,10 @@ CONFIG_VIDEO_CAPTURE_DRIVERS=y
+ # CONFIG_VIDEO_M52790 is not set
+ # CONFIG_VIDEO_VIVI is not set
+ # CONFIG_VIDEO_MXC_CAMERA is not set
+-# CONFIG_MXC_CAMERA_MICRON111 is not set
+-# CONFIG_MXC_CAMERA_OV2640 is not set
+-# CONFIG_MXC_CAMERA_OV3640 is not set
+-# CONFIG_MXC_CAMERA_OV5640 is not set
+-# CONFIG_MXC_CAMERA_OV8820_MIPI is not set
+-# CONFIG_MXC_CAMERA_OV5642 is not set
+-# CONFIG_MXC_TVIN_ADV7180 is not set
+-# CONFIG_MXC_IPU_DEVICE_QUEUE_SDC is not set
+ CONFIG_VIDEO_MXC_OUTPUT=y
+ CONFIG_VIDEO_MXC_IPU_OUTPUT=y
+ # CONFIG_VIDEO_MXC_IPUV1_WVGA_OUTPUT is not set
++# CONFIG_VIDEO_MXC_PXP_V4L2 is not set
+ # CONFIG_VIDEO_MXC_OPL is not set
+ # CONFIG_VIDEO_CPIA2 is not set
+ # CONFIG_VIDEO_TIMBERDALE is not set
+@@ -1467,6 +1478,7 @@ CONFIG_FB_MODE_HELPERS=y
+ #
+ # Frame buffer hardware drivers
+ #
++# CONFIG_FB_ARMCLCD is not set
+ # CONFIG_FB_UVESA is not set
+ # CONFIG_FB_S1D13XXX is not set
+ # CONFIG_FB_TMIO is not set
+@@ -1489,6 +1501,7 @@ CONFIG_FB_MXC_LDB=y
+ # CONFIG_FB_MXC_CLAA_WVGA_SYNC_PANEL is not set
+ # CONFIG_FB_MXC_SEIKO_WVGA_SYNC_PANEL is not set
+ # CONFIG_FB_MXC_SII902X is not set
++# CONFIG_FB_MXC_SII902X_ELCDIF is not set
+ # CONFIG_FB_MXC_CH7026 is not set
+ # CONFIG_FB_MXC_TVOUT_CH7024 is not set
+ # CONFIG_FB_MXC_ASYNC_PANEL is not set
+@@ -1546,6 +1559,7 @@ CONFIG_SND_DRIVERS=y
+ # CONFIG_SND_SERIAL_U16550 is not set
+ # CONFIG_SND_MPU401 is not set
+ CONFIG_SND_ARM=y
++# CONFIG_SND_ARMAACI is not set
+ CONFIG_SND_SPI=y
+ CONFIG_SND_USB=y
+ # CONFIG_SND_USB_AUDIO is not set
+@@ -1794,6 +1808,7 @@ CONFIG_MMC_BLOCK_BOUNCE=y
+ #
+ # MMC/SD/SDIO Host Controller Drivers
+ #
++# CONFIG_MMC_ARMMMCI is not set
+ CONFIG_MMC_SDHCI=y
+ CONFIG_MMC_SDHCI_IO_ACCESSORS=y
+ CONFIG_MMC_SDHCI_PLTFM=y
+@@ -1879,17 +1894,20 @@ CONFIG_RTC_DRV_SNVS=y
+ #
+ # on-CPU RTC drivers
+ #
++# CONFIG_RTC_DRV_PL030 is not set
++# CONFIG_RTC_DRV_PL031 is not set
+ CONFIG_DMADEVICES=y
+ # CONFIG_DMADEVICES_DEBUG is not set
+ 
+ #
+ # DMA Devices
+ #
++# CONFIG_AMBA_PL08X is not set
+ # CONFIG_DW_DMAC is not set
+ # CONFIG_MXC_PXP_V2 is not set
+ # CONFIG_TIMB_DMA is not set
+ CONFIG_IMX_SDMA=y
+-# CONFIG_MXS_DMA is not set
++CONFIG_MXS_DMA=y
+ CONFIG_DMA_ENGINE=y
+ 
+ #
+@@ -1981,6 +1999,7 @@ CONFIG_MXC_IPU_V3H=y
+ #
+ CONFIG_MXC_VPU=y
+ # CONFIG_MXC_VPU_DEBUG is not set
++# CONFIG_MX6_VPU_352M is not set
+ 
+ #
+ # MXC Asynchronous Sample Rate Converter support
+@@ -2253,7 +2272,7 @@ CONFIG_HAVE_ARCH_KGDB=y
+ # CONFIG_STRICT_DEVMEM is not set
+ CONFIG_ARM_UNWIND=y
+ # CONFIG_DEBUG_USER is not set
+-# CONFIG_OC_ETM is not set
++CONFIG_OC_ETM=y
+ 
+ #
+ # Security options
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 0488258..46ea21b 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -30,11 +30,8 @@
+ #include <linux/fsl_devices.h>
+ #include <linux/smsc911x.h>
+ #include <linux/spi/spi.h>
+-#if defined(CONFIG_MTD_M25P80) || defined(CONFIG_MTD_M25P80_MODULE)
+ #include <linux/spi/flash.h>
+-#else
+ #include <linux/mtd/physmap.h>
+-#endif
+ #include <linux/i2c.h>
+ #include <linux/i2c/pca953x.h>
+ #include <linux/ata.h>
+@@ -399,7 +396,6 @@ static const struct spi_imx_master mx6q_sabreauto_spi_data __initconst = {
+ 	.num_chipselect = ARRAY_SIZE(mx6q_sabreauto_spi_cs),
+ };
+ 
+-#if defined(CONFIG_MTD_M25P80) || defined(CONFIG_MTD_M25P80_MODULE)
+ static struct mtd_partition m25p32_partitions[] = {
+ 	{
+ 		.name	= "bootloader",
+@@ -420,7 +416,6 @@ static struct flash_platform_data m25p32_spi_flash_data = {
+ };
+ 
+ static struct spi_board_info m25p32_spi0_board_info[] __initdata = {
+-#if defined(CONFIG_MTD_M25P80)
+ 	{
+ 		/* The modalias must be the same as spi device driver name */
+ 		.modalias	= "m25p80",
+@@ -429,14 +424,12 @@ static struct spi_board_info m25p32_spi0_board_info[] __initdata = {
+ 		.chip_select	= 0,
+ 		.platform_data	= &m25p32_spi_flash_data,
+ 	},
+-#endif
+ };
+ static void spi_device_init(void)
+ {
+ 	spi_register_board_info(m25p32_spi0_board_info,
+ 				ARRAY_SIZE(m25p32_spi0_board_info));
+ }
+-#else
+ static struct mtd_partition mxc_nor_partitions[] = {
+ 	{
+ 		.name	= "Bootloader",
+@@ -486,7 +479,6 @@ static void mx6q_setup_weimcs(void)
+ 	__raw_writel(0x1C022000, nor_reg + 0x00000008);
+ 	__raw_writel(0x0804a240, nor_reg + 0x00000010);
+ }
+-#endif
+ 
+ static int max7310_1_setup(struct i2c_client *client,
+ 	unsigned gpio_base, unsigned ngpio,
+@@ -1528,12 +1520,12 @@ static void __init mx6_board_init(void)
+ 	}
+ 	/* SPI */
+ 	imx6q_add_ecspi(0, &mx6q_sabreauto_spi_data);
+-#if defined(CONFIG_MTD_M25P80) || defined(CONFIG_MTD_M25P80_MODULE)
+-		spi_device_init();
+-#else
+-		mx6q_setup_weimcs();
+-		platform_device_register(&physmap_flash_device);
+-#endif
++		if (spinor_en)
++			spi_device_init();
++		else if (weimnor_en) {
++			mx6q_setup_weimcs();
++			platform_device_register(&physmap_flash_device);
++		}
+ 	imx6q_add_mxc_hdmi(&hdmi_data);
+ 
+ 	imx6q_add_anatop_thermal_imx(1, &mx6q_sabreauto_anatop_thermal_data);
+@@ -1581,7 +1573,7 @@ static void __init mx6_board_init(void)
+ 	imx6q_add_viim();
+ 	imx6q_add_imx2_wdt(0, NULL);
+ 	imx6q_add_dma();
+-	if (!uart3_en)
++	if (!uart3_en && !weimnor_en)
+ 		imx6q_add_gpmi(&mx6q_gpmi_nand_platform_data);
+ 
+ 	imx6q_add_dvfs_core(&sabreauto_dvfscore_data);
+-- 
+1.7.7.4
+

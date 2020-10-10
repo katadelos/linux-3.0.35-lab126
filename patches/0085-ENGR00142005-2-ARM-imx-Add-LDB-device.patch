@@ -1,0 +1,129 @@
+From 8281101630c21c5c4a18ded14880171e875be14e Mon Sep 17 00:00:00 2001
+From: Lily Zhang <r58066@freescale.com>
+Date: Thu, 14 Apr 2011 14:18:43 +0800
+Subject: [PATCH 0085/2463] ENGR00142005-2 ARM: imx: Add LDB device
+
+Add LDB device into i.MX platform
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+---
+ arch/arm/mach-mx5/Kconfig                       |    1 +
+ arch/arm/plat-mxc/devices/Kconfig               |    3 +
+ arch/arm/plat-mxc/devices/Makefile              |    2 +-
+ arch/arm/plat-mxc/devices/platform-imx_ldb.c    |   51 +++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h |    9 ++++
+ 5 files changed, 65 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/Kconfig b/arch/arm/mach-mx5/Kconfig
+index 1a1713c..af268be 100755
+--- a/arch/arm/mach-mx5/Kconfig
++++ b/arch/arm/mach-mx5/Kconfig
+@@ -58,6 +58,7 @@ config	SOC_IMX53
+ 	select IMX_HAVE_PLATFORM_IMX_DVFS
+ 	select IMX_HAVE_PLATFORM_IMX_SSI
+ 	select IMX_HAVE_PLATFORM_IMX_IIM
++	select IMX_HAVE_PLATFORM_LDB
+ 
+ if ARCH_MX50_SUPPORTED
+ #comment "i.MX50 machines:"
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index e7149db..f2ee8a5 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -112,3 +112,6 @@ config IMX_HAVE_PLATFORM_RANDOM_RNGC
+ 
+ config IMX_HAVE_PLATFORM_PERFMON
+ 	bool
++
++config IMX_HAVE_PLATFORM_LDB
++	bool
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index f7a3680..f18fd96 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -36,4 +36,4 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_OCOTP) += platform-imx-ocotp.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_DCP) += platform-imx-dcp.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_RANDOM_RNGC) += platform-imx-rngb.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_PERFMON) += platform-imx-perfmon.o
+-
++obj-$(CONFIG_IMX_HAVE_PLATFORM_LDB) += platform-imx_ldb.o
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_ldb.c b/arch/arm/plat-mxc/devices/platform-imx_ldb.c
+new file mode 100644
+index 0000000..93de74d
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx_ldb.c
+@@ -0,0 +1,51 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++#include <linux/clk.h>
++
++#define imx_ldb_data_entry_single(soc, size)	\
++	{								\
++		.iobase = soc ## _IOMUXC_BASE_ADDR,			\
++		.iosize = size,						\
++	}
++
++#ifdef CONFIG_SOC_IMX53
++const struct imx_ldb_data imx53_ldb_data __initconst =
++			imx_ldb_data_entry_single(MX53, SZ_4K);
++#endif
++
++struct platform_device *__init imx_add_ldb(
++		const struct imx_ldb_data *data,
++		struct fsl_mxc_ldb_platform_data *pdata)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + data->iosize - 1,
++			.flags = IORESOURCE_MEM,
++		},
++	};
++
++	return imx_add_platform_device("mxc_ldb", -1,
++			res, ARRAY_SIZE(res), pdata, sizeof(*pdata));
++}
++
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 24c9187..a5ee1db 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -378,6 +378,15 @@ struct imx_perfmon_data {
+ 
+ struct platform_device *__init imx_add_perfmon(
+ 		const struct imx_perfmon_data *data);
++
++struct imx_ldb_data {
++	resource_size_t iobase;
++	resource_size_t iosize;
++};
++
++struct platform_device *__init imx_add_ldb(
++	const struct imx_ldb_data *data,
++	struct fsl_mxc_ldb_platform_data *pdata);
+ struct imx_perfmon_data {
+ 	resource_size_t iobase;
+ 	struct mxs_platform_perfmon_data *pdata;
+-- 
+1.7.7.4
+

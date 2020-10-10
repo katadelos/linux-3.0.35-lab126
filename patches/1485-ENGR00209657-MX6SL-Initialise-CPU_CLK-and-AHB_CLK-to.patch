@@ -1,0 +1,53 @@
+From 9c4bbfaed02c3ea40e349f3c19057d0677845abd Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Wed, 16 May 2012 23:41:47 -0500
+Subject: [PATCH 1485/2463] ENGR00209657 MX6SL-Initialise CPU_CLK and AHB_CLK
+ to default rates.
+
+Set CPU_CLK to be 1GHz at boot and ABH_CLK to be 132MHz.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_arm2.c |    4 ++++
+ arch/arm/mach-mx6/clock_mx6sl.c      |    3 +++
+ 2 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index fd1cb30..60325bd 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -196,6 +196,9 @@ static void __init mx6_arm2_init(void)
+ {
+ 	mxc_iomux_v3_setup_multiple_pads(mx6sl_arm2_pads, ARRAY_SIZE(mx6sl_arm2_pads));
+ 
++	gp_reg_id = "cpu_vddgp";
++	mx6_cpu_regulator_init();
++
+ 	imx6q_add_imx_i2c(0, &mx6_arm2_i2c0_data);
+ 	imx6q_add_imx_i2c(1, &mx6_arm2_i2c1_data);
+ 	i2c_register_board_info(0, mxc_i2c0_board_info,
+@@ -206,6 +209,7 @@ static void __init mx6_arm2_init(void)
+ 	i2c_register_board_info(2, mxc_i2c2_board_info,
+ 			ARRAY_SIZE(mxc_i2c2_board_info));
+ 	mx6sl_arm2_init_pfuze100(0);
++
+ 	mx6_arm2_init_uart();
+ 	/* get enet tx reference clk from FEC_REF_CLK pad.
+ 	 * GPR1[14] = 0, GPR1[18:17] = 00
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 08d9e61..eaf0d32 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -3630,6 +3630,9 @@ int __init mx6sl_clocks_init(unsigned long ckil, unsigned long osc,
+ 
+ 	clk_tree_init();
+ 
++	/* Set AHB to 132MHz. */
++	clk_set_rate(&ahb_clk, clk_round_rate(&ahb_clk, 132000000));
++
+ 	pll2_pfd0_352M.disable(&pll2_pfd0_352M);
+ 	pll2_pfd1_594M.disable(&pll2_pfd1_594M);
+ 
+-- 
+1.7.7.4
+

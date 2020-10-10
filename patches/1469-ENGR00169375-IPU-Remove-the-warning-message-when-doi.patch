@@ -1,0 +1,31 @@
+From 90fb0c14e9d8ea1e98767ca885b8a1c7b7384f4b Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Wed, 16 May 2012 15:43:12 +0800
+Subject: [PATCH 1469/2463] ENGR00169375 IPU: Remove the warning message when
+ doing 8:1 downsize
+
+Remove Overflow message on resize coeff when resize from 1280*720 to 160*120
+The IPU IC can not do exactly 8:1 downsize, but can be very close to 8:1
+downsize.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_ic.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_ic.c b/drivers/mxc/ipu3/ipu_ic.c
+index e21d613..84dcbb1 100644
+--- a/drivers/mxc/ipu3/ipu_ic.c
++++ b/drivers/mxc/ipu3/ipu_ic.c
+@@ -841,7 +841,7 @@ static bool _calc_resize_coeffs(struct ipu_soc *ipu,
+ 	   where M = 2^13, SI - input size, SO - output size    */
+ 	*resizeCoeff = (8192L * (tempSize - 1)) / (outSize - 1);
+ 	if (*resizeCoeff >= 16384L) {
+-		dev_err(ipu->dev, "Warning! Overflow on resize coeff.\n");
++		dev_dbg(ipu->dev, "Warning! Overflow on resize coeff.\n");
+ 		*resizeCoeff = 0x3FFF;
+ 	}
+ 
+-- 
+1.7.7.4
+

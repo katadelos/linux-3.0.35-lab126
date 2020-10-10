@@ -1,0 +1,582 @@
+From 9e8fa39e078dc94235086eaedd00619c3c6da64d Mon Sep 17 00:00:00 2001
+From: Zeng Zhaoming <b32542@freescale.com>
+Date: Tue, 28 Jun 2011 10:23:16 +0800
+Subject: [PATCH 0195/2463] ENGR00139229-2 MX6: Bring up i.MX6 sabreauto with
+ Quad cores
+
+MSL code for bring up MX6 sabreauto board with Quad core.
+Enable cpu core local timer, add reset and enable cpu core control,
+and enable it in default config.
+
+Merged from testbuild:imx6_bringup branch.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+Signed-off-by: Jason Liu <r64343@freescale.com>
+Signed-off-by: Zeng Zhaoming <b32542@freescale.com>
+
+Merged-by: Zeng Zhaoming <b32542@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig          |   32 +++++--
+ arch/arm/mach-mx6/Makefile               |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    6 +-
+ arch/arm/mach-mx6/headsmp.S              |   65 +++++++++++++
+ arch/arm/mach-mx6/localtimer.c           |   35 +++++++
+ arch/arm/mach-mx6/plat_hotplug.c         |   47 +++++++++
+ arch/arm/mach-mx6/platsmp.c              |  151 ++++++++++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/mx6.h     |    1 +
+ arch/arm/plat-mxc/include/mach/smp.h     |   28 ++++++
+ 9 files changed, 357 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index b2d6212..93cae1a 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux/arm 2.6.38 Kernel Configuration
+-# Tue Jun 28 09:45:50 2011
++# Tue Jun 28 11:08:47 2011
+ #
+ CONFIG_ARM=y
+ CONFIG_HAVE_PWM=y
+@@ -10,13 +10,14 @@ CONFIG_HAVE_SCHED_CLOCK=y
+ CONFIG_GENERIC_GPIO=y
+ # CONFIG_ARCH_USES_GETTIMEOFFSET is not set
+ CONFIG_GENERIC_CLOCKEVENTS=y
++CONFIG_GENERIC_CLOCKEVENTS_BROADCAST=y
+ CONFIG_HAVE_PROC_CPU=y
+ CONFIG_STACKTRACE_SUPPORT=y
+-CONFIG_HAVE_LATENCYTOP_SUPPORT=y
+ CONFIG_LOCKDEP_SUPPORT=y
+ CONFIG_TRACE_IRQFLAGS_SUPPORT=y
+ CONFIG_HARDIRQS_SW_RESEND=y
+ CONFIG_GENERIC_IRQ_PROBE=y
++CONFIG_GENERIC_LOCKBREAK=y
+ CONFIG_RWSEM_GENERIC_SPINLOCK=y
+ CONFIG_ARCH_HAS_CPU_IDLE_WAIT=y
+ CONFIG_GENERIC_HWEIGHT=y
+@@ -33,7 +34,6 @@ CONFIG_HAVE_IRQ_WORK=y
+ # General setup
+ #
+ CONFIG_EXPERIMENTAL=y
+-CONFIG_BROKEN_ON_SMP=y
+ CONFIG_LOCK_KERNEL=y
+ CONFIG_INIT_ENV_ARG_LIMIT=32
+ CONFIG_CROSS_COMPILE=""
+@@ -69,8 +69,6 @@ CONFIG_HAVE_SPARSE_IRQ=y
+ # RCU Subsystem
+ #
+ CONFIG_TREE_PREEMPT_RCU=y
+-# CONFIG_TINY_RCU is not set
+-# CONFIG_TINY_PREEMPT_RCU is not set
+ CONFIG_PREEMPT_RCU=y
+ # CONFIG_RCU_TRACE is not set
+ CONFIG_RCU_FANOUT=32
+@@ -125,6 +123,7 @@ CONFIG_HAVE_OPROFILE=y
+ # CONFIG_KPROBES is not set
+ CONFIG_HAVE_KPROBES=y
+ CONFIG_HAVE_KRETPROBES=y
++CONFIG_USE_GENERIC_SMP_HELPERS=y
+ CONFIG_HAVE_REGS_AND_STACK_ACCESS_API=y
+ CONFIG_HAVE_CLK=y
+ CONFIG_HAVE_DMA_API_DEBUG=y
+@@ -142,6 +141,7 @@ CONFIG_MODULE_UNLOAD=y
+ CONFIG_MODULE_FORCE_UNLOAD=y
+ CONFIG_MODVERSIONS=y
+ # CONFIG_MODULE_SRCVERSION_ALL is not set
++CONFIG_STOP_MACHINE=y
+ CONFIG_BLOCK=y
+ CONFIG_LBDAF=y
+ # CONFIG_BLK_DEV_BSG is not set
+@@ -185,7 +185,7 @@ CONFIG_DEFAULT_IOSCHED="cfq"
+ # CONFIG_INLINE_WRITE_UNLOCK_BH is not set
+ # CONFIG_INLINE_WRITE_UNLOCK_IRQ is not set
+ # CONFIG_INLINE_WRITE_UNLOCK_IRQRESTORE is not set
+-# CONFIG_MUTEX_SPIN_ON_OWNER is not set
++CONFIG_MUTEX_SPIN_ON_OWNER=y
+ CONFIG_FREEZER=y
+ 
+ #
+@@ -322,7 +322,11 @@ CONFIG_CPU_HAS_PMU=y
+ # CONFIG_ARM_ERRATA_430973 is not set
+ # CONFIG_ARM_ERRATA_458693 is not set
+ # CONFIG_ARM_ERRATA_460075 is not set
++# CONFIG_ARM_ERRATA_742230 is not set
++# CONFIG_ARM_ERRATA_742231 is not set
++# CONFIG_ARM_ERRATA_720789 is not set
+ # CONFIG_ARM_ERRATA_743622 is not set
++# CONFIG_ARM_ERRATA_751472 is not set
+ # CONFIG_ARM_ERRATA_753970 is not set
+ CONFIG_ARM_GIC=y
+ 
+@@ -340,11 +344,17 @@ CONFIG_TICK_ONESHOT=y
+ CONFIG_NO_HZ=y
+ CONFIG_HIGH_RES_TIMERS=y
+ CONFIG_GENERIC_CLOCKEVENTS_BUILD=y
+-# CONFIG_SMP is not set
++CONFIG_SMP=y
++CONFIG_SMP_ON_UP=y
++CONFIG_HAVE_ARM_SCU=y
++CONFIG_HAVE_ARM_TWD=y
+ # CONFIG_VMSPLIT_3G is not set
+ CONFIG_VMSPLIT_2G=y
+ # CONFIG_VMSPLIT_1G is not set
+ CONFIG_PAGE_OFFSET=0x80000000
++CONFIG_NR_CPUS=4
++CONFIG_HOTPLUG_CPU=y
++CONFIG_LOCAL_TIMERS=y
+ # CONFIG_PREEMPT_NONE is not set
+ # CONFIG_PREEMPT_VOLUNTARY is not set
+ CONFIG_PREEMPT=y
+@@ -369,7 +379,6 @@ CONFIG_BOUNCE=y
+ CONFIG_VIRT_TO_BUS=y
+ # CONFIG_KSM is not set
+ CONFIG_DEFAULT_MMAP_MIN_ADDR=4096
+-CONFIG_NEED_PER_CPU_KM=y
+ CONFIG_ALIGNMENT_TRAP=y
+ # CONFIG_UACCESS_WITH_MEMCPY is not set
+ # CONFIG_SECCOMP is not set
+@@ -421,6 +430,7 @@ CONFIG_PM_DEBUG=y
+ # CONFIG_PM_ADVANCED_DEBUG is not set
+ # CONFIG_PM_VERBOSE is not set
+ CONFIG_CAN_PM_TRACE=y
++CONFIG_PM_SLEEP_SMP=y
+ CONFIG_PM_SLEEP=y
+ CONFIG_SUSPEND=y
+ # CONFIG_PM_TEST_SUSPEND is not set
+@@ -497,6 +507,8 @@ CONFIG_DEFAULT_TCP_CONG="cubic"
+ # CONFIG_NET_SCHED is not set
+ # CONFIG_DCB is not set
+ # CONFIG_BATMAN_ADV is not set
++CONFIG_RPS=y
++CONFIG_XPS=y
+ 
+ #
+ # Network testing
+@@ -1097,6 +1109,7 @@ CONFIG_WATCHDOG_NOWAYOUT=y
+ # Watchdog Device Drivers
+ #
+ # CONFIG_SOFT_WATCHDOG is not set
++# CONFIG_MPCORE_WATCHDOG is not set
+ # CONFIG_MAX63XX_WATCHDOG is not set
+ 
+ #
+@@ -1361,7 +1374,9 @@ CONFIG_MMC_BLOCK_BOUNCE=y
+ # MMC/SD/SDIO Host Controller Drivers
+ #
+ CONFIG_MMC_SDHCI=y
++CONFIG_MMC_SDHCI_IO_ACCESSORS=y
+ CONFIG_MMC_SDHCI_PLTFM=y
++CONFIG_MMC_SDHCI_ESDHC_IMX=y
+ # CONFIG_MMC_MXC is not set
+ # CONFIG_MMC_DW is not set
+ # CONFIG_MMC_USHC is not set
+@@ -1763,6 +1778,7 @@ CONFIG_CRYPTO_MANAGER2=y
+ CONFIG_CRYPTO_MANAGER_DISABLE_TESTS=y
+ # CONFIG_CRYPTO_GF128MUL is not set
+ # CONFIG_CRYPTO_NULL is not set
++# CONFIG_CRYPTO_PCRYPT is not set
+ CONFIG_CRYPTO_WORKQUEUE=y
+ # CONFIG_CRYPTO_CRYPTD is not set
+ # CONFIG_CRYPTO_AUTHENC is not set
+diff --git a/arch/arm/mach-mx6/Makefile b/arch/arm/mach-mx6/Makefile
+index e90d015..e6274bd 100644
+--- a/arch/arm/mach-mx6/Makefile
++++ b/arch/arm/mach-mx6/Makefile
+@@ -7,3 +7,4 @@ obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o
+ 
+ obj-$(CONFIG_ARCH_MX6) += clock.o
+ obj-$(CONFIG_MACH_MX6Q_SABREAUTO) += board-mx6q_sabreauto.o
++obj-$(CONFIG_SMP) += plat_hotplug.o platsmp.o headsmp.o localtimer.o
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index dd5eeac..a7e5af1 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -175,10 +175,14 @@ static void __init mx6_board_init(void)
+ 	imx6q_add_sdhci_usdhc_imx(3, &mx6q_sabreauto_sd4_data);
+ }
+ 
++extern void __iomem *twd_base;
+ static void __init mx6_timer_init(void)
+ {
+ 	struct clk *uart_clk;
+-
++#ifdef CONFIG_LOCAL_TIMERS
++	twd_base = ioremap(LOCAL_TWD_ADDR, SZ_256);
++	BUG_ON(!twd_base);
++#endif
+ 	mx6_clocks_init(32768, 24000000, 0, 0);
+ 
+ 	uart_clk = clk_get_sys("imx-uart.0", NULL);
+diff --git a/arch/arm/mach-mx6/headsmp.S b/arch/arm/mach-mx6/headsmp.S
+new file mode 100644
+index 0000000..c972d73
+--- /dev/null
++++ b/arch/arm/mach-mx6/headsmp.S
+@@ -0,0 +1,65 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <linux/linkage.h>
++#include <linux/init.h>
++
++        __INIT
++ENTRY(v7_invalidate_l1)
++        mov     r0, #0
++        mcr     p15, 2, r0, c0, c0, 0
++        mrc     p15, 1, r0, c0, c0, 0
++
++        ldr     r1, =0x7fff
++        and     r2, r1, r0, lsr #13
++
++        ldr     r1, =0x3ff
++
++        and     r3, r1, r0, lsr #3  @ NumWays - 1
++        add     r2, r2, #1          @ NumSets
++
++        and     r0, r0, #0x7
++        add     r0, r0, #4          @ SetShift
++
++        clz     r1, r3              @ WayShift
++        add     r4, r3, #1          @ NumWays
++1:      sub     r2, r2, #1          @ NumSets--
++        mov     r3, r4              @ Temp = NumWays
++2:      subs    r3, r3, #1          @ Temp--
++        mov     r5, r3, lsl r1
++        mov     r6, r2, lsl r0
++        orr     r5, r5, r6          @ Reg = (Temp<<WayShift)|(NumSets<<SetShift)
++        mcr     p15, 0, r5, c7, c6, 2
++        bgt     2b
++        cmp     r2, #0
++        bgt     1b
++        dsb
++        isb
++        mov     pc, lr
++ENDPROC(v7_invalidate_l1)
++
++ENTRY(mx6_secondary_startup)
++	msr     cpsr_fsxc, #0xd3
++
++	/* invalidate l1-cache first */
++	bl      v7_invalidate_l1
++
++	/* jump to secondary_startup */
++	b secondary_startup
++
++ENDPROC(mx6_secondary_startup)
+diff --git a/arch/arm/mach-mx6/localtimer.c b/arch/arm/mach-mx6/localtimer.c
+new file mode 100644
+index 0000000..541dcad
+--- /dev/null
++++ b/arch/arm/mach-mx6/localtimer.c
+@@ -0,0 +1,35 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <linux/init.h>
++#include <linux/smp.h>
++#include <linux/clockchips.h>
++#include <asm/smp_twd.h>
++#include <asm/localtimer.h>
++#include <mach/irqs.h>
++#include <mach/hardware.h>
++
++
++/*
++ * Setup the local clock events for a CPU.
++ */
++void __cpuinit local_timer_setup(struct clock_event_device *evt)
++{
++	evt->irq = IRQ_LOCALTIMER;
++	twd_timer_setup(evt);
++}
+diff --git a/arch/arm/mach-mx6/plat_hotplug.c b/arch/arm/mach-mx6/plat_hotplug.c
+new file mode 100644
+index 0000000..a0d9490
+--- /dev/null
++++ b/arch/arm/mach-mx6/plat_hotplug.c
+@@ -0,0 +1,47 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <linux/kernel.h>
++#include <linux/errno.h>
++#include <linux/smp.h>
++
++#include <asm/cacheflush.h>
++
++
++int platform_cpu_kill(unsigned int cpu)
++{
++	return 1;
++}
++
++/*
++ * platform-specific code to shutdown a CPU
++ * Called with IRQs disabled
++ */
++void platform_cpu_die(unsigned int cpu)
++{
++
++}
++
++int platform_cpu_disable(unsigned int cpu)
++{
++	/*
++	 * we don't allow CPU 0 to be shutdown (it is still too special
++	 * e.g. clock tick interrupts)
++	 */
++	return cpu == 0 ? -EPERM : 0;
++}
+diff --git a/arch/arm/mach-mx6/platsmp.c b/arch/arm/mach-mx6/platsmp.c
+new file mode 100644
+index 0000000..a49e3cc
+--- /dev/null
++++ b/arch/arm/mach-mx6/platsmp.c
+@@ -0,0 +1,151 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <linux/init.h>
++#include <linux/errno.h>
++#include <linux/delay.h>
++#include <linux/device.h>
++#include <linux/jiffies.h>
++#include <linux/smp.h>
++#include <linux/io.h>
++#include <asm/cacheflush.h>
++#include <mach/hardware.h>
++#include <asm/mach-types.h>
++#include <asm/localtimer.h>
++#include <asm/smp_scu.h>
++#include <mach/mx6.h>
++#include "src-reg.h"
++
++static DEFINE_SPINLOCK(boot_lock);
++
++static void __iomem *scu_base_addr(void)
++{
++	return IO_ADDRESS(SCU_BASE_ADDR);
++}
++
++void __cpuinit platform_secondary_init(unsigned int cpu)
++{
++	trace_hardirqs_off();
++
++	/*
++	* if any interrupts are already enabled for the primary
++	* core (e.g. timer irq), then they will not have been enabled
++	* for us: do so
++	*/
++	gic_secondary_init(0);
++
++	/*
++	* Synchronise with the boot thread.
++	*/
++	spin_lock(&boot_lock);
++	spin_unlock(&boot_lock);
++
++}
++
++int __cpuinit boot_secondary(unsigned int cpu, struct task_struct *idle)
++{
++	unsigned long boot_entry;
++	void __iomem *src_base = IO_ADDRESS(SRC_BASE_ADDR);
++	unsigned long timeout;
++	int val;
++
++	 /*
++	  * set synchronisation state between this boot processor
++	  * and the secondary one
++	  */
++	spin_lock(&boot_lock);
++
++	/* set entry point for cpu1-cpu3*/
++	boot_entry = virt_to_phys(mx6_secondary_startup);
++
++	writel(boot_entry, src_base + SRC_GPR1_OFFSET + 4 * 2 * cpu);
++	writel(0, src_base + SRC_GPR1_OFFSET + 4 * 2 * cpu + 4);
++
++	smp_wmb();
++	dsb();
++	flush_cache_all();
++
++	/* reset cpu n */
++	val = readl(src_base + SRC_SCR_OFFSET);
++	val |= 1 << (BP_SRC_SCR_CORE0_RST + cpu);
++	val |= 1 << (BP_SRC_SCR_CORES_DBG_RST + cpu);
++	writel(val, src_base + SRC_SCR_OFFSET);
++
++	/* let cpu<n> out of loop, call secondary_startup function*/
++	writel(0, src_base + SRC_GPR1_OFFSET + 4 * 2 * cpu + 4);
++
++	/*
++	* now the secondary core is starting up let it run its
++	* calibrations, then wait for it to finish
++	*/
++	spin_unlock(&boot_lock);
++
++	return 0;
++
++}
++
++/*
++ * Initialise the CPU possible map early - this describes the CPUs
++ * which may be present or become present in the system.
++ */
++void __init smp_init_cpus(void)
++{
++	void __iomem *scu_base = scu_base_addr();
++	unsigned int i, ncores;
++
++	ncores = scu_base ? scu_get_core_count(scu_base) : 1;
++
++	/* sanity check */
++	if (ncores == 0) {
++		pr_err("mx6: strange CM count of 0? Default to 1\n");
++		ncores = 1;
++	}
++	if (ncores > NR_CPUS) {
++		pr_warning("mx6: no. of cores (%d) greater than configured "
++			"maximum of %d - clipping\n",
++			ncores, NR_CPUS);
++		ncores = NR_CPUS;
++	}
++
++	for (i = 0; i < ncores; i++)
++		set_cpu_possible(i, true);
++}
++static void __init wakeup_secondary(void)
++{
++
++}
++
++void __init platform_smp_prepare_cpus(unsigned int max_cpus)
++{
++	int i;
++	void __iomem *scu_base = scu_base_addr();
++
++	/*
++	 * Initialise the present map, which describes the set of CPUs
++	 * actually populated at the present time.
++	 */
++	for (i = 0; i < max_cpus; i++)
++		set_cpu_present(i, true);
++
++	/*
++	 * Initialise the SCU and wake up the secondary core using
++	 * wakeup_secondary().
++	 */
++	scu_enable(scu_base);
++	wakeup_secondary();
++}
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index a110d7f..55e0641 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -225,6 +225,7 @@
+ /* Cortex-A9 MPCore private memory region */
+ #define ARM_PERIPHBASE                  0x00A00000
+ #define SCU_BASE_ADDR                   ARM_PERIPHBASE
++#define LOCAL_TWD_ADDR			(SCU_BASE_ADDR + 0x600)
+ #define IC_INTERFACES_BASE_ADDR         (ARM_PERIPHBASE + 0x0100)
+ #define GLOBAL_TIMER_BASE_ADDR          (ARM_PERIPHBASE + 0x0200)
+ #define PRIVATE_TIMERS_WD_BASE_ADDR     (ARM_PERIPHBASE + 0x0600)
+diff --git a/arch/arm/plat-mxc/include/mach/smp.h b/arch/arm/plat-mxc/include/mach/smp.h
+new file mode 100644
+index 0000000..8f9250b
+--- /dev/null
++++ b/arch/arm/plat-mxc/include/mach/smp.h
+@@ -0,0 +1,28 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ */
++#ifndef FSL_ARCH_SMP_H
++#define FSL_ARCH_SMP_H
++
++#include <asm/hardware/gic.h>
++
++/* Needed for secondary core boot */
++extern void mx6_secondary_startup(void);
++/*extern u32 mx6_modify_auxcoreboot0(u32 set_mask, u32 clear_mask);
++extern void mx6_auxcoreboot_addr(u32 cpu_addr);
++extern u32 mx6_read_auxcoreboot0(void);*/
++
++/*
++ * We use Soft IRQ1 as the IPI
++ */
++static inline void smp_cross_call(const struct cpumask *mask, int ipi)
++{
++	gic_raise_softirq(mask, ipi);
++}
++#endif
+-- 
+1.7.7.4
+

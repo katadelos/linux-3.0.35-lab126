@@ -1,0 +1,41 @@
+From 16439ee6f79311ed26988c12b68b960b66406390 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Mon, 16 Apr 2012 13:30:36 -0500
+Subject: [PATCH 1332/2463] ENGR00179747: MX6DL-Fix boot failure
+
+Fix the boot failure caused by:
+8f0c21e06d4f7d0c7c078d6261ccd75f2a45c3ab
+MX6- Add bus frequency scaling support
+
+There is no SATA on MX6DL. Accessing SATA PHYs early in the boot
+process causes the system to crash.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |   10 ++++++----
+ 1 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 47ee9b7..a5b22d8 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5297,10 +5297,12 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	lp_med_freq = 0;
+ 
+ 	/* Turn OFF all unnecessary PHYs. */
+-	/* Turn off SATA PHY. */
+-	base = ioremap(MX6Q_SATA_BASE_ADDR, SZ_8K);
+-	reg = __raw_readl(base + PORT_PHY_CTL);
+-	__raw_writel(reg | PORT_PHY_CTL_PDDQ_LOC, base + PORT_PHY_CTL);
++	if (cpu_is_mx6q()) {
++		/* Turn off SATA PHY. */
++		base = ioremap(MX6Q_SATA_BASE_ADDR, SZ_8K);
++		reg = __raw_readl(base + PORT_PHY_CTL);
++		__raw_writel(reg | PORT_PHY_CTL_PDDQ_LOC, base + PORT_PHY_CTL);
++	}
+ 
+ 	/* Turn off HDMI PHY. */
+ 	base = ioremap(MX6Q_HDMI_ARB_BASE_ADDR, SZ_128K);
+-- 
+1.7.7.4
+

@@ -1,0 +1,39 @@
+From 3d3e2849a2d704bb84eb42375e5bba1ff0f9c4b6 Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Mon, 18 Jul 2011 13:46:23 +0800
+Subject: [PATCH 0255/2463] ENGR00153221 [MX6Q uSDHC]workaround for TC intr
+ coming ealier than DMA intr
+
+if TC interrupt bit is set but DMA interrupt bit is clear, read status register
+again in case DMA interrupt will come in next time cycle
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ drivers/mmc/host/sdhci-esdhc-imx.c |   11 +++++++++++
+ 1 files changed, 11 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index 3938955..958a0ed 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -99,6 +99,17 @@ static u32 esdhc_readl_le(struct sdhci_host *host, int reg)
+ 			val |= SDHCI_CARD_PRESENT;
+ 	}
+ 
++	if (reg == SDHCI_INT_STATUS && cpu_is_mx6q())
++		/*
++		 * on mx6q, there is low possibility that
++		 * DATA END interrupt comes ealier than DMA
++		 * END interrupt which is conflict with standard
++		 * host controller spec. In this case, read the
++		 * status register again will workaround this issue.
++		 */
++		if ((val & SDHCI_INT_DATA_END) && \
++			!(val & SDHCI_INT_DMA_END))
++			val = readl(host->ioaddr + reg);
+ 	return val;
+ }
+ 
+-- 
+1.7.7.4
+

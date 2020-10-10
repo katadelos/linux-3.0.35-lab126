@@ -1,0 +1,37 @@
+From 8fd3d99c490374816e14c468d83c8c076f60a2fa Mon Sep 17 00:00:00 2001
+From: Danny Nold <dannynold@freescale.com>
+Date: Fri, 30 Mar 2012 15:25:33 -0500
+Subject: [PATCH 1254/2463] ENGR00178581 - EPDC fb: Fix regulator-related EPDC
+ failure on SabreSD
+
+Remove call to regulator_has_full_constraints() from Max17135 EPD PMIC
+initialization code, since leaving it enabled results in a failure of
+system to load properly - key regulators are disabled when 'epdc' is added
+to the kernel command line.
+
+Signed-off-by: Danny Nold <dannynold@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |    7 ++++++-
+ 1 files changed, 6 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index a20a435..d9c44f0 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -704,7 +704,12 @@ static int __init max17135_regulator_init(struct max17135 *max17135)
+ 		}
+ 	}
+ 
+-	regulator_has_full_constraints();
++	/*
++	 * TODO: We cannot enable full constraints for now, since
++	 * it results in the PFUZE regulators being disabled
++	 * at the end of boot, which disables critical regulators.
++	 */
++	/*regulator_has_full_constraints();*/
+ 
+ 	return 0;
+ }
+-- 
+1.7.7.4
+

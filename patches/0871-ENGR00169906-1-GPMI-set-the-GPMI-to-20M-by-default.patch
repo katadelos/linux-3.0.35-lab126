@@ -1,0 +1,39 @@
+From 1102cb434ed70899ca08efb325e7e1a6ed8a580c Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Mon, 16 Jan 2012 17:09:34 +0800
+Subject: [PATCH 0871/2463] ENGR00169906-1 GPMI : set the GPMI to 20M by
+ default
+
+The 11M for GPMI is too slow.
+
+Change the GPMI to 20MHz by default, most of the NAND
+chips can run with this frequency.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    9 ++-------
+ 1 files changed, 2 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index e709b34..89b6621 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5029,13 +5029,8 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	clk_set_parent(&asrc_clk[1], &pll3_sw_clk);
+ 	clk_set_rate(&asrc_clk[1], 7500000);
+ 
+-	/* set the GPMI clock to : 11MHz */
+-	clk_set_rate(&enfc_clk, enfc_clk.round_rate(&enfc_clk, 11000000));
+-
+-#ifdef CONFIG_MTD_NAND_GPMI_NFC
+-	/* set the DMA clock */
+-	clk_set_rate(&usdhc3_clk, usdhc3_clk.round_rate(&usdhc3_clk, 11000000));
+-#endif
++	/* set the GPMI clock to default frequency : 20MHz */
++	clk_set_rate(&enfc_clk, enfc_clk.round_rate(&enfc_clk, 20000000));
+ 
+ 	mx6_cpu_op_init();
+ 	cpu_op_tbl = get_cpu_op(&cpu_op_nr);
+-- 
+1.7.7.4
+

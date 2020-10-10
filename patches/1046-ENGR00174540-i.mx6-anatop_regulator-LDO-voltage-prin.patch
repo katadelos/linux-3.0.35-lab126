@@ -1,0 +1,51 @@
+From 05ab957c2d63bf2b4b4017e02aa3536866a423f8 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Wed, 15 Feb 2012 18:34:41 +0800
+Subject: [PATCH 1046/2463] ENGR00174540: i.mx6: anatop_regulator: LDO voltage
+ print not correctly
+
+The LDO voltage constraint not printed correctly:
+
+print_constraints: vddpu: 725 <--> 1300 mV at 700 mV fast normal
+print_constraints: vddsoc: 725 <--> 1300 mV at 700 mV fast normal
+print_constraints: vdd2p5: 2000 <--> 2775 mV at 2000 mV fast normal
+print_constraints: vdd1p1: 800 <--> 1400 mV at 700 mV fast normal
+print_constraints: vdd3p0: 2800 <--> 3150 mV at 2625 mV fast normal
+
+There due to one typo: << in the code, thus will make the LDO constraint print
+not correctly, the patch will make the print correctly as the followings:
+
+print_constraints: vddpu: 725 <--> 1300 mV at 1100 mV fast normal
+print_constraints: vddsoc: 725 <--> 1300 mV at 1200 mV fast normal
+print_constraints: vdd2p5: 2000 <--> 2775 mV at 2400 mV fast normal
+print_constraints: vdd1p1: 800 <--> 1400 mV at 1100 mV fast normal
+print_constraints: vdd3p0: 2800 <--> 3150 mV at 3000 mV fast normal
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx6/mx6_anatop_regulator.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mx6_anatop_regulator.c b/arch/arm/mach-mx6/mx6_anatop_regulator.c
+index 89c053a..fd7e0c3 100644
+--- a/arch/arm/mach-mx6/mx6_anatop_regulator.c
++++ b/arch/arm/mach-mx6/mx6_anatop_regulator.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -44,7 +44,7 @@ static int get_voltage(struct anatop_regulator *sreg)
+ 	struct anatop_regulator_data *rdata = sreg->rdata;
+ 
+ 	if (sreg->rdata->control_reg) {
+-		u32 val = (__raw_readl(rdata->control_reg) <<
++		u32 val = (__raw_readl(rdata->control_reg) >>
+ 			   rdata->vol_bit_shift) & rdata->vol_bit_mask;
+ 		uv = rdata->min_voltage + (val - rdata->min_bit_val) * 25000;
+ 		pr_debug("vddio = %d, val=%u\n", uv, val);
+-- 
+1.7.7.4
+

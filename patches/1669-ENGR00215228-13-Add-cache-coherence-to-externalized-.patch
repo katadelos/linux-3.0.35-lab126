@@ -1,0 +1,38 @@
+From 6b2617ffb2513f4fbbc798e1b4a9a4ed634c80ba Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Thu, 28 Jun 2012 15:39:18 -0700
+Subject: [PATCH 1669/2463] ENGR00215228-13: Add cache coherence to
+ externalized key generation
+
+Add cache coherence to externalized key generation
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+---
+ drivers/crypto/caam/key_gen.c |    4 +++-
+ 1 files changed, 3 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/crypto/caam/key_gen.c b/drivers/crypto/caam/key_gen.c
+index 8e8a1d7..8e67628 100644
+--- a/drivers/crypto/caam/key_gen.c
++++ b/drivers/crypto/caam/key_gen.c
+@@ -64,6 +64,7 @@ u32 gen_split_key(struct device *jrdev, u8 *key_out, int split_key_len,
+ 		kfree(desc);
+ 		return -ENOMEM;
+ 	}
++	dma_sync_single_for_device(jrdev, dma_addr_in, keylen, DMA_TO_DEVICE);
+ 	append_key(desc, dma_addr_in, keylen, CLASS_2 | KEY_DEST_CLASS_REG);
+ 
+ 	/* Sets MDHA up into an HMAC-INIT */
+@@ -111,7 +112,8 @@ u32 gen_split_key(struct device *jrdev, u8 *key_out, int split_key_len,
+ 			       split_key_pad_len, 1);
+ #endif
+ 	}
+-
++	dma_sync_single_for_cpu(jrdev, dma_addr_out, split_key_pad_len,
++				DMA_FROM_DEVICE);
+ 	dma_unmap_single(jrdev, dma_addr_out, split_key_pad_len,
+ 			 DMA_FROM_DEVICE);
+ 	dma_unmap_single(jrdev, dma_addr_in, keylen, DMA_TO_DEVICE);
+-- 
+1.7.7.4
+

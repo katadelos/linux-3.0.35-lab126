@@ -1,0 +1,83 @@
+From e6f757055755da8f75c7315d3521b86bfe2f6444 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Fri, 4 May 2012 17:30:13 +0800
+Subject: [PATCH 1420/2463] ENGR00181693 HDMI:threshold and INCR type config
+
+Configure information for threshold and incr:
+
+CHIP + CHANNEL      THRESHOLD     INCRTYPE
+      ARIK + 2            126            4
+  ARIK + 4,6,8            124            4
+RIGEL + 2,4,6,8           128            8
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ sound/soc/imx/imx-hdmi-dma.c |   46 ++++++++++++++++++++++++++++++-----------
+ 1 files changed, 33 insertions(+), 13 deletions(-)
+
+diff --git a/sound/soc/imx/imx-hdmi-dma.c b/sound/soc/imx/imx-hdmi-dma.c
+index da9c2f7..ac7ac5d 100644
+--- a/sound/soc/imx/imx-hdmi-dma.c
++++ b/sound/soc/imx/imx-hdmi-dma.c
+@@ -652,25 +652,45 @@ static void hdmi_dma_enable_channels(int channels)
+ 	}
+ }
+ 
+-static void hdmi_dma_configure_dma(int channels)
++static void hdmi_dma_set_thrsld_incrtype(int channels)
+ {
+-	hdmi_dma_enable_hlock(1);
+-
+-	switch (channels) {
+-	case 2:
+-		hdmi_dma_set_incr_type(HDMI_DMA_BURST_INCR4);
+-		hdmi_writeb(126, HDMI_AHB_DMA_THRSLD);
++	int rev = hdmi_readb(HDMI_REVISION_ID);
++
++	switch (rev) {
++	case 0x0a:
++		{
++			switch (channels) {
++			case 2:
++				hdmi_dma_set_incr_type(HDMI_DMA_BURST_INCR4);
++				hdmi_writeb(126, HDMI_AHB_DMA_THRSLD);
++				break;
++			case 4:
++			case 6:
++			case 8:
++				hdmi_dma_set_incr_type(HDMI_DMA_BURST_INCR4);
++				hdmi_writeb(124, HDMI_AHB_DMA_THRSLD);
++				break;
++			default:
++				pr_debug("unsupport channel!\r\n");
++			}
++		}
+ 		break;
+-	case 4:
+-	case 6:
+-	case 8:
+-		hdmi_dma_set_incr_type(HDMI_DMA_BURST_INCR4);
+-		hdmi_writeb(124, HDMI_AHB_DMA_THRSLD);
++	case 0x1a:
++		hdmi_writeb(128, HDMI_AHB_DMA_THRSLD);
++		hdmi_dma_set_incr_type(HDMI_DMA_BURST_INCR8);
+ 		break;
+ 	default:
+-		pr_err("%s %dunsupport channel!\r\n", __func__, __LINE__);
++		pr_debug("error:unrecognized hdmi controller!\r\n");
++		break;
+ 	}
+ 
++	pr_debug("HDMI_AHB_DMA_THRSLD          0x%02x\n", hdmi_readb(HDMI_AHB_DMA_THRSLD));
++}
++
++static void hdmi_dma_configure_dma(int channels)
++{
++	hdmi_dma_enable_hlock(1);
++	hdmi_dma_set_thrsld_incrtype(channels);
+ 	hdmi_dma_enable_channels(channels);
+ }
+ 
+-- 
+1.7.7.4
+

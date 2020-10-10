@@ -1,0 +1,96 @@
+From 44124255f34e98af48dec976283c1ae8a726e79d Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Fri, 22 Jul 2011 10:28:03 +0800
+Subject: [PATCH 0328/2463] ENGR00139247-4 ARM: add APBH-DMA arch code for
+ imx6q
+
+add the arch code for APBH-DMA.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c                |    2 +-
+ arch/arm/mach-mx6/devices-imx6q.h        |    3 +++
+ arch/arm/plat-mxc/devices/platform-dma.c |    8 +++++++-
+ arch/arm/plat-mxc/include/mach/dma.h     |   15 +++++++++++++++
+ 4 files changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 74aa0fb..1c192b7 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4052,7 +4052,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "hsi_tx", hsi_tx_clk),
+ 	_REGISTER_CLOCK(NULL, "caam_clk", caam_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "asrc_clk", asrc_clk),
+-	_REGISTER_CLOCK(NULL, "apbh_dma_clk", apbh_dma_clk),
++	_REGISTER_CLOCK("mxs-dma-apbh",	NULL, apbh_dma_clk),
+ 	_REGISTER_CLOCK(NULL, "openvg_axi_clk", openvg_axi_clk),
+ 	_REGISTER_CLOCK(NULL, "gpu3d_clk", gpu3d_core_clk),
+ 	_REGISTER_CLOCK(NULL, "gpu2d_clk", gpu2d_core_clk),
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 94cfd0c..3f6a3e0 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -32,6 +32,9 @@ imx6q_anatop_thermal_imx_data __initconst;
+ #define imx6q_add_anatop_thermal_imx(id, pdata)	\
+ 	imx_add_anatop_thermal_imx(&imx6q_anatop_thermal_imx_data, pdata)
+ 
++extern const struct imx_dma_data imx6q_dma_data __initconst;
++#define imx6q_add_dma()	imx_add_dma(&imx6q_dma_data);
++
+ #define imx6q_add_gpmi(platform_data)	imx_add_gpmi(platform_data);
+ 
+ extern const struct imx_fec_data imx6q_fec_data __initconst;
+diff --git a/arch/arm/plat-mxc/devices/platform-dma.c b/arch/arm/plat-mxc/devices/platform-dma.c
+index 7a73c23..b2cba3d 100644
+--- a/arch/arm/plat-mxc/devices/platform-dma.c
++++ b/arch/arm/plat-mxc/devices/platform-dma.c
+@@ -9,7 +9,7 @@
+ #include <linux/err.h>
+ #include <linux/init.h>
+ 
+-#include <mach/mx50.h>
++#include <mach/hardware.h>
+ #include <mach/devices-common.h>
+ 
+ #ifdef CONFIG_SOC_IMX50
+@@ -18,6 +18,12 @@ const struct imx_dma_data imx50_dma_data __initconst = {
+ };
+ #endif
+ 
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_dma_data imx6q_dma_data __initconst = {
++	.iobase = APBH_DMA_ARB_BASE_ADDR,
++};
++#endif
++
+ struct platform_device *__init imx_add_dma(
+ 			const struct imx_dma_data *data)
+ {
+diff --git a/arch/arm/plat-mxc/include/mach/dma.h b/arch/arm/plat-mxc/include/mach/dma.h
+index ee137b4..04ab43d 100644
+--- a/arch/arm/plat-mxc/include/mach/dma.h
++++ b/arch/arm/plat-mxc/include/mach/dma.h
+@@ -77,4 +77,19 @@ static inline int imx_dma_is_general_purpose(struct dma_chan *chan)
+ 		!strcmp(dev_name(chan->device->dev), "imx-dma");
+ }
+ 
++struct mxs_dma_data {
++	int chan_irq;
++};
++
++static inline int mxs_dma_is_apbh(struct dma_chan *chan)
++{
++	return !strcmp(dev_name(chan->device->dev), "mxs-dma-apbh");
++}
++
++static inline int mxs_dma_is_apbx(struct dma_chan *chan)
++{
++	return !strcmp(dev_name(chan->device->dev), "mxs-dma-apbx");
++}
++
++
+ #endif
+-- 
+1.7.7.4
+

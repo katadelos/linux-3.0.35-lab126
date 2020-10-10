@@ -1,0 +1,174 @@
+From 0665062cdf6b558d8f66800ea5944a953aa0741a Mon Sep 17 00:00:00 2001
+From: Richard Zhu <Hong-Xing.Zhu@freescale.com>
+Date: Fri, 18 May 2012 10:25:49 +0800
+Subject: [PATCH 1652/2463] ENGR00214799 MX6 PCIe enable the GEN2 mode
+
+* enable PCIe on ARD boards
+* Configure the DEEM parameters to pass PCIe GEN2 stress tests
+
+Signed-off-by: Richard Zhu <Hong-Xing.Zhu@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig                |    1 +
+ arch/arm/mach-mx6/board-mx6q_arm2.c      |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   10 ++++++++++
+ arch/arm/mach-mx6/board-mx6q_sabresd.c   |    1 +
+ arch/arm/mach-mx6/crm_regs.h             |    1 +
+ arch/arm/mach-mx6/pcie.c                 |   18 +++++++-----------
+ 6 files changed, 21 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index a96597d..ea0c7e7 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -200,6 +200,7 @@ config MACH_MX6Q_SABREAUTO
+ 	select IMX_HAVE_PLATFORM_IMX_MIPI_DSI
+ 	select IMX_HAVE_PLATFORM_FLEXCAN
+ 	select IMX_HAVE_PLATFORM_IMX_MIPI_CSI2
++	select IMX_HAVE_PLATFORM_IMX_PCIE
+ 	help
+ 	  Include support for i.MX 6Quad SABRE Auto platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 0852398..7dce47f 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -2168,6 +2168,7 @@ static void __init mx6_arm2_init(void)
+ 		mxc_register_device(&max17135_sensor_device, NULL);
+ 		imx6dl_add_imx_epdc(&epdc_data);
+ 	}
++	/* Add PCIe RC interface support */
+ 	imx6q_add_pcie(&mx6_arm2_pcie_data);
+ 	imx6q_add_busfreq();
+ }
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 656508f..c260156 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -120,6 +120,7 @@
+ #define SABREAUTO_IO_EXP_GPIO2(x)	(SABREAUTO_MAX7310_2_BASE_ADDR + (x))
+ #define SABREAUTO_IO_EXP_GPIO3(x)	(SABREAUTO_MAX7310_3_BASE_ADDR + (x))
+ 
++#define SABREAUTO_PCIE_RST_B_REVB	(SABREAUTO_MAX7310_1_BASE_ADDR + 2)
+ /*
+  * CAN2 STBY and EN lines are the same as the CAN1. These lines are not
+  * independent.
+@@ -1297,6 +1298,12 @@ static struct fsl_mxc_capture_platform_data capture_data[] = {
+ 	},
+ };
+ 
++static const struct imx_pcie_platform_data mx6_sabreauto_pcie_data __initconst = {
++	.pcie_pwr_en	= -EINVAL,
++	.pcie_rst	= SABREAUTO_PCIE_RST_B_REVB,
++	.pcie_wake_up	= -EINVAL,
++	.pcie_dis	= -EINVAL,
++};
+ 
+ /*!
+  * Board specific initialization.
+@@ -1570,6 +1577,9 @@ static void __init mx6_board_init(void)
+ 	mxc_register_device(&mxc_si4763_audio_device, &si4763_audio_data);
+ 
+ 	imx6q_add_busfreq();
++
++	/* Add PCIe RC interface support */
++	imx6q_add_pcie(&mx6_sabreauto_pcie_data);
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index fdd7023..eaf1d77 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1797,6 +1797,7 @@ static void __init mx6_sabresd_board_init(void)
+ 	pm_power_off = mx6_snvs_poweroff;
+ 	imx6q_add_busfreq();
+ 
++	/* Add PCIe RC interface support */
+ 	imx6q_add_pcie(&mx6_sabresd_pcie_data);
+ 	if (cpu_is_mx6dl()) {
+ 		mxc_iomux_v3_setup_multiple_pads(mx6dl_arm2_elan_pads,
+diff --git a/arch/arm/mach-mx6/crm_regs.h b/arch/arm/mach-mx6/crm_regs.h
+index c99caad..2e1f3e4 100644
+--- a/arch/arm/mach-mx6/crm_regs.h
++++ b/arch/arm/mach-mx6/crm_regs.h
+@@ -121,6 +121,7 @@
+ #define ANADIG_PLL_ENET_POWER_DOWN		(1 << 12)
+ #define ANADIG_PLL_ENET_DIV_SELECT_MASK		(0x3)
+ #define ANADIG_PLL_ENET_DIV_SELECT_OFFSET	(0)
++#define ANATOP_BYPASS_SRC_LVDS1         0x00004000
+ 
+ /* PFD register defines. */
+ #define ANADIG_PFD_FRAC_MASK			0x3F
+diff --git a/arch/arm/mach-mx6/pcie.c b/arch/arm/mach-mx6/pcie.c
+index 38e9abc..f39dd3d 100644
+--- a/arch/arm/mach-mx6/pcie.c
++++ b/arch/arm/mach-mx6/pcie.c
+@@ -606,6 +606,7 @@ static void imx_pcie_enable_controller(struct device *dev)
+ 		pr_err("can't enable pcie clock.\n");
+ 		clk_put(pcie_clk);
+ 	}
++	imx_pcie_clrset(iomuxc_gpr1_pcie_ref_clk_en, 1 << 16, IOMUXC_GPR1);
+ }
+ 
+ static void card_reset(struct device *dev)
+@@ -652,6 +653,9 @@ static void __init add_pcie_port(void __iomem *base, void __iomem *dbi_base,
+ 		clk_disable(pcie_clk);
+ 		clk_put(pcie_clk);
+ 
++		imx_pcie_clrset(iomuxc_gpr1_pcie_ref_clk_en, 0 << 16,
++				IOMUXC_GPR1);
++
+ 		/* Disable PCIE power */
+ 		gpio_request(pdata->pcie_pwr_en, "PCIE POWER_EN");
+ 
+@@ -669,7 +673,6 @@ static int __devinit imx_pcie_pltfm_probe(struct platform_device *pdev)
+ 	struct device *dev = &pdev->dev;
+ 	struct imx_pcie_platform_data *pdata = dev->platform_data;
+ 
+-
+ 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (!mem) {
+ 		dev_err(dev, "no mmio space\n");
+@@ -698,15 +701,13 @@ static int __devinit imx_pcie_pltfm_probe(struct platform_device *pdev)
+ 
+ 	imx_pcie_clrset(iomuxc_gpr8_tx_deemph_gen1, 0 << 0, IOMUXC_GPR8);
+ 	imx_pcie_clrset(iomuxc_gpr8_tx_deemph_gen2_3p5db, 0 << 6, IOMUXC_GPR8);
+-	imx_pcie_clrset(iomuxc_gpr8_tx_deemph_gen2_6db, 0 << 12, IOMUXC_GPR8);
++	imx_pcie_clrset(iomuxc_gpr8_tx_deemph_gen2_6db, 20 << 12, IOMUXC_GPR8);
+ 	imx_pcie_clrset(iomuxc_gpr8_tx_swing_full, 127 << 18, IOMUXC_GPR8);
+ 	imx_pcie_clrset(iomuxc_gpr8_tx_swing_low, 127 << 25, IOMUXC_GPR8);
+ 
+ 	/* Enable the pwr, clks and so on */
+ 	imx_pcie_enable_controller(dev);
+ 
+-	imx_pcie_clrset(iomuxc_gpr1_pcie_ref_clk_en, 1 << 16, IOMUXC_GPR1);
+-
+ 	/* togle the external card's reset */
+ 	card_reset(dev) ;
+ 
+@@ -714,13 +715,6 @@ static int __devinit imx_pcie_pltfm_probe(struct platform_device *pdev)
+ 	imx_pcie_regions_setup(dbi_base);
+ 	usleep_range(3000, 4000);
+ 
+-	/*
+-	 * Force to GEN1 because of PCIE2USB storage stress tests
+-	 * would be failed when GEN2 is enabled
+-	 */
+-	writel(((readl(dbi_base + LNK_CAP) & 0xfffffff0) | 0x1),
+-			dbi_base + LNK_CAP);
+-
+ 	/* start link up */
+ 	imx_pcie_clrset(iomuxc_gpr12_app_ltssm_enable, 1 << 10, IOMUXC_GPR12);
+ 
+@@ -749,6 +743,8 @@ static int __devexit imx_pcie_pltfm_remove(struct platform_device *pdev)
+ 		clk_put(pcie_clk);
+ 	}
+ 
++	imx_pcie_clrset(iomuxc_gpr1_pcie_ref_clk_en, 0 << 16, IOMUXC_GPR1);
++
+ 	/* Disable PCIE power */
+ 	gpio_request(pdata->pcie_pwr_en, "PCIE POWER_EN");
+ 
+-- 
+1.7.7.4
+

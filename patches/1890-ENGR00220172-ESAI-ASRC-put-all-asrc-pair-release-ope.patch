@@ -1,0 +1,45 @@
+From 7f0c6c316f54c0f174c5720b0d3ab3d9e68d1ca7 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Sun, 12 Aug 2012 23:03:01 +0800
+Subject: [PATCH 1890/2463] ENGR00220172 ESAI ASRC: put all asrc pair release
+ operation to shutdown()
+
+When use ASRC for ESAI P2P playback, ESAI driver would release ASRC pair
+resource immediately after ASRC function's error return.It may
+introduce risk that in ESAI machine driver's shutdown(), ASRC resource
+release operation may be double called. In this case, system hang
+happens due to ASRC register's operation with no clock.
+
+In this patch, let all ASRC resource release operation in ESAI machine
+driver's shutdown().
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ sound/soc/imx/imx-cs42888.c |    4 ----
+ 1 files changed, 0 insertions(+), 4 deletions(-)
+
+diff --git a/sound/soc/imx/imx-cs42888.c b/sound/soc/imx/imx-cs42888.c
+index e06b1a7..c372587 100644
+--- a/sound/soc/imx/imx-cs42888.c
++++ b/sound/soc/imx/imx-cs42888.c
+@@ -85,8 +85,6 @@ static int config_asrc(struct snd_pcm_substream *substream,
+ 	ret = asrc_req_pair(channel, &iprtd->asrc_index);
+ 	if (ret < 0) {
+ 		pr_err("Fail to request asrc pair\n");
+-		asrc_release_pair(iprtd->asrc_index);
+-		asrc_finish_conv(iprtd->asrc_index);
+ 		return -EINVAL;
+ 	}
+ 
+@@ -102,8 +100,6 @@ static int config_asrc(struct snd_pcm_substream *substream,
+ 	ret = asrc_config_pair(&config);
+ 	if (ret < 0) {
+ 		pr_err("Fail to config asrc\n");
+-		asrc_release_pair(iprtd->asrc_index);
+-		asrc_finish_conv(iprtd->asrc_index);
+ 		return ret;
+ 	}
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,47 @@
+From 956af4c27bb65489696a850e8ff541de24c58fcd Mon Sep 17 00:00:00 2001
+From: Heiko Carstens <heiko.carstens@de.ibm.com>
+Date: Tue, 23 Aug 2011 13:20:46 +0200
+Subject: [PATCH 1522/2463] nohz: Remove "Switched to NOHz mode" debugging
+ messages
+
+When performing cpu hotplug tests the kernel printk log buffer gets flooded
+with pointless "Switched to NOHz mode..." messages. Especially when afterwards
+analyzing a dump this might have removed more interesting stuff out of the
+buffer.
+Assuming that switching to NOHz mode simply works just remove the printk.
+
+Signed-off-by: Heiko Carstens <heiko.carstens@de.ibm.com>
+Link: http://lkml.kernel.org/r/20110823112046.GB2540@osiris.boeblingen.de.ibm.com
+Signed-off-by: Thomas Gleixner <tglx@linutronix.de>
+---
+ kernel/time/tick-sched.c |    6 +-----
+ 1 files changed, 1 insertions(+), 5 deletions(-)
+
+diff --git a/kernel/time/tick-sched.c b/kernel/time/tick-sched.c
+index c473ce2..032f193 100644
+--- a/kernel/time/tick-sched.c
++++ b/kernel/time/tick-sched.c
+@@ -640,8 +640,6 @@ static void tick_nohz_switch_to_nohz(void)
+ 		next = ktime_add(next, tick_period);
+ 	}
+ 	local_irq_enable();
+-
+-	printk(KERN_INFO "Switched to NOHz mode on CPU #%d\n", smp_processor_id());
+ }
+ 
+ /*
+@@ -793,10 +791,8 @@ void tick_setup_sched_timer(void)
+ 	}
+ 
+ #ifdef CONFIG_NO_HZ
+-	if (tick_nohz_enabled) {
++	if (tick_nohz_enabled)
+ 		ts->nohz_mode = NOHZ_MODE_HIGHRES;
+-		printk(KERN_INFO "Switched to NOHz mode on CPU #%d\n", smp_processor_id());
+-	}
+ #endif
+ }
+ #endif /* HIGH_RES_TIMERS */
+-- 
+1.7.7.4
+

@@ -1,0 +1,68 @@
+From 573e8da5c0d26d37cd4dbc5e1b33669ed716ee53 Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Wed, 2 Nov 2011 16:22:03 +0800
+Subject: [PATCH 0530/2463] ENGR00161219 [MX6Q] add backlight driver on ARM2
+
+add pwm-backlight driver on mx6q arm2 board
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c         |   14 ++++++++++++--
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h |    2 +-
+ 2 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 14bc8f2..93bf906 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -252,8 +252,8 @@ static iomux_v3_cfg_t mx6q_arm2_pads[] = {
+ 
+ 	MX6Q_PAD_EIM_D24__GPIO_3_24,
+ 
+-	/* ldb: pwm fixme*/
+-	MX6Q_PAD_GPIO_9__GPIO_1_9,
++	/* PWM1 */
++	MX6Q_PAD_GPIO_9__PWM1_PWMO,
+ 
+ 	/* DISP0 I2C ENABLE*/
+ 	MX6Q_PAD_EIM_D28__GPIO_3_28,
+@@ -877,6 +877,13 @@ static struct imx_ipuv3_platform_data ipu_data[] = {
+ 	},
+ };
+ 
++static struct platform_pwm_backlight_data mx6_arm2_pwm_backlight_data = {
++	.pwm_id = 0,
++	.max_brightness = 255,
++	.dft_brightness = 128,
++	.pwm_period_ns = 50000,
++};
++
+ static void arm2_suspend_enter(void)
+ {
+ 	/* suspend preparation */
+@@ -1329,6 +1336,9 @@ static void __init mx6_board_init(void)
+ 
+ 	imx6q_add_dvfs_core(&arm2_dvfscore_data);
+ 
++	imx6q_add_mxc_pwm(0);
++	imx6q_add_mxc_pwm_backlight(0, &mx6_arm2_pwm_backlight_data);
++
+ 	mxc_spdif_data.spdif_core_clk = clk_get_sys("mxc_spdif.0", NULL);
+ 	clk_put(mxc_spdif_data.spdif_core_clk);
+ 	imx6q_add_spdif(&mxc_spdif_data);
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index f6281bb..0d7042d 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -5879,7 +5879,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_GPIO_9__CCM_REF_EN_B		\
+ 		(_MX6Q_PAD_GPIO_9__CCM_REF_EN_B | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_9__PWM1_PWMO		\
+-		(_MX6Q_PAD_GPIO_9__PWM1_PWMO | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_GPIO_9__PWM1_PWMO | MUX_PAD_CTRL(MX6Q_HIGH_DRV))
+ #define  MX6Q_PAD_GPIO_9__GPIO_1_9		\
+ 		(_MX6Q_PAD_GPIO_9__GPIO_1_9 | MUX_PAD_CTRL(MX6Q_HIGH_DRV))
+ #define  MX6Q_PAD_GPIO_9__USDHC1_WP		\
+-- 
+1.7.7.4
+

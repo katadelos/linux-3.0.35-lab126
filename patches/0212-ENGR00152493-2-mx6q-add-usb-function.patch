@@ -1,0 +1,531 @@
+From aba4dc8fa53c7a85431287773ef0daa3d5ec1bc5 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Mon, 4 Jul 2011 16:00:54 +0800
+Subject: [PATCH 0212/2463] ENGR00152493-2 mx6q: add usb function
+
+The changes for driver part
+
+- Merging some newest changes at 2.6.38
+- Add high speed disconnect check at usb core
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/core/hub.c          |   38 ++++++++++++++++
+ drivers/usb/gadget/arcotg_udc.c |   92 ++++++++++++++------------------------
+ drivers/usb/gadget/arcotg_udc.h |    3 +-
+ drivers/usb/host/ehci-arc.c     |   62 ++++++++++++++++++++++----
+ drivers/usb/otg/fsl_otg.c       |   12 +++---
+ 5 files changed, 132 insertions(+), 75 deletions(-)
+
+diff --git a/drivers/usb/core/hub.c b/drivers/usb/core/hub.c
+index 34bb059..1fc9e2e 100644
+--- a/drivers/usb/core/hub.c
++++ b/drivers/usb/core/hub.c
+@@ -30,6 +30,13 @@
+ 
+ #include "usb.h"
+ 
++#ifdef CONFIG_ARCH_MX6
++#define MX6_USB_HOST_HACK
++
++#include <linux/fsl_devices.h>
++extern void fsl_platform_set_usb_phy_dis(struct fsl_usb2_platform_data *pdata,
++					 bool enable);
++#endif
+ /* if we are in debug mode, always announce new devices */
+ #ifdef DEBUG
+ #ifndef CONFIG_USB_ANNOUNCE_NEW_DEVICES
+@@ -3022,6 +3029,19 @@ hub_port_init (struct usb_hub *hub, struct usb_device *udev, int port1,
+ 			break;
+ 		}
+ 	}
++#ifdef MX6_USB_HOST_HACK
++	{	/*Must enable HOSTDISCONDETECT after second reset*/
++		if (port1 == 1) {
++			if (udev->speed == USB_SPEED_HIGH) {
++				struct device *dev = hcd->self.controller;
++				struct fsl_usb2_platform_data *pdata;
++				pdata = (struct fsl_usb2_platform_data *)
++					 dev->platform_data;
++				fsl_platform_set_usb_phy_dis(pdata, 1);
++			}
++		}
++	}
++#endif
+ 	if (retval)
+ 		goto fail;
+ 
+@@ -3159,6 +3179,24 @@ static void hub_port_connect_change(struct usb_hub *hub, int port1,
+ 		hub->indicator[port1-1] = INDICATOR_AUTO;
+ 	}
+ 
++#ifdef MX6_USB_HOST_HACK
++	{
++		struct device *dev = hcd->self.controller;
++		struct fsl_usb2_platform_data *pdata;
++
++		pdata = (struct fsl_usb2_platform_data *)dev->platform_data;
++		if (dev->parent && dev->type) {
++			if (port1 == 1 && pdata->init)
++				pdata->init(NULL);
++		}
++		if (port1 == 1) {
++			if (!(portstatus&USB_PORT_STAT_CONNECTION)) {
++				/* Must clear HOSTDISCONDETECT when disconnect*/
++				fsl_platform_set_usb_phy_dis(pdata, 0);
++			}
++		}
++	}
++#endif
+ #ifdef	CONFIG_USB_OTG
+ 	/* during HNP, don't repeat the debounce */
+ 	if (hdev->bus->is_b_host)
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 9d4e29e2..ff897dc 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -44,6 +44,7 @@
+ #include <asm/io.h>
+ #include <asm/irq.h>
+ #include <asm/system.h>
++#include <asm/mach-types.h>
+ #include <asm/unaligned.h>
+ #include <asm/dma.h>
+ #include <asm/cacheflush.h>
+@@ -335,38 +336,6 @@ static void dr_phy_low_power_mode(struct fsl_udc *udc, bool enable)
+ 	pdata->lowpower = enable;
+ }
+ 
+-
+-/* workaroud for some boards, maybe there is a large capacitor between the ground and the Vbus
+- * that will cause the vbus dropping very slowly when device is detached,
+- * may cost 2-3 seconds to below 0.8V */
+-static void udc_wait_b_session_low(void)
+-{
+-	u32 temp;
+-	u32 wait = 5000/jiffies_to_msecs(1); /* max wait time is 5000 ms */
+-	/* if we are in host mode, don't need to care the B session */
+-	if ((fsl_readl(&dr_regs->otgsc) & OTGSC_STS_USB_ID) == 0)
+-		return;
+-	/* if the udc is dettached , there will be a suspend irq */
+-	if (udc_controller->usb_state != USB_STATE_SUSPENDED)
+-		return;
+-	temp = fsl_readl(&dr_regs->otgsc);
+-	temp &= ~OTGSC_B_SESSION_VALID_IRQ_EN;
+-	fsl_writel(temp, &dr_regs->otgsc);
+-
+-	do {
+-		if (!(fsl_readl(&dr_regs->otgsc) & OTGSC_B_SESSION_VALID))
+-			break;
+-		msleep(jiffies_to_msecs(1));
+-		wait -= 1;
+-	} while (wait);
+-	if (!wait)
+-		printk(KERN_ERR "ERROR!!!!!: the vbus can not be lower \
+-				then 0.8V for 5 seconds, Pls Check your HW design\n");
+-	temp = fsl_readl(&dr_regs->otgsc);
+-	temp |= OTGSC_B_SESSION_VALID_IRQ_EN;
+-	fsl_writel(temp, &dr_regs->otgsc);
+-}
+-
+ static int dr_controller_setup(struct fsl_udc *udc)
+ {
+ 	unsigned int tmp = 0, portctrl = 0;
+@@ -2050,7 +2019,7 @@ static void suspend_irq(struct fsl_udc *udc)
+ 	fsl_writel(otgsc, &dr_regs->otgsc);
+ 
+ 	/* discharge in work queue */
+-	cancel_delayed_work(&udc->gadget_delay_work);
++	__cancel_delayed_work(&udc->gadget_delay_work);
+ 	schedule_delayed_work(&udc->gadget_delay_work, msecs_to_jiffies(20));
+ 
+ 	/* report suspend to the driver, serial.c does not support this */
+@@ -2160,10 +2129,15 @@ bool try_wake_up_udc(struct fsl_udc *udc)
+ 	irq_src = fsl_readl(&dr_regs->otgsc) & (~OTGSC_ID_CHANGE_IRQ_STS);
+ 	if (irq_src & OTGSC_B_SESSION_VALID_IRQ_STS) {
+ 		u32 tmp;
++		/* Only handle device interrupt event
++		 * For mx53 loco board, the debug ID value is 0 and
++		 * DO NOT support OTG function
++		 */
++		if (!machine_is_mx53_loco())
++			if (!(fsl_readl(&dr_regs->otgsc) & OTGSC_STS_USB_ID))
++				return false;
++
+ 		fsl_writel(irq_src, &dr_regs->otgsc);
+-		/* only handle device interrupt event */
+-		if (!(fsl_readl(&dr_regs->otgsc) & OTGSC_STS_USB_ID))
+-			return false;
+ 
+ 		tmp = fsl_readl(&dr_regs->usbcmd);
+ 		/* check BSV bit to see if fall or rise */
+@@ -2222,8 +2196,8 @@ static irqreturn_t fsl_udc_irq(int irq, void *_udc)
+ 	irq_src = fsl_readl(&dr_regs->usbsts) & fsl_readl(&dr_regs->usbintr);
+ 	/* Clear notification bits */
+ 	fsl_writel(irq_src, &dr_regs->usbsts);
++	pr_debug("%s: 0x%x\n", __func__, irq_src);
+ 
+-	VDBG("0x%x\n", irq_src);
+ 	/* Need to resume? */
+ 	if (udc->usb_state == USB_STATE_SUSPENDED)
+ 		if ((fsl_readl(&dr_regs->portsc1) & PORTSCX_PORT_SUSPEND) == 0)
+@@ -2810,7 +2784,7 @@ static int __init struct_ep_setup(struct fsl_udc *udc, unsigned char index,
+  * all intialization operations implemented here except enabling usb_intr reg
+  * board setup should have been done in the platform code
+  */
+-static int __init fsl_udc_probe(struct platform_device *pdev)
++static int __devinit fsl_udc_probe(struct platform_device *pdev)
+ {
+ 	struct resource *res;
+ 	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
+@@ -3061,7 +3035,6 @@ static int __exit fsl_udc_remove(struct platform_device *pdev)
+ 	device_unregister(&udc_controller->gadget.dev);
+ 	/* free udc --wait for the release() finished */
+ 	wait_for_completion(&done);
+-
+ 	/*
+ 	 * do platform specific un-initialization:
+ 	 * release iomux pins, etc.
+@@ -3071,6 +3044,7 @@ static int __exit fsl_udc_remove(struct platform_device *pdev)
+ 
+ 	if (udc_controller->stopped)
+ 		dr_clk_gate(false);
++
+ 	return 0;
+ }
+ 
+@@ -3101,7 +3075,6 @@ static int udc_suspend(struct fsl_udc *udc)
+ 	 * Otherwise, the system will wakeup even the user only wants to
+ 	 * charge using usb
+ 	 */
+-	printk(KERN_DEBUG "udc suspend begins\n");
+ 	if (pdata->pmflags == 0) {
+ 		if (!udc_can_wakeup_system())
+ 			dr_wake_up_enable(udc, false);
+@@ -3109,9 +3082,6 @@ static int udc_suspend(struct fsl_udc *udc)
+ 			dr_wake_up_enable(udc, true);
+ 	}
+ 
+-	mode = fsl_readl(&dr_regs->usbmode) & USB_MODE_CTRL_MODE_MASK;
+-	usbcmd = fsl_readl(&dr_regs->usbcmd);
+-
+ 	/*
+ 	 * If the controller is already stopped, then this must be a
+ 	 * PM suspend.  Remember this fact, so that we will leave the
+@@ -3122,32 +3092,36 @@ static int udc_suspend(struct fsl_udc *udc)
+ 		goto out;
+ 	}
+ 
++	mode = fsl_readl(&dr_regs->usbmode) & USB_MODE_CTRL_MODE_MASK;
++	usbcmd = fsl_readl(&dr_regs->usbcmd);
+ 	if (mode != USB_MODE_CTRL_MODE_DEVICE) {
+ 		printk(KERN_DEBUG "gadget not in device mode, leaving early\n");
+ 		goto out;
+ 	}
+ 
+-	/* Comment udc_wait_b_session_low, uncomment it at below two
+-	 * situations:
+-	 * 1. the user wants to debug some problems about vbus
+-	 * 2. the vbus discharges very slow at user's board
+-	 */
+-
+-	/* For some buggy hardware designs, see comment of this function for detail */
+-	/* udc_wait_b_session_low(); */
+-
+ 	udc->stopped = 1;
+ 
+-	/* stop the controller */
+-	usbcmd = fsl_readl(&dr_regs->usbcmd) & ~USB_CMD_RUN_STOP;
+-	fsl_writel(usbcmd, &dr_regs->usbcmd);
++	if (!(fsl_readl(&dr_regs->otgsc) & OTGSC_A_BUS_VALID)) {
++		/* stop the controller */
++		usbcmd = fsl_readl(&dr_regs->usbcmd) & ~USB_CMD_RUN_STOP;
++		fsl_writel(usbcmd, &dr_regs->usbcmd);
++	}
+ 
+ 	dr_phy_low_power_mode(udc, true);
+-	printk(KERN_DEBUG "USB Gadget suspend ends\n");
+ out:
++	if (udc->suspended > 1) {
++		pr_warning(
++			"It's the case usb device is on otg port\
++				and the gadget driver"
++			"is loaded during boots up\n"
++			"So, do not increase suspended counter Or\
++				there is a error, "
++			"please debug it !!!\n"
++			 );
++		return 0;
++	}
++
+ 	udc->suspended++;
+-	if (udc->suspended > 2)
+-		printk(KERN_ERR "ERROR: suspended times > 2\n");
+ 
+ 	return 0;
+ }
+@@ -3159,6 +3133,7 @@ out:
+ static int fsl_udc_suspend(struct platform_device *pdev, pm_message_t state)
+ {
+ 	int ret;
++	printk(KERN_DEBUG "udc suspend begins\n");
+ #ifdef CONFIG_USB_OTG
+ 	if (udc_controller->transceiver->gadget == NULL)
+ 		return 0;
+@@ -3174,6 +3149,7 @@ static int fsl_udc_suspend(struct platform_device *pdev, pm_message_t state)
+ 		ret = udc_suspend(udc_controller);
+ 	dr_clk_gate(false);
+ 
++	printk(KERN_DEBUG "USB Gadget suspend ends\n");
+ 	return ret;
+ }
+ 
+diff --git a/drivers/usb/gadget/arcotg_udc.h b/drivers/usb/gadget/arcotg_udc.h
+index bc88afb..6f141c6 100755
+--- a/drivers/usb/gadget/arcotg_udc.h
++++ b/drivers/usb/gadget/arcotg_udc.h
+@@ -261,10 +261,11 @@ struct usb_sys_interface {
+ #define  PORTSCX_SPEED_BIT_POS                (26)
+ 
+ /* OTGSC Register Bit Masks */
+-#define  OTGSC_ID_CHANGE_IRQ_STS		(1 << 16)
++#define  OTGSC_ID_CHANGE_IRQ_STS                (1 << 16)
+ #define  OTGSC_B_SESSION_VALID_IRQ_EN           (1 << 27)
+ #define  OTGSC_B_SESSION_VALID_IRQ_STS          (1 << 19)
+ #define  OTGSC_B_SESSION_VALID                  (1 << 11)
++#define  OTGSC_A_BUS_VALID			(1 << 9)
+ 
+ /* bit 28 is parallel transceiver width for UTMI interface */
+ #define  PORTSCX_PTW                          (0x10000000)
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index ee28bcc..7727bcb 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -28,8 +28,6 @@
+ #include "../core/usb.h"
+ #include "ehci-fsl.h"
+ #include <mach/fsl_usb.h>
+-
+-extern int usb_host_wakeup_irq(struct device *wkup_dev);
+ extern void usb_host_set_wakeup(struct device *wkup_dev, bool para);
+ static void fsl_usb_lowpower_mode(struct fsl_usb2_platform_data *pdata, bool enable)
+ {
+@@ -136,6 +134,32 @@ void fsl_usb_recover_hcd(struct platform_device *pdev)
+ }
+ 
+ /**
++ * This irq is used to open the hw access and let usb_hcd_irq process the usb event
++ * ehci_fsl_pre_irq will be called before usb_hcd_irq
++ * The hcd operation need to be done during the wakeup irq
++ */
++static irqreturn_t ehci_fsl_pre_irq(int irq, void *dev)
++{
++	struct platform_device *pdev = (struct platform_device *)dev;
++	struct usb_hcd *hcd = platform_get_drvdata(pdev);
++	struct fsl_usb2_platform_data *pdata;
++	struct ehci_hcd *ehci = hcd_to_ehci(hcd);
++
++	pdata = hcd->self.controller->platform_data;
++
++	if (!test_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags)) {
++		if (pdata->irq_delay || !pdata->wakeup_event)
++			return IRQ_NONE;
++
++		pr_debug("%s\n", __func__);
++		pdata->wakeup_event = 0;
++		fsl_usb_recover_hcd(pdev);
++		return IRQ_HANDLED;
++	}
++	return IRQ_NONE;
++}
++
++/**
+  * usb_hcd_fsl_probe - initialize FSL-based HCDs
+  * @drvier: Driver to be used for this HCD
+  * @pdev: USB Host Controller being probed
+@@ -150,6 +174,7 @@ int usb_hcd_fsl_probe(const struct hc_driver *driver,
+ 	struct fsl_usb2_platform_data *pdata;
+ 	struct usb_hcd *hcd;
+ 	struct resource *res;
++	struct ehci_hcd *ehci;
+ 	int irq;
+ 	int retval;
+ 
+@@ -218,15 +243,23 @@ int usb_hcd_fsl_probe(const struct hc_driver *driver,
+ 	 */
+ 	if (pdata->init && pdata->init(pdev)) {
+ 		retval = -ENODEV;
+-		goto err3;
++		goto err4;
+ 	}
+ 
+ 	fsl_platform_set_host_mode(hcd);
+ 	hcd->power_budget = pdata->power_budget;
++	/*
++	 * The ehci_fsl_pre_irq must be registered before usb_hcd_irq, in that case
++	 * it can be called before usb_hcd_irq when irq occurs
++	 */
++	retval = request_irq(irq, ehci_fsl_pre_irq, IRQF_SHARED,
++			"fsl ehci pre interrupt", (void *)pdev);
++	if (retval != 0)
++		goto err4;
+ 
+ 	retval = usb_add_hcd(hcd, irq, IRQF_DISABLED | IRQF_SHARED);
+ 	if (retval != 0)
+-		goto err4;
++		goto err5;
+ 
+ 	if (pdata->operating_mode == FSL_USB2_DR_OTG) {
+ 		struct ehci_hcd *ehci = hcd_to_ehci(hcd);
+@@ -239,7 +272,7 @@ int usb_hcd_fsl_probe(const struct hc_driver *driver,
+ 		if (!ehci->transceiver) {
+ 			printk(KERN_ERR "can't find transceiver\n");
+ 			retval = -ENODEV;
+-			goto err5;
++			goto err6;
+ 		}
+ 
+ 		retval = otg_set_host(ehci->transceiver, &ehci_to_hcd(ehci)->self);
+@@ -251,9 +284,13 @@ int usb_hcd_fsl_probe(const struct hc_driver *driver,
+ 
+ 	fsl_platform_set_ahb_burst(hcd);
+ 	ehci_testmode_init(hcd_to_ehci(hcd));
++	ehci = hcd_to_ehci(hcd);
++	pdata->pm_command = ehci->command;
+ 	return retval;
+-err5:
++err6:
+ 	usb_remove_hcd(hcd);
++err5:
++	free_irq(irq, (void *)pdev);
+ err4:
+ 	iounmap(hcd->regs);
+ err3:
+@@ -364,7 +401,7 @@ static int ehci_fsl_bus_suspend(struct usb_hcd *hcd)
+ 	struct fsl_usb2_platform_data *pdata;
+ 
+ 	pdata = hcd->self.controller->platform_data;
+-	printk(KERN_DEBUG "%s, %s\n", __func__, pdata->name);
++	printk(KERN_DEBUG "%s begins, %s\n", __func__, pdata->name);
+ 
+ 	/* the host is already at low power mode */
+ 	if (!test_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags)) {
+@@ -382,6 +419,7 @@ static int ehci_fsl_bus_suspend(struct usb_hcd *hcd)
+ 	fsl_usb_lowpower_mode(pdata, true);
+ 	fsl_usb_clk_gate(hcd->self.controller->platform_data, false);
+ 	clear_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
++	printk(KERN_DEBUG "%s ends, %s\n", __func__, pdata->name);
+ 
+ 	return ret;
+ }
+@@ -390,9 +428,10 @@ static int ehci_fsl_bus_resume(struct usb_hcd *hcd)
+ {
+ 	int ret = 0;
+ 	struct fsl_usb2_platform_data *pdata;
++	struct ehci_hcd *ehci = hcd_to_ehci(hcd);
+ 
+ 	pdata = hcd->self.controller->platform_data;
+-	printk(KERN_DEBUG "%s, %s\n", __func__, pdata->name);
++	printk(KERN_DEBUG "%s begins, %s\n", __func__, pdata->name);
+ 
+ 	/*
+ 	 * At otg mode, it should not call host resume for usb gadget device
+@@ -412,9 +451,11 @@ static int ehci_fsl_bus_resume(struct usb_hcd *hcd)
+ 	if (pdata->platform_resume)
+ 		pdata->platform_resume(pdata);
+ 
++	ehci->command = pdata->pm_command;
+ 	ret = ehci_bus_resume(hcd);
+ 	if (ret)
+ 		return ret;
++	printk(KERN_DEBUG "%s ends, %s\n", __func__, pdata->name);
+ 
+ 	return ret;
+ }
+@@ -588,6 +629,7 @@ static int ehci_fsl_drv_suspend(struct platform_device *pdev,
+ 			usb_host_set_wakeup(hcd->self.controller, false);
+ 			fsl_usb_clk_gate(hcd->self.controller->platform_data, false);
+ 		}
++		printk(KERN_DEBUG "host suspend ends\n");
+ 		return 0;
+ 	}
+ 
+@@ -627,8 +669,8 @@ static int ehci_fsl_drv_suspend(struct platform_device *pdev,
+ 
+ 	port_status = ehci_readl(ehci, &ehci->regs->port_status[0]);
+ 	/* save EHCI registers */
+-	pdata->pm_command = ehci_readl(ehci, &ehci->regs->command);
+-	pdata->pm_command &= ~CMD_RUN;
++/*	pdata->pm_command = ehci_readl(ehci, &ehci->regs->command); */
++/*	pdata->pm_command &= ~CMD_RUN; */
+ 	pdata->pm_status  = ehci_readl(ehci, &ehci->regs->status);
+ 	pdata->pm_intr_enable  = ehci_readl(ehci, &ehci->regs->intr_enable);
+ 	pdata->pm_frame_index  = ehci_readl(ehci, &ehci->regs->frame_index);
+diff --git a/drivers/usb/otg/fsl_otg.c b/drivers/usb/otg/fsl_otg.c
+index e529cdb..6d65969 100755
+--- a/drivers/usb/otg/fsl_otg.c
++++ b/drivers/usb/otg/fsl_otg.c
+@@ -20,8 +20,6 @@
+  * with this program; if not, write  to the Free Software Foundation, Inc.,
+  * 675 Mass Ave, Cambridge, MA 02139, USA.
+  */
+-#define VERBOSE
+-
+ #include <linux/module.h>
+ #include <linux/moduleparam.h>
+ #include <linux/kernel.h>
+@@ -52,6 +50,7 @@
+ #include <asm/io.h>
+ #include <asm/irq.h>
+ #include <asm/system.h>
++#include <asm/mach-types.h>
+ #include <asm/byteorder.h>
+ #include <asm/uaccess.h>
+ #include <asm/unaligned.h>
+@@ -776,7 +775,7 @@ irqreturn_t fsl_otg_isr_gpio(int irq, void *dev_id)
+ 
+ 	f_otg->fsm.id = value;
+ 
+-	cancel_delayed_work(&f_otg->otg_event);
++	__cancel_delayed_work(&f_otg->otg_event);
+ 	schedule_otg_work(&f_otg->otg_event, msecs_to_jiffies(10));
+ 
+ 	return IRQ_HANDLED;
+@@ -799,6 +798,7 @@ irqreturn_t fsl_otg_isr(int irq, void *dev_id)
+ 		if (pdata->irq_delay)
+ 			return ret;
+ 	}
++
+ 	otg_sc = le32_to_cpu(usb_dr_regs->otgsc);
+ 	otg_int_src = otg_sc & OTGSC_INTSTS_MASK & (otg_sc >> 8);
+ 
+@@ -826,7 +826,7 @@ irqreturn_t fsl_otg_isr(int irq, void *dev_id)
+ 
+ 			printk(KERN_DEBUG "ID int (ID is %d)\n", fotg->fsm.id);
+ 
+-			cancel_delayed_work(&fotg->otg_event);
++			__cancel_delayed_work(&fotg->otg_event);
+ 			schedule_otg_work(&fotg->otg_event, msecs_to_jiffies(10));
+ 			ret = IRQ_HANDLED;
+ 		}
+@@ -1219,7 +1219,7 @@ static int otg_proc_read(char *page, char **start, off_t off, int count,
+ /* This function handle some ioctl command,such as get otg
+  * status and set host suspend
+  */
+-static int fsl_otg_ioctl(struct file *file,
++static long fsl_otg_ioctl(struct file *file,
+ 			 unsigned int cmd, unsigned long arg)
+ {
+ 	u32 retval = 0;
+@@ -1276,7 +1276,7 @@ static struct file_operations otg_fops = {
+ 	.release	= fsl_otg_release,
+ };
+ 
+-static int __init fsl_otg_probe(struct platform_device *pdev)
++static int __devinit fsl_otg_probe(struct platform_device *pdev)
+ {
+ 	int status;
+ 	struct fsl_usb2_platform_data *pdata;
+-- 
+1.7.7.4
+

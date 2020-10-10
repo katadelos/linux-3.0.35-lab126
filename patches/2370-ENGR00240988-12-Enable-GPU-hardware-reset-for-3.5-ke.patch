@@ -1,0 +1,56 @@
+From 3b051d33d5d2dc04c0526d6581f1289043212184 Mon Sep 17 00:00:00 2001
+From: Loren HUANG <b02279@freescle.com>
+Date: Mon, 21 Jan 2013 15:37:03 +0800
+Subject: [PATCH 2370/2463] ENGR00240988-12 Enable GPU hardware reset for 3.5
+ kernel
+
+Cherry-pick from imx_3.5.7 branch.
+
+Signed-off-by: Loren HUANG <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |    8 +++++++-
+ 1 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index cb6d3ea..792dd96 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -38,9 +38,13 @@
+ #if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,23)
+ #include <linux/math64.h>
+ #endif
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(3,5,0)
++#include <mach/common.h>
++#endif
+ #include <linux/delay.h>
+ #include <linux/pm_runtime.h>
+ 
++
+ #define _GC_OBJ_ZONE    gcvZONE_OS
+ 
+ /*******************************************************************************
+@@ -6886,10 +6890,10 @@ gckOS_ResetGPU(
+     IN gceCORE Core
+     )
+ {
++#if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0)
+ #define SRC_SCR_OFFSET 0
+ #define BP_SRC_SCR_GPU3D_RST 1
+ #define BP_SRC_SCR_GPU2D_RST 4
+-#if LINUX_VERSION_CODE < KERNEL_VERSION(3,5,0)
+     void __iomem *src_base = IO_ADDRESS(SRC_BASE_ADDR);
+     gctUINT32 bit_offset,val;
+ 
+@@ -6913,6 +6917,8 @@ gckOS_ResetGPU(
+     }
+ 
+     gcmkFOOTER_NO();
++#else
++    imx_src_reset_gpu((int)Core);
+ #endif
+     return gcvSTATUS_OK;
+ }
+-- 
+1.7.7.4
+

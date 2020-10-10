@@ -1,0 +1,102 @@
+From 8ca6288db45a89a353c3b4fb51b417e91a7d4d6d Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Thu, 16 Aug 2012 16:21:25 +0800
+Subject: [PATCH 1917/2463] ENGR00220027-2 mx6sl: add pad ctrl for audmux
+ iomux setting
+
+for avoiding pop-noise adn setting audmux pad to 1.8v on evk,
+add pad ctrl for audmux iomux setting
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_evk.c          |   11 +++++++++++
+ arch/arm/plat-mxc/include/mach/iomux-mx6sl.h |   21 ++++++++++++++++-----
+ 2 files changed, 27 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_evk.c b/arch/arm/mach-mx6/board-mx6sl_evk.c
+index 3f42a0e..62daad6 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_evk.c
++++ b/arch/arm/mach-mx6/board-mx6sl_evk.c
+@@ -488,6 +488,17 @@ static int mxc_wm8962_init(void)
+ 	clk_set_rate(extern_audio_root, rate);
+ 
+ 	wm8962_data.sysclk = rate;
++	/* set AUDMUX pads to 1.8v */
++	mxc_iomux_set_specialbits_register(MX6SL_PAD_AUD_MCLK,
++					PAD_CTL_LVE, PAD_CTL_LVE_MASK);
++	mxc_iomux_set_specialbits_register(MX6SL_PAD_AUD_RXD,
++					PAD_CTL_LVE, PAD_CTL_LVE_MASK);
++	mxc_iomux_set_specialbits_register(MX6SL_PAD_AUD_TXC,
++					PAD_CTL_LVE, PAD_CTL_LVE_MASK);
++	mxc_iomux_set_specialbits_register(MX6SL_PAD_AUD_TXD,
++					PAD_CTL_LVE, PAD_CTL_LVE_MASK);
++	mxc_iomux_set_specialbits_register(MX6SL_PAD_AUD_TXFS,
++					PAD_CTL_LVE, PAD_CTL_LVE_MASK);
+ 
+ 	return 0;
+ }
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h b/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
+index 52442b5..296df42 100755
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
+@@ -74,9 +74,20 @@
+ 
+ #define MX6SL_TSPAD_CTRL	(PAD_CTL_HYS | PAD_CTL_PKE | PAD_CTL_PUE | \
+ 				PAD_CTL_PUS_47K_UP)
++#define MX6SL_ADU_PAD_CTRL	(PAD_CTL_PKE | PAD_CTL_PUE |		\
++		PAD_CTL_DSE_40ohm | PAD_CTL_PUS_100K_DOWN |		\
++		PAD_CTL_HYS | PAD_CTL_SPEED_MED)
++
++#define MX6SL_PAD_AUD_MCLK		0x02A4
++#define MX6SL_PAD_AUD_RXD		0x02AC
++#define MX6SL_PAD_AUD_TXC		0x02B4
++#define MX6SL_PAD_AUD_TXD		0x02B8
++#define MX6SL_PAD_AUD_TXFS		0x02BC
++#define MX6SL_PAD_HSIC_DAT		0x0444
++#define MX6SL_PAD_HSIC_STROBE		0x0448
+ 
+ #define MX6SL_PAD_AUD_MCLK__AUDMUX_AUDIO_CLK_OUT                              \
+-		IOMUX_PAD(0x02A4, 0x004C, 0, 0x0000, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x02A4, 0x004C, 0, 0x0000, 0, MX6SL_ADU_PAD_CTRL)
+ #define MX6SL_PAD_AUD_MCLK__PWM4_PWMO                                         \
+ 		IOMUX_PAD(0x02A4, 0x004C, 1, 0x0000, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_AUD_MCLK__ECSPI3_RDY                                        \
+@@ -112,7 +123,7 @@
+ 		IOMUX_PAD(0x02A8, 0x0050, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_AUD_RXD__AUDMUX_AUD3_RXD                                    \
+-		IOMUX_PAD(0x02AC, 0x0054, 0, 0x0000, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x02AC, 0x0054, 0, 0x0000, 0, MX6SL_ADU_PAD_CTRL)
+ #define MX6SL_PAD_AUD_RXD__ECSPI3_MOSI                                        \
+ 		IOMUX_PAD(0x02AC, 0x0054, 1, 0x06BC, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_AUD_RXD__UART4_TXD                                          \
+@@ -150,7 +161,7 @@
+ 		IOMUX_PAD(0x02B0, 0x0058, 7, 0x07EC, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_AUD_TXC__AUDMUX_AUD3_TXC                                    \
+-		IOMUX_PAD(0x02B4, 0x005C, 0, 0x0000, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x02B4, 0x005C, 0, 0x0000, 0, MX6SL_ADU_PAD_CTRL)
+ #define MX6SL_PAD_AUD_TXC__ECSPI3_MISO                                        \
+ 		IOMUX_PAD(0x02B4, 0x005C, 1, 0x06B8, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_AUD_TXC__UART4_TXD                                          \
+@@ -169,7 +180,7 @@
+ 		IOMUX_PAD(0x02B4, 0x005C, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_AUD_TXD__AUDMUX_AUD3_TXD                                    \
+-		IOMUX_PAD(0x02B8, 0x0060, 0, 0x0000, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x02B8, 0x0060, 0, 0x0000, 0, MX6SL_ADU_PAD_CTRL)
+ #define MX6SL_PAD_AUD_TXD__ECSPI3_SCLK                                        \
+ 		IOMUX_PAD(0x02B8, 0x0060, 1, 0x06B0, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_AUD_TXD__UART4_CTS                                          \
+@@ -188,7 +199,7 @@
+ 		IOMUX_PAD(0x02B8, 0x0060, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_AUD_TXFS__AUDMUX_AUD3_TXFS                                  \
+-		IOMUX_PAD(0x02BC, 0x0064, 0, 0x0000, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x02BC, 0x0064, 0, 0x0000, 0, MX6SL_ADU_PAD_CTRL)
+ #define MX6SL_PAD_AUD_TXFS__PWM3_PWMO                                         \
+ 		IOMUX_PAD(0x02BC, 0x0064, 1, 0x0000, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_AUD_TXFS__UART4_CTS                                         \
+-- 
+1.7.7.4
+

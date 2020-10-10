@@ -1,0 +1,63 @@
+From 9ed769f5e29559e181161081a0513c99c0a35dce Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Thu, 28 Apr 2011 14:39:44 +0800
+Subject: [PATCH 0154/2463] ENGR00143126-3 ARM: add DMA driver for mx50
+
+add the DMA driver for mx50.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/dma/Kconfig   |    2 +-
+ drivers/dma/mxs-dma.c |   10 +++++++++-
+ 2 files changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/dma/Kconfig b/drivers/dma/Kconfig
+index 6a718b7..90dded6 100644
+--- a/drivers/dma/Kconfig
++++ b/drivers/dma/Kconfig
+@@ -230,7 +230,7 @@ config IMX_DMA
+ 
+ config MXS_DMA
+ 	bool "MXS DMA support"
+-	depends on SOC_IMX23 || SOC_IMX28
++	depends on SOC_IMX23 || SOC_IMX28 || SOC_IMX50
+ 	select DMA_ENGINE
+ 	help
+ 	  Support the MXS DMA engine. This engine including APBH-DMA
+diff --git a/drivers/dma/mxs-dma.c b/drivers/dma/mxs-dma.c
+index 88aad4f..c912fc6 100644
+--- a/drivers/dma/mxs-dma.c
++++ b/drivers/dma/mxs-dma.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * Refer to drivers/dma/imx-sdma.c
+  *
+@@ -27,6 +27,9 @@
+ #include <mach/mxs.h>
+ #include <mach/dma.h>
+ #include <mach/common.h>
++#ifdef CONFIG_SOC_IMX50
++#include <mach/system.h>
++#endif
+ 
+ /*
+  * NOTE: The term "PIO" throughout the mxs-dma implementation means
+@@ -576,7 +579,12 @@ static int __init mxs_dma_init(struct mxs_dma_engine *mxs_dma)
+ 	if (ret)
+ 		goto err_out;
+ 
++#if defined(CONFIG_SOC_IMX23) || defined(CONFIG_SOC_IMX28)
+ 	ret = mxs_reset_block(mxs_dma->base);
++#elif defined(CONFIG_SOC_IMX50)
++	ret = mxs_reset_block(mxs_dma->base, true);
++#endif
++
+ 	if (ret)
+ 		goto err_out;
+ 
+-- 
+1.7.7.4
+

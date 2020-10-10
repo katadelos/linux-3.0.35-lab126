@@ -1,0 +1,50 @@
+From a2f043c1d672253e16f704fbe2d756055186c6b0 Mon Sep 17 00:00:00 2001
+From: Sascha Hauer <s.hauer@pengutronix.de>
+Date: Tue, 26 Jun 2012 17:26:16 +0200
+Subject: [PATCH 2021/2463] mtd: gpmi-nand: fix read page when reading to
+ vmalloced area
+
+The gpmi-nand driver uses virt_addr_valid() to check whether a buffer
+is suitable for dma. If it's not, a driver allocated buffer is used
+instead. Then after a page read the driver allocated buffer must be
+copied to the user supplied buffer. This does not happen since commit
+7725cc85932bd02dd12c23108e0ef748c551ccba.
+
+This patch fixes the issue. The bug is encountered with UBI which uses a
+vmalloced buffer for the volume table.
+
+Signed-off-by: Sascha Hauer <s.hauer@pengutronix.de>
+Tested-by: snijsure@grid-net.com
+Acked-by: Huang Shijie <b32955@freescale.com>
+Signed-off-by: Artem Bityutskiy <artem.bityutskiy@linux.intel.com>
+Signed-off-by: David Woodhouse <David.Woodhouse@intel.com>
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/mtd/nand/gpmi-nand/gpmi-nand.c |   10 +++++-----
+ 1 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/mtd/nand/gpmi-nand/gpmi-nand.c b/drivers/mtd/nand/gpmi-nand/gpmi-nand.c
+index e9e8d1c..cc353ce 100644
+--- a/drivers/mtd/nand/gpmi-nand/gpmi-nand.c
++++ b/drivers/mtd/nand/gpmi-nand/gpmi-nand.c
+@@ -952,12 +952,12 @@ static int gpmi_ecc_read_page(struct mtd_info *mtd, struct nand_chip *chip,
+ 		 */
+ 		memset(chip->oob_poi, ~0, mtd->oobsize);
+ 		chip->oob_poi[0] = ((uint8_t *) auxiliary_virt)[0];
+-
+-		read_page_swap_end(this, buf, mtd->writesize,
+-				this->payload_virt, this->payload_phys,
+-				nfc_geo->payload_size,
+-				payload_virt, payload_phys);
+ 	}
++
++	read_page_swap_end(this, buf, mtd->writesize,
++			this->payload_virt, this->payload_phys,
++			nfc_geo->payload_size,
++			payload_virt, payload_phys);
+ exit_nfc:
+ 	return ret;
+ }
+-- 
+1.7.7.4
+

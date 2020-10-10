@@ -1,0 +1,42 @@
+From da492da3b0e008e6812d0328ace4305862e59950 Mon Sep 17 00:00:00 2001
+From: Matthieu CASTET <matthieu.castet@parrot.com>
+Date: Mon, 19 Mar 2012 15:35:25 +0100
+Subject: [PATCH 2205/2463] mtd: support ONFI multi lun NAND
+
+With onfi a flash is organized into one or more logical units (LUNs).
+A" logical unit (LUN) is the minimum unit that can independently execute
+commands and report status.
+
+Mtd does not exploit LUN, so make it see a big single flash where size is
+lun_size * number_of_lun.
+
+Without this patch MT29F8G08ADBDAH4 size is 512MiB instead of 1GiB.
+
+Artem: split long line on 2 shorter ones.
+
+Signed-off-by: Matthieu Castet <matthieu.castet@parrot.com>
+Acked-by: Florian Fainelli <ffainelli@freebox.fr>
+Signed-off-by: Artem Bityutskiy <artem.bityutskiy@linux.intel.com>
+Signed-off-by: David Woodhouse <David.Woodhouse@intel.com>
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/mtd/nand/nand_base.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mtd/nand/nand_base.c b/drivers/mtd/nand/nand_base.c
+index ccad911..c2dc1f0 100644
+--- a/drivers/mtd/nand/nand_base.c
++++ b/drivers/mtd/nand/nand_base.c
+@@ -2909,7 +2909,8 @@ static int nand_flash_detect_onfi(struct mtd_info *mtd, struct nand_chip *chip,
+ 	mtd->writesize = le32_to_cpu(p->byte_per_page);
+ 	mtd->erasesize = le32_to_cpu(p->pages_per_block) * mtd->writesize;
+ 	mtd->oobsize = le16_to_cpu(p->spare_bytes_per_page);
+-	chip->chipsize = (uint64_t)le32_to_cpu(p->blocks_per_lun) * mtd->erasesize;
++	chip->chipsize = le32_to_cpu(p->blocks_per_lun);
++	chip->chipsize *= (uint64_t)mtd->erasesize * p->lun_count;
+ 	*busw = 0;
+ 	if (le16_to_cpu(p->features) & 1)
+ 		*busw = NAND_BUSWIDTH_16;
+-- 
+1.7.7.4
+

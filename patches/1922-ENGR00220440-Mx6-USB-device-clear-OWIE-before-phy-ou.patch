@@ -1,0 +1,30 @@
+From 7e3d9c6385f56469cb37b448fb3f3cd8c88772ae Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Thu, 16 Aug 2012 15:44:11 +0800
+Subject: [PATCH 1922/2463] ENGR00220440 Mx6:USB device: clear OWIE before phy
+ out of low power mode
+
+There is a limitation on mx6 phy low power flow. During phy enter low power mode
+and out of low power mode with OWIE bit active,there will be abnormal usb wakeup
+interrupt happen. So we should clear OWIE bit before phy out of low power mode.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index eedd149..bab3ec9 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -3465,6 +3465,7 @@ static int fsl_udc_resume(struct platform_device *pdev)
+ 	 */
+ 	if (udc_controller->suspended && !udc_controller->stopped) {
+ 		dr_clk_gate(true);
++		dr_wake_up_enable(udc_controller, false);
+ 		dr_phy_low_power_mode(udc_controller, false);
+ 	}
+ 	/* Enable DR irq reg and set controller Run */
+-- 
+1.7.7.4
+

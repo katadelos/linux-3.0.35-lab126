@@ -1,0 +1,216 @@
+From 542d164ec0c13e5d052911f0a7ba0bc984fb0306 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Tue, 26 Apr 2011 16:27:29 +0800
+Subject: [PATCH 0150/2463] ENGR00141558-8 ARM: add gpmi device for mx508
+
+add the gpmi device for mx508.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx50_rdp.c                |   37 ++++++++++++
+ arch/arm/mach-mx5/clock_mx50.c                    |    2 +-
+ arch/arm/mach-mx5/devices-imx50.h                 |    2 +
+ arch/arm/plat-mxc/devices/Kconfig                 |    3 +
+ arch/arm/plat-mxc/devices/Makefile                |    1 +
+ arch/arm/plat-mxc/devices/platform-imx-gpmi-nfc.c |   66 +++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h   |    5 ++
+ 7 files changed, 115 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx50_rdp.c b/arch/arm/mach-mx5/board-mx50_rdp.c
+index 5cac95a..bbaeef7 100755
+--- a/arch/arm/mach-mx5/board-mx50_rdp.c
++++ b/arch/arm/mach-mx5/board-mx50_rdp.c
+@@ -207,6 +207,42 @@ static const struct spi_imx_master mx50_rdp_spi_pdata __initconst = {
+ 	.num_chipselect = ARRAY_SIZE(mx50_rdp_spi_cs),
+ };
+ 
++/* The GPMI is conflicted with SD3, so init this in the driver. */
++static iomux_v3_cfg_t mx50_gpmi_nand[] __initdata = {
++	MX50_PIN_EIM_DA8__NANDF_CLE,
++	MX50_PIN_EIM_DA9__NANDF_ALE,
++	MX50_PIN_EIM_DA10__NANDF_CE0,
++	MX50_PIN_EIM_DA11__NANDF_CE1,
++	MX50_PIN_EIM_DA12__NANDF_CE2,
++	MX50_PIN_EIM_DA13__NANDF_CE3,
++	MX50_PAD_EIM_DA14__NANDF_READY,
++	MX50_PIN_EIM_DA15__NANDF_DQS,
++	MX50_PIN_SD3_D4__NANDF_D0,
++	MX50_PIN_SD3_D5__NANDF_D1,
++	MX50_PIN_SD3_D6__NANDF_D2,
++	MX50_PIN_SD3_D7__NANDF_D3,
++	MX50_PIN_SD3_D0__NANDF_D4,
++	MX50_PIN_SD3_D1__NANDF_D5,
++	MX50_PIN_SD3_D2__NANDF_D6,
++	MX50_PIN_SD3_D3__NANDF_D7,
++	MX50_PIN_SD3_CLK__NANDF_RDN,
++	MX50_PIN_SD3_CMD__NANDF_WRN,
++	MX50_PIN_SD3_WP__NANDF_RESETN,
++};
++
++static int gpmi_nfc_platform_init(void)
++{
++	return mxc_iomux_v3_setup_multiple_pads(mx50_gpmi_nand,
++					ARRAY_SIZE(mx50_gpmi_nand));
++}
++
++static struct gpmi_nfc_platform_data  mx50_gpmi_nfc_platform_data __initdata = {
++	.platform_init           = gpmi_nfc_platform_init,
++	.min_prop_delay_in_ns    = 5,
++	.max_prop_delay_in_ns    = 9,
++	.max_chip_count          = 1,
++};
++
+ /*
+  * Board specific initialization.
+  */
+@@ -228,6 +264,7 @@ static void __init mx50_rdp_board_init(void)
+ 	imx50_add_srtc();
+ 	mx50_rdp_fec_reset();
+ 	imx50_add_fec(&fec_data);
++	imx50_add_gpmi(&mx50_gpmi_nfc_platform_data);
+ 	imx50_add_imx_i2c(0, &i2c_data);
+ 	imx50_add_imx_i2c(1, &i2c_data);
+ 	imx50_add_imx_i2c(2, &i2c_data);
+diff --git a/arch/arm/mach-mx5/clock_mx50.c b/arch/arm/mach-mx5/clock_mx50.c
+index 670a6cc..48f9de5 100755
+--- a/arch/arm/mach-mx5/clock_mx50.c
++++ b/arch/arm/mach-mx5/clock_mx50.c
+@@ -3324,7 +3324,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK("fec.0", NULL, fec_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "fec_sec1_clk", fec_clk[1]),
+ 	_REGISTER_CLOCK("mxc_w1.0", NULL, owire_clk),
+-	_REGISTER_CLOCK(NULL, "gpmi-nfc", gpmi_nfc_clk[0]),
++	_REGISTER_CLOCK("imx50-gpmi-nfc.0", NULL, gpmi_nfc_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "gpmi-apb", gpmi_nfc_clk[1]),
+ 	_REGISTER_CLOCK(NULL, "bch", gpmi_nfc_clk[2]),
+ 	_REGISTER_CLOCK(NULL, "bch-apb", gpmi_nfc_clk[3]),
+diff --git a/arch/arm/mach-mx5/devices-imx50.h b/arch/arm/mach-mx5/devices-imx50.h
+index fdce283..18c9609 100755
+--- a/arch/arm/mach-mx5/devices-imx50.h
++++ b/arch/arm/mach-mx5/devices-imx50.h
+@@ -57,6 +57,8 @@ extern const struct imx_rngb_data imx50_rngb_data __initconst;
+ extern const struct imx_perfmon_data imx50_perfmon_data __initconst;
+ #define imx50_add_perfmon() \
+ 	imx_add_perfmon(&imx50_perfmon_data);
++#define imx50_add_gpmi(platform_data)	imx_add_gpmi(platform_data);
++
+ extern const struct imx_perfmon_data imx50_perfmon_data __initconst;
+ #define imx50_add_perfmon() \
+ 	imx_add_perfmon(&imx50_perfmon_data);
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index f2ee8a5..d3b1350 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -13,6 +13,9 @@ config IMX_HAVE_PLATFORM_GPIO_KEYS
+ 	bool
+ 	default y if SOC_IMX51
+ 
++config IMX_HAVE_PLATFORM_GPMI_NFC
++	bool
++
+ config IMX_HAVE_PLATFORM_IMX21_HCD
+ 	bool
+ 
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index 76baca6..e3dd8d8 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -2,6 +2,7 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_FEC) += platform-fec.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_FLEXCAN) += platform-flexcan.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_FSL_USB2_UDC) += platform-fsl-usb2-udc.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_GPIO_KEYS) += platform-gpio_keys.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_GPMI_NFC) += platform-imx-gpmi-nfc.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX21_HCD) += platform-imx21-hcd.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX2_WDT) += platform-imx2-wdt.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMXDI_RTC) += platform-imxdi_rtc.o
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-gpmi-nfc.c b/arch/arm/plat-mxc/devices/platform-imx-gpmi-nfc.c
+new file mode 100644
+index 0000000..0d5ffeb
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx-gpmi-nfc.c
+@@ -0,0 +1,66 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++#include <asm/sizes.h>
++#include <mach/hardware.h>
++#include <mach/gpmi-nfc.h>
++#include <mach/devices-common.h>
++
++#ifdef CONFIG_SOC_IMX50
++struct platform_device *__init
++imx_add_gpmi(const struct gpmi_nfc_platform_data *platform_data)
++{
++	struct resource res[] = {
++	{ /* GPMI */
++		 .name  = GPMI_NFC_GPMI_REGS_ADDR_RES_NAME,
++		 .flags = IORESOURCE_MEM,
++		 .start = MX50_GPMI_BASE_ADDR,
++		 .end   = MX50_GPMI_BASE_ADDR + SZ_8K - 1,
++	}, {
++		 .name  = GPMI_NFC_GPMI_INTERRUPT_RES_NAME,
++		 .flags = IORESOURCE_IRQ,
++		 .start = MX50_INT_RAWNAND_GPMI,
++		 .end   = MX50_INT_RAWNAND_GPMI,
++	}, { /* BCH */
++		 .name  = GPMI_NFC_BCH_REGS_ADDR_RES_NAME,
++		 .flags = IORESOURCE_MEM,
++		 .start = MX50_BCH_BASE_ADDR,
++		 .end   = MX50_BCH_BASE_ADDR + SZ_8K - 1,
++	}, {
++		 .name  = GPMI_NFC_BCH_INTERRUPT_RES_NAME,
++		 .flags = IORESOURCE_IRQ,
++		 .start = MX50_INT_RAWNAND_BCH,
++		 .end   = MX50_INT_RAWNAND_BCH,
++	}, { /* DMA */
++		 .name  = GPMI_NFC_DMA_CHANNELS_RES_NAME,
++		 .flags = IORESOURCE_DMA,
++		 .start	= MX50_DMA_CHANNEL_AHB_APBH_GPMI0,
++		 .end	= MX50_DMA_CHANNEL_AHB_APBH_GPMI7,
++	}, {
++		 .name  = GPMI_NFC_DMA_INTERRUPT_RES_NAME,
++		 .flags = IORESOURCE_IRQ,
++		 .start = MX50_INT_APBHDMA_CHAN0,
++		 .end   = MX50_INT_APBHDMA_CHAN7,
++	}, };
++
++	return imx_add_platform_device_dmamask("imx50-gpmi-nfc", 0,
++			res, ARRAY_SIZE(res), platform_data,
++			sizeof(*platform_data), DMA_BIT_MASK(32));
++}
++#endif /* ifdef CONFIG_SOC_IMX50 */
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 6c28bc5..56f26ac 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -424,6 +424,11 @@ struct imx_dcp_data {
+ struct platform_device *__init imx_add_dcp(
+ 		const struct imx_dcp_data *data);
+ 
++/* gpmi-nfc */
++#include <mach/gpmi-nfc.h>
++struct platform_device *__init imx_add_gpmi(
++		const struct gpmi_nfc_platform_data *data);
++
+ struct imx_rngb_data {
+ 	resource_size_t iobase;
+ 	resource_size_t irq;
+-- 
+1.7.7.4
+

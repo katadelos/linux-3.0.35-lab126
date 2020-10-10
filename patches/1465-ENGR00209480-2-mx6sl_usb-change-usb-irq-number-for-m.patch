@@ -1,0 +1,87 @@
+From 9b7542b1f1a12c57378d54a44d98a2fbdb2849e0 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Sat, 28 Apr 2012 21:05:56 +0800
+Subject: [PATCH 1465/2463] ENGR00209480-2 mx6sl_usb:change usb irq number for
+ mx6sl
+
+- in mx6sl RM, the irq of usb h1(usb otg2) is 72, but
+  in fact, it should be 74, we need change the irq special
+  for mx6sl
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ arch/arm/mach-mx6/devices-imx6q.h             |    4 ++++
+ arch/arm/mach-mx6/usb_h1.c                    |    5 ++++-
+ arch/arm/plat-mxc/devices/platform-mxc-ehci.c |    8 ++++++++
+ arch/arm/plat-mxc/include/mach/mx6.h          |    4 ++--
+ 4 files changed, 18 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 995a5bd..cf7f3c8 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -70,6 +70,10 @@ extern const struct imx_mxc_ehci_data imx6q_mxc_ehci_hs_data[] __initconst;
+ #define imx6q_add_fsl_ehci_hs(id, pdata)	\
+ 	imx_add_fsl_ehci(&imx6q_mxc_ehci_hs_data[id - 1], pdata)
+ 
++extern const struct imx_mxc_ehci_data imx6sl_mxc_ehci_hs_data[] __initconst;
++#define imx6sl_add_fsl_ehci_hs(id, pdata)	\
++	imx_add_fsl_ehci(&imx6sl_mxc_ehci_hs_data[id - 1], pdata)
++
+ extern const struct imx_fsl_usb2_otg_data imx6q_fsl_usb2_otg_data __initconst;
+ #define imx6q_add_fsl_usb2_otg(pdata)	\
+ 	imx_add_fsl_usb2_otg(&imx6q_fsl_usb2_otg_data, pdata)
+diff --git a/arch/arm/mach-mx6/usb_h1.c b/arch/arm/mach-mx6/usb_h1.c
+index 478ead4..e36ec6f 100644
+--- a/arch/arm/mach-mx6/usb_h1.c
++++ b/arch/arm/mach-mx6/usb_h1.c
+@@ -350,7 +350,10 @@ void __init mx6_usb_h1_init(void)
+ 	struct platform_device *pdev, *pdev_wakeup;
+ 	static void __iomem *anatop_base_addr = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
+ 	usbh1_config.wakeup_pdata = &usbh1_wakeup_config;
+-	pdev = imx6q_add_fsl_ehci_hs(1, &usbh1_config);
++	if (cpu_is_mx6sl())
++		pdev = imx6sl_add_fsl_ehci_hs(1, &usbh1_config);
++	else
++		pdev = imx6q_add_fsl_ehci_hs(1, &usbh1_config);
+ 	usbh1_wakeup_config.usb_pdata[0] = pdev->dev.platform_data;
+ 	pdev_wakeup = imx6q_add_fsl_usb2_hs_wakeup(1, &usbh1_wakeup_config);
+ 	((struct fsl_usb2_platform_data *)(pdev->dev.platform_data))->wakeup_pdata =
+diff --git a/arch/arm/plat-mxc/devices/platform-mxc-ehci.c b/arch/arm/plat-mxc/devices/platform-mxc-ehci.c
+index 700cf46..94fdf11 100644
+--- a/arch/arm/plat-mxc/devices/platform-mxc-ehci.c
++++ b/arch/arm/plat-mxc/devices/platform-mxc-ehci.c
+@@ -58,6 +58,14 @@ const struct imx_mxc_ehci_data imx6q_mxc_ehci_hs_data[] __initconst = {
+ };
+ #endif /* ifdef CONFIG_SOC_IMX6Q */
+ 
++#ifdef CONFIG_SOC_IMX6SL
++const struct imx_mxc_ehci_data imx6sl_mxc_ehci_hs_data[] __initconst = {
++	imx_mxc_ehci_data_entry_single(MX6SL, 1, HS1),
++	imx_mxc_ehci_data_entry_single(MX6SL, 2, HS2),
++	imx_mxc_ehci_data_entry_single(MX6SL, 3, HS3),
++};
++#endif /* ifdef CONFIG_SOC_IMX6SL */
++
+ struct platform_device *__init imx_add_mxc_ehci(
+ 		const struct imx_mxc_ehci_data *data,
+ 		const struct mxc_usbh_platform_data *pdata)
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index ca4daec..9cf2a21 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -364,9 +364,9 @@
+ #define MX6Q_INT_USB_HS1		72
+ #define MX6SL_INT_USB_HS1		74
+ #define MX6Q_INT_USB_HS2		73
+-#define MX6SL_INT_USB_HS2		72
++#define MX6SL_INT_USB_HS2		73
+ #define MX6Q_INT_USB_HS3		74
+-#define MX6SL_INT_USB_HS3		73
++#define MX6SL_INT_USB_HS3		72
+ #define MX6Q_INT_USB_OTG		75
+ #define MX6Q_INT_USB_PHY0		76
+ #define MX6Q_INT_USB_PHY1		77
+-- 
+1.7.7.4
+

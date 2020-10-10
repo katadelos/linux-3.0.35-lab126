@@ -1,0 +1,255 @@
+From 39598ba89ba17c2ae2a4e6e40f02113f323fda20 Mon Sep 17 00:00:00 2001
+From: Danny Nold <dannynold@freescale.com>
+Date: Tue, 3 May 2011 13:10:46 -0500
+Subject: [PATCH 0159/2463] ENGR00142950-4 - Plat-MXC: Port EPDC support to
+ 2.6.38 kernel
+
+- Port EPDC platform code to 2.6.38
+- Port PxP platform code to 2.6.38
+
+Signed-off-by: Danny Nold <dannynold@freescale.com>
+---
+ arch/arm/plat-mxc/devices/Kconfig                |    8 +++-
+ arch/arm/plat-mxc/devices/Makefile               |    3 +-
+ arch/arm/plat-mxc/devices/platform-imx-epdc-fb.c |   56 ++++++++++++++++++++
+ arch/arm/plat-mxc/devices/platform-imx-pxp.c     |   61 ++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h  |   18 ++++++
+ arch/arm/plat-mxc/include/mach/epdc.h            |   41 +++++++++++++++
+ 6 files changed, 185 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index b146fc1..8680752 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -120,4 +120,10 @@ config IMX_HAVE_PLATFORM_PERFMON
+ 	bool
+ 
+ config IMX_HAVE_PLATFORM_LDB
+-	bool
++    bool
++
++config IMX_HAVE_PLATFORM_IMX_PXP
++    bool
++
++config IMX_HAVE_PLATFORM_IMX_EPDC
++	bool
+\ No newline at end of file
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index 149b673..6586b62 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -40,4 +40,5 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_RANDOM_RNGC) += platform-imx-rngb.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_PERFMON) += platform-imx-perfmon.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_LDB) += platform-imx_ldb.o
+ obj-y += platform-imx-scc2.o
+-
++obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_PXP) += platform-imx-pxp.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_EPDC) += platform-imx-epdc-fb.o
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-epdc-fb.c b/arch/arm/plat-mxc/devices/platform-imx-epdc-fb.c
+new file mode 100644
+index 0000000..d7dbe3e
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx-epdc-fb.c
+@@ -0,0 +1,56 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <asm/sizes.h>
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++
++#define imx5_epdc_data_entry_single(soc, size)	\
++	{								\
++		.iobase = soc ## _EPDC_BASE_ADDR,			\
++		.irq = soc ## _INT_EPDC,				\
++		.iosize = size,						\
++	}
++
++#ifdef CONFIG_SOC_IMX50
++const struct imx_epdc_data imx50_epdc_data __initconst =
++			imx5_epdc_data_entry_single(MX50, SZ_4K);
++#endif
++
++struct platform_device *__init imx_add_imx_epdc(
++		const struct imx_epdc_data *data,
++		const struct imx_epdc_fb_platform_data *pdata)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + data->iosize - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.start = data->irq,
++			.end = data->irq,
++			.flags = IORESOURCE_IRQ,
++		},
++	};
++
++	return imx_add_platform_device_dmamask("imx_epdc_fb", -1,
++		res, ARRAY_SIZE(res), pdata, sizeof(*pdata), DMA_BIT_MASK(32));
++}
++
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-pxp.c b/arch/arm/plat-mxc/devices/platform-imx-pxp.c
+new file mode 100644
+index 0000000..51030c5
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx-pxp.c
+@@ -0,0 +1,61 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <asm/sizes.h>
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++
++#define imx5_pxp_data_entry_single(soc, size)	\
++	{								\
++		.iobase = soc ## _EPXP_BASE_ADDR,			\
++		.irq = soc ## _INT_EPXP,				\
++		.iosize = size,						\
++	}
++
++#ifdef CONFIG_SOC_IMX50
++const struct imx_pxp_data imx50_pxp_data __initconst =
++			imx5_pxp_data_entry_single(MX50, SZ_4K);
++#endif
++
++struct platform_device *__init imx_add_imx_pxp(
++		const struct imx_pxp_data *data)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + data->iosize - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.start = data->irq,
++			.end = data->irq,
++			.flags = IORESOURCE_IRQ,
++		},
++	};
++
++	return imx_add_platform_device_dmamask("imx-pxp", -1,
++		res, ARRAY_SIZE(res), NULL, 0, DMA_BIT_MASK(32));
++}
++
++struct platform_device *__init imx_add_imx_pxp_client()
++{
++    return imx_add_platform_device("imx-pxp-client", -1,
++		NULL, 0, NULL, 0);
++}
++
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index c62f7b7..92dfa01 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -409,6 +409,24 @@ struct imx_perfmon_data {
+ 	struct mxs_platform_perfmon_data *pdata;
+ };
+ 
++struct imx_pxp_data {
++    resource_size_t iobase;
++    resource_size_t iosize;
++    resource_size_t irq;
++};
++struct platform_device *__init imx_add_imx_pxp(
++	const struct imx_pxp_data *data);
++struct platform_device *__init imx_add_imx_pxp_client(void);
++
++#include <mach/epdc.h>
++struct imx_epdc_data {
++	resource_size_t iobase;
++	resource_size_t iosize;
++	resource_size_t irq;
++};
++struct platform_device *__init imx_add_imx_epdc(
++		const struct imx_epdc_data *data,
++		const struct imx_epdc_fb_platform_data *pdata);
+ struct platform_device *__init imx_add_perfmon(
+ 		const struct imx_perfmon_data *data);
+ 		const struct mxc_gpu_platform_data *pdata);
+diff --git a/arch/arm/plat-mxc/include/mach/epdc.h b/arch/arm/plat-mxc/include/mach/epdc.h
+new file mode 100644
+index 0000000..89abcc6
+--- /dev/null
++++ b/arch/arm/plat-mxc/include/mach/epdc.h
+@@ -0,0 +1,41 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * for more details.
++ */
++
++#ifndef __MACH_EPDC_H_
++#define __MACH_EPDC_H_
++
++struct imx_epdc_fb_mode {
++    struct fb_videomode *vmode;
++    int vscan_holdoff;
++    int sdoed_width;
++    int sdoed_delay;
++    int sdoez_width;
++    int sdoez_delay;
++    int gdclk_hp_offs;
++    int gdsp_offs;
++    int gdoe_offs;
++    int gdclk_offs;
++    int num_ce;
++};
++
++struct imx_epdc_fb_platform_data {
++    struct imx_epdc_fb_mode *epdc_mode;
++    int num_modes;
++    int (*get_pins) (void);
++    void (*put_pins) (void);
++    void (*enable_pins) (void);
++    void (*disable_pins) (void);
++};
++
++#endif /* __MACH_EPDC_H_ */
+-- 
+1.7.7.4
+

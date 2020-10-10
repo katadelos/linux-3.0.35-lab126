@@ -1,0 +1,78 @@
+From 1c584293e60f067f6e10db6e8afd880aeade25aa Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Thu, 11 Oct 2012 17:18:15 +0800
+Subject: [PATCH 2166/2463] ENGR00227890 ts: fix elan touch screen gets no
+ response upon suspend/resume
+
+To reproduce:
+1. let system enter suspend mode
+2. touch the screen
+3. after the system resumes, touch screen does not respond again.
+
+The cause:
+The touch screen interrupt is triggered by falling edge. During suspend stage,
+once the screen has ever been touched, then the interrupt line will be always
+pulled low. Since elan ts chip is always powered on and the interrupt gets no
+chance to be handled during suspend stage, the interrupt line can not recover
+to high to detect a new one.
+
+Workaround:
+Read out the pending data to make the touch screen come back alive.
+
+Signed-off-by: LiGang <b41990@freescale.com>
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ drivers/input/touchscreen/elan_ts.c |   30 ++++++++++++++++++++++++++++++
+ 1 files changed, 30 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/input/touchscreen/elan_ts.c b/drivers/input/touchscreen/elan_ts.c
+index 7edd87d..9027259 100644
+--- a/drivers/input/touchscreen/elan_ts.c
++++ b/drivers/input/touchscreen/elan_ts.c
+@@ -359,6 +359,33 @@ static const struct i2c_device_id elan_touch_id[] = {
+ 	{}
+ };
+ 
++static int elan_suspend(struct device *dev)
++{
++	return 0;
++}
++
++static int elan_resume(struct device *dev)
++{
++	uint8_t buf[IDX_PACKET_SIZE] = { 0 };
++
++	if (0 == elan_touch_detect_int_level()) {
++		dev_dbg(dev, "Got touch during suspend period.\n");
++		/*
++		 * if touch screen during suspend, recv and drop the
++		 * data, then touch interrupt pin will return high after
++		 * receving data.
++		 */
++		elan_touch_recv_data(elan_touch_data.client, buf);
++	}
++
++	return 0;
++}
++
++static const struct dev_pm_ops elan_dev_pm_ops = {
++	.suspend = elan_suspend,
++	.resume  = elan_resume,
++};
++
+ static struct i2c_driver elan_touch_driver = {
+ 	.probe = elan_touch_probe,
+ 	.remove = elan_touch_remove,
+@@ -366,6 +393,9 @@ static struct i2c_driver elan_touch_driver = {
+ 	.driver = {
+ 		   .name = "elan-touch",
+ 		   .owner = THIS_MODULE,
++#ifdef CONFIG_PM
++		   .pm = &elan_dev_pm_ops,
++#endif
+ 		   },
+ };
+ 
+-- 
+1.7.7.4
+

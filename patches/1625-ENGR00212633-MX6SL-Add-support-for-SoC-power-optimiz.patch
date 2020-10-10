@@ -1,0 +1,673 @@
+From af046c7b9df81b8451675c4ae21a2da832b2720b Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Tue, 19 Jun 2012 17:21:43 -0500
+Subject: [PATCH 1625/2463] ENGR00212633 [MX6SL]: Add support for SoC power
+ optimization in Idle mode
+
+Add support for SoC power optimization in Idle mode (1st phase):
+1.	ARM @ 198MHz. VDDARM_CAP @ 0.85V
+2.	AHB @ 24MHz, DDR @ 25MHz
+3.	PU regulator disabled when system is in IDLE.
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_arm2.c |    1 +
+ arch/arm/mach-mx6/bus_freq.c         |  279 ++++++++++++++++++++++------------
+ arch/arm/mach-mx6/clock_mx6sl.c      |   78 +++++++---
+ arch/arm/mach-mx6/crm_regs.h         |    4 +-
+ 4 files changed, 240 insertions(+), 122 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 8b9799d..69fb1ad 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -1175,6 +1175,7 @@ static void __init mx6_arm2_init(void)
+ 
+ 	imx_add_viv_gpu(&imx6_gpu_data, &imx6q_gpu_pdata);
+ 	imx6sl_add_imx_keypad(&mx6sl_arm2_map_data);
++	imx6q_add_busfreq();
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index 9420283..37aec11 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -45,14 +45,11 @@
+ #include <asm/tlb.h>
+ #include "crm_regs.h"
+ 
+-
+-#define LPAPM_CLK	24000000
+-#define DDR_MED_CLK	400000000
+-#define DDR3_NORMAL_CLK	528000000
+-#define GPC_PGC_GPU_PGCR_OFFSET		0x260
+-#define GPC_CNTR_OFFSET				0x0
+-
+-
++#define LPAPM_CLK		24000000
++#define DDR_MED_CLK		400000000
++#define DDR3_NORMAL_CLK		528000000
++#define GPC_PGC_GPU_PGCR_OFFSET	0x260
++#define GPC_CNTR_OFFSET		0x0
+ 
+ DEFINE_SPINLOCK(ddr_freq_lock);
+ 
+@@ -91,13 +88,17 @@ struct timeval end_time;
+ static int cpu_op_nr;
+ static struct cpu_op *cpu_op_tbl;
+ static struct clk *pll2_400;
+-static struct clk *pll2_200;
++static struct clk *axi_clk;
++static struct clk *ahb_clk;
++static struct clk *periph_clk;
++static struct clk *osc_clk;
+ static struct clk *cpu_clk;
+ static unsigned int org_ldo;
+ static struct clk *pll3;
+ static struct clk *pll2;
+-static struct clk *periph_clk;
+-static struct clk *osc;
++static struct clk *pll3_sw_clk;
++static struct clk *pll2_200;
++static struct clk *mmdc_ch0_axi;
+ 
+ static struct delayed_work low_bus_freq_handler;
+ 
+@@ -126,67 +127,88 @@ static void reduce_bus_freq_handler(struct work_struct *work)
+ 		return;
+ 	}
+ 
+-	clk_enable(pll3);
++	if (!cpu_is_mx6sl()) {
++		clk_enable(pll3);
++
++		if (lp_audio_freq) {
++			/* Need to ensure that PLL2_PFD_400M is kept ON. */
++			clk_enable(pll2_400);
++			update_ddr_freq(50000000);
++			/* Make sure periph clk's parent also got updated */
++			clk_set_parent(periph_clk, pll2_200);
++			audio_bus_freq_mode = 1;
++			low_bus_freq_mode = 0;
++		} else {
++			update_ddr_freq(24000000);
++			/* Make sure periph clk's parent also got updated */
++			clk_set_parent(periph_clk, osc_clk);
++			if (audio_bus_freq_mode)
++				clk_disable(pll2_400);
++			low_bus_freq_mode = 1;
++			audio_bus_freq_mode = 0;
++		}
+ 
+-	if (lp_audio_freq) {
+-		/* Need to ensure that PLL2_PFD_400M is kept ON. */
+-		clk_enable(pll2_400);
+-		update_ddr_freq(50000000);
+-		/* Make sure periph clk's parent also got updated */
+-		clk_set_parent(periph_clk, pll2_200);
+-		audio_bus_freq_mode = 1;
+-		low_bus_freq_mode = 0;
+-	} else {
+-		update_ddr_freq(24000000);
+-		/* Make sure periph clk's parent also got updated */
+-		clk_set_parent(periph_clk, osc);
+-		if (audio_bus_freq_mode)
++		if (med_bus_freq_mode)
+ 			clk_disable(pll2_400);
++		clk_disable(pll3);
++	} else {
++		/* Set periph_clk to be sourced from OSC_CLK */
++		/* Set MMDC clk to 25MHz. */
++		/* First need to set the divider before changing the parent */
++		/* if parent clock is larger than previous one */
++		clk_set_rate(mmdc_ch0_axi, clk_get_rate(mmdc_ch0_axi) / 2);
++		clk_set_parent(mmdc_ch0_axi, pll3_sw_clk);
++		clk_set_parent(mmdc_ch0_axi, pll2_200);
++		clk_set_rate(mmdc_ch0_axi,
++			     clk_round_rate(mmdc_ch0_axi, LPAPM_CLK));
++
++		/* Set AXI to 24MHz. */
++		clk_set_parent(periph_clk, osc_clk);
++		clk_set_rate(axi_clk, clk_round_rate(axi_clk, LPAPM_CLK));
++		/* Set AHB to 24MHz. */
++		clk_set_rate(ahb_clk, clk_round_rate(ahb_clk, LPAPM_CLK));
++
+ 		low_bus_freq_mode = 1;
+ 		audio_bus_freq_mode = 0;
+ 	}
+ 
+-	if (med_bus_freq_mode)
+-		clk_disable(pll2_400);
+-
+ 	high_bus_freq_mode = 0;
+ 	med_bus_freq_mode = 0;
+ 
+-	if (cpu_is_mx6q()) {
+-		/* Disable the brown out detection since we are going to be
+-		  * disabling the LDO.
+-		  */
+-		reg = __raw_readl(ANA_MISC2_BASE_ADDR);
+-		reg &= ~ANADIG_ANA_MISC2_REG1_BO_EN;
+-		__raw_writel(reg, ANA_MISC2_BASE_ADDR);
+-
+-		/* Power gate the PU LDO. */
+-		/* Power gate the PU domain first. */
+-		/* enable power down request */
+-		reg = __raw_readl(gpc_base + GPC_PGC_GPU_PGCR_OFFSET);
+-		__raw_writel(reg | 0x1, gpc_base + GPC_PGC_GPU_PGCR_OFFSET);
+-		/* power down request */
+-		reg = __raw_readl(gpc_base + GPC_CNTR_OFFSET);
+-		__raw_writel(reg | 0x1, gpc_base + GPC_CNTR_OFFSET);
+-		/* Wait for power down to complete. */
+-		while (__raw_readl(gpc_base + GPC_CNTR_OFFSET) & 0x1)
+-			;
+-
+-		/* Mask the ANATOP brown out interrupt in the GPC. */
+-		reg = __raw_readl(gpc_base + 0x14);
+-		reg |= 0x80000000;
+-		__raw_writel(reg, gpc_base + 0x14);
+-
+-		org_ldo = reg = __raw_readl(ANADIG_REG_CORE);
+-		reg &= ~(ANADIG_REG_TARGET_MASK << ANADIG_REG1_PU_TARGET_OFFSET);
+-		__raw_writel(reg, ANADIG_REG_CORE);
++	/* Disable the brown out detection since we are going to be
++	  * disabling the LDO.
++	  */
++	reg = __raw_readl(ANA_MISC2_BASE_ADDR);
++	reg &= ~ANADIG_ANA_MISC2_REG1_BO_EN;
++	__raw_writel(reg, ANA_MISC2_BASE_ADDR);
++
++	/* Power gate the PU LDO. */
++	/* Power gate the PU domain first. */
++	/* enable power down request */
++	reg = __raw_readl(gpc_base + GPC_PGC_GPU_PGCR_OFFSET);
++	__raw_writel(reg | 0x1, gpc_base + GPC_PGC_GPU_PGCR_OFFSET);
++	/* power down request */
++	reg = __raw_readl(gpc_base + GPC_CNTR_OFFSET);
++	__raw_writel(reg | 0x1, gpc_base + GPC_CNTR_OFFSET);
++	/* Wait for power down to complete. */
++	while (__raw_readl(gpc_base + GPC_CNTR_OFFSET) & 0x1)
++		;
++
++	/* Mask the ANATOP brown out interrupt in the GPC. */
++	reg = __raw_readl(gpc_base + 0x14);
++	reg |= 0x80000000;
++	__raw_writel(reg, gpc_base + 0x14);
++
++	/* PU power gating. */
++	org_ldo = reg = __raw_readl(ANADIG_REG_CORE);
++	reg &= ~(ANADIG_REG_TARGET_MASK << ANADIG_REG1_PU_TARGET_OFFSET);
++	__raw_writel(reg, ANADIG_REG_CORE);
++
++	/* Clear the BO interrupt in the ANATOP. */
++	reg = __raw_readl(ANADIG_MISC1_REG);
++	reg |= 0x80000000;
++	__raw_writel(reg, ANADIG_MISC1_REG);
+ 
+-		/* Clear the BO interrupt in the ANATOP. */
+-		reg = __raw_readl(ANADIG_MISC1_REG);
+-		reg |= 0x80000000;
+-		__raw_writel(reg, ANADIG_MISC1_REG);
+-	}
+-	clk_disable(pll3);
+ 	mutex_unlock(&bus_freq_mutex);
+ }
+ 
+@@ -202,8 +224,8 @@ int set_low_bus_freq(void)
+ 	if (!bus_freq_scaling_initialized || !bus_freq_scaling_is_active)
+ 		return 0;
+ 
+-	/* Don't lower the frequency immediately. Instead scheduled a delayed work
+-	  * and drop the freq if the conditions still remain the same.
++	/* Don't lower the frequency immediately. Instead scheduled a delayed
++	  * work and drop the freq if the conditions still remain the same.
+ 	  */
+ 	schedule_delayed_work(&low_bus_freq_handler, usecs_to_jiffies(3000000));
+ 	return 0;
+@@ -232,17 +254,25 @@ int set_high_bus_freq(int high_bus_freq)
+ 		msleep(1);
+ 
+ 	if ((high_bus_freq_mode && (high_bus_freq || lp_high_freq)) ||
+-		(med_bus_freq_mode && !high_bus_freq && lp_med_freq && !lp_high_freq)) {
++	    (med_bus_freq_mode && !high_bus_freq && lp_med_freq &&
++	     !lp_high_freq)) {
+ 		mutex_unlock(&bus_freq_mutex);
+ 		return 0;
+ 	}
+-	clk_enable(pll3);
+-
+ 
+ 	/* Enable the PU LDO */
+-	if (cpu_is_mx6q() && low_bus_freq_mode) {
++	if (low_bus_freq_mode) {
++		/* Set the voltage of VDDSOC as in normal mode. */
+ 		__raw_writel(org_ldo, ANADIG_REG_CORE);
+ 
++		/* Need to wait for the regulator to come back up */
++		/*
++		 * Delay time is based on the number of 24MHz clock cycles
++		 * programmed in the ANA_MISC2_BASE_ADDR for each
++		 * 25mV step.
++		 */
++		udelay(150);
++
+ 		/* enable power up request */
+ 		reg = __raw_readl(gpc_base + GPC_PGC_GPU_PGCR_OFFSET);
+ 		__raw_writel(reg | 0x1, gpc_base + GPC_PGC_GPU_PGCR_OFFSET);
+@@ -262,32 +292,58 @@ int set_high_bus_freq(int high_bus_freq)
+ 		reg = __raw_readl(gpc_base + 0x14);
+ 		reg &= ~0x80000000;
+ 		__raw_writel(reg, gpc_base + 0x14);
++
++		if (cpu_is_mx6sl()) {
++			/* Set periph_clk to be sourced from pll2_pfd2_400M */
++			/* First need to set the divider before changing the */
++			/* parent if parent clock is larger than previous one */
++			clk_set_rate(ahb_clk, clk_round_rate(ahb_clk,
++							     LPAPM_CLK / 3));
++			clk_set_rate(axi_clk,
++				     clk_round_rate(axi_clk, LPAPM_CLK / 2));
++			clk_set_parent(periph_clk, pll2_400);
++
++			/* Set mmdc_clk_root to be sourced */
++			/* from pll2_pfd2_400M */
++			clk_set_rate(mmdc_ch0_axi,
++				     clk_round_rate(mmdc_ch0_axi,
++						    LPAPM_CLK / 2));
++			clk_set_parent(mmdc_ch0_axi, pll3_sw_clk);
++			clk_set_parent(mmdc_ch0_axi, pll2_400);
++			clk_set_rate(mmdc_ch0_axi,
++				     clk_round_rate(mmdc_ch0_axi, DDR_MED_CLK));
++
++			high_bus_freq_mode = 1;
++			med_bus_freq_mode = 0;
++		}
+ 	}
+ 
+-	if (high_bus_freq) {
+-		update_ddr_freq(ddr_normal_rate);
+-		/* Make sure periph clk's parent also got updated */
+-		clk_set_parent(periph_clk, pll2);
+-		if (med_bus_freq_mode)
++	if (!cpu_is_mx6sl()) {
++		clk_enable(pll3);
++		if (high_bus_freq) {
++			update_ddr_freq(ddr_normal_rate);
++			/* Make sure periph clk's parent also got updated */
++			clk_set_parent(periph_clk, pll2);
++			if (med_bus_freq_mode)
++				clk_disable(pll2_400);
++			high_bus_freq_mode = 1;
++			med_bus_freq_mode = 0;
++		} else {
++			clk_enable(pll2_400);
++			update_ddr_freq(ddr_med_rate);
++			/* Make sure periph clk's parent also got updated */
++			clk_set_parent(periph_clk, pll2_400);
++			high_bus_freq_mode = 0;
++			med_bus_freq_mode = 1;
++		}
++		if (audio_bus_freq_mode)
+ 			clk_disable(pll2_400);
+-		high_bus_freq_mode = 1;
+-		med_bus_freq_mode = 0;
+-	} else {
+-		clk_enable(pll2_400);
+-		update_ddr_freq(ddr_med_rate);
+-		/* Make sure periph clk's parent also got updated */
+-		clk_set_parent(periph_clk, pll2_400);
+-		high_bus_freq_mode = 0;
+-		med_bus_freq_mode = 1;
++
++		clk_disable(pll3);
+ 	}
+-	if (audio_bus_freq_mode)
+-		clk_disable(pll2_400);
+-	low_bus_freq_mode = 0;
+-	audio_bus_freq_mode = 0;
+ 
+ 	low_bus_freq_mode = 0;
+-
+-	clk_disable(pll3);
++	audio_bus_freq_mode = 0;
+ 	mutex_unlock(&bus_freq_mutex);
+ 
+ 	return 0;
+@@ -386,14 +442,14 @@ static int __devinit busfreq_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	pll2_200 = clk_get(NULL, "pll2_200M");
+-	if (IS_ERR(pll2_400)) {
++	if (IS_ERR(pll2_200)) {
+ 		printk(KERN_DEBUG "%s: failed to get pll2_200M\n",
+ 		       __func__);
+ 		return PTR_ERR(pll2_200);
+ 	}
+ 
+ 	pll2 = clk_get(NULL, "pll2");
+-	if (IS_ERR(pll2_400)) {
++	if (IS_ERR(pll2)) {
+ 		printk(KERN_DEBUG "%s: failed to get pll2\n",
+ 		       __func__);
+ 		return PTR_ERR(pll2);
+@@ -413,18 +469,46 @@ static int __devinit busfreq_probe(struct platform_device *pdev)
+ 		return PTR_ERR(pll3);
+ 	}
+ 
++	pll3_sw_clk = clk_get(NULL, "pll3_sw_clk");
++	if (IS_ERR(pll3_sw_clk)) {
++		printk(KERN_DEBUG "%s: failed to get pll3_sw_clk\n",
++		       __func__);
++		return PTR_ERR(pll3_sw_clk);
++	}
++
++	axi_clk = clk_get(NULL, "axi_clk");
++	if (IS_ERR(axi_clk)) {
++		printk(KERN_DEBUG "%s: failed to get axi_clk\n",
++		       __func__);
++		return PTR_ERR(axi_clk);
++	}
++
++	ahb_clk = clk_get(NULL, "ahb");
++	if (IS_ERR(ahb_clk)) {
++		printk(KERN_DEBUG "%s: failed to get ahb_clk\n",
++		       __func__);
++		return PTR_ERR(ahb_clk);
++	}
++
+ 	periph_clk = clk_get(NULL, "periph_clk");
+ 	if (IS_ERR(periph_clk)) {
+-		printk(KERN_DEBUG "%s: failed to get periph\n",
++		printk(KERN_DEBUG "%s: failed to get periph_clk\n",
+ 		       __func__);
+ 		return PTR_ERR(periph_clk);
+ 	}
+ 
+-	osc = clk_get(NULL, "osc");
+-	if (IS_ERR(osc)) {
+-		printk(KERN_DEBUG "%s: failed to get osc\n",
++	osc_clk = clk_get(NULL, "osc");
++	if (IS_ERR(osc_clk)) {
++		printk(KERN_DEBUG "%s: failed to get osc_clk\n",
++		       __func__);
++		return PTR_ERR(osc_clk);
++	}
++
++	mmdc_ch0_axi = clk_get(NULL, "mmdc_ch0_axi");
++	if (IS_ERR(mmdc_ch0_axi)) {
++		printk(KERN_DEBUG "%s: failed to get mmdc_ch0_axi\n",
+ 		       __func__);
+-		return PTR_ERR(osc);
++		return PTR_ERR(mmdc_ch0_axi);
+ 	}
+ 
+ 	err = sysfs_create_file(&busfreq_dev->kobj, &dev_attr_enable.attr);
+@@ -446,7 +530,7 @@ static int __devinit busfreq_probe(struct platform_device *pdev)
+ 		ddr_med_rate = DDR_MED_CLK;
+ 		ddr_normal_rate = DDR3_NORMAL_CLK;
+ 	}
+-	if (cpu_is_mx6dl()) {
++	if (cpu_is_mx6dl() || cpu_is_mx6sl()) {
+ 		ddr_low_rate = LPAPM_CLK;
+ 		ddr_normal_rate = ddr_med_rate = DDR_MED_CLK;
+ 	}
+@@ -455,7 +539,8 @@ static int __devinit busfreq_probe(struct platform_device *pdev)
+ 
+ 	mutex_init(&bus_freq_mutex);
+ 
+-	init_mmdc_settings();
++	if (!cpu_is_mx6sl())
++		init_mmdc_settings();
+ 
+ 	return 0;
+ }
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index a223f45..be00867 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -183,11 +183,6 @@ static int _clk_enable(struct clk *clk)
+ 	reg |= MXC_CCM_CCGRx_CG_MASK << clk->enable_shift;
+ 	__raw_writel(reg, clk->enable_reg);
+ 
+-	if (clk->flags & AHB_HIGH_SET_POINT)
+-		lp_high_freq++;
+-	else if (clk->flags & AHB_MED_SET_POINT)
+-		lp_med_freq++;
+-
+ 	return 0;
+ }
+ 
+@@ -197,11 +192,6 @@ static void _clk_disable(struct clk *clk)
+ 	reg = __raw_readl(clk->enable_reg);
+ 	reg &= ~(MXC_CCM_CCGRx_CG_MASK << clk->enable_shift);
+ 	__raw_writel(reg, clk->enable_reg);
+-
+-	if (clk->flags & AHB_HIGH_SET_POINT)
+-		lp_high_freq--;
+-	else if (clk->flags & AHB_MED_SET_POINT)
+-		lp_med_freq--;
+ }
+ 
+ static void _clk_disable_inwait(struct clk *clk)
+@@ -1300,7 +1290,7 @@ static int _clk_periph_set_parent(struct clk *clk, struct clk *parent)
+ 			;
+ 
+ 		reg = __raw_readl(MXC_CCM_CBCDR);
+-		/* Set periph_clk_sel to select periph_clk2. */
++		/* Set periph_clk_sel to select periph_clk. */
+ 		reg |= MXC_CCM_CBCDR_PERIPH_CLK_SEL;
+ 		__raw_writel(reg, MXC_CCM_CBCDR);
+ 	}
+@@ -1558,6 +1548,47 @@ static struct clk mx6per2_clk = {
+ 	.disable = _clk_disable_inwait,
+ };
+ 
++static int _clk_mmdc_ch1_axi_set_parent(struct clk *clk,
++					       struct clk *parent)
++{
++	u32 reg;
++	int mux;
++
++	mux = _get_mux6(parent, &pll2_528_bus_main_clk, &pll2_pfd2_400M,
++		&pll2_pfd0_352M, &pll2_200M, &pll3_sw_clk, NULL);
++
++	if (mux <= 3) {
++		/* Set the pre_periph2_clk_sel multiplexer */
++		reg = __raw_readl(MXC_CCM_CBCMR);
++		reg &= ~MXC_CCM_CBCMR_PRE_PERIPH2_CLK_SEL_MASK;
++		reg |= mux << MXC_CCM_CBCMR_PRE_PERIPH2_CLK_SEL_OFFSET;
++		__raw_writel(reg, MXC_CCM_CBCMR);
++
++		/* Set the periph2_clk_sel multiplexer. */
++		reg = __raw_readl(MXC_CCM_CBCDR);
++		reg &= ~MXC_CCM_CBCDR_PERIPH2_CLK_SEL;
++		__raw_writel(reg, MXC_CCM_CBCDR);
++	} else {
++		/* Select PLL3_SW_CLK from the periph2_clk2
++		   multiplexer */
++		reg = __raw_readl(MXC_CCM_CBCMR);
++		reg &= ~MXC_CCM_CBCMR_PERIPH2_CLK2_SEL;
++		__raw_writel(reg, MXC_CCM_CBCMR);
++
++		/* Set the periph2_clk_sel multiplexer. */
++		reg = __raw_readl(MXC_CCM_CBCDR);
++		reg &= ~MXC_CCM_CBCDR_PERIPH2_CLK_SEL;
++		reg |= MXC_CCM_CBCDR_PERIPH2_CLK_SEL;
++		__raw_writel(reg, MXC_CCM_CBCDR);
++	}
++
++	if (!WAIT(!(__raw_readl(MXC_CCM_CDHIPR)
++	     & MXC_CCM_CDHIPR_PERIPH2_CLK_SEL_BUSY), SPIN_DELAY))
++		panic("_clk_mmdc_ch1_axi_set_parent failed\n");
++
++	return 0;
++}
++
+ static unsigned long _clk_mmdc_ch1_axi_get_rate(struct clk *clk)
+ {
+ 	u32 reg, div;
+@@ -1622,6 +1653,7 @@ static struct clk mmdc_ch1_axi_clk[] = {
+ 	.enable_reg = MXC_CCM_CCGR3,
+ 	.enable_shift = MXC_CCM_CCGRx_CG11_OFFSET,
+ 	.secondary = &mmdc_ch1_axi_clk[1],
++	.set_parent = _clk_mmdc_ch1_axi_set_parent,
+ 	.get_rate = _clk_mmdc_ch1_axi_get_rate,
+ 	.set_rate = _clk_mmdc_ch1_axi_set_rate,
+ 	.round_rate = _clk_mmdc_ch1_axi_round_rate,
+@@ -1945,13 +1977,12 @@ static struct clk ipu2_clk = {
+ 	.round_rate = _clk_ipu_round_rate,
+ 	.set_rate = _clk_ipu2_set_rate,
+ 	.get_rate = _clk_ipu2_get_rate,
+-	.flags = AHB_MED_SET_POINT | CPU_FREQ_TRIG_UPDATE,
++	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static struct clk usdhc_dep_clk = {
+ 	.parent = &mmdc_ch1_axi_clk[0],
+ 	.secondary = &mx6per1_clk,
+-	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ 	};
+ 
+ static unsigned long _clk_usdhc_round_rate(struct clk *clk,
+@@ -2029,7 +2060,6 @@ static struct clk usdhc1_clk = {
+ 	.round_rate = _clk_usdhc_round_rate,
+ 	.set_rate = _clk_usdhc1_set_rate,
+ 	.get_rate = _clk_usdhc1_get_rate,
+-	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static int _clk_usdhc2_set_parent(struct clk *clk, struct clk *parent)
+@@ -2087,7 +2117,6 @@ static struct clk usdhc2_clk = {
+ 	.round_rate = _clk_usdhc_round_rate,
+ 	.set_rate = _clk_usdhc2_set_rate,
+ 	.get_rate = _clk_usdhc2_get_rate,
+-	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static int _clk_usdhc3_set_parent(struct clk *clk, struct clk *parent)
+@@ -2146,7 +2175,6 @@ static struct clk usdhc3_clk = {
+ 	.round_rate = _clk_usdhc_round_rate,
+ 	.set_rate = _clk_usdhc3_set_rate,
+ 	.get_rate = _clk_usdhc3_get_rate,
+-	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static int _clk_usdhc4_set_parent(struct clk *clk, struct clk *parent)
+@@ -2205,7 +2233,6 @@ static struct clk usdhc4_clk = {
+ 	.round_rate = _clk_usdhc_round_rate,
+ 	.set_rate = _clk_usdhc4_set_rate,
+ 	.get_rate = _clk_usdhc4_get_rate,
+-	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static unsigned long _clk_ssi_round_rate(struct clk *clk,
+@@ -2377,6 +2404,7 @@ static struct clk ssi1_clk = {
+ #else
+ 	 .secondary = &mmdc_ch1_axi_clk[0],
+ #endif
++	.flags  = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static unsigned long _clk_ssi2_get_rate(struct clk *clk)
+@@ -2450,6 +2478,7 @@ static struct clk ssi2_clk = {
+ #else
+ 	 .secondary = &mmdc_ch1_axi_clk[0],
+ #endif
++	.flags  = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static unsigned long _clk_ssi3_get_rate(struct clk *clk)
+@@ -2522,6 +2551,7 @@ static struct clk ssi3_clk = {
+ #else
+ 	 .secondary = &mmdc_ch1_axi_clk[0],
+ #endif
++	.flags  = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static unsigned long _clk_epdc_lcdif_pix_round_rate(struct clk *clk,
+@@ -3794,7 +3824,6 @@ static struct clk dummy_clk = {
+ 		.clk = &c, \
+ 	}
+ 
+-
+ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "osc", osc_clk),
+ 	_REGISTER_CLOCK(NULL, "ckih", ckih_clk),
+@@ -3803,7 +3832,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "pll1_main_clk", pll1_sys_main_clk),
+ 	_REGISTER_CLOCK(NULL, "pll1_sw_clk", pll1_sw_clk),
+ 	_REGISTER_CLOCK(NULL, "pll2", pll2_528_bus_main_clk),
+-	_REGISTER_CLOCK(NULL, "pll2_pfd2_400M", pll2_pfd2_400M),
++	_REGISTER_CLOCK(NULL, "pll2_pfd_400M", pll2_pfd2_400M),
+ 	_REGISTER_CLOCK(NULL, "pll2_pfd0_352M", pll2_pfd0_352M),
+ 	_REGISTER_CLOCK(NULL, "pll2_pfd1_594M", pll2_pfd1_594M),
+ 	_REGISTER_CLOCK(NULL, "pll2_200M", pll2_200M),
+@@ -3811,7 +3840,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "pll3_pfd2_508M", pll3_pfd2_508M),
+ 	_REGISTER_CLOCK(NULL, "pll3_pfd3_454M", pll3_pfd3_454M),
+ 	_REGISTER_CLOCK(NULL, "pll3_pfd0_720M", pll3_pfd0_720M),
+-	_REGISTER_CLOCK(NULL, "pll3_pfd1_540M", pll3_pfd1_540M),
++	_REGISTER_CLOCK(NULL, "pll3_pfd_540M", pll3_pfd1_540M),
+ 	_REGISTER_CLOCK(NULL, "pll3_sw_clk", pll3_sw_clk),
+ 	_REGISTER_CLOCK(NULL, "pll3_120M", pll3_120M),
+ 	_REGISTER_CLOCK(NULL, "pll3_80M", pll3_80M),
+@@ -3901,7 +3930,6 @@ static void clk_tree_init(void)
+ 	if ((reg & MMDC_MDMISC_DDR_TYPE_MASK) ==
+ 		(0x1 << MMDC_MDMISC_DDR_TYPE_OFFSET)) {
+ 		clk_set_parent(&periph_clk, &pll2_pfd2_400M);
+-		printk(KERN_INFO "Set periph_clk's parent to pll2_pfd2_400M!\n");
+ 	}
+ }
+ 
+@@ -3933,11 +3961,12 @@ int __init mx6sl_clocks_init(unsigned long ckil, unsigned long osc,
+ 
+ 	mxc_timer_init(&gpt_clk[0], timer_base, MXC_INT_GPT);
+ 
+-	clk_tree_init();
+-
+ 	/* keep correct count. */
+ 	clk_enable(&cpu_clk);
+ 	clk_enable(&periph_clk);
++	clk_enable(&mmdc_ch1_axi_clk);
++
++	clk_tree_init();
+ 
+ 	/* Set AHB to 132MHz. */
+ 	clk_set_rate(&ahb_clk, clk_round_rate(&ahb_clk, 132000000));
+@@ -3996,6 +4025,9 @@ int __init mx6sl_clocks_init(unsigned long ckil, unsigned long osc,
+ 
+ 	__raw_writel(0, MXC_CCM_CCGR6);
+ 
++	/* Bypass MMDC_CH0 handshake */
++	__raw_writel(0x20000, MXC_CCM_CCDR);
++
+ 	/* S/PDIF */
+ 	clk_set_parent(&spdif0_clk[0], &pll3_pfd3_454M);
+ 
+diff --git a/arch/arm/mach-mx6/crm_regs.h b/arch/arm/mach-mx6/crm_regs.h
+index 52fd75d..10fd663 100644
+--- a/arch/arm/mach-mx6/crm_regs.h
++++ b/arch/arm/mach-mx6/crm_regs.h
+@@ -228,7 +228,7 @@
+ /* Define the bits in register CBCDR */
+ #define MXC_CCM_CBCDR_PERIPH_CLK2_PODF_MASK	(0x7 << 27)
+ #define MXC_CCM_CBCDR_PERIPH_CLK2_PODF_OFFSET	(27)
+-#define MXC_CCM_CBCDR_PERIPH2_CLK2_SEL		(1 << 26)
++#define MXC_CCM_CBCDR_PERIPH2_CLK_SEL		(1 << 26)
+ #define MXC_CCM_CBCDR_PERIPH_CLK_SEL		(1 << 25)
+ #define MXC_CCM_CBCDR_MMDC_CH0_PODF_MASK	(0x7 << 19)
+ #define MXC_CCM_CBCDR_MMDC_CH0_PODF_OFFSET	(19)
+@@ -255,7 +255,7 @@
+ #define MXC_CCM_CBCMR_GPU2D_CORE_PODF_OFFSET		(23)
+ #define MXC_CCM_CBCMR_PRE_PERIPH2_CLK_SEL_MASK		(0x3 << 21)
+ #define MXC_CCM_CBCMR_PRE_PERIPH2_CLK_SEL_OFFSET	(21)
+-#define MXC_CCM_CBCMR_PRE_PERIPH2_CLK2_SEL		(1 << 20)
++#define MXC_CCM_CBCMR_PERIPH2_CLK2_SEL			(1 << 20)
+ #define MXC_CCM_CBCMR_PRE_PERIPH_CLK_SEL_MASK		(0x3 << 18)
+ #define MXC_CCM_CBCMR_PRE_PERIPH_CLK_SEL_OFFSET		(18)
+ #define MXC_CCM_CBCMR_GPU2D_CLK_SEL_MASK		(0x3 << 16)
+-- 
+1.7.7.4
+

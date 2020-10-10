@@ -1,0 +1,48 @@
+From a16630277ef7107a40276e1078adb91a306ac52a Mon Sep 17 00:00:00 2001
+From: Zeng Zhaoming <b32542@freescale.com>
+Date: Wed, 6 Apr 2011 04:48:28 +0800
+Subject: [PATCH 0051/2463] ENGR00141651-2 Audio: audio not work when ipmux2
+ clock disabled in idle
+
+When SOC enter wait mode, ipmux2_clk will disable to save power, if using
+ssi1 for audio transfer, audio will not work correctly.
+
+To around this, using ssi2.
+
+Signed-off-by: Zeng Zhaoming <b32542@freescale.com>
+---
+ sound/soc/imx/imx-pcm-dma-mx2.c |    2 +-
+ sound/soc/imx/imx-sgtl5000.c    |    4 ++--
+ 2 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/sound/soc/imx/imx-pcm-dma-mx2.c b/sound/soc/imx/imx-pcm-dma-mx2.c
+index 4173b3d..89e859a 100644
+--- a/sound/soc/imx/imx-pcm-dma-mx2.c
++++ b/sound/soc/imx/imx-pcm-dma-mx2.c
+@@ -83,7 +83,7 @@ static int imx_ssi_dma_alloc(struct snd_pcm_substream *substream,
+ 
+ 	dma_params = snd_soc_dai_get_dma_data(rtd->cpu_dai, substream);
+ 
+-	iprtd->dma_data.peripheral_type = IMX_DMATYPE_SSI;
++	iprtd->dma_data.peripheral_type = IMX_DMATYPE_SSI_SP;
+ 	iprtd->dma_data.priority = DMA_PRIO_HIGH;
+ 	iprtd->dma_data.dma_request = dma_params->dma;
+ 
+diff --git a/sound/soc/imx/imx-sgtl5000.c b/sound/soc/imx/imx-sgtl5000.c
+index 618d0fe..3ccf263 100644
+--- a/sound/soc/imx/imx-sgtl5000.c
++++ b/sound/soc/imx/imx-sgtl5000.c
+@@ -238,8 +238,8 @@ static struct snd_soc_dai_link imx_sgtl5000_dai[] = {
+ 		.stream_name	= "HiFi",
+ 		.codec_dai_name	= "sgtl5000",
+ 		.codec_name	= "sgtl5000.1-000a",
+-		.cpu_dai_name	= "imx-ssi.0",
+-		.platform_name	= "imx-pcm-audio.0",
++		.cpu_dai_name	= "imx-ssi.1",
++		.platform_name	= "imx-pcm-audio.1",
+ 		.init		= imx_3stack_sgtl5000_init,
+ 		.ops		= &imx_sgtl5000_hifi_ops,
+ 	},
+-- 
+1.7.7.4
+

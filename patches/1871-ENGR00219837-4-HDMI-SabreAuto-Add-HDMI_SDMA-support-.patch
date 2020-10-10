@@ -1,0 +1,38 @@
+From 7036e0af31452b7561e79578dd7def687b847dfd Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Wed, 8 Aug 2012 21:04:19 +0800
+Subject: [PATCH 1871/2463] ENGR00219837-4 HDMI SabreAuto: Add HDMI_SDMA
+ support for RIGEL TO1.1
+
+Replace mx6q_version() check with hdmi_SDMA_check() to add support
+for HDMI_SDMA in RIGEL TO1.1.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index ff031e4..3adf51f 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -56,6 +56,7 @@
+ #include <linux/regulator/fixed.h>
+ #include <linux/mxc_asrc.h>
+ #include <sound/pcm.h>
++#include <linux/mfd/mxc-hdmi-core.h>
+ 
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+@@ -912,7 +913,7 @@ static void hdmi_init(int ipu_id, int disp_id)
+ 	mxc_iomux_set_gpr_register(3, 2, 2, hdmi_mux_setting);
+ 
+ 	/* Set HDMI event as SDMA event2 while Chip version later than TO1.2 */
+-	if ((mx6q_revision() > IMX_CHIP_REVISION_1_1))
++	if (hdmi_SDMA_check())
+ 		mxc_iomux_set_gpr_register(0, 0, 1, 1);
+ }
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,31 @@
+From 6238c8255d5e93f177723d5898d5d45250d5e994 Mon Sep 17 00:00:00 2001
+From: Lily Zhang <r58066@freescale.com>
+Date: Tue, 13 Mar 2012 18:47:50 +0800
+Subject: [PATCH 1204/2463] ENGR00177310-2 mx6 clock: change
+ _clk_clko_round_rate
+
+Change _clk_clko_round_rate and ensure the clock should
+be less than the input rate.
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 06516b8..a6a1715 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4821,6 +4821,9 @@ static unsigned long _clk_clko_round_rate(struct clk *clk,
+ 	 */
+ 	if (div == 0)
+ 		div++;
++	else if (parent_rate % rate)
++		div++;
++
+ 	if (div > 8)
+ 		div = 8;
+ 	return parent_rate / div;
+-- 
+1.7.7.4
+

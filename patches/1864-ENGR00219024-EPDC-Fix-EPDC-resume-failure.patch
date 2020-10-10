@@ -1,0 +1,37 @@
+From adf1f08bdb8ee9b7223eca251ac239c2224e798a Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Fri, 3 Aug 2012 19:28:33 +0800
+Subject: [PATCH 1864/2463] ENGR00219024 [EPDC]Fix EPDC resume failure.
+
+Need to enable both axi and pix clock before doing EPDC reset,
+or the hardware reset will fail, which will result in dead loop
+of EPDC resume function, and block system resume.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ drivers/video/mxc/mxc_epdc_fb.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_epdc_fb.c b/drivers/video/mxc/mxc_epdc_fb.c
+index f782008..0b3923c 100644
+--- a/drivers/video/mxc/mxc_epdc_fb.c
++++ b/drivers/video/mxc/mxc_epdc_fb.c
+@@ -857,6 +857,7 @@ static void epdc_init_settings(struct mxc_epdc_fb_data *fb_data)
+ 
+ 	/* Enable clocks to access EPDC regs */
+ 	clk_enable(fb_data->epdc_clk_axi);
++	clk_enable(fb_data->epdc_clk_pix);
+ 
+ 	/* Reset */
+ 	__raw_writel(EPDC_CTRL_SFTRST, EPDC_CTRL_SET);
+@@ -1027,6 +1028,7 @@ static void epdc_init_settings(struct mxc_epdc_fb_data *fb_data)
+ 
+ 	/* Disable clock */
+ 	clk_disable(fb_data->epdc_clk_axi);
++	clk_disable(fb_data->epdc_clk_pix);
+ }
+ 
+ static void epdc_powerup(struct mxc_epdc_fb_data *fb_data)
+-- 
+1.7.7.4
+

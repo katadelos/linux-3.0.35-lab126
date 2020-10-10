@@ -1,0 +1,48 @@
+From 438b8579d208cccae407a474ef89f88a65664744 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 8 May 2012 15:10:16 +0800
+Subject: [PATCH 1432/2463] ENGR00182243 [MX6]Fix suspend/resume issue
+
+When there is pending wake up source before SOC enter DSM,
+we should restore DDR IO and enable cache then return. Previous
+code break r2 register which keep the iram stack addr, will
+lead to DDR IO restore fail, need to avoid it.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/mx6q_suspend.S |   16 ++++++++--------
+ 1 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mx6q_suspend.S b/arch/arm/mach-mx6/mx6q_suspend.S
+index aca771e..e52c66a 100644
+--- a/arch/arm/mach-mx6/mx6q_suspend.S
++++ b/arch/arm/mach-mx6/mx6q_suspend.S
+@@ -579,17 +579,17 @@ ddr_iomux_save:
+ 	stmfd	r0!, {r4}
+ 
+ #ifdef CONFIG_CACHE_L2X0
+-	ldr r2, =L2_BASE_ADDR
+-	add r2, r2, #PERIPBASE_VIRT
++	ldr r1, =L2_BASE_ADDR
++	add r1, r1, #PERIPBASE_VIRT
+ 
+-	ldr	r4, [r2, #L2X0_CTRL]
+-	ldr	r5, [r2, #L2X0_AUX_CTRL]
+-	ldr	r6, [r2, #L2X0_TAG_LATENCY_CTRL]
+-	ldr	r7, [r2, #L2X0_DATA_LATENCY_CTRL]
++	ldr	r4, [r1, #L2X0_CTRL]
++	ldr	r5, [r1, #L2X0_AUX_CTRL]
++	ldr	r6, [r1, #L2X0_TAG_LATENCY_CTRL]
++	ldr	r7, [r1, #L2X0_DATA_LATENCY_CTRL]
+ 	stmfd	r0!, {r4-r7}
+ 
+-	ldr	r4, [r2, #L2X0_PREFETCH_CTRL]
+-	ldr	r5, [r2, #L2X0_POWER_CTRL]
++	ldr	r4, [r1, #L2X0_PREFETCH_CTRL]
++	ldr	r5, [r1, #L2X0_POWER_CTRL]
+ 	stmfd	r0!, {r4-r5}
+ #endif
+ 
+-- 
+1.7.7.4
+

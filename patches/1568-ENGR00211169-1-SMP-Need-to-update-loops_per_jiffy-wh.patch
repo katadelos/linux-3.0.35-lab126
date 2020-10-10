@@ -1,0 +1,58 @@
+From 10e40260bd23e5e56c58b0b6a8f332a2a61f030a Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Mon, 4 Jun 2012 20:50:53 +0800
+Subject: [PATCH 1568/2463] ENGR00211169-1 [SMP]Need to update loops_per_jiffy
+ when cpufreq is changed
+
+Need to update loops_per_jiffy when cpufreq is changed, our platform
+only change the loops_per_jiffy of per_cpu cpu_data, we need to update
+it to global loops_per_jiffy which is used for udelay.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ init/calibrate.c |    9 ++++-----
+ 1 files changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/init/calibrate.c b/init/calibrate.c
+index 24df797..ebab7b3 100644
+--- a/init/calibrate.c
++++ b/init/calibrate.c
+@@ -10,6 +10,7 @@
+ #include <linux/timex.h>
+ #include <linux/smp.h>
+ #include <linux/percpu.h>
++#include <asm/cpu.h>
+ 
+ unsigned long lpj_fine;
+ unsigned long preset_lpj;
+@@ -244,16 +245,14 @@ recalibrate:
+ 	return lpj;
+ }
+ 
+-static DEFINE_PER_CPU(unsigned long, cpu_loops_per_jiffy) = { 0 };
+-
+ void __cpuinit calibrate_delay(void)
+ {
+ 	unsigned long lpj;
+ 	static bool printed;
+ 	int this_cpu = smp_processor_id();
+ 
+-	if (per_cpu(cpu_loops_per_jiffy, this_cpu)) {
+-		lpj = per_cpu(cpu_loops_per_jiffy, this_cpu);
++	if (per_cpu(cpu_data, this_cpu).loops_per_jiffy) {
++		lpj = per_cpu(cpu_data, this_cpu).loops_per_jiffy;
+ 		pr_info("Calibrating delay loop (skipped) "
+ 				"already calibrated this CPU");
+ 	} else if (preset_lpj) {
+@@ -274,7 +273,7 @@ void __cpuinit calibrate_delay(void)
+ 			pr_info("Calibrating delay loop... ");
+ 		lpj = calibrate_delay_converge();
+ 	}
+-	per_cpu(cpu_loops_per_jiffy, this_cpu) = lpj;
++	per_cpu(cpu_data, this_cpu).loops_per_jiffy = lpj;
+ 	if (!printed)
+ 		pr_cont("%lu.%02lu BogoMIPS (lpj=%lu)\n",
+ 			lpj/(500000/HZ),
+-- 
+1.7.7.4
+

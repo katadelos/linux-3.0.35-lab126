@@ -1,0 +1,47 @@
+From 1c6d40c63ca42e5e6f166d44df9d867ddf039226 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 2 Aug 2011 18:07:39 +0800
+Subject: [PATCH 0313/2463] ENGR00154056-3 [MX6]Enable dormant mode
+
+Better to save all the register that would be
+used in suspend function.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/mx6q_suspend.S |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mx6q_suspend.S b/arch/arm/mach-mx6/mx6q_suspend.S
+index 38db8a0..4c304c9 100644
+--- a/arch/arm/mach-mx6/mx6q_suspend.S
++++ b/arch/arm/mach-mx6/mx6q_suspend.S
+@@ -45,7 +45,7 @@ see define in include/linux/suspend.h
+ *************************************************************/
+ 
+ ENTRY(mx6q_suspend)
+-	stmfd   sp!, {r0-r8}     @ Save registers
++	stmfd   sp!, {r0-r12}     @ Save registers
+ /*************************************************************
+ suspend mode entry
+ *************************************************************/
+@@ -363,7 +363,7 @@ clear src register we used
+ return back to mx6_suspend_enter for dormant
+ ***********************************************************/
+ 	mov lr, r5
+-	ldmfd   sp!, {r0-r8}
++	ldmfd   sp!, {r0-r12}
+ 	mov pc, lr
+ 
+ 
+@@ -371,7 +371,7 @@ return back to mx6_suspend_enter for dormant
+ return back to mx6_suspend_enter for suspend
+ *************************************************/
+ out:
+-	ldmfd   sp!, {r0-r8}
++	ldmfd   sp!, {r0-r12}
+ 	mov pc, lr
+ 
+ 	.equ	va2pa_offset, (PAGE_OFFSET - MX6_PHYS_OFFSET)
+-- 
+1.7.7.4
+

@@ -1,0 +1,97 @@
+From c9cf5f94e34ab42ba8a2c079d09fe0be40c37f4c Mon Sep 17 00:00:00 2001
+From: Zhang Jiejing <jiejing.zhang@freescale.com>
+Date: Wed, 6 Jun 2012 10:07:21 +0800
+Subject: [PATCH 1875/2463] ENGR00212489-1 viv_GPU: add reserved memory
+ account handler.
+
+the original low memory killer only take care of system memory accounting,
+but for so large shared memory occupy by GPU, and each process memory
+killer account become unfair, very large 3D game will not killed firstly
+if it going to background.
+
+Add this account to let real large memory user get killed if going to background
+eg, the "angry bird Space" will acquire 68,215,360 GPU memory for 1-6 toll-gate.
+
+The test show it can quicker recovery from memory shortage situation,
+since it's very like to be killed after add so much GPU memory for such 3D game.
+
+Signed-off-by: Zhang Jiejing <jiejing.zhang@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../hal/os/linux/kernel/gc_hal_kernel_driver.c     |   39 ++++++++++++++++++++
+ 1 files changed, 39 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+index cd40904..02aaf81 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+@@ -39,6 +39,11 @@
+ #endif
+ 
+ 
++#ifdef CONFIG_ANDROID_RESERVED_MEMORY_ACCOUNT
++#    include <linux/resmem_account.h>
++#endif
++
++
+ /* Zone used for header/footer. */
+ #define _GC_OBJ_ZONE    gcvZONE_DRIVER
+ 
+@@ -144,6 +149,30 @@ static struct file_operations driver_fops =
+     .mmap       = drv_mmap,
+ };
+ 
++#ifdef CONFIG_ANDROID_RESERVED_MEMORY_ACCOUNT
++static size_t viv_gpu_resmem_query(struct task_struct *p, struct reserved_memory_account *m);
++static struct reserved_memory_account viv_gpu_resmem_handler = {
++    .name = "viv_gpu",
++    .get_page_used_by_process = viv_gpu_resmem_query,
++};
++
++size_t viv_gpu_resmem_query(struct task_struct *p, struct reserved_memory_account *m)
++{
++    gcuDATABASE_INFO info;
++    unsigned int processid = p->pid;
++    gckKERNEL gpukernel = m->data;
++
++    /* ignore error happens in this api. */
++    if (gckKERNEL_QueryProcessDB(gpukernel, processid, false, gcvDB_VIDEO_MEMORY, &info) != gcvSTATUS_OK)
++	return 0;
++
++    /* we return pages. */
++    if (info.counters.bytes > 0)
++	return info.counters.bytes / PAGE_SIZE;
++    return 0;
++}
++#endif
++
+ int drv_open(
+     struct inode* inode,
+     struct file* filp
+@@ -789,6 +818,12 @@ static int drv_init(void)
+         device->baseAddress = 0;
+     }
+ 
++#ifdef CONFIG_ANDROID_RESERVED_MEMORY_ACCOUNT
++    viv_gpu_resmem_handler.data = device->kernels[gcvCORE_MAJOR];
++    register_reserved_memory_account(&viv_gpu_resmem_handler);
++#endif
++
++
+     /* Register the character device. */
+     ret = register_chrdev(major, DRV_NAME, &driver_fops);
+ 
+@@ -868,6 +903,10 @@ static void drv_exit(void)
+ {
+     gcmkHEADER();
+ 
++#ifdef CONFIG_ANDROID_RESERVED_MEMORY_ACCOUNT
++    unregister_reserved_memory_account(&viv_gpu_resmem_handler);
++#endif
++
+     gcmkASSERT(gpuClass != gcvNULL);
+     device_destroy(gpuClass, MKDEV(major, 0));
+     class_destroy(gpuClass);
+-- 
+1.7.7.4
+

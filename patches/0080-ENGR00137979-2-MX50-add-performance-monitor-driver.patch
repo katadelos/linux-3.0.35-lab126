@@ -1,0 +1,226 @@
+From 8a04a8c5189c49f4c3a94ce0cd193f68646554f3 Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Tue, 11 Jan 2011 18:01:03 +0800
+Subject: [PATCH 0080/2463] ENGR00137979-2 [MX50]add performance monitor
+ driver
+
+	enable performance monitor driver for system loading analysis
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ arch/arm/configs/imx5_defconfig                  |    5 +-
+ arch/arm/mach-mx5/Kconfig                        |    1 +
+ arch/arm/mach-mx5/board-mx50_rdp.c               |    2 +
+ arch/arm/mach-mx5/devices-imx50.h                |    6 ++
+ arch/arm/plat-mxc/devices/Kconfig                |    3 +
+ arch/arm/plat-mxc/devices/Makefile               |    2 +
+ arch/arm/plat-mxc/devices/platform-imx-perfmon.c |   70 ++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h  |   14 ++++
+ arch/arm/plat-mxc/include/mach/system.h          |    2 +-
+ 9 files changed, 103 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/configs/imx5_defconfig b/arch/arm/configs/imx5_defconfig
+index ccf6928..9b87e98 100755
+--- a/arch/arm/configs/imx5_defconfig
++++ b/arch/arm/configs/imx5_defconfig
+@@ -269,6 +269,7 @@ CONFIG_IMX_HAVE_PLATFORM_MXC_GPU=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_OCOTP=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_DCP=y
+ CONFIG_IMX_HAVE_PLATFORM_RANDOM_RNGC=y
++CONFIG_IMX_HAVE_PLATFORM_PERFMON=y
+ 
+ #
+ # Freescale MXC Implementations
+@@ -583,7 +584,9 @@ CONFIG_BLK_DEV_RAM_SIZE=65536
+ # CONFIG_ATA_OVER_ETH is not set
+ # CONFIG_MG_DISK is not set
+ # CONFIG_BLK_DEV_RBD is not set
+-# CONFIG_MISC_DEVICES is not set
++CONFIG_MISC_DEVICES=y
++CONFIG_MXS_PERFMON=y
++
+ CONFIG_HAVE_IDE=y
+ # CONFIG_IDE is not set
+ 
+diff --git a/arch/arm/mach-mx5/Kconfig b/arch/arm/mach-mx5/Kconfig
+index 8af83c3..1a1713c 100755
+--- a/arch/arm/mach-mx5/Kconfig
++++ b/arch/arm/mach-mx5/Kconfig
+@@ -73,6 +73,7 @@ config MACH_MX50_RDP
+ 	select IMX_HAVE_PLATFORM_IMX_OCOTP
+ 	select IMX_HAVE_PLATFORM_IMX_DCP
+ 	select IMX_HAVE_PLATFORM_RANDOM_RNGC
++	select IMX_HAVE_PLATFORM_PERFMON
+ 	help
+ 	  Include support for MX50 reference design platform (RDP) board. This
+ 	  includes specific configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx5/board-mx50_rdp.c b/arch/arm/mach-mx5/board-mx50_rdp.c
+index e1ece1f..e28f395 100755
+--- a/arch/arm/mach-mx5/board-mx50_rdp.c
++++ b/arch/arm/mach-mx5/board-mx50_rdp.c
+@@ -36,6 +36,7 @@
+ 
+ #include "devices-imx50.h"
+ #include "cpu_op-mx50.h"
++#include "devices.h"
+ 
+ #define FEC_EN		IMX_GPIO_NR(6, 23)
+ #define FEC_RESET_B	IMX_GPIO_NR(4, 12)
+@@ -218,6 +219,7 @@ static void __init mx50_rdp_board_init(void)
+ 	imx50_add_otp();
+ 	imx50_add_dcp();
+ 	imx50_add_rngb();
++	imx50_add_perfmon();
+ }
+ 
+ static void __init mx50_rdp_timer_init(void)
+diff --git a/arch/arm/mach-mx5/devices-imx50.h b/arch/arm/mach-mx5/devices-imx50.h
+index 092dae4..932e65c 100755
+--- a/arch/arm/mach-mx5/devices-imx50.h
++++ b/arch/arm/mach-mx5/devices-imx50.h
+@@ -50,3 +50,9 @@ extern const struct imx_dcp_data imx50_dcp_data __initconst;
+ extern const struct imx_rngb_data imx50_rngb_data __initconst;
+ #define imx50_add_rngb() \
+ 	imx_add_rngb(&imx50_rngb_data);
++extern const struct imx_perfmon_data imx50_perfmon_data __initconst;
++#define imx50_add_perfmon() \
++	imx_add_perfmon(&imx50_perfmon_data);
++extern const struct imx_perfmon_data imx50_perfmon_data __initconst;
++#define imx50_add_perfmon() \
++	imx_add_perfmon(&imx50_perfmon_data);
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index 2f0f895..e7149db 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -109,3 +109,6 @@ config IMX_HAVE_PLATFORM_IMX_DCP
+ 
+ config IMX_HAVE_PLATFORM_RANDOM_RNGC
+ 	bool
++
++config IMX_HAVE_PLATFORM_PERFMON
++	bool
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index 51c686d..f7a3680 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -35,3 +35,5 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_MXC_GPU) +=  platform-mxc_gpu.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_OCOTP) += platform-imx-ocotp.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_DCP) += platform-imx-dcp.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_RANDOM_RNGC) += platform-imx-rngb.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_PERFMON) += platform-imx-perfmon.o
++
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-perfmon.c b/arch/arm/plat-mxc/devices/platform-imx-perfmon.c
+new file mode 100644
+index 0000000..faec9b0
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx-perfmon.c
+@@ -0,0 +1,70 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++#include <linux/fsl_devices.h>
++
++#ifdef CONFIG_SOC_IMX50
++static struct mxs_perfmon_bit_config
++mx50_perfmon_bit_config[] = {
++	{.field = (1 << 0),	.name = "MID0-CORE" },
++	{.field = (1 << 1),	.name = "MID1-DCP" },
++	{.field = (1 << 2),	.name = "MID2-PXP" },
++	{.field = (1 << 3),	.name = "MID3-USB" },
++	{.field = (1 << 4),	.name = "MID4-GPU2D" },
++	{.field = (1 << 5),	.name = "MID5-BCH" },
++	{.field = (1 << 6),	.name = "MID6-AHB" },
++	{.field = (1 << 7),	.name = "MID7-EPDC" },
++	{.field = (1 << 8),	.name = "MID8-LCDIF" },
++	{.field = (1 << 9),	.name = "MID9-SDMA" },
++	{.field = (1 << 10),	.name = "MID10-FEC" },
++	{.field = (1 << 11),	.name = "MID11-MSHC" }
++};
++
++struct mxs_platform_perfmon_data mxc_perfmon_data = {
++	.bit_config_tab = mx50_perfmon_bit_config,
++	.bit_config_cnt = ARRAY_SIZE(mx50_perfmon_bit_config),
++};
++
++
++const struct imx_perfmon_data imx50_perfmon_data = {
++	.iobase = MX50_PERFMON_BASE_ADDR,
++	.pdata = &mxc_perfmon_data,
++};
++#endif
++
++
++struct platform_device *__init imx_add_perfmon(
++		const struct imx_perfmon_data *data)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + SZ_4K - 1,
++			.flags = IORESOURCE_MEM,
++		}
++	};
++
++	return imx_add_platform_device("mxs-perfmon", 0,
++			res, ARRAY_SIZE(res), data->pdata,
++			sizeof(struct mxs_platform_perfmon_data));
++}
++
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index b5e1082..24c9187 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -371,6 +371,20 @@ struct imx_mxc_gpu_data {
+ 
+ struct platform_device *__init imx_add_mxc_gpu(
+ 		const struct imx_mxc_gpu_data *data,
++struct imx_perfmon_data {
++	resource_size_t iobase;
++	struct mxs_platform_perfmon_data *pdata;
++};
++
++struct platform_device *__init imx_add_perfmon(
++		const struct imx_perfmon_data *data);
++struct imx_perfmon_data {
++	resource_size_t iobase;
++	struct mxs_platform_perfmon_data *pdata;
++};
++
++struct platform_device *__init imx_add_perfmon(
++		const struct imx_perfmon_data *data);
+ 		const int *pdata);
+ struct imx_otp_data {
+ 	resource_size_t iobase;
+diff --git a/arch/arm/plat-mxc/include/mach/system.h b/arch/arm/plat-mxc/include/mach/system.h
+index b3c09ca..1a51cca 100755
+--- a/arch/arm/plat-mxc/include/mach/system.h
++++ b/arch/arm/plat-mxc/include/mach/system.h
+@@ -25,5 +25,5 @@ extern void mx5_cpu_lp_set(enum mxc_cpu_pwr_mode mode);
+ void arch_idle(void);
+ 
+ void arch_reset(char mode, const char *cmd);
+-
++int mxs_reset_block(void __iomem *hwreg, int just_enable);
+ #endif /* __ASM_ARCH_MXC_SYSTEM_H__ */
+-- 
+1.7.7.4
+

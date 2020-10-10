@@ -1,0 +1,120 @@
+From 751d7a160ed0fc4b6587102d868766e3f667f973 Mon Sep 17 00:00:00 2001
+From: Terry Lv <r65388@freescale.com>
+Date: Mon, 16 Jul 2012 15:48:11 +0800
+Subject: [PATCH 1759/2463] ENGR00217306-1: Add DCP/RNGB driver support
+
+This patch will add driver menu support.
+And also, for rng don't need to enable clock, we add operation when no
+clock is specified for rng.
+
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/char/hw_random/fsl-rngc.c |   19 ++++++++-----------
+ drivers/crypto/Kconfig            |   10 +++++-----
+ drivers/crypto/dcp.c              |    4 ++--
+ 3 files changed, 15 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/char/hw_random/fsl-rngc.c b/drivers/char/hw_random/fsl-rngc.c
+index 58f0afb..5efe810 100644
+--- a/drivers/char/hw_random/fsl-rngc.c
++++ b/drivers/char/hw_random/fsl-rngc.c
+@@ -1,7 +1,7 @@
+ /*
+  * RNG driver for Freescale RNGC
+  *
+- * Copyright (C) 2008-2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2008-2012 Freescale Semiconductor, Inc.
+  */
+ 
+ /*
+@@ -123,7 +123,7 @@ static struct platform_device *rng_dev;
+ 
+ int irq_rng;
+ 
+-static int fsl_rngc_data_present(struct hwrng *rng)
++static int fsl_rngc_data_present(struct hwrng *rng, int wait)
+ {
+ 	int level;
+ 	u32 rngc_base = (u32) rng->priv;
+@@ -135,7 +135,7 @@ static int fsl_rngc_data_present(struct hwrng *rng)
+ 	return level > 0 ? 1 : 0;
+ }
+ 
+-static int fsl_rngc_data_read(struct hwrng *rng, u32 * data)
++static int fsl_rngc_data_read(struct hwrng *rng, u32 *data)
+ {
+ 	int err;
+ 	u32 rngc_base = (u32) rng->priv;
+@@ -293,13 +293,10 @@ static int __init fsl_rngc_probe(struct platform_device *pdev)
+ 
+ 	clk = clk_get(&pdev->dev, "rng_clk");
+ 
+-	if (IS_ERR(clk)) {
+-		dev_err(&pdev->dev, "Can not get rng_clk\n");
+-		err = PTR_ERR(clk);
+-		return err;
+-	}
+-
+-	clk_enable(clk);
++	if (IS_ERR(clk))
++		dev_warn(&pdev->dev, "No rng_clk specified\n");
++	else
++		clk_enable(clk);
+ 
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 
+@@ -340,7 +337,7 @@ static int __exit fsl_rngc_remove(struct platform_device *pdev)
+ 	clk = clk_get(&pdev->dev, "rng_clk");
+ 
+ 	if (IS_ERR(clk))
+-		dev_err(&pdev->dev, "Can not get rng_clk\n");
++		dev_warn(&pdev->dev, "No rng_clk specified\n");
+ 	else
+ 		clk_disable(clk);
+ 
+diff --git a/drivers/crypto/Kconfig b/drivers/crypto/Kconfig
+index 626b132..ed37f0a 100644
+--- a/drivers/crypto/Kconfig
++++ b/drivers/crypto/Kconfig
+@@ -294,13 +294,13 @@ config CRYPTO_DEV_S5P
+ 	  algorithms execution.
+ config CRYPTO_DEV_DCP
+ 	tristate "Support for the DCP engine"
+-	depends on SOC_IMX28 || SOC_IMX23 || SOC_IMX50
++	depends on SOC_IMX28 || SOC_IMX23 || SOC_IMX50 || SOC_IMX6SL
+ 	select CRYPTO_ALGAPI
+ 	select CRYPTO_BLKCIPHER
+ 	help
+-	 Say 'Y' here to use the DCP AES and SHA
+-	 engine for the CryptoAPI algorithms.
+-	 To compile this driver as a module, choose M here: the module
+-	 will be called geode-aes.
++	  Say 'Y' here to use the DCP AES and SHA
++	  engine for the CryptoAPI algorithms.
++	  To compile this driver as a module, choose M here: the module
++	  will be called geode-aes.
+ 
+ endif # CRYPTO_HW
+diff --git a/drivers/crypto/dcp.c b/drivers/crypto/dcp.c
+index 7ab5955..cfc486d 100644
+--- a/drivers/crypto/dcp.c
++++ b/drivers/crypto/dcp.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2008-2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2008-2012 Freescale Semiconductor, Inc.
+  */
+ 
+ /*
+@@ -1317,7 +1317,7 @@ static irqreturn_t dcp_irq(int irq, void *context)
+ }
+ 
+ /* DCP bootstream verification interface: uses OTP key for crypto */
+-static int dcp_bootstream_ioctl(struct inode *inode, struct file *file,
++static long dcp_bootstream_ioctl(struct file *file,
+ 					 unsigned int cmd, unsigned long arg)
+ {
+ 	struct dcp *sdcp = global_sdcp;
+-- 
+1.7.7.4
+

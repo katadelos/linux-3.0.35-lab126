@@ -1,0 +1,283 @@
+From 609a06efed0637962c3c455b569f8034b44c7eda Mon Sep 17 00:00:00 2001
+From: Danny Nold <dannynold@freescale.com>
+Date: Fri, 2 Sep 2011 16:45:14 -0500
+Subject: [PATCH 0401/2463] ENGR00154436-1 - MACH-MX6: MXC HDMI updates to
+ support full feature set
+
+- Corrected logic bug in how GPR registers are set
+- Add support for configurable ipu-to-hdmi mappings
+- Add aspect ratio to EDID mode data
+- Expanded HDMI register field defines
+- Removed HDMI platform data now handled by HDMI core in MFD
+
+Signed-off-by: Danny Nold <dannynold@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c        |   27 +++++++-
+ arch/arm/mach-mx6/devices-imx6q.h               |    2 +-
+ arch/arm/plat-mxc/devices/platform-mxc_hdmi.c   |   14 +---
+ arch/arm/plat-mxc/include/mach/devices-common.h |    4 +-
+ arch/arm/plat-mxc/include/mach/mxc_edid.h       |    4 +
+ arch/arm/plat-mxc/include/mach/mxc_hdmi.h       |   85 +++++++++++++++++++++--
+ arch/arm/plat-mxc/iomux-v3.c                    |    2 +-
+ 7 files changed, 114 insertions(+), 24 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 9a82a3b..747684a 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -677,10 +677,33 @@ static struct ipuv3_fb_platform_data sabr_fb_data[] = {
+ 	},
+ };
+ 
+-static struct fsl_mxc_lcd_platform_data hdmi_data = {
++static void hdmi_init(int ipu_id, int disp_id)
++{
++	int hdmi_mux_setting;
++
++	if ((ipu_id > 1) || (ipu_id < 0)) {
++		printk(KERN_ERR"Invalid IPU select for HDMI: %d. Set to 0\n",
++			ipu_id);
++		ipu_id = 0;
++	}
++
++	if ((disp_id > 1) || (disp_id < 0)) {
++		printk(KERN_ERR"Invalid DI select for HDMI: %d. Set to 0\n",
++			disp_id);
++		disp_id = 0;
++	}
++
++	/* Configure the connection between IPU1/2 and HDMI */
++	hdmi_mux_setting = 2*ipu_id + disp_id;
++
++	/* GPR3, bits 2-3 = HDMI_MUX_CTL */
++	mxc_iomux_set_gpr_register(3, 2, 2, hdmi_mux_setting);
++}
++
++static struct fsl_mxc_hdmi_platform_data hdmi_data = {
++	.init = hdmi_init,
+ 	.ipu_id = 0,
+ 	.disp_id = 0,
+-	.default_ifmt = IPU_PIX_FMT_RGB24,
+ };
+ 
+ static struct fsl_mxc_lcd_platform_data lcdif_data = {
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 2cc9d76..2d5069f 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -108,7 +108,7 @@ extern const struct imx_ldb_data imx6q_ldb_data __initconst;
+ 	platform_device_register_resndata(NULL, "mxc_v4l2_capture",\
+ 			id, NULL, 0, NULL, 0);
+ 
+-extern const struct fsl_mxc_lcd_platform_data imx6q_mxc_hdmi_data __initconst;
++extern const struct imx_mxc_hdmi_data imx6q_mxc_hdmi_data __initconst;
+ #define imx6q_add_mxc_hdmi(pdata)	\
+ 	imx_add_mxc_hdmi(&imx6q_mxc_hdmi_data, pdata)
+ 
+diff --git a/arch/arm/plat-mxc/devices/platform-mxc_hdmi.c b/arch/arm/plat-mxc/devices/platform-mxc_hdmi.c
+index 1647b8a..c054570 100644
+--- a/arch/arm/plat-mxc/devices/platform-mxc_hdmi.c
++++ b/arch/arm/plat-mxc/devices/platform-mxc_hdmi.c
+@@ -22,30 +22,22 @@
+ #include <mach/hardware.h>
+ #include <mach/devices-common.h>
+ 
+-#define imx6_mxc_hdmi_data_entry_single(soc, size)	\
++#define imx6_mxc_hdmi_data_entry_single(soc)				\
+ 	{								\
+-		.iobase = soc ## _HDMI_ARB_BASE_ADDR,			\
+ 		.irq = soc ## _INT_HDMI_TX,				\
+-		.irq_wakeup = soc ## _INT_HDMI_TX_WAKEUP,		\
+-		.iosize = size,						\
+ 	}
+ 
+ #ifdef CONFIG_SOC_IMX6Q
+ const struct imx_mxc_hdmi_data imx6q_mxc_hdmi_data __initconst =
+-			imx6_mxc_hdmi_data_entry_single(MX6Q, SZ_32K + SZ_4K);
++			imx6_mxc_hdmi_data_entry_single(MX6Q);
+ #endif
+ 
+ struct platform_device *__init imx_add_mxc_hdmi(
+ 		const struct imx_mxc_hdmi_data *data,
+-		const struct fsl_mxc_lcd_platform_data *pdata)
++		const struct fsl_mxc_hdmi_platform_data *pdata)
+ {
+ 	struct resource res[] = {
+ 		{
+-			.start = data->iobase,
+-			.end = data->iobase + data->iosize - 1,
+-			.flags = IORESOURCE_MEM,
+-		},
+-		{
+ 			.start = data->irq,
+ 			.end = data->irq,
+ 			.flags = IORESOURCE_IRQ,
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index ec688e0..59ea7f8 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -538,15 +538,13 @@ struct platform_device *__init imx_add_pm_imx(
+ 
+ #include <mach/mxc_hdmi.h>
+ struct imx_mxc_hdmi_data {
+-	resource_size_t iobase;
+-	resource_size_t iosize;
+ 	resource_size_t irq;
+ 	resource_size_t irq_wakeup;
+ };
+ 
+ struct platform_device *__init imx_add_mxc_hdmi(
+ 		const struct imx_mxc_hdmi_data *data,
+-		const struct fsl_mxc_lcd_platform_data *pdata);
++		const struct fsl_mxc_hdmi_platform_data *pdata);
+ 
+ struct imx_mxc_hdmi_core_data {
+ 	resource_size_t iobase;
+diff --git a/arch/arm/plat-mxc/include/mach/mxc_edid.h b/arch/arm/plat-mxc/include/mach/mxc_edid.h
+index ec65a5f..7f76beb 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc_edid.h
++++ b/arch/arm/plat-mxc/include/mach/mxc_edid.h
+@@ -26,6 +26,9 @@
+ #ifndef MXC_EDID_H
+ #define MXC_EDID_H
+ 
++#define FB_MODE_ASPECT_4_3	0x10
++#define FB_MODE_ASPECT_16_9	0x20
++
+ struct mxc_edid_cfg {
+ 	bool cea_underscan;
+ 	bool cea_basicaudio;
+@@ -42,6 +45,7 @@ struct mxc_edid_cfg {
+ };
+ 
+ int mxc_edid_var_to_vic(struct fb_var_screeninfo *var);
++int mxc_edid_mode_to_vic(const struct fb_videomode *mode);
+ int mxc_edid_read(struct i2c_adapter *adp, unsigned short addr,
+ 	unsigned char *edid, struct mxc_edid_cfg *cfg, struct fb_info *fbi);
+ 
+diff --git a/arch/arm/plat-mxc/include/mach/mxc_hdmi.h b/arch/arm/plat-mxc/include/mach/mxc_hdmi.h
+index 53a17af..23ad182 100644
+--- a/arch/arm/plat-mxc/include/mach/mxc_hdmi.h
++++ b/arch/arm/plat-mxc/include/mach/mxc_hdmi.h
+@@ -578,12 +578,16 @@
+  */
+ enum {
+ /* IH_PHY_STAT0 field values */
+-	HDMI_IH_PHY_STAT0_RX_SENSE3_CLEAR = 0x20,
+-	HDMI_IH_PHY_STAT0_RX_SENSE2_CLEAR = 0x10,
+-	HDMI_IH_PHY_STAT0_RX_SENSE1_CLEAR = 0x8,
+-	HDMI_IH_PHY_STAT0_RX_SENSE0_CLEAR = 0x4,
+-	HDMI_IH_PHY_STAT0_TX_PHY_LOCK_CLEAR = 0x2,
+-	HDMI_IH_PHY_STAT0_HDP_CLEAR = 0x1,
++	HDMI_IH_PHY_STAT0_RX_SENSE3 = 0x20,
++	HDMI_IH_PHY_STAT0_RX_SENSE2 = 0x10,
++	HDMI_IH_PHY_STAT0_RX_SENSE1 = 0x8,
++	HDMI_IH_PHY_STAT0_RX_SENSE0 = 0x4,
++	HDMI_IH_PHY_STAT0_TX_PHY_LOCK = 0x2,
++	HDMI_IH_PHY_STAT0_HPD = 0x1,
++
++/* IH_MUTE_I2CMPHY_STAT0 field values */
++	HDMI_IH_MUTE_I2CMPHY_STAT0_I2CMPHYDONE = 0x2,
++	HDMI_IH_MUTE_I2CMPHY_STAT0_I2CMPHYERROR = 0x1,
+ 
+ /* IH_MUTE field values */
+ 	HDMI_IH_MUTE_MUTE_WAKEUP_INTERRUPT = 0x2,
+@@ -693,6 +697,67 @@ enum {
+ 	HDMI_FC_PRCONF_OUTPUT_PR_FACTOR_MASK = 0x0F,
+ 	HDMI_FC_PRCONF_OUTPUT_PR_FACTOR_OFFSET = 0,
+ 
++/* FC_AVICONF0-FC_AVICONF2 field values */
++	HDMI_FC_AVICONF0_PIX_FMT_MASK = 0x60,
++	HDMI_FC_AVICONF0_PIX_FMT_RGB = 0x00,
++	HDMI_FC_AVICONF0_PIX_FMT_YCBCR422 = 0x20,
++	HDMI_FC_AVICONF0_PIX_FMT_YCBCR444 = 0x40,
++	HDMI_FC_AVICONF0_ACTIVE_FMT_MASK = 0x10,
++	HDMI_FC_AVICONF0_ACTIVE_FMT_INFO_PRESENT = 0x10,
++	HDMI_FC_AVICONF0_ACTIVE_FMT_NO_INFO = 0x00,
++	HDMI_FC_AVICONF0_BAR_DATA_MASK = 0x0C,
++	HDMI_FC_AVICONF0_BAR_DATA_NO_DATA = 0x00,
++	HDMI_FC_AVICONF0_BAR_DATA_VERT_BAR = 0x40,
++	HDMI_FC_AVICONF0_BAR_DATA_HORIZ_BAR = 0x80,
++	HDMI_FC_AVICONF0_BAR_DATA_VERT_HORIZ_BAR = 0xC0,
++	HDMI_FC_AVICONF0_SCAN_INFO_MASK = 0x03,
++	HDMI_FC_AVICONF0_SCAN_INFO_OVERSCAN = 0x01,
++	HDMI_FC_AVICONF0_SCAN_INFO_UNDERSCAN = 0x02,
++	HDMI_FC_AVICONF0_SCAN_INFO_NODATA = 0x00,
++
++	HDMI_FC_AVICONF1_ACTIVE_ASPECT_RATIO_MASK = 0x0F,
++	HDMI_FC_AVICONF1_ACTIVE_ASPECT_RATIO_USE_CODED = 0x09,
++	HDMI_FC_AVICONF1_ACTIVE_ASPECT_RATIO_4_3 = 0x09,
++	HDMI_FC_AVICONF1_ACTIVE_ASPECT_RATIO_16_9 = 0x0A,
++	HDMI_FC_AVICONF1_ACTIVE_ASPECT_RATIO_14_9 = 0x0B,
++	HDMI_FC_AVICONF1_CODED_ASPECT_RATIO_MASK = 0x30,
++	HDMI_FC_AVICONF1_CODED_ASPECT_RATIO_NO_DATA = 0x00,
++	HDMI_FC_AVICONF1_CODED_ASPECT_RATIO_4_3 = 0x10,
++	HDMI_FC_AVICONF1_CODED_ASPECT_RATIO_16_9 = 0x20,
++	HDMI_FC_AVICONF1_COLORIMETRY_MASK = 0xC0,
++	HDMI_FC_AVICONF1_COLORIMETRY_NO_DATA = 0x00,
++	HDMI_FC_AVICONF1_COLORIMETRY_SMPTE = 0x40,
++	HDMI_FC_AVICONF1_COLORIMETRY_ITUR = 0x80,
++	HDMI_FC_AVICONF1_COLORIMETRY_EXTENDED_INFO = 0xC0,
++
++	HDMI_FC_AVICONF2_SCALING_MASK = 0x03,
++	HDMI_FC_AVICONF2_SCALING_NONE = 0x00,
++	HDMI_FC_AVICONF2_SCALING_HORIZ = 0x01,
++	HDMI_FC_AVICONF2_SCALING_VERT = 0x02,
++	HDMI_FC_AVICONF2_SCALING_HORIZ_VERT = 0x03,
++	HDMI_FC_AVICONF2_RGB_QUANT_MASK = 0x0C,
++	HDMI_FC_AVICONF2_RGB_QUANT_DEFAULT = 0x00,
++	HDMI_FC_AVICONF2_RGB_QUANT_LIMITED_RANGE = 0x04,
++	HDMI_FC_AVICONF2_RGB_QUANT_FULL_RANGE = 0x08,
++	HDMI_FC_AVICONF2_EXT_COLORIMETRY_MASK = 0x70,
++	HDMI_FC_AVICONF2_EXT_COLORIMETRY_XVYCC601 = 0x00,
++	HDMI_FC_AVICONF2_EXT_COLORIMETRY_XVYCC709 = 0x10,
++	HDMI_FC_AVICONF2_EXT_COLORIMETRY_SYCC601 = 0x20,
++	HDMI_FC_AVICONF2_EXT_COLORIMETRY_ADOBE_YCC601 = 0x30,
++	HDMI_FC_AVICONF2_EXT_COLORIMETRY_ADOBE_RGB = 0x40,
++	HDMI_FC_AVICONF2_IT_CONTENT_MASK = 0x80,
++	HDMI_FC_AVICONF2_IT_CONTENT_NO_DATA = 0x00,
++	HDMI_FC_AVICONF2_IT_CONTENT_VALID = 0x80,
++
++	HDMI_FC_AVICONF3_IT_CONTENT_TYPE_MASK = 0x03,
++	HDMI_FC_AVICONF2_IT_CONTENT_TYPE_GRAPHICS = 0x00,
++	HDMI_FC_AVICONF2_IT_CONTENT_TYPE_PHOTO = 0x01,
++	HDMI_FC_AVICONF2_IT_CONTENT_TYPE_CINEMA = 0x02,
++	HDMI_FC_AVICONF2_IT_CONTENT_TYPE_GAME = 0x03,
++	HDMI_FC_AVICONF3_QUANT_RANGE_MASK = 0x0C,
++	HDMI_FC_AVICONF3_QUANT_RANGE_LIMITED = 0x00,
++	HDMI_FC_AVICONF3_QUANT_RANGE_FULL = 0x04,
++
+ /* FC_DBGFORCE field values */
+ 	HDMI_FC_DBGFORCE_FORCEAUDIO = 0x10,
+ 	HDMI_FC_DBGFORCE_FORCEVIDEO = 0x1,
+@@ -727,6 +792,14 @@ enum {
+ 	HDMI_PHY_TST0_TSTCLK_MASK = 0x1,
+ 	HDMI_PHY_TST0_TSTCLK_OFFSET = 0,
+ 
++/* PHY_STAT0 field values */
++	HDMI_PHY_RX_SENSE3 = 0x80,
++	HDMI_PHY_RX_SENSE2 = 0x40,
++	HDMI_PHY_RX_SENSE1 = 0x20,
++	HDMI_PHY_RX_SENSE0 = 0x10,
++	HDMI_PHY_HPD = 0x02,
++	HDMI_PHY_TX_PHY_LOCK = 0x01,
++
+ /* PHY_I2CM_SLAVE_ADDR field values */
+ 	HDMI_PHY_I2CM_SLAVE_ADDR_PHY_GEN2 = 0x69,
+ 	HDMI_PHY_I2CM_SLAVE_ADDR_HEAC_PHY = 0x49,
+diff --git a/arch/arm/plat-mxc/iomux-v3.c b/arch/arm/plat-mxc/iomux-v3.c
+index 612d56f..f7bc871 100644
+--- a/arch/arm/plat-mxc/iomux-v3.c
++++ b/arch/arm/plat-mxc/iomux-v3.c
+@@ -80,7 +80,7 @@ void mxc_iomux_set_gpr_register(int group, int start_bit, int num_bits, int valu
+ 	while (num_bits) {
+ 		reg &= ~(1<<(start_bit + i));
+ 		i++;
+-		num_bits -= i;
++		num_bits--;
+ 	}
+ 	reg |= (value << start_bit);
+ 	__raw_writel(reg, base + group * 4);
+-- 
+1.7.7.4
+

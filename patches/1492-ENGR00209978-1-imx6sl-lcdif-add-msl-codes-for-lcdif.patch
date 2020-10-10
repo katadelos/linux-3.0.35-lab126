@@ -1,0 +1,545 @@
+From 02dea80ca87217eb3d8942f45cfea24f983940bb Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Fri, 18 May 2012 17:26:02 +0800
+Subject: [PATCH 1492/2463] ENGR00209978-1: imx6sl: lcdif: add msl codes for
+ lcdif
+
+- update LCDIF pinmux setting (and pad ctrl setting)
+- correct LCDIF pixel clock setting
+- add platform device/data for lcdif
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig                          |    1 +
+ arch/arm/mach-mx6/board-mx6sl_arm2.c               |   36 +++++++++++++
+ arch/arm/mach-mx6/board-mx6sl_arm2.h               |   35 ++++++++++++
+ arch/arm/mach-mx6/clock_mx6sl.c                    |   15 ++++--
+ arch/arm/mach-mx6/devices-imx6q.h                  |    3 +
+ arch/arm/plat-mxc/devices/Kconfig                  |    3 +
+ arch/arm/plat-mxc/devices/Makefile                 |    1 +
+ arch/arm/plat-mxc/devices/platform-imx-elcdif-fb.c |   56 ++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h    |   11 ++++
+ arch/arm/plat-mxc/include/mach/iomux-mx6sl.h       |   45 ++++++++-------
+ arch/arm/plat-mxc/include/mach/mx6.h               |    4 +-
+ 11 files changed, 183 insertions(+), 27 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 6620096..fd89c92 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -62,6 +62,7 @@ config MACH_MX6Q_ARM2
+ 	select IMX_HAVE_PLATFORM_PERFMON
+ 	select IMX_HAVE_PLATFORM_MXC_MLB
+ 	select IMX_HAVE_PLATFORM_IMX_EPDC
++	select IMX_HAVE_PLATFORM_IMX_ELCDIF
+ 	select IMX_HAVE_PLATFORM_IMX_PXP
+ 	select IMX_HAVE_PLATFORM_IMX_PCIE
+ 	help
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 60325bd..eb4245a 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -75,6 +75,7 @@
+ 
+ #define MX6_ARM2_USBOTG1_PWR    IMX_GPIO_NR(4, 0)       /* KEY_COL4 */
+ #define MX6_ARM2_USBOTG2_PWR    IMX_GPIO_NR(4, 2)       /* KEY_COL5 */
++#define MX6_ARM2_LCD_PWR_EN	IMX_GPIO_NR(4, 3)	/* KEY_ROW5 */
+ #define MX6_ARM2_SD1_WP		IMX_GPIO_NR(4, 6)	/* KEY_COL7 */
+ #define MX6_ARM2_SD1_CD		IMX_GPIO_NR(4, 7)	/* KEY_ROW7 */
+ #define MX6_ARM2_SD2_WP		IMX_GPIO_NR(4, 29)	/* SD2_DAT6 */
+@@ -189,6 +190,33 @@ static void __init mx6_arm2_init_usb(void)
+ #endif
+ }
+ 
++static struct platform_pwm_backlight_data mx6_arm2_pwm_backlight_data = {
++	.pwm_id		= 0,
++	.max_brightness	= 255,
++	.dft_brightness	= 128,
++	.pwm_period_ns	= 50000,
++};
++static struct fb_videomode video_modes[] = {
++	{
++	 /* 800x480 @ 57 Hz , pixel clk @ 32MHz */
++	 "SEIKO-WVGA", 60, 800, 480, 29850, 99, 164, 33, 10, 10, 10,
++	 FB_SYNC_CLK_LAT_FALL,
++	 FB_VMODE_NONINTERLACED,
++	 0,},
++};
++
++static struct mxc_fb_platform_data fb_data[] = {
++	{
++	 .interface_pix_fmt = V4L2_PIX_FMT_RGB24,
++	 .mode_str = "SEIKO-WVGA",
++	 .mode = video_modes,
++	 .num_modes = ARRAY_SIZE(video_modes),
++	 },
++};
++
++static struct platform_device lcd_wvga_device = {
++	.name = "lcd_seiko",
++};
+ /*!
+  * Board specific initialization.
+  */
+@@ -226,6 +254,14 @@ static void __init mx6_arm2_init(void)
+ 	imx6_init_fec(fec_data);
+ 
+ 	mx6_arm2_init_usb();
++
++	imx6q_add_mxc_pwm(0);
++	imx6q_add_mxc_pwm_backlight(0, &mx6_arm2_pwm_backlight_data);
++	imx6dl_add_imx_elcdif(&fb_data[0]);
++
++	gpio_request(MX6_ARM2_LCD_PWR_EN, "elcdif-power-on");
++	gpio_direction_output(MX6_ARM2_LCD_PWR_EN, 1);
++	mxc_register_device(&lcd_wvga_device, NULL);
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.h b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+index 9e4ea0a..29893db 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.h
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+@@ -90,6 +90,41 @@ static iomux_v3_cfg_t mx6sl_arm2_pads[] = {
+ 	MX6SL_PAD_I2C1_SDA__I2C1_SDA,
+ 	MX6SL_PAD_I2C2_SCL__I2C2_SCL,
+ 	MX6SL_PAD_I2C2_SDA__I2C2_SDA,
++
++	/* LCD */
++	MX6SL_PAD_LCD_CLK__LCDIF_CLK,
++	MX6SL_PAD_LCD_ENABLE__LCDIF_ENABLE,
++	MX6SL_PAD_LCD_HSYNC__LCDIF_HSYNC,
++	MX6SL_PAD_LCD_VSYNC__LCDIF_VSYNC,
++	MX6SL_PAD_LCD_RESET__LCDIF_RESET,
++	MX6SL_PAD_LCD_DAT0__LCDIF_DAT_0,
++	MX6SL_PAD_LCD_DAT1__LCDIF_DAT_1,
++	MX6SL_PAD_LCD_DAT2__LCDIF_DAT_2,
++	MX6SL_PAD_LCD_DAT3__LCDIF_DAT_3,
++	MX6SL_PAD_LCD_DAT4__LCDIF_DAT_4,
++	MX6SL_PAD_LCD_DAT5__LCDIF_DAT_5,
++	MX6SL_PAD_LCD_DAT6__LCDIF_DAT_6,
++	MX6SL_PAD_LCD_DAT7__LCDIF_DAT_7,
++	MX6SL_PAD_LCD_DAT8__LCDIF_DAT_8,
++	MX6SL_PAD_LCD_DAT9__LCDIF_DAT_9,
++	MX6SL_PAD_LCD_DAT10__LCDIF_DAT_10,
++	MX6SL_PAD_LCD_DAT11__LCDIF_DAT_11,
++	MX6SL_PAD_LCD_DAT12__LCDIF_DAT_12,
++	MX6SL_PAD_LCD_DAT13__LCDIF_DAT_13,
++	MX6SL_PAD_LCD_DAT14__LCDIF_DAT_14,
++	MX6SL_PAD_LCD_DAT15__LCDIF_DAT_15,
++	MX6SL_PAD_LCD_DAT16__LCDIF_DAT_16,
++	MX6SL_PAD_LCD_DAT17__LCDIF_DAT_17,
++	MX6SL_PAD_LCD_DAT18__LCDIF_DAT_18,
++	MX6SL_PAD_LCD_DAT19__LCDIF_DAT_19,
++	MX6SL_PAD_LCD_DAT20__LCDIF_DAT_20,
++	MX6SL_PAD_LCD_DAT21__LCDIF_DAT_21,
++	MX6SL_PAD_LCD_DAT22__LCDIF_DAT_22,
++	MX6SL_PAD_LCD_DAT23__LCDIF_DAT_23,
++	/* LCD brightness */
++	MX6SL_PAD_PWM1__PWM1_PWMO,
++	/* LCD power on */
++	MX6SL_PAD_KEY_ROW5__GPIO_4_3,
+ };
+ 
+ #endif
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index eaf0d32..ada76d7 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -1803,7 +1803,7 @@ static int _clk_ipu2_set_rate(struct clk *clk, unsigned long rate)
+ }
+ 
+ static struct clk ipu2_clk = {
+-	__INIT_CLK_DEBUG(ipu2_clk)
++	__INIT_CLK_DEBUG(elcdif_axi_clk)
+ 	.parent = &pll2_pfd2_400M,
+ 	.enable_reg = MXC_CCM_CCGR3,
+ 	.enable_shift = MXC_CCM_CCGRx_CG3_OFFSET,
+@@ -2617,9 +2617,16 @@ static int _clk_lcdif_pix_set_rate(struct clk *clk, unsigned long rate)
+ 	reg |= (pre - 1) << MXC_CCM_CSCDR2_IPU2_DI0_PODF_OFFSET;
+ 	__raw_writel(reg, MXC_CCM_CSCDR2);
+ 
++	/*
++	 * fixup:
++	 * Bits 22 and 21 of the divide value are inverted before
++	 * going into the divider port.
++	 */
++	post = (post - 1) ^ 0x6;
++
+ 	reg = __raw_readl(MXC_CCM_CSCMR1);
+ 	reg &= ~MXC_CCM_CSCMR1_ACLK_EMI_PODF_MASK;
+-	reg |= (post - 1) << MXC_CCM_CSCMR1_ACLK_EMI_PODF_OFFSET;
++	reg |= post << MXC_CCM_CSCMR1_ACLK_EMI_PODF_OFFSET;
+ 	__raw_writel(reg, MXC_CCM_CSCMR1);
+ 
+ 	return 0;
+@@ -2680,8 +2687,6 @@ static int _clk_epdc_pix_set_rate(struct clk *clk, unsigned long rate)
+ 
+ 	__calc_pre_post_dividers(1 << 3, div, &pre, &post);
+ 
+-	printk("pre %d, post %d\n", pre, post);
+-
+ 	reg = __raw_readl(MXC_CCM_CSCDR2);
+ 	reg &= ~MXC_CCM_CSCDR2_IPU2_DI1_PODF_MASK;
+ 	reg |= (pre - 1) << MXC_CCM_CSCDR2_IPU2_DI1_PODF_OFFSET;
+@@ -3697,6 +3702,8 @@ int __init mx6sl_clocks_init(unsigned long ckil, unsigned long osc,
+ 
+ 	/* epdc pix - PLL5 as parent */
+ 	clk_set_parent(&epdc_pix_clk, &pll5_video_main_clk);
++	/* lcdif pix - PLL5 as parent */
++	clk_set_parent(&lcdif_pix_clk, &pll5_video_main_clk);
+ 
+ 	gpt_clk[0].parent = &ipg_perclk;
+ 	gpt_clk[0].get_rate = NULL;
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index eb3b3b0..95686a0 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -223,6 +223,9 @@ extern const struct imx_pxp_data imx6dl_pxp_data __initconst;
+ extern const struct imx_epdc_data imx6dl_epdc_data __initconst;
+ #define imx6dl_add_imx_epdc(pdata)	\
+ 	imx_add_imx_epdc(&imx6dl_epdc_data, pdata)
++extern const struct imx_elcdif_data imx6dl_elcdif_data __initconst;
++#define imx6dl_add_imx_elcdif(pdata)	\
++	imx_add_imx_elcdif(&imx6dl_elcdif_data, pdata)
+ extern const struct imx_vdoa_data imx6q_vdoa_data __initconst;
+ #define imx6q_add_vdoa() imx_add_vdoa(&imx6q_vdoa_data)
+ 
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index 70322dd..7358432 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -141,6 +141,9 @@ config IMX_HAVE_PLATFORM_LDB
+ config IMX_HAVE_PLATFORM_IMX_PXP
+ 	bool
+ 
++config IMX_HAVE_PLATFORM_IMX_ELCDIF
++	bool
++
+ config IMX_HAVE_PLATFORM_IMX_EPDC
+ 	bool
+ 
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index d78e013..e0e7eb7 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -47,6 +47,7 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_LDB) += platform-imx_ldb.o
+ obj-y += platform-imx-scc2.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_PXP) += platform-imx-pxp.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_EPDC) += platform-imx-epdc-fb.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_ELCDIF) += platform-imx-elcdif-fb.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_SPDIF) += platform-imx-spdif.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_SPDIF) += platform-imx-spdif-dai.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_SPDIF) += platform-imx-spdif-audio.o
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-elcdif-fb.c b/arch/arm/plat-mxc/devices/platform-imx-elcdif-fb.c
+new file mode 100644
+index 0000000..09a59ef
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx-elcdif-fb.c
+@@ -0,0 +1,56 @@
++/*
++ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <asm/sizes.h>
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++
++#define imx_elcdif_data_entry_single(soc, size)	\
++	{								\
++		.iobase = soc ## _ELCDIF_BASE_ADDR,			\
++		.irq = soc ## _INT_ELCDIF,				\
++		.iosize = size,						\
++	}
++
++#ifdef CONFIG_SOC_IMX6SL
++const struct imx_elcdif_data imx6dl_elcdif_data __initconst =
++			imx_elcdif_data_entry_single(MX6DL, SZ_16K);
++#endif
++
++struct platform_device *__init imx_add_imx_elcdif(
++		const struct imx_elcdif_data *data,
++		const struct mxc_fb_platform_data *pdata)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + data->iosize - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.start = data->irq,
++			.end = data->irq,
++			.flags = IORESOURCE_IRQ,
++		},
++	};
++
++	return imx_add_platform_device_dmamask("mxc_elcdif_fb", -1,
++		res, ARRAY_SIZE(res), pdata, sizeof(*pdata), DMA_BIT_MASK(32));
++}
++
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index b0724ce..58d0e20 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -468,6 +468,17 @@ struct platform_device *__init imx_add_imx_pxp(
+ 	const struct imx_pxp_data *data);
+ struct platform_device *__init imx_add_imx_pxp_client(void);
+ 
++#include <linux/fsl_devices.h>
++struct imx_elcdif_data {
++	resource_size_t iobase;
++	resource_size_t iosize;
++	resource_size_t irq;
++};
++
++struct platform_device *__init imx_add_imx_elcdif(
++		const struct imx_elcdif_data *data,
++		const struct mxc_fb_platform_data *pdata);
++
+ #include <mach/epdc.h>
+ struct imx_epdc_data {
+ 	resource_size_t iobase;
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h b/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
+index 2166779..529ee99 100755
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
+@@ -65,6 +65,9 @@
+ #define MX6SL_HP_DET_PAD_CTRL	(PAD_CTL_PKE | PAD_CTL_PUE |		\
+ 		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED |		\
+ 		PAD_CTL_DSE_40ohm   | PAD_CTL_HYS)
++#define MX6SL_LCDIF_PAD_CTRL	(PAD_CTL_HYS | PAD_CTL_PUS_100K_UP |	\
++				PAD_CTL_PUE | PAD_CTL_PKE |		\
++				PAD_CTL_SPEED_MED | PAD_CTL_DSE_40ohm)
+ 
+ #define MX6SL_PAD_AUD_MCLK__AUDMUX_AUDIO_CLK_OUT                              \
+ 		IOMUX_PAD(0x02A4, 0x004C, 0, 0x0000, 0, NO_PAD_CTRL)
+@@ -1845,7 +1848,7 @@
+ 		IOMUX_PAD(0x04B0, 0x01A8, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_CLK__LCDIF_CLK                                          \
+-		IOMUX_PAD(0x04B4, 0x01AC, 0, 0x0000, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x04B4, 0x01AC, 0, 0x0000, 0, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_CLK__USDHC4_DAT4                                        \
+ 		IOMUX_PAD(0x04B4, 0x01AC, 1, 0x086C, 2, MX6SL_USDHC_PAD_CTRL)
+ #define MX6SL_PAD_LCD_CLK__LCDIF_WR_RWN                                       \
+@@ -1862,7 +1865,7 @@
+ 		IOMUX_PAD(0x04B4, 0x01AC, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT0__LCDIF_DAT_0                                       \
+-		IOMUX_PAD(0x04B8, 0x01B0, 0, 0x0778, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04B8, 0x01B0, 0, 0x0778, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT0__ECSPI1_MOSI                                       \
+ 		IOMUX_PAD(0x04B8, 0x01B0, 1, 0x0688, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT0__ANATOP_USBOTG2_ID                                 \
+@@ -1879,7 +1882,7 @@
+ 		IOMUX_PAD(0x04B8, 0x01B0, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT1__LCDIF_DAT_1                                       \
+-		IOMUX_PAD(0x04BC, 0x01B4, 0, 0x077C, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04BC, 0x01B4, 0, 0x077C, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT1__ECSPI1_MISO                                       \
+ 		IOMUX_PAD(0x04BC, 0x01B4, 1, 0x0684, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT1__ANATOP_USBOTG1_ID                                 \
+@@ -1896,7 +1899,7 @@
+ 		IOMUX_PAD(0x04BC, 0x01B4, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT10__LCDIF_DAT_10                                     \
+-		IOMUX_PAD(0x04C0, 0x01B8, 0, 0x07A0, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04C0, 0x01B8, 0, 0x07A0, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT10__KPP_COL_1                                        \
+ 		IOMUX_PAD(0x04C0, 0x01B8, 1, 0x0738, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT10__CSI_D_7                                          \
+@@ -1913,7 +1916,7 @@
+ 		IOMUX_PAD(0x04C0, 0x01B8, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT11__LCDIF_DAT_11                                     \
+-		IOMUX_PAD(0x04C4, 0x01BC, 0, 0x07A4, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04C4, 0x01BC, 0, 0x07A4, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT11__KPP_ROW_1                                        \
+ 		IOMUX_PAD(0x04C4, 0x01BC, 1, 0x0758, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT11__CSI_D_6                                          \
+@@ -1930,7 +1933,7 @@
+ 		IOMUX_PAD(0x04C4, 0x01BC, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT12__LCDIF_DAT_12                                     \
+-		IOMUX_PAD(0x04C8, 0x01C0, 0, 0x07A8, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04C8, 0x01C0, 0, 0x07A8, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT12__KPP_COL_2                                        \
+ 		IOMUX_PAD(0x04C8, 0x01C0, 1, 0x073C, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT12__CSI_D_5                                          \
+@@ -1949,7 +1952,7 @@
+ 		IOMUX_PAD(0x04C8, 0x01C0, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT13__LCDIF_DAT_13                                     \
+-		IOMUX_PAD(0x04CC, 0x01C4, 0, 0x07AC, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04CC, 0x01C4, 0, 0x07AC, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT13__KPP_ROW_2                                        \
+ 		IOMUX_PAD(0x04CC, 0x01C4, 1, 0x075C, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT13__CSI_D_4                                          \
+@@ -1968,7 +1971,7 @@
+ 		IOMUX_PAD(0x04CC, 0x01C4, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT14__LCDIF_DAT_14                                     \
+-		IOMUX_PAD(0x04D0, 0x01C8, 0, 0x07B0, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04D0, 0x01C8, 0, 0x07B0, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT14__KPP_COL_3                                        \
+ 		IOMUX_PAD(0x04D0, 0x01C8, 1, 0x0740, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT14__CSI_D_3                                          \
+@@ -1987,7 +1990,7 @@
+ 		IOMUX_PAD(0x04D0, 0x01C8, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT15__LCDIF_DAT_15                                     \
+-		IOMUX_PAD(0x04D4, 0x01CC, 0, 0x07B4, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04D4, 0x01CC, 0, 0x07B4, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT15__KPP_ROW_3                                        \
+ 		IOMUX_PAD(0x04D4, 0x01CC, 1, 0x0760, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT15__CSI_D_2                                          \
+@@ -2006,7 +2009,7 @@
+ 		IOMUX_PAD(0x04D4, 0x01CC, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT16__LCDIF_DAT_16                                     \
+-		IOMUX_PAD(0x04D8, 0x01D0, 0, 0x07B8, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04D8, 0x01D0, 0, 0x07B8, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT16__KPP_COL_4                                        \
+ 		IOMUX_PAD(0x04D8, 0x01D0, 1, 0x0744, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT16__CSI_D_1                                          \
+@@ -2023,7 +2026,7 @@
+ 		IOMUX_PAD(0x04D8, 0x01D0, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT17__LCDIF_DAT_17                                     \
+-		IOMUX_PAD(0x04DC, 0x01D4, 0, 0x07BC, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04DC, 0x01D4, 0, 0x07BC, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT17__KPP_ROW_4                                        \
+ 		IOMUX_PAD(0x04DC, 0x01D4, 1, 0x0764, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT17__CSI_D_0                                          \
+@@ -2040,7 +2043,7 @@
+ 		IOMUX_PAD(0x04DC, 0x01D4, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT18__LCDIF_DAT_18                                     \
+-		IOMUX_PAD(0x04E0, 0x01D8, 0, 0x07C0, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04E0, 0x01D8, 0, 0x07C0, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT18__KPP_COL_5                                        \
+ 		IOMUX_PAD(0x04E0, 0x01D8, 1, 0x0748, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT18__CSI_D_15                                         \
+@@ -2057,7 +2060,7 @@
+ 		IOMUX_PAD(0x04E0, 0x01D8, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT19__LCDIF_DAT_19                                     \
+-		IOMUX_PAD(0x04E4, 0x01DC, 0, 0x07C4, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04E4, 0x01DC, 0, 0x07C4, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT19__KPP_ROW_5                                        \
+ 		IOMUX_PAD(0x04E4, 0x01DC, 1, 0x0768, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT19__CSI_D_14                                         \
+@@ -2091,7 +2094,7 @@
+ 		IOMUX_PAD(0x04E8, 0x01E0, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT20__LCDIF_DAT_20                                     \
+-		IOMUX_PAD(0x04EC, 0x01E4, 0, 0x07C8, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04EC, 0x01E4, 0, 0x07C8, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT20__KPP_COL_6                                        \
+ 		IOMUX_PAD(0x04EC, 0x01E4, 1, 0x074C, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT20__CSI_D_13                                         \
+@@ -2108,7 +2111,7 @@
+ 		IOMUX_PAD(0x04EC, 0x01E4, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT21__LCDIF_DAT_21                                     \
+-		IOMUX_PAD(0x04F0, 0x01E8, 0, 0x07CC, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04F0, 0x01E8, 0, 0x07CC, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT21__KPP_ROW_6                                        \
+ 		IOMUX_PAD(0x04F0, 0x01E8, 1, 0x076C, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT21__CSI_D_12                                         \
+@@ -2125,7 +2128,7 @@
+ 		IOMUX_PAD(0x04F0, 0x01E8, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT22__LCDIF_DAT_22                                     \
+-		IOMUX_PAD(0x04F4, 0x01EC, 0, 0x07D0, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04F4, 0x01EC, 0, 0x07D0, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT22__KPP_COL_7                                        \
+ 		IOMUX_PAD(0x04F4, 0x01EC, 1, 0x0750, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT22__CSI_D_11                                         \
+@@ -2142,7 +2145,7 @@
+ 		IOMUX_PAD(0x04F4, 0x01EC, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_DAT23__LCDIF_DAT_23                                     \
+-		IOMUX_PAD(0x04F8, 0x01F0, 0, 0x07D4, 1, NO_PAD_CTRL)
++		IOMUX_PAD(0x04F8, 0x01F0, 0, 0x07D4, 1, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT23__KPP_ROW_7                                        \
+ 		IOMUX_PAD(0x04F8, 0x01F0, 1, 0x0770, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_DAT23__CSI_D_10                                         \
+@@ -2278,7 +2281,7 @@
+ 		IOMUX_PAD(0x0514, 0x020C, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_ENABLE__LCDIF_ENABLE                                    \
+-		IOMUX_PAD(0x0518, 0x0210, 0, 0x0000, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x0518, 0x0210, 0, 0x0000, 0, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_ENABLE__USDHC4_DAT5                                     \
+ 		IOMUX_PAD(0x0518, 0x0210, 1, 0x0870, 2, MX6SL_USDHC_PAD_CTRL)
+ #define MX6SL_PAD_LCD_ENABLE__LCDIF_RD_E                                      \
+@@ -2297,7 +2300,7 @@
+ 		IOMUX_PAD(0x0518, 0x0210, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_HSYNC__LCDIF_HSYNC                                      \
+-		IOMUX_PAD(0x051C, 0x0214, 0, 0x0774, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x051C, 0x0214, 0, 0x0774, 0, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_HSYNC__USDHC4_DAT6                                      \
+ 		IOMUX_PAD(0x051C, 0x0214, 1, 0x0874, 2, MX6SL_USDHC_PAD_CTRL)
+ #define MX6SL_PAD_LCD_HSYNC__LCDIF_CS                                         \
+@@ -2316,7 +2319,7 @@
+ 		IOMUX_PAD(0x051C, 0x0214, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_RESET__LCDIF_RESET                                      \
+-		IOMUX_PAD(0x0520, 0x0218, 0, 0x0000, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x0520, 0x0218, 0, 0x0000, 0, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_RESET__WEIM_WEIM_DTACK_B                                \
+ 		IOMUX_PAD(0x0520, 0x0218, 1, 0x0880, 1, NO_PAD_CTRL)
+ #define MX6SL_PAD_LCD_RESET__LCDIF_BUSY                                       \
+@@ -2335,7 +2338,7 @@
+ 		IOMUX_PAD(0x0520, 0x0218, 7, 0x0000, 0, NO_PAD_CTRL)
+ 
+ #define MX6SL_PAD_LCD_VSYNC__LCDIF_VSYNC                                      \
+-		IOMUX_PAD(0x0524, 0x021C, 0, 0x0000, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x0524, 0x021C, 0, 0x0000, 0, MX6SL_LCDIF_PAD_CTRL)
+ #define MX6SL_PAD_LCD_VSYNC__USDHC4_DAT7                                      \
+ 		IOMUX_PAD(0x0524, 0x021C, 1, 0x0878, 2, MX6SL_USDHC_PAD_CTRL)
+ #define MX6SL_PAD_LCD_VSYNC__LCDIF_RS                                         \
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index ca4daec..1042410 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -198,7 +198,7 @@
+ #define MX6Q_SDMA_BASE_ADDR		(AIPS1_OFF_BASE_ADDR + 0x6C000)
+ #define MX6DL_EPXP_BASE_ADDR		(AIPS1_OFF_BASE_ADDR + 0x70000)
+ #define MX6DL_EPDC_BASE_ADDR		(AIPS1_OFF_BASE_ADDR + 0x74000)
+-#define MX6DL_LCDIF_BASE_ADDR		(AIPS1_OFF_BASE_ADDR + 0x78000)
++#define MX6DL_ELCDIF_BASE_ADDR		(AIPS1_OFF_BASE_ADDR + 0x78000)
+ #define MX6SL_DCP_BASE_ADDR		(AIPS1_OFF_BASE_ADDR + 0x7C000)
+ #define MX6Q_DVFSCORE_BASE_ADDR		(GPC_BASE_ADDR + 0x180)
+ 
+@@ -360,7 +360,7 @@
+ #define MX6Q_INT_I2C2			69
+ #define MX6Q_INT_I2C3			70
+ #define MX6Q_INT_SATA			71
+-#define MX6DL_INT_LCDIF			71
++#define MX6DL_INT_ELCDIF		71
+ #define MX6Q_INT_USB_HS1		72
+ #define MX6SL_INT_USB_HS1		74
+ #define MX6Q_INT_USB_HS2		73
+-- 
+1.7.7.4
+

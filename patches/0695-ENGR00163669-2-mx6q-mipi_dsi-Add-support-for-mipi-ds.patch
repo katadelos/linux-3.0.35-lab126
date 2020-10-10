@@ -1,0 +1,94 @@
+From 8d7ff4a8b3c4e27353d97815bae3291c89a7448b Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Thu, 1 Dec 2011 19:54:06 +0800
+Subject: [PATCH 0695/2463] ENGR00163669-2 mx6q mipi_dsi: Add support for mipi
+ dsi display
+
+mx6q mipi_dsi: support for mipi dsi display
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c               |   22 +++++++++++++-------
+ arch/arm/plat-mxc/devices/platform-imx-mipi_dsi.c |    5 ++++
+ 2 files changed, 19 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index f61719c..6dbaee5 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -932,8 +932,8 @@ static void mx6q_sabreauto_reset_mipi_dsi(void)
+ }
+ 
+ static struct mipi_dsi_platform_data mipi_dsi_pdata = {
+-	.ipu_id	 = 0,
+-	.disp_id = 0,
++	.ipu_id	 = 1,
++	.disp_id = 1,
+ 	.lcd_panel = "TRULY-WVGA",
+ 	.reset   = mx6q_sabreauto_reset_mipi_dsi,
+ };
+@@ -946,10 +946,10 @@ static struct ipuv3_fb_platform_data sabr_fb_data[] = {
+ 	.default_bpp = 16,
+ 	.int_clk = false,
+ 	}, {
+-	.disp_dev = "lcd",
+-	.interface_pix_fmt = IPU_PIX_FMT_RGB565,
+-	.mode_str = "CLAA-WVGA",
+-	.default_bpp = 16,
++	.disp_dev = "mipi_dsi",
++	.interface_pix_fmt = IPU_PIX_FMT_RGB24,
++	.mode_str = "TRULY-WVGA",
++	.default_bpp = 24,
+ 	.int_clk = false,
+ 	}, {
+ 	.disp_dev = "ldb",
+@@ -957,7 +957,13 @@ static struct ipuv3_fb_platform_data sabr_fb_data[] = {
+ 	.mode_str = "LDB-XGA",
+ 	.default_bpp = 16,
+ 	.int_clk = false,
+-	},
++	}, {
++	.disp_dev = "lcd",
++	.interface_pix_fmt = IPU_PIX_FMT_RGB565,
++	.mode_str = "CLAA-WVGA",
++	.default_bpp = 16,
++	.int_clk = false,
++	}
+ };
+ 
+ static void hdmi_init(int ipu_id, int disp_id)
+@@ -1004,7 +1010,7 @@ static struct fsl_mxc_ldb_platform_data ldb_data = {
+ 	.ext_ref = 1,
+ 	.mode = LDB_SEP0,
+ 	.sec_ipu_id = 1,
+-	.sec_disp_id = 1,
++	.sec_disp_id = 0,
+ };
+ 
+ static struct imx_ipuv3_platform_data ipu_data[] = {
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-mipi_dsi.c b/arch/arm/plat-mxc/devices/platform-imx-mipi_dsi.c
+index 1c583ee..136a8fc 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-mipi_dsi.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-mipi_dsi.c
+@@ -33,6 +33,7 @@
+ 	[_id] = imx_mipi_dsi_data_entry_single(soc, _id, _hwid, _size)
+ 
+ #ifdef CONFIG_SOC_IMX6Q
++#define SOC_IOMUXC_BASE_ADDR MX6Q_IOMUXC_BASE_ADDR
+ const struct imx_mipi_dsi_data imx6q_mipi_dsi_data __initconst =
+ 			imx_mipi_dsi_data_entry_single(MX6Q, 0, , SZ_4K);
+ #endif
+@@ -47,6 +48,10 @@ struct platform_device *__init imx_add_mipi_dsi(
+ 			.end = data->iobase + data->iosize - 1,
+ 			.flags = IORESOURCE_MEM,
+ 		}, {
++			.start = SOC_IOMUXC_BASE_ADDR,
++			.end = SOC_IOMUXC_BASE_ADDR + SZ_4K - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
+ 			.start = data->irq,
+ 			.end = data->irq,
+ 			.flags = IORESOURCE_IRQ,
+-- 
+1.7.7.4
+

@@ -1,0 +1,37 @@
+From bca640d1f725236ddc0443f9ce0f28bc1c5b4d78 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Fri, 27 Jul 2012 15:22:47 +0800
+Subject: [PATCH 1825/2463] ENGR00218624 ASRC: set dma_data to 0 before config
+ SDMA
+
+To allocate an SDMA channel, imx_dma_data struct is need. However,
+if the member dma_request_p2p is not set to 0 before configuration,
+SDMA driver would treat the channel as p2p(periphal to periphal) DMA and
+set SDMA channel context in p2p way. In the worst case, SDMA would
+access some unexisted address cause of mis configuration above and thus
+cause kernel panic or hang.
+
+In this patch, set imx_dma_data struct to 0 once it is allocated from
+stack.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/mxc/asrc/mxc_asrc.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index 4ef31c8..f67274f 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -952,7 +952,7 @@ static bool filter(struct dma_chan *chan, void *param)
+ static struct dma_chan *imx_asrc_dma_alloc(u32 dma_req)
+ {
+ 	dma_cap_mask_t mask;
+-	struct imx_dma_data dma_data;
++	struct imx_dma_data dma_data = {0};
+ 
+ 	dma_data.peripheral_type = IMX_DMATYPE_ASRC;
+ 	dma_data.priority = DMA_PRIO_MEDIUM;
+-- 
+1.7.7.4
+

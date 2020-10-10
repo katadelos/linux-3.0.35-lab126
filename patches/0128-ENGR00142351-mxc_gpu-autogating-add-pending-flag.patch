@@ -1,0 +1,65 @@
+From a1b24ba554e5f51582cb485c3eecf46e48025a1b Mon Sep 17 00:00:00 2001
+From: Richard Zhao <richard.zhao@freescale.com>
+Date: Wed, 20 Apr 2011 13:18:15 +0800
+Subject: [PATCH 0128/2463] ENGR00142351 mxc_gpu: autogating: add pending flag
+
+pending indicate the timer has been fired but clock not yet disabled.
+
+This patch fixs the bug that sometimes in irq handle it tries to enable
+clock and cause BUG.
+
+Signed-off-by: Richard Zhao <richard.zhao@freescale.com>
+---
+ drivers/mxc/amd-gpu/platform/hal/linux/misc.c |    8 ++++++--
+ 1 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/amd-gpu/platform/hal/linux/misc.c b/drivers/mxc/amd-gpu/platform/hal/linux/misc.c
+index 2908627..b3a4582 100644
+--- a/drivers/mxc/amd-gpu/platform/hal/linux/misc.c
++++ b/drivers/mxc/amd-gpu/platform/hal/linux/misc.c
+@@ -30,6 +30,8 @@ typedef struct _gsl_autogate_t {
+     struct timer_list timer;	
+     spinlock_t lock;
+     int active;
++    /* pending indicate the timer has been fired but clock not yet disabled. */
++    int pending;
+     int timeout;
+     gsl_device_t *dev;
+     struct work_struct dis_task;
+@@ -47,6 +49,7 @@ static void clk_disable_task(struct work_struct *work)
+ 	if (autogate->dev->ftbl.device_idle)
+ 		autogate->dev->ftbl.device_idle(autogate->dev, GSL_TIMEOUT_DEFAULT);
+ 	kgsl_clock(autogate->dev->id, 0);
++	autogate->pending = 0;
+ }
+ 
+ static int _kgsl_device_active(gsl_device_t *dev, int all)
+@@ -62,7 +65,7 @@ static int _kgsl_device_active(gsl_device_t *dev, int all)
+ 
+ 	spin_lock_irqsave(&autogate->lock, flags);
+ 	if (in_interrupt()) {
+-		if (!autogate->active)
++		if (!autogate->active && !autogate->pending)
+ 			BUG();
+ 	} else {
+ 		to_active = !autogate->active;
+@@ -99,6 +102,7 @@ static void kgsl_device_inactive(unsigned long data)
+ 	WARN(!autogate->active, "GPU Device %d is already inactive\n", autogate->dev->id);
+ 	if (autogate->active) {
+ 		autogate->active = 0;
++		autogate->pending = 1;
+ 		schedule_work(&autogate->dis_task);
+ 	}
+ 	spin_unlock_irqrestore(&autogate->lock, flags);
+@@ -128,7 +132,7 @@ int kgsl_device_autogate_init(gsl_device_t *dev)
+ 	gsl_autogate_t *autogate;
+ 
+ //	printk(KERN_ERR "%s:%d id %d\n", __func__, __LINE__, dev->id);
+-	autogate = kmalloc(sizeof(gsl_autogate_t), GFP_KERNEL);
++	autogate = kzalloc(sizeof(gsl_autogate_t), GFP_KERNEL);
+ 	if (!autogate) {
+ 		printk(KERN_ERR "%s: out of memory!\n", __func__);
+ 		return -ENOMEM;
+-- 
+1.7.7.4
+

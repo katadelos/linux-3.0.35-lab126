@@ -1,0 +1,37 @@
+From 135867c29aa11802020daaa0d4e5eb802b02abe1 Mon Sep 17 00:00:00 2001
+From: Allen Xu <allen.xu@freescale.com>
+Date: Wed, 18 Apr 2012 10:15:27 +0800
+Subject: [PATCH 1341/2463] ENGR00180096 change NAND clock source to
+ pll2_pfd_400M
+
+change clock source explicitly by calling set_parent() function
+
+Signed-off-by: Allen Xu <allen.xu@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 20cfc55..9fea560 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -3873,7 +3873,7 @@ static int _clk_enfc_set_rate(struct clk *clk, unsigned long rate)
+ static struct clk enfc_clk = {
+ 	__INIT_CLK_DEBUG(enfc_clk)
+ 	 .id = 0,
+-	 .parent = &pll2_pfd_400M,
++	 .parent = &pll2_pfd_352M,
+ 	 .enable_reg = MXC_CCM_CCGR2,
+ 	 .enable_shift = MXC_CCM_CCGRx_CG7_OFFSET,
+ 	 .enable = _clk_enable,
+@@ -5236,6 +5236,7 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	clk_set_rate(&asrc_clk[1], 7500000);
+ 
+ 	/* set the GPMI clock to default frequency : 20MHz */
++	clk_set_parent(&enfc_clk, &pll2_pfd_400M);
+ 	clk_set_rate(&enfc_clk, enfc_clk.round_rate(&enfc_clk, 20000000));
+ 
+ 	mx6_cpu_op_init();
+-- 
+1.7.7.4
+

@@ -1,0 +1,98 @@
+From 6e6bae18b13bdf7c50acf778eeefc82c912f0f33 Mon Sep 17 00:00:00 2001
+From: Terry Lv <r65388@freescale.com>
+Date: Mon, 16 Apr 2012 17:44:12 +0800
+Subject: [PATCH 1350/2463] ENGR00179722: MLB: set correct mlb sys clock in
+ mx6dl
+
+In Rigel validatioin, the MLB sys_clock isn't using the right frequency
+after boot.
+In arik, the register CBCMR controls gpu2d clock, not mlb clock, mlb is
+sourced from axi_clock.
+But In rigel, the axi clock is lower than in mx6q, so mlb need to find a
+new clock root. The gpu2d clock is then root of mlb clock in rigel.
+Thus we need to add setting to support this change.
+
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c    |   41 ++++++++++++++++++++++++++++++++++++++++-
+ arch/arm/mach-mx6/crm_regs.h |    2 ++
+ 2 files changed, 42 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 9fea560..259ebac1 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4716,10 +4716,34 @@ static struct clk usboh3_clk[] = {
+ 	},
+ };
+ 
++static int _clk_mlb_set_parent(struct clk *clk, struct clk *parent)
++{
++	u32 sel, cbcmr = __raw_readl(MXC_CCM_CBCMR);
++
++	/*
++	 * In Rigel validatioin, the MLB sys_clock isn't using the
++	 * right frequency after boot.
++	 * In arik, the register CBCMR controls gpu2d clock, not mlb clock,
++	 * mlb is sourced from axi clock.
++	 * But In rigel, the axi clock is lower than in mx6q, so mlb need to
++	 * find a new clock root.
++	 * The gpu2d clock is the root of mlb clock in rigel.
++	 * Thus we need to add below code in mx6dl.
++	 * */
++	sel = _get_mux(parent, &axi_clk, &pll3_sw_clk,
++			&pll2_pfd_352M, &pll2_pfd_400M);
++
++	cbcmr &= ~MXC_CCM_CBCMR_MLB_CLK_SEL_MASK;
++	cbcmr |= sel << MXC_CCM_CBCMR_MLB_CLK_SEL_OFFSET;
++	__raw_writel(cbcmr, MXC_CCM_CBCMR);
++
++	return 0;
++}
++
+ static struct clk mlb150_clk = {
+ 	__INIT_CLK_DEBUG(mlb150_clk)
+ 	.id = 0,
+-	.parent = &ipg_clk,
++	.set_parent = _clk_mlb_set_parent,
+ 	.enable_reg = MXC_CCM_CCGR3,
+ 	.enable_shift = MXC_CCM_CCGRx_CG9_OFFSET,
+ 	.enable = _clk_enable,
+@@ -5278,6 +5302,21 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	/* S/PDIF */
+ 	clk_set_parent(&spdif0_clk[0], &pll3_pfd_454M);
+ 
++	/* MLB150 SYS Clock */
++	/*
++	 * In Rigel validatioin, the MLB sys_clock isn't using the
++	 * right frequency after boot.
++	 * In arik, the register CBCMR controls gpu2d clock, not mlb clock,
++	 * mlb is sourced from axi clock.
++	 * But In rigel, the axi clock is lower than in mx6q, so mlb need to
++	 * find a new clock root.
++	 * The gpu2d clock is the root of mlb clock in rigel.
++	 * Thus we need to add below code in mx6dl.
++	 * */
++	if (cpu_is_mx6dl())
++		clk_set_parent(&mlb150_clk, &pll3_sw_clk);
++
++
+ 	/* pxp & epdc */
+ 	clk_set_parent(&ipu2_clk, &pll2_pfd_400M);
+ 	clk_set_rate(&ipu2_clk, 200000000);
+diff --git a/arch/arm/mach-mx6/crm_regs.h b/arch/arm/mach-mx6/crm_regs.h
+index 7622992..0af4b5b 100644
+--- a/arch/arm/mach-mx6/crm_regs.h
++++ b/arch/arm/mach-mx6/crm_regs.h
+@@ -257,6 +257,8 @@
+ #define MXC_CCM_CBCMR_PRE_PERIPH_CLK_SEL_OFFSET		(18)
+ #define MXC_CCM_CBCMR_GPU2D_CLK_SEL_MASK		(0x3 << 16)
+ #define MXC_CCM_CBCMR_GPU2D_CLK_SEL_OFFSET		(16)
++#define MXC_CCM_CBCMR_MLB_CLK_SEL_MASK			(0x3 << 16)
++#define MXC_CCM_CBCMR_MLB_CLK_SEL_OFFSET		(16)
+ #define MXC_CCM_CBCMR_VPU_AXI_CLK_SEL_MASK		(0x3 << 14)
+ #define MXC_CCM_CBCMR_VPU_AXI_CLK_SEL_OFFSET		(14)
+ #define MXC_CCM_CBCMR_PERIPH_CLK2_SEL_MASK		(0x3 << 12)
+-- 
+1.7.7.4
+

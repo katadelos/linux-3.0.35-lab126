@@ -1,0 +1,105 @@
+From 7361e1f0fb0a54f7494d562b3a022105e24315d5 Mon Sep 17 00:00:00 2001
+From: Robin Gong <b38343@freescale.com>
+Date: Mon, 19 Nov 2012 10:16:22 +0800
+Subject: [PATCH 2266/2463] ENGR00234040 FUSE 1.2G: add fuse bit for 1.2G
+
+Before, we use "arm_freq" in command line to set 1.2G. Now we will read the
+fuse bit and "arm_freq", get the mini value to be used as "arm_max_freq".And:
+1. you can easily set CPU max freq on what frequency you want by cmdline.
+2. if you didn't set arm_freq in cmdline, kernel will read the fuse bit
+(0x021bc440) to set the right arm_max_freq.
+
+At the same time, add 1Ghz setpoint if chip max freq is 1.2Ghz.
+
+Signed-off-by: Robin Gong <b38343@freescale.com>
+---
+ arch/arm/mach-mx6/cpu.c        |    2 +-
+ arch/arm/mach-mx6/cpu_op-mx6.c |   23 +++++++++++++++++++++++
+ arch/arm/mach-mx6/cpu_op-mx6.h |    6 +++---
+ 3 files changed, 27 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index fbb3827..37f125a 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -33,7 +33,7 @@
+ 
+ struct cpu_op *(*get_cpu_op)(int *op);
+ bool enable_wait_mode = true;
+-u32 arm_max_freq = CPU_AT_1GHz;
++u32 arm_max_freq = CPU_AT_1_2GHz;
+ bool mem_clk_on_in_wait;
+ int chip_rev;
+ 
+diff --git a/arch/arm/mach-mx6/cpu_op-mx6.c b/arch/arm/mach-mx6/cpu_op-mx6.c
+index 028e876..5124c5e 100644
+--- a/arch/arm/mach-mx6/cpu_op-mx6.c
++++ b/arch/arm/mach-mx6/cpu_op-mx6.c
+@@ -13,10 +13,12 @@
+ 
+ #include <linux/types.h>
+ #include <linux/kernel.h>
++#include <asm/io.h>
+ #include <mach/hardware.h>
+ #include <mach/mxc_dvfs.h>
+ #include "cpu_op-mx6.h"
+ 
++#define OCOTP_SPEED_BIT_OFFSET (16)
+ extern struct cpu_op *(*get_cpu_op)(int *op);
+ extern struct dvfs_op *(*get_dvfs_core_op)(int *wp);
+ extern void (*set_num_cpu_op)(int num);
+@@ -33,6 +35,13 @@ static struct cpu_op mx6q_cpu_op_1_2G[] = {
+ 	 .soc_voltage = 1275000,
+ 	 .cpu_voltage = 1275000,},
+ 	{
++	 .pll_rate = 996000000,
++	 .cpu_rate = 996000000,
++	 .cpu_podf = 0,
++	 .pu_voltage = 1250000,
++	 .soc_voltage = 1250000,
++	 .cpu_voltage = 1250000,},
++	{
+ 	 .pll_rate = 792000000,
+ 	 .cpu_rate = 792000000,
+ 	 .cpu_podf = 0,
+@@ -331,6 +340,20 @@ void mx6_set_num_cpu_op(int num)
+ 
+ void mx6_cpu_op_init(void)
+ {
++	unsigned int reg;
++	void __iomem *base;
++	if (cpu_is_mx6q()) {
++		/*read fuse bit to know the max cpu freq : offset 0x440
++		* bit[17:16]:SPEED_GRADING[1:0]*/
++		base = IO_ADDRESS(OCOTP_BASE_ADDR);
++		reg = __raw_readl(base + 0x440);
++		reg &= (0x3 << OCOTP_SPEED_BIT_OFFSET);
++		reg >>= OCOTP_SPEED_BIT_OFFSET;
++		/*choose the little value to run lower max cpufreq*/
++		arm_max_freq = (reg > arm_max_freq) ? arm_max_freq : reg;
++	} else
++		arm_max_freq = CPU_AT_1GHz;/*mx6dl/sl max freq is 1Ghz*/
++	printk(KERN_INFO "arm_max_freq=%x\n", arm_max_freq);
+ 	get_cpu_op = mx6_get_cpu_op;
+ 	set_num_cpu_op = mx6_set_num_cpu_op;
+ 
+diff --git a/arch/arm/mach-mx6/cpu_op-mx6.h b/arch/arm/mach-mx6/cpu_op-mx6.h
+index b5ca58e..310cbb3 100644
+--- a/arch/arm/mach-mx6/cpu_op-mx6.h
++++ b/arch/arm/mach-mx6/cpu_op-mx6.h
+@@ -10,9 +10,9 @@
+  * http://www.opensource.org/licenses/gpl-license.html
+  * http://www.gnu.org/copyleft/gpl.html
+  */
+-
++/*The below value aligned with SPEED_GRADING bits in 0x440 fuse offset */
+ #define CPU_AT_800MHz		0
+-#define CPU_AT_1GHz			1
+-#define CPU_AT_1_2GHz		2
++#define CPU_AT_1GHz		2
++#define CPU_AT_1_2GHz		3
+ 
+ void mx6_cpu_op_init(void);
+-- 
+1.7.7.4
+

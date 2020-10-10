@@ -1,0 +1,122 @@
+From ca8cdb9a625c834ffcd4d2e914260716dd5cd773 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Tue, 6 Sep 2011 13:04:03 +0800
+Subject: [PATCH 0413/2463] ENGR00155147 mx5x mx6x: adjust dma zone max size
+ to 184M
+
+adjust dma zone max size to 184M.
+keep default size as 96M.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/mach-mx5/Kconfig                 |    8 --------
+ arch/arm/mach-mx6/Kconfig                 |    7 -------
+ arch/arm/plat-mxc/Kconfig                 |    8 ++++++++
+ arch/arm/plat-mxc/include/mach/hardware.h |    2 +-
+ arch/arm/plat-mxc/include/mach/memory.h   |    4 +---
+ arch/arm/plat-mxc/include/mach/vmalloc.h  |    4 ++--
+ 6 files changed, 12 insertions(+), 21 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/Kconfig b/arch/arm/mach-mx5/Kconfig
+index 36197c6..acac8d3 100755
+--- a/arch/arm/mach-mx5/Kconfig
++++ b/arch/arm/mach-mx5/Kconfig
+@@ -260,12 +260,4 @@ config MACH_IMX_BLUETOOTH_RFKILL
+        depends on RFKILL
+        ---help---
+ 	Say Y to get the standard rfkill interface of Bluetooth
+-
+-config DMA_ZONE_SIZE
+-        int "DMA memory zone size"
+-        range 0 96
+-        default 24
+-        help
+-          This is the size in MB for the DMA zone. The DMA zone is used for
+-          dedicated memory for large contiguous video buffers
+ endif
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index d6dc1cb..ccd3a33 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -53,11 +53,4 @@ config MACH_MX6Q_SABREAUTO
+ 
+ comment "MX6 Options:"
+ 
+-config DMA_ZONE_SIZE
+-        int "DMA memory zone size"
+-        range 0 184
+-        default 24
+-        help
+-          This is the size in MB for the DMA zone. The DMA zone is used for
+-          dedicated memory for large contiguous video buffers
+ endif
+diff --git a/arch/arm/plat-mxc/Kconfig b/arch/arm/plat-mxc/Kconfig
+index 3558748..e708ed4 100755
+--- a/arch/arm/plat-mxc/Kconfig
++++ b/arch/arm/plat-mxc/Kconfig
+@@ -151,4 +151,12 @@ config CLK_DEBUG
+ 	help
+ 	  export clk debug information to user space
+ 
++config DMA_ZONE_SIZE
++        int "DMA memory zone size"
++        range 0 184
++        default 24
++        help
++          This is the size in MB for the DMA zone. The DMA zone is used for
++          dedicated memory for large contiguous video buffers
++
+ endif
+diff --git a/arch/arm/plat-mxc/include/mach/hardware.h b/arch/arm/plat-mxc/include/mach/hardware.h
+old mode 100644
+new mode 100755
+index b40891f..ef96455
+--- a/arch/arm/plat-mxc/include/mach/hardware.h
++++ b/arch/arm/plat-mxc/include/mach/hardware.h
+@@ -88,7 +88,7 @@
+  *	AIPS2	0x83f00000+0x100000	->	0xf4300000+0x100000
+  */
+ #define IMX_IO_P2V(x)	(						\
+-			0xf4000000 +					\
++			0xf2000000 +					\
+ 			(((x) & 0x50000000) >> 6) +			\
+ 			(((x) & 0x0b000000) >> 4) +			\
+ 			(((x) & 0x000fffff)))
+diff --git a/arch/arm/plat-mxc/include/mach/memory.h b/arch/arm/plat-mxc/include/mach/memory.h
+index e33df19..5a17215 100755
+--- a/arch/arm/plat-mxc/include/mach/memory.h
++++ b/arch/arm/plat-mxc/include/mach/memory.h
+@@ -63,9 +63,7 @@
+ #define CONSISTENT_DMA_SIZE SZ_4M
+ #else
+ 
+-#if defined(CONFIG_ARCH_MX5)
+-#define CONSISTENT_DMA_SIZE     (96 * SZ_1M)
+-#elif defined(CONFIG_ARCH_MX6)
++#if defined(CONFIG_ARCH_MX5) || defined(CONFIG_ARCH_MX6)
+ #define CONSISTENT_DMA_SIZE     (184 * SZ_1M)
+ #else
+ #define CONSISTENT_DMA_SIZE     (32 * SZ_1M)
+diff --git a/arch/arm/plat-mxc/include/mach/vmalloc.h b/arch/arm/plat-mxc/include/mach/vmalloc.h
+index ef6379c..44ea15a 100644
+--- a/arch/arm/plat-mxc/include/mach/vmalloc.h
++++ b/arch/arm/plat-mxc/include/mach/vmalloc.h
+@@ -1,6 +1,6 @@
+ /*
+  *  Copyright (C) 2000 Russell King.
+- *  Copyright 2004-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ *  Copyright 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -17,6 +17,6 @@
+ #define __ASM_ARCH_MXC_VMALLOC_H__
+ 
+ /* vmalloc ending address */
+-#define VMALLOC_END       0xf4000000UL
++#define VMALLOC_END       0xf2000000UL
+ 
+ #endif /* __ASM_ARCH_MXC_VMALLOC_H__ */
+-- 
+1.7.7.4
+

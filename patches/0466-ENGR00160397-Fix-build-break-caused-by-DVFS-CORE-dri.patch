@@ -1,0 +1,62 @@
+From b9b23457a9f0262e2aad0e3b85361e40af3b0d95 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Wed, 19 Oct 2011 17:38:37 -0500
+Subject: [PATCH 0466/2463] ENGR00160397: Fix build break caused by DVFS-CORE
+ driver
+
+loops_per_jiffy is a global variable for non-smp platforms.
+For SMP platforms, loops_per_jiffy is a per_cpu variable.
+Fix dvfs_core to adjust loops_per_jiffy for both configurations.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/plat-mxc/dvfs_core.c |   18 +++++++++++++++++-
+ 1 files changed, 17 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/dvfs_core.c b/arch/arm/plat-mxc/dvfs_core.c
+index 518d064..f1a74ba 100755
+--- a/arch/arm/plat-mxc/dvfs_core.c
++++ b/arch/arm/plat-mxc/dvfs_core.c
+@@ -655,11 +655,19 @@ static void dvfs_core_work_handler(struct work_struct *work)
+ END:
+ 	if (cpufreq_trig_needed == 1) {
+ 		/*Fix loops-per-jiffy */
+-		cpufreq_trig_needed = 0;
++#ifdef CONFIG_SMP
+ 		for_each_online_cpu(cpu)
+ 			per_cpu(cpu_data, cpu).loops_per_jiffy =
+ 			dvfs_cpu_jiffies(per_cpu(cpu_data, cpu).loops_per_jiffy,
+ 				curr_cpu / 1000, clk_get_rate(cpu_clk) / 1000);
++#else
++		u32 old_loops_per_jiffy = loops_per_jiffy;
++
++		loops_per_jiffy =
++			dvfs_cpu_jiffies(old_loops_per_jiffy,
++				curr_cpu/1000, clk_get_rate(cpu_clk) / 1000);
++#endif
++		cpufreq_trig_needed = 0;
+ 	}
+ 
+ 	/* Set MAXF, MINF */
+@@ -713,10 +721,18 @@ void stop_dvfs(void)
+ 			set_cpu_freq(curr_op);
+ 
+ 			/*Fix loops-per-jiffy */
++#ifdef CONFIG_SMP
+ 			for_each_online_cpu(cpu)
+ 				per_cpu(cpu_data, cpu).loops_per_jiffy =
+ 				dvfs_cpu_jiffies(per_cpu(cpu_data, cpu).loops_per_jiffy,
+ 					curr_cpu/1000, clk_get_rate(cpu_clk) / 1000);
++#else
++		u32 old_loops_per_jiffy = loops_per_jiffy;
++
++		loops_per_jiffy =
++			dvfs_cpu_jiffies(old_loops_per_jiffy,
++				curr_cpu/1000, clk_get_rate(cpu_clk) / 1000);
++#endif
+ 
+ 		}
+ 		spin_lock_irqsave(&mxc_dvfs_core_lock, flags);
+-- 
+1.7.7.4
+

@@ -1,0 +1,183 @@
+From e07646bbe34773d475102b2335093062dc3c2d4b Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Thu, 23 Feb 2012 11:32:38 +0800
+Subject: [PATCH 1095/2463] ENGR00175205 camera: change sensor_clock as an
+ indepent module
+
+Sensor_clock function will have confict when dual camera is introduced,
+so change it as an indepent module.
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ drivers/media/video/mxc/capture/Kconfig        |   17 +++++++++++++++
+ drivers/media/video/mxc/capture/Makefile       |   27 +++++++++++++----------
+ drivers/media/video/mxc/capture/sensor_clock.c |    3 ++
+ 3 files changed, 35 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/Kconfig b/drivers/media/video/mxc/capture/Kconfig
+index 3b2d90f..d66c59d 100644
+--- a/drivers/media/video/mxc/capture/Kconfig
++++ b/drivers/media/video/mxc/capture/Kconfig
+@@ -35,6 +35,7 @@ config MXC_CAMERA_MC521DA
+ 	tristate "Magnachip mc521da camera support"
+ 	select I2C_MXC
+ 	depends on VIDEO_MXC_EMMA_CAMERA
++	select MXC_CAMERA_SENSOR_CLK
+ 	---help---
+ 	  If you plan to use the mc521da Camera with your MXC system, say Y here.
+ 
+@@ -42,12 +43,14 @@ config MXC_EMMA_CAMERA_MICRON111
+ 	tristate "Micron mt9v111 camera support with eMMA"
+ 	select I2C_MXC
+ 	depends on VIDEO_MXC_EMMA_CAMERA
++	select MXC_CAMERA_SENSOR_CLK
+ 	---help---
+ 	  If you plan to use the mt9v111 Camera with your MXC system, say Y here.
+ 
+ config MXC_CAMERA_OV2640_EMMA
+ 	tristate "OmniVision ov2640 camera support with eMMA"
+ 	depends on VIDEO_MXC_EMMA_CAMERA
++	select MXC_CAMERA_SENSOR_CLK
+ 	---help---
+ 	  If you plan to use the ov2640 Camera with your MXC system, say Y here.
+ 
+@@ -55,24 +58,28 @@ config MXC_CAMERA_MICRON111
+ 	tristate "Micron mt9v111 camera support"
+ 	select I2C_MXC
+ 	depends on ! VIDEO_MXC_EMMA_CAMERA
++	select MXC_CAMERA_SENSOR_CLK
+ 	---help---
+ 	  If you plan to use the mt9v111 Camera with your MXC system, say Y here.
+ 
+ config MXC_CAMERA_OV2640
+ 	tristate "OmniVision ov2640 camera support"
+ 	depends on !VIDEO_MXC_EMMA_CAMERA
++	select MXC_CAMERA_SENSOR_CLK
+ 	---help---
+ 	  If you plan to use the ov2640 Camera with your MXC system, say Y here.
+ 
+ config MXC_CAMERA_OV3640
+ 	tristate "OmniVision ov3640 camera support"
+ 	depends on !VIDEO_MXC_EMMA_CAMERA
++	select MXC_CAMERA_SENSOR_CLK
+ 	---help---
+ 	  If you plan to use the ov3640 Camera with your MXC system, say Y here.
+ 
+ config MXC_CAMERA_OV5640
+ 	tristate "OmniVision ov5640 camera support"
+ 	depends on !VIDEO_MXC_EMMA_CAMERA
++	select MXC_CAMERA_SENSOR_CLK
+ 	---help---
+ 	  If you plan to use the ov5640 Camera with your MXC system, say Y here.
+ 
+@@ -81,6 +88,7 @@ config MXC_CAMERA_OV5640_MIPI
+ 	depends on !VIDEO_MXC_EMMA_CAMERA
+ 	depends on ARCH_MX6Q
+ 	select MXC_MIPI_CSI2 if ARCH_MX6Q
++	select MXC_CAMERA_SENSOR_CLK
+ 	---help---
+ 	  If you plan to use the ov5640 Camera with mipi interface in your MXC system, say Y here.
+ 
+@@ -89,12 +97,14 @@ config MXC_CAMERA_OV8820_MIPI
+ 	depends on !VIDEO_MXC_EMMA_CAMERA
+ 	depends on ARCH_MX6Q
+ 	select MXC_MIPI_CSI2 if ARCH_MX6Q
++	select MXC_CAMERA_SENSOR_CLK
+ 	---help---
+ 	  If you plan to use the ov8820 Camera with mipi interface in your MXC system, say Y here.
+ 
+ config MXC_CAMERA_OV5642
+ 	tristate "OmniVision ov5642 camera support"
+ 	depends on !VIDEO_MXC_EMMA_CAMERA
++	select MXC_CAMERA_SENSOR_CLK
+ 	---help---
+ 	  If you plan to use the ov5642 Camera with your MXC system, say Y here.
+ 
+@@ -106,6 +116,13 @@ config MXC_TVIN_ADV7180
+ 
+ endchoice
+ 
++config MXC_CAMERA_SENSOR_CLK
++	tristate "camera clock"
++	depends on !VIDEO_MXC_EMMA_CAMERA
++	---help---
++	  If you plan to use the Camera with your MXC system, say Y here.
++
++
+ config MXC_IPU_PRP_VF_SDC
+ 	tristate "Pre-Processor VF SDC library"
+ 	depends on VIDEO_MXC_IPU_CAMERA && FB_MXC_SYNC_PANEL
+diff --git a/drivers/media/video/mxc/capture/Makefile b/drivers/media/video/mxc/capture/Makefile
+index 8dab021..85bf84e 100644
+--- a/drivers/media/video/mxc/capture/Makefile
++++ b/drivers/media/video/mxc/capture/Makefile
+@@ -10,40 +10,43 @@ obj-$(CONFIG_VIDEO_MXC_CSI_CAMERA) += fsl_csi.o csi_v4l2_capture.o
+ mx27_capture-objs := mx27_prphw.o mx27_prpsw.o emma_v4l2_capture.o
+ obj-$(CONFIG_VIDEO_MXC_EMMA_CAMERA) += mx27_csi.o mx27_capture.o
+ 
+-mc521da_camera-objs := mc521da.o sensor_clock.o
++camera_sensor_clock-objs := sensor_clock.o
++obj-$(CONFIG_MXC_CAMERA_SENSOR_CLK) += camera_sensor_clock.o
++
++mc521da_camera-objs := mc521da.o
+ obj-$(CONFIG_MXC_CAMERA_MC521DA) += mc521da_camera.o
+ 
+-emma_mt9v111_camera-objs := emma_mt9v111.o sensor_clock.o
++emma_mt9v111_camera-objs := emma_mt9v111.o
+ obj-$(CONFIG_MXC_EMMA_CAMERA_MICRON111) += emma_mt9v111_camera.o
+ 
+-mt9v111_camera-objs := mt9v111.o sensor_clock.o
++mt9v111_camera-objs := mt9v111.o
+ obj-$(CONFIG_MXC_CAMERA_MICRON111) += mt9v111_camera.o
+ 
+-hv7161_camera-objs := hv7161.o sensor_clock.o
++hv7161_camera-objs := hv7161.o
+ obj-$(CONFIG_MXC_CAMERA_HV7161) += hv7161_camera.o
+ 
+-s5k3aaex_camera-objs := s5k3aaex.o sensor_clock.o
++s5k3aaex_camera-objs := s5k3aaex.o
+ obj-$(CONFIG_MXC_CAMERA_S5K3AAEX) += s5k3aaex_camera.o
+ 
+-emma_ov2640_camera-objs := emma_ov2640.o sensor_clock.o
++emma_ov2640_camera-objs := emma_ov2640.o
+ obj-$(CONFIG_MXC_CAMERA_OV2640_EMMA) += emma_ov2640_camera.o
+ 
+-ov2640_camera-objs := ov2640.o sensor_clock.o
++ov2640_camera-objs := ov2640.o
+ obj-$(CONFIG_MXC_CAMERA_OV2640) += ov2640_camera.o
+ 
+-ov3640_camera-objs := ov3640.o sensor_clock.o
++ov3640_camera-objs := ov3640.o
+ obj-$(CONFIG_MXC_CAMERA_OV3640) += ov3640_camera.o
+ 
+-ov5640_camera-objs := ov5640.o sensor_clock.o
++ov5640_camera-objs := ov5640.o
+ obj-$(CONFIG_MXC_CAMERA_OV5640) += ov5640_camera.o
+ 
+-ov5640_camera_mipi-objs := ov5640_mipi.o sensor_clock.o
++ov5640_camera_mipi-objs := ov5640_mipi.o
+ obj-$(CONFIG_MXC_CAMERA_OV5640_MIPI) += ov5640_camera_mipi.o
+ 
+-ov8820_camera_mipi-objs := ov8820_mipi.o sensor_clock.o
++ov8820_camera_mipi-objs := ov8820_mipi.o
+ obj-$(CONFIG_MXC_CAMERA_OV8820_MIPI) += ov8820_camera_mipi.o
+ 
+-ov5642_camera-objs := ov5642.o sensor_clock.o
++ov5642_camera-objs := ov5642.o
+ obj-$(CONFIG_MXC_CAMERA_OV5642) += ov5642_camera.o
+ 
+ adv7180_tvin-objs := adv7180.o
+diff --git a/drivers/media/video/mxc/capture/sensor_clock.c b/drivers/media/video/mxc/capture/sensor_clock.c
+index 2e758d1..a2adcfe 100644
+--- a/drivers/media/video/mxc/capture/sensor_clock.c
++++ b/drivers/media/video/mxc/capture/sensor_clock.c
+@@ -106,3 +106,6 @@ void set_mclk_rate(uint32_t *p_mclk_freq, uint32_t csi)
+ 
+ /* Exported symbols for modules. */
+ EXPORT_SYMBOL(set_mclk_rate);
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("Camera Sensor clock");
++MODULE_LICENSE("GPL");
+-- 
+1.7.7.4
+

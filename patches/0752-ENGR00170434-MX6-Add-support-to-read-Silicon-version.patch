@@ -1,0 +1,104 @@
+From 44d1c5e0aecad6e83df55816e641b7fb95ba1a5e Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Thu, 15 Dec 2011 11:55:00 -0600
+Subject: [PATCH 0752/2463] ENGR00170434: MX6 - Add support to read Silicon
+ version
+
+Read the silicon version stored in ROM at address ox48.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/cpu.c              |   43 ++++++++++++++++++++++++++++++++++
+ arch/arm/mach-mx6/mm.c               |    5 ++++
+ arch/arm/plat-mxc/include/mach/mx6.h |    2 +
+ 3 files changed, 50 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index c9690ed..bfc4993 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -44,6 +44,49 @@ u32 arm_max_freq = CPU_AT_1GHz;
+ void __iomem *gpc_base;
+ void __iomem *ccm_base;
+ 
++static int cpu_silicon_rev = -1;
++#define SI_REV_OFFSET 	0x48
++
++static int get_mx6q_srev(void)
++{
++	void __iomem *romcp = ioremap(BOOT_ROM_BASE_ADDR, SZ_8K);
++	u32 rev;
++
++	if (!romcp) {
++		cpu_silicon_rev = -EINVAL;
++		return 0;
++	}
++
++	rev = __raw_readl(romcp + SI_REV_OFFSET);
++	rev &= 0xff;
++
++	iounmap(romcp);
++	if (rev == 0x10)
++		return IMX_CHIP_REVISION_1_0;
++	else if (rev == 0x11)
++		return IMX_CHIP_REVISION_1_1;
++	else if (rev == 0x20)
++		return IMX_CHIP_REVISION_2_0;
++	return 0;
++}
++
++/*
++ * Returns:
++ *	the silicon revision of the cpu
++ *	-EINVAL - not a mx50
++ */
++int mx6q_revision(void)
++{
++	if (!cpu_is_mx6q())
++		return -EINVAL;
++
++	if (cpu_silicon_rev == -1)
++		cpu_silicon_rev = get_mx6q_srev();
++
++	return cpu_silicon_rev;
++}
++EXPORT_SYMBOL(mx6q_revision);
++
+ static int __init post_cpu_init(void)
+ {
+ 	unsigned int reg;
+diff --git a/arch/arm/mach-mx6/mm.c b/arch/arm/mach-mx6/mm.c
+index bbaa6ae..fa1c78b 100644
+--- a/arch/arm/mach-mx6/mm.c
++++ b/arch/arm/mach-mx6/mm.c
+@@ -36,6 +36,11 @@
+  */
+ static struct map_desc mx6_io_desc[] __initdata = {
+ 	{
++	.virtual = BOOT_ROM_BASE_ADDR_VIRT,
++	.pfn = __phys_to_pfn(BOOT_ROM_BASE_ADDR),
++	.length = ROMCP_SIZE,
++	.type = MT_DEVICE},
++	{
+ 	.virtual = AIPS1_BASE_ADDR_VIRT,
+ 	.pfn = __phys_to_pfn(AIPS1_ARB_BASE_ADDR),
+ 	.length = AIPS1_SIZE,
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 5100add..e09be19b 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -253,9 +253,11 @@
+ 
+ /* define virtual address */
+ #define PERIPBASE_VIRT 0xF2000000
++#define BOOT_ROM_BASE_ADDR_VIRT	(PERIPBASE_VIRT + BOOT_ROM_BASE_ADDR)
+ #define AIPS1_BASE_ADDR_VIRT (PERIPBASE_VIRT + AIPS1_ARB_BASE_ADDR)
+ #define AIPS2_BASE_ADDR_VIRT (PERIPBASE_VIRT + AIPS2_ARB_BASE_ADDR)
+ #define ARM_PERIPHBASE_VIRT	 (PERIPBASE_VIRT + ARM_PERIPHBASE)
++#define ROMCP_SIZE SZ_1M
+ #define AIPS1_SIZE SZ_1M
+ #define AIPS2_SIZE SZ_1M
+ #define ARM_PERIPHBASE_SIZE (SZ_8K + SZ_4K)
+-- 
+1.7.7.4
+

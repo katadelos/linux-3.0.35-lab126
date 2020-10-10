@@ -1,0 +1,92 @@
+From c72a31629453715162be72b10f593c897a90f1b1 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Wed, 14 Dec 2011 12:54:11 +0800
+Subject: [PATCH 0740/2463] ENGR00170244-1 ARM: AHCI: Enable PDDQ mode when no
+ disk is attached
+
+In order to save the power consumption, enable the
+PDDQ mode of AHCI PHY when there is no sata disk
+on the port
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/plat-mxc/ahci_sata.c              |   23 +++++++++++++++++++++--
+ arch/arm/plat-mxc/include/mach/ahci_sata.h |    1 +
+ 2 files changed, 22 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/ahci_sata.c b/arch/arm/plat-mxc/ahci_sata.c
+index ab4fcf8..0d78a12 100644
+--- a/arch/arm/plat-mxc/ahci_sata.c
++++ b/arch/arm/plat-mxc/ahci_sata.c
+@@ -22,6 +22,7 @@
+ #include <linux/clk.h>
+ #include <linux/kernel.h>
+ #include <linux/delay.h>
++#include <asm/errno.h>
+ #include <mach/ahci_sata.h>
+ 
+ int write_phy_ctl_ack_polling(u32 data, void __iomem *mmio,
+@@ -37,7 +38,7 @@ int write_phy_ctl_ack_polling(u32 data, void __iomem *mmio,
+ 		if (val == exp_val)
+ 			return 0;
+ 		if (i == max_iterations) {
+-			printk(KERN_ERR "Wait for CR ACK error!\n");
++			pr_err("Wait for CR ACK error!\n");
+ 			return 1;
+ 		}
+ 		usleep_range(100, 200);
+@@ -137,6 +138,7 @@ int sata_phy_cr_read(u32 *data, void __iomem *mmio)
+ int sata_init(void __iomem *addr, unsigned long timer1ms)
+ {
+ 	u32 tmpdata;
++	int iterations = 20;
+ 
+ 	/* Reset HBA */
+ 	writel(HOST_RESET, addr + HOST_CTL);
+@@ -146,7 +148,7 @@ int sata_init(void __iomem *addr, unsigned long timer1ms)
+ 	while (readl(addr + HOST_VERSIONR) == 0) {
+ 		tmpdata++;
+ 		if (tmpdata > 100000) {
+-			printk(KERN_ERR "Can't recover from RESET HBA!\n");
++			pr_err("Can't recover from RESET HBA!\n");
+ 			break;
+ 		}
+ 	}
+@@ -164,5 +166,22 @@ int sata_init(void __iomem *addr, unsigned long timer1ms)
+ 
+ 	writel(timer1ms, addr + HOST_TIMER1MS);
+ 
++	/* Release resources when there is no device on the port */
++	do {
++		if ((readl(addr + PORT_SATA_SR) & 0xF) == 0)
++			msleep(25);
++		else
++			break;
++
++		if (iterations == 0) {
++			pr_info("No sata disk.\n");
++			/* Enter into PDDQ mode, save power */
++			tmpdata = readl(addr + PORT_PHY_CTL);
++			writel(tmpdata | PORT_PHY_CTL_PDDQ_LOC,
++					addr + PORT_PHY_CTL);
++			return -ENODEV;
++		}
++	} while (iterations-- > 0);
++
+ 	return 0;
+ }
+diff --git a/arch/arm/plat-mxc/include/mach/ahci_sata.h b/arch/arm/plat-mxc/include/mach/ahci_sata.h
+index edca22b..48b93e5 100755
+--- a/arch/arm/plat-mxc/include/mach/ahci_sata.h
++++ b/arch/arm/plat-mxc/include/mach/ahci_sata.h
+@@ -39,6 +39,7 @@ enum {
+ 	PORT_PHY_CTL_CAP_DAT_LOC = 0x20000,
+ 	PORT_PHY_CTL_WRITE_LOC = 0x40000,
+ 	PORT_PHY_CTL_READ_LOC = 0x80000,
++	PORT_PHY_CTL_PDDQ_LOC = 0x100000,
+ 	/* Port0 PHY Status */
+ 	PORT_PHY_SR = 0x17c,
+ 	/* PORT_PHY_SR */
+-- 
+1.7.7.4
+

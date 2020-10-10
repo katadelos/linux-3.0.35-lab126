@@ -1,0 +1,78 @@
+From 8d078d9a6fc3e6eb8eb893f29f17c0af227b0a46 Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Fri, 27 Apr 2012 17:16:10 +0800
+Subject: [PATCH 1401/2463] ENGR00181107 add dma_alloc_writethrough function
+
+add dma_alloc_writethrough function to dma_mapping.c
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ arch/arm/include/asm/dma-mapping.h |   13 +++++++++++++
+ arch/arm/include/asm/pgtable.h     |    3 +++
+ arch/arm/mm/dma-mapping.c          |   12 ++++++++++++
+ 3 files changed, 28 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/include/asm/dma-mapping.h b/arch/arm/include/asm/dma-mapping.h
+index 4fff837..d9b4bad 100644
+--- a/arch/arm/include/asm/dma-mapping.h
++++ b/arch/arm/include/asm/dma-mapping.h
+@@ -186,6 +186,19 @@ static inline void dma_free_noncoherent(struct device *dev, size_t size,
+ extern void *dma_alloc_coherent(struct device *, size_t, dma_addr_t *, gfp_t);
+ 
+ /**
++ * dma_alloc_writethrough - allocate consistent memory for DMA
++ * @dev: valid struct device pointer, or NULL for ISA and EISA-like devices
++ * @size: required memory size
++ * @handle: bus-specific DMA address
++ *
++ * Allocate some writethrough cached,  for a device for
++ * performing DMA.  This function allocates pages, and will
++ * return the CPU-viewed address, and sets @handle to be the
++ * device-viewed address.
++ */
++extern void *dma_alloc_writethrough(struct device *, size_t, dma_addr_t *, gfp_t);
++
++/**
+  * dma_free_coherent - free memory allocated by dma_alloc_coherent
+  * @dev: valid struct device pointer, or NULL for ISA and EISA-like devices
+  * @size: size of memory originally requested in dma_alloc_coherent
+diff --git a/arch/arm/include/asm/pgtable.h b/arch/arm/include/asm/pgtable.h
+index 5750704..6682ab9 100644
+--- a/arch/arm/include/asm/pgtable.h
++++ b/arch/arm/include/asm/pgtable.h
+@@ -232,6 +232,9 @@ extern pgprot_t		pgprot_kernel;
+ #define pgprot_writecombine(prot) \
+ 	__pgprot_modify(prot, L_PTE_MT_MASK, L_PTE_MT_BUFFERABLE)
+ 
++#define pgprot_writethrough(prot) \
++       __pgprot_modify(prot, L_PTE_MT_MASK, L_PTE_MT_WRITETHROUGH)
++
+ #ifdef CONFIG_ARM_DMA_MEM_BUFFERABLE
+ #define pgprot_dmacoherent(prot) \
+ 	__pgprot_modify(prot, L_PTE_MT_MASK, L_PTE_MT_BUFFERABLE | L_PTE_XN)
+diff --git a/arch/arm/mm/dma-mapping.c b/arch/arm/mm/dma-mapping.c
+index f96d2c7..79e05f6 100644
+--- a/arch/arm/mm/dma-mapping.c
++++ b/arch/arm/mm/dma-mapping.c
+@@ -357,6 +357,18 @@ dma_alloc_writecombine(struct device *dev, size_t size, dma_addr_t *handle, gfp_
+ }
+ EXPORT_SYMBOL(dma_alloc_writecombine);
+ 
++/*
++ *  Allocate DMA-writethrough memory space and return both the kernel remapped
++ * virtual and bus address for that space.
++ */
++void *
++dma_alloc_writethrough(struct device *dev, size_t size, dma_addr_t *handle, gfp_t gfp)
++{
++	return __dma_alloc(dev, size, handle, gfp,
++			  pgprot_writethrough(pgprot_kernel));
++}
++EXPORT_SYMBOL(dma_alloc_writethrough);
++
+ static int dma_mmap(struct device *dev, struct vm_area_struct *vma,
+ 		    void *cpu_addr, dma_addr_t dma_addr, size_t size)
+ {
+-- 
+1.7.7.4
+

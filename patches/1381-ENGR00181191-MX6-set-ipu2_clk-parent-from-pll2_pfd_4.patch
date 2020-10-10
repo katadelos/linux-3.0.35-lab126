@@ -1,0 +1,43 @@
+From 3b9c28f54a9e80898954eb5492ca0f21ee1b995c Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Fri, 27 Apr 2012 14:31:55 +0800
+Subject: [PATCH 1381/2463] ENGR00181191 MX6: set ipu2_clk parent from
+ pll2_pfd_400M
+
+On mx6dl, set ipu2_clk's parent from pll2_pfd_400M.
+On mx6q, ipu2_clk's parent from mmdc_ch0_axi_clk, and it is 264MHz by default.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    8 +++-----
+ 1 files changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 7ee0f3e..33f75c0 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5320,11 +5320,6 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	if (cpu_is_mx6dl())
+ 		clk_set_parent(&mlb150_clk, &pll3_sw_clk);
+ 
+-
+-	/* pxp & epdc */
+-	clk_set_parent(&ipu2_clk, &pll2_pfd_400M);
+-	clk_set_rate(&ipu2_clk, 200000000);
+-
+ 	if (mx6q_revision() == IMX_CHIP_REVISION_1_0) {
+ 		gpt_clk[0].parent = &ipg_perclk;
+ 		gpt_clk[0].get_rate = NULL;
+@@ -5335,6 +5330,9 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	}
+ 
+ 	if (cpu_is_mx6dl()) {
++		/* pxp & epdc */
++		clk_set_parent(&ipu2_clk, &pll2_pfd_400M);
++		clk_set_rate(&ipu2_clk, 200000000);
+ 		if (epdc_enabled)
+ 			clk_set_parent(&ipu2_di_clk[1], &pll5_video_main_clk);
+ 		else
+-- 
+1.7.7.4
+

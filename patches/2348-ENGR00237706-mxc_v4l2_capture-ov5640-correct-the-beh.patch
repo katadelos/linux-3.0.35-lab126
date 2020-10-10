@@ -1,0 +1,32 @@
+From aeb4138cc90dd52a40b6385c2f5ed4e96baced10 Mon Sep 17 00:00:00 2001
+From: Sheng Nan <b38800@freescale.com>
+Date: Wed, 19 Dec 2012 17:27:42 +0800
+Subject: [PATCH 2348/2463] ENGR00237706: mxc_v4l2_capture: ov5640: correct
+ the behavior of ENUM_FMT
+
+ov5640 ioctl_enum_fmt_cap only returns value of index = 0;
+before support other formats, correct the behavior of this ioctl.
+
+- ENUM_FMT returns all the supported format.
+
+Signed-off-by: Sheng Nan <b38800@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov5640.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov5640.c b/drivers/media/video/mxc/capture/ov5640.c
+index 813fd80..c816833 100644
+--- a/drivers/media/video/mxc/capture/ov5640.c
++++ b/drivers/media/video/mxc/capture/ov5640.c
+@@ -829,7 +829,7 @@ static int ioctl_init(struct v4l2_int_device *s)
+ static int ioctl_enum_fmt_cap(struct v4l2_int_device *s,
+ 			      struct v4l2_fmtdesc *fmt)
+ {
+-	if (fmt->index > 0)	/* only 1 pixelformat support so far */
++	if (fmt->index > ov5640_mode_MAX)
+ 		return -EINVAL;
+ 
+ 	fmt->pixelformat = ov5640_data.pix.pixelformat;
+-- 
+1.7.7.4
+

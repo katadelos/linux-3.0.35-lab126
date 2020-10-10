@@ -1,0 +1,164 @@
+From 238d8d1281485f65b8a6b56df638476f5cb22db7 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Wed, 25 Jul 2012 21:18:19 +0800
+Subject: [PATCH 1834/2463] ENGR00218421-1 ESAI: Setup virtual device under
+ ESAI sound card
+
+For ESAI sound card, ESAI driver setup device 0 for raw ESAI playback
+and capture.
+
+In this patch, add ESAI virtual device 1 under ESAI sound card. Device 1
+is for ESAI audio p2p playback. Every time user use device 1 for
+playback, ASRC would be called defaultly. Thus for device 1, it can
+support all sample rate between 8k ~ 192k.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ sound/soc/codecs/cs42888.c  |   21 +++++++++++++++---
+ sound/soc/codecs/cs42888.h  |    2 +-
+ sound/soc/imx/imx-cs42888.c |   46 ++++++++++++++++++++----------------------
+ 3 files changed, 40 insertions(+), 29 deletions(-)
+
+diff --git a/sound/soc/codecs/cs42888.c b/sound/soc/codecs/cs42888.c
+index 97a8fc8..cc802e0 100644
+--- a/sound/soc/codecs/cs42888.c
++++ b/sound/soc/codecs/cs42888.c
+@@ -761,7 +761,8 @@ static struct snd_soc_dai_ops cs42888_dai_ops = {
+ };
+ 
+ 
+-struct snd_soc_dai_driver cs42888_dai = {
++struct snd_soc_dai_driver cs42888_dai[] = {
++	{
+ 	.name = "CS42888",
+ 	.playback = {
+ 		.stream_name = "Playback",
+@@ -780,6 +781,18 @@ struct snd_soc_dai_driver cs42888_dai = {
+ 		.formats = CS42888_FORMATS,
+ 	},
+ 	.ops = &cs42888_dai_ops,
++	},
++	{
++		.name = "CS42888_ASRC",
++		.playback = {
++			.stream_name = "Playback",
++			.channels_min = 1,
++			.channels_max = 8,
++			.rates = SNDRV_PCM_RATE_8000_192000,
++			.formats = CS42888_FORMATS,
++		},
++		.ops = &cs42888_dai_ops,
++	},
+ };
+ 
+ /**
+@@ -939,14 +952,14 @@ static int cs42888_i2c_probe(struct i2c_client *i2c_client,
+ 	if (i2c_client->dev.platform_data) {
+ 		memcpy(&cs42888->pdata, i2c_client->dev.platform_data,
+ 				sizeof(cs42888->pdata));
+-		cs42888_dai.playback.rates = cs42888->pdata.rates;
+-		cs42888_dai.capture.rates = cs42888->pdata.rates;
++		cs42888_dai[0].playback.rates = cs42888->pdata.rates;
++		cs42888_dai[0].capture.rates = cs42888->pdata.rates;
+ 	}
+ 
+ 	i2c_set_clientdata(i2c_client, cs42888);
+ 
+ 	ret = snd_soc_register_codec(&i2c_client->dev,
+-		&cs42888_driver, &cs42888_dai, 1);
++		&cs42888_driver, cs42888_dai, 2);
+ 	if (ret) {
+ 		dev_err(&i2c_client->dev, "Failed to register codec:%d\n", ret);
+ 		kfree(cs42888);
+diff --git a/sound/soc/codecs/cs42888.h b/sound/soc/codecs/cs42888.h
+index b4f3950..a7c92d5 100644
+--- a/sound/soc/codecs/cs42888.h
++++ b/sound/soc/codecs/cs42888.h
+@@ -18,7 +18,7 @@
+  * The ASoC codec DAI structure for the CS42888.  Assign this structure to
+  * the .codec_dai field of your machine driver's snd_soc_dai_link structure.
+  */
+-extern struct snd_soc_dai_driver cs42888_dai;
++extern struct snd_soc_dai_driver cs42888_dai[];
+ 
+ /*
+  * The ASoC codec device structure for the CS42888.  Assign this structure
+diff --git a/sound/soc/imx/imx-cs42888.c b/sound/soc/imx/imx-cs42888.c
+index 128c995..7f4f284 100644
+--- a/sound/soc/imx/imx-cs42888.c
++++ b/sound/soc/imx/imx-cs42888.c
+@@ -385,33 +385,14 @@ static int imx_3stack_cs42888_init(struct snd_soc_pcm_runtime *rtd)
+ {
+ 	struct snd_soc_codec *codec = rtd->codec;
+ 
+-	if (asrc_support) {
+-		struct snd_card *card = codec->card->snd_card;
+-		int i;
+-		int ret;
+-
+-		for (i = 0; i < ARRAY_SIZE(asrc_controls); i++) {
+-			ret = snd_ctl_add(card,
+-					snd_soc_cnew(&asrc_controls[i],
+-						codec, asrc_controls[i].name,
+-						codec->name_prefix));
+-			if (ret < 0)
+-				return ret;
+-		}
+-		/*asrc_func is inited 0.
+-		 * it means asrc would not
+-		 * be called defaultly*/
+-		asrc_func = 0;
+-		asrc_esai_data.input_sample_rate = asrc_rates[asrc_func];
+-	}
+-
+ 	snd_soc_dapm_new_controls(&codec->dapm, imx_3stack_dapm_widgets,
+ 				  ARRAY_SIZE(imx_3stack_dapm_widgets));
+-
+ 	snd_soc_dapm_add_routes(&codec->dapm, audio_map, ARRAY_SIZE(audio_map));
+-
+ 	snd_soc_dapm_sync(&codec->dapm);
+-
++	return 0;
++}
++static int imx_asrc_cs42888_init(struct snd_soc_pcm_runtime *rtd)
++{
+ 	return 0;
+ }
+ 
+@@ -431,6 +412,21 @@ static struct snd_soc_dai_link imx_3stack_dai[] = {
+ 	.init = imx_3stack_cs42888_init,
+ 	.ops = &imx_3stack_surround_ops,
+ 	},
++	{
++	.name = "HiFi_ASRC",
++	.stream_name = "HIFI_ASRC",
++	.codec_dai_name = "CS42888_ASRC",
++#ifdef CONFIG_SOC_IMX53
++	.codec_name = "cs42888.1-0048",
++#endif
++#ifdef CONFIG_SOC_IMX6Q
++	.codec_name = "cs42888.0-0048",
++#endif
++	.cpu_dai_name = "imx-esai.0",
++	.platform_name = "imx-pcm-audio.0",
++	.init = imx_asrc_cs42888_init,
++	.ops = &imx_3stack_surround_ops,
++	},
+ };
+ 
+ static struct snd_soc_card snd_soc_card_imx_3stack = {
+@@ -451,8 +447,10 @@ static int __devinit imx_3stack_cs42888_probe(struct platform_device *pdev)
+ 		return -EINVAL;
+ 	}
+ 	mclk_freq = plat_data->sysclk;
+-	if (plat_data->codec_name)
++	if (plat_data->codec_name) {
+ 		imx_3stack_dai[0].codec_name = plat_data->codec_name;
++		imx_3stack_dai[1].codec_name = plat_data->codec_name;
++	}
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

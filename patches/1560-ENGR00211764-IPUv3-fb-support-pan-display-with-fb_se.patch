@@ -1,0 +1,121 @@
+From 94a729817c3131de32deae49740af8bd93b23c6d Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Wed, 30 May 2012 16:14:06 +0800
+Subject: [PATCH 1560/2463] ENGR00211764 IPUv3 fb: support pan display with
+ fb_set_var
+
+Users may call FBIOPUT_VSCREENINFO ioctrl to do pan display.
+This ioctrl relies on fb_set_var() to do the job. fb_set_var()
+calls custom fb_set_par() method and then calls custom
+fb_pan_display() method. The current implementation of ipuv3fb
+reinitializes IPU display controller every time the custom
+fb_set_par() method is called, which makes the display flash
+if fb_set_var() is called to do panning frequently. The custom
+fb_pan_display() method checks if the current xoffset and
+yoffset are different from previous ones before doing actual
+panning, which prevents the panning from happening within the
+fb_set_var() context. This patch checks new var info to decide
+whether we really need to reinitialize IPU display controller.
+We ignore xoffset and yoffset update because it doesn't require
+to reinitialize the controller. Users may specify activate field
+of var info with FB_ACTIVATE_NOW and FB_ACTIVATE_FORCE to
+reinialize the controller by force. Meanwhile, this patch removes
+the check in custom fb_pan_display() method mentioned before to
+have the panning work within fb_set_var() context. It doesn't
+hurt to do panning again if there is no update for xoffset and
+yoffset.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |   33 ++++++++++++++++++++++++++++++---
+ 1 files changed, 30 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 4b2a19d..ad21ef8 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -93,6 +93,8 @@ struct mxcfb_info {
+ 	struct fb_info *ovfbi;
+ 
+ 	struct mxc_dispdrv_handle *dispdrv;
++
++	struct fb_var_screeninfo cur_var;
+ };
+ 
+ struct mxcfb_alloc_list {
+@@ -301,6 +303,25 @@ static int _setup_disp_channel2(struct fb_info *fbi)
+ 	return retval;
+ }
+ 
++static bool mxcfb_need_to_set_par(struct fb_info *fbi)
++{
++	struct mxcfb_info *mxc_fbi = fbi->par;
++
++	if ((fbi->var.activate & FB_ACTIVATE_FORCE) &&
++	    (fbi->var.activate & FB_ACTIVATE_MASK) == FB_ACTIVATE_NOW)
++		return true;
++
++	/*
++	 * Ignore xoffset and yoffset update,
++	 * because pan display handles this case.
++	 */
++	mxc_fbi->cur_var.xoffset = fbi->var.xoffset;
++	mxc_fbi->cur_var.yoffset = fbi->var.yoffset;
++
++	return !!memcmp(&mxc_fbi->cur_var, &fbi->var,
++			sizeof(struct fb_var_screeninfo));
++}
++
+ /*
+  * Set framebuffer parameters and change the operating mode.
+  *
+@@ -313,6 +334,9 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 	ipu_di_signal_cfg_t sig_cfg;
+ 	struct mxcfb_info *mxc_fbi = (struct mxcfb_info *)fbi->par;
+ 
++	if (!mxcfb_need_to_set_par(fbi))
++		return 0;
++
+ 	dev_dbg(fbi->device, "Reconfiguring framebuffer\n");
+ 
+ 	ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+@@ -459,6 +483,8 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 		}
+ 	}
+ 
++	mxc_fbi->cur_var = fbi->var;
++
+ 	return retval;
+ }
+ 
+@@ -879,6 +905,8 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 			} else
+ 				mxc_fbi->alpha_chan_en = false;
+ 
++			fbi->var.activate = (fbi->var.activate & ~FB_ACTIVATE_MASK) |
++						FB_ACTIVATE_NOW | FB_ACTIVATE_FORCE;
+ 			mxcfb_set_par(fbi);
+ 
+ 			la.alpha_phy_addr0 = mxc_fbi->alpha_phy_addr0;
+@@ -1212,6 +1240,8 @@ static int mxcfb_blank(int blank, struct fb_info *info)
+ 		ipu_uninit_channel(mxc_fbi->ipu, mxc_fbi->ipu_ch);
+ 		break;
+ 	case FB_BLANK_UNBLANK:
++		info->var.activate = (info->var.activate & ~FB_ACTIVATE_MASK) |
++				FB_ACTIVATE_NOW | FB_ACTIVATE_FORCE;
+ 		ret = mxcfb_set_par(info);
+ 		break;
+ 	}
+@@ -1240,9 +1270,6 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 	int fb_stride;
+ 	int i;
+ 
+-	if (info->var.yoffset == var->yoffset)
+-		return 0;	/* No change, do nothing */
+-
+ 	/* no pan display during fb blank */
+ 	if (mxc_fbi->ipu_ch == MEM_FG_SYNC) {
+ 		struct mxcfb_info *bg_mxcfbi = NULL;
+-- 
+1.7.7.4
+

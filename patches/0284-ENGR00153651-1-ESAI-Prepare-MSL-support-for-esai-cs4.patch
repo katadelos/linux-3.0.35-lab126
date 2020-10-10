@@ -1,0 +1,559 @@
+From 3eb1935c944233c52799b3e9047e37fc2870888c Mon Sep 17 00:00:00 2001
+From: Lionel Xu <Lionel.Xu@freescale.com>
+Date: Mon, 25 Jul 2011 21:44:45 +0800
+Subject: [PATCH 0284/2463] ENGR00153651-1 ESAI: Prepare MSL support for
+ esai/cs42888 audio codec driver
+
+1) Add machine specific code for esai/cs42888 driver support, including pad
+    control, clk setting, i2c setting, etc.
+2) Enable audio support in default config.
+
+Signed-off-by: Lionel Xu <R63889@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig                 |   47 ++++++++++++++++-
+ arch/arm/mach-mx6/Kconfig                       |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c        |   65 ++++++++++++++++++++++-
+ arch/arm/mach-mx6/clock.c                       |    3 +-
+ arch/arm/mach-mx6/crm_regs.h                    |    4 +-
+ arch/arm/mach-mx6/devices-imx6q.h               |    4 ++
+ arch/arm/plat-mxc/devices/Kconfig               |    3 +
+ arch/arm/plat-mxc/devices/Makefile              |    1 +
+ arch/arm/plat-mxc/devices/platform-imx-esai.c   |   60 +++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h |   13 +++++
+ arch/arm/plat-mxc/include/mach/esai.h           |   18 ++++++
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h     |   31 ++++++-----
+ 12 files changed, 230 insertions(+), 20 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 6600a51..cdca419 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux/arm 2.6.38 Kernel Configuration
+-# Mon Jul 25 15:02:40 2011
++# Mon Jul 25 20:19:16 2011
+ #
+ CONFIG_ARM=y
+ CONFIG_HAVE_PWM=y
+@@ -1344,7 +1344,50 @@ CONFIG_LOGO=y
+ CONFIG_LOGO_LINUX_MONO=y
+ CONFIG_LOGO_LINUX_VGA16=y
+ CONFIG_LOGO_LINUX_CLUT224=y
+-# CONFIG_SOUND is not set
++CONFIG_SOUND=y
++# CONFIG_SOUND_OSS_CORE is not set
++CONFIG_SND=y
++CONFIG_SND_TIMER=y
++CONFIG_SND_PCM=y
++CONFIG_SND_JACK=y
++# CONFIG_SND_SEQUENCER is not set
++# CONFIG_SND_MIXER_OSS is not set
++# CONFIG_SND_PCM_OSS is not set
++# CONFIG_SND_HRTIMER is not set
++# CONFIG_SND_DYNAMIC_MINORS is not set
++CONFIG_SND_SUPPORT_OLD_API=y
++CONFIG_SND_VERBOSE_PROCFS=y
++# CONFIG_SND_VERBOSE_PRINTK is not set
++# CONFIG_SND_DEBUG is not set
++# CONFIG_SND_RAWMIDI_SEQ is not set
++# CONFIG_SND_OPL3_LIB_SEQ is not set
++# CONFIG_SND_OPL4_LIB_SEQ is not set
++# CONFIG_SND_SBAWE_SEQ is not set
++# CONFIG_SND_EMU10K1_SEQ is not set
++CONFIG_SND_DRIVERS=y
++# CONFIG_SND_DUMMY is not set
++# CONFIG_SND_ALOOP is not set
++# CONFIG_SND_MTPAV is not set
++# CONFIG_SND_SERIAL_U16550 is not set
++# CONFIG_SND_MPU401 is not set
++CONFIG_SND_ARM=y
++CONFIG_SND_SPI=y
++CONFIG_SND_USB=y
++# CONFIG_SND_USB_AUDIO is not set
++# CONFIG_SND_USB_UA101 is not set
++# CONFIG_SND_USB_CAIAQ is not set
++CONFIG_SND_SOC=y
++# CONFIG_SND_SOC_CACHE_LZO is not set
++CONFIG_SND_SOC_AC97_BUS=y
++CONFIG_SND_IMX_SOC=y
++CONFIG_SND_MXC_SOC_MX2=y
++CONFIG_SND_SOC_IMX_CS42888=y
++# CONFIG_SND_SOC_IMX_SPDIF is not set
++CONFIG_SND_SOC_I2C_AND_SPI=y
++# CONFIG_SND_SOC_ALL_CODECS is not set
++CONFIG_SND_SOC_CS42888=y
++# CONFIG_SOUND_PRIME is not set
++CONFIG_AC97_BUS=y
+ CONFIG_HID_SUPPORT=y
+ CONFIG_HID=y
+ # CONFIG_HIDRAW is not set
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 5619c7e..e0c247b 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -30,6 +30,7 @@ config MACH_MX6Q_SABREAUTO
+ 	select IMX_HAVE_PLATFORM_IMX_I2C
+ 	select IMX_HAVE_PLATFORM_VIV_GPU
+ 	select IMX_HAVE_PLATFORM_IMX_VPU
++	select IMX_HAVE_PLATFORM_IMX_ESAI
+ 	select IMX_HAVE_PLATFORM_IMX_ANATOP_THERMAL
+ 	select IMX_HAVE_PLATFORM_FSL_USB2_UDC
+ 	select IMX_HAVE_PLATFORM_MXC_EHCI
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index f52f327..3e8f9d0 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -156,6 +156,25 @@ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 	MX6Q_PAD_EIM_D17__ECSPI1_MISO,
+ 	MX6Q_PAD_EIM_D18__ECSPI1_MOSI,
+ 
++	/* ESAI */
++	MX6Q_PAD_ENET_RXD0__ESAI1_HCKT,
++	/* MX6Q_PAD_ENET_RX_ER__ESAI1_HCKR,
++	MX6Q_PAD_ENET_MDIO__ESAI1_SCKR,
++	MX6Q_PAD_ENET_REF_CLK__ESAI1_FSR, */
++	MX6Q_PAD_ENET_CRS_DV__ESAI1_SCKT,
++	MX6Q_PAD_ENET_RXD1__ESAI1_FST,
++	/* MX6Q_PAD_ENET_TX_EN__ESAI1_TX3_RX2,
++	MX6Q_PAD_ENET_TXD1__ESAI1_TX2_RX3,
++	MX6Q_PAD_ENET_TXD0__ESAI1_TX4_RX1,
++	MX6Q_PAD_ENET_MDC__ESAI1_TX5_RX0, */
++	MX6Q_PAD_NANDF_CS2__ESAI1_TX0,
++	MX6Q_PAD_NANDF_CS3__ESAI1_TX1,
++	/* MX53_PAD_PATA_DATA4__GPIO2_4, */
++
++	/* I2C1 */
++	MX6Q_PAD_CSI0_DAT8__I2C1_SDA,
++	MX6Q_PAD_CSI0_DAT9__I2C1_SCL,
++
+ 	/* I2C2 */
+ 	MX6Q_PAD_KEY_COL3__I2C2_SCL,
+ 	MX6Q_PAD_KEY_ROW3__I2C2_SDA,
+@@ -290,7 +309,7 @@ static int max7310_u48_setup(struct i2c_client *client,
+ 	void *context)
+ {
+ 	int max7310_gpio_value[] = {
+-		0, 1, 1, 0, 0, 0, 0, 0,
++		0, 1, 1, 1, 0, 0, 0, 0,
+ 	};
+ 
+ 	int n;
+@@ -336,10 +355,20 @@ static struct fsl_mxc_dvi_platform_data sabr_ddc_dvi_data = {
+ 	.update = ddc_dvi_update,
+ };
+ 
++static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
++	{
++		I2C_BOARD_INFO("cs42888", 0x48),
++	},
++};
++
+ static struct imxi2c_platform_data mx6q_sabreauto_i2c_data = {
+ 	.bitrate = 400000,
+ };
+ 
++static struct imxi2c_platform_data mx6q_sabreauto_i2c0_data = {
++	.bitrate = 100000,
++};
++
+ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ 	{
+ 		I2C_BOARD_INFO("max7310", 0x1F),
+@@ -540,6 +569,36 @@ static const struct pm_platform_data mx6q_sabreauto_pm_data __initconst = {
+ 	.suspend_enter = sabreauto_suspend_enter,
+ 	.suspend_exit = sabreauto_suspend_exit,
+ };
++
++static struct mxc_audio_platform_data sab_audio_data = {
++	.sysclk = 16934400,
++};
++
++static struct platform_device sab_audio_device = {
++	.name = "imx-cs42888",
++};
++
++static struct imx_esai_platform_data sab_esai_pdata = {
++	.flags = IMX_ESAI_NET,
++};
++
++static int imx6q_init_audio(void)
++{
++	struct clk *pll3_pfd, *esai_clk;
++	mxc_register_device(&sab_audio_device, &sab_audio_data);
++	imx6q_add_imx_esai(0, &sab_esai_pdata);
++
++	esai_clk = clk_get(NULL, "esai_clk");
++	if (IS_ERR(esai_clk))
++		return PTR_ERR(esai_clk);
++
++	pll3_pfd = clk_get(NULL, "pll3_pfd_508M");
++	if (IS_ERR(pll3_pfd))
++		return PTR_ERR(pll3_pfd);
++
++	clk_set_parent(esai_clk, pll3_pfd);
++	clk_set_rate(esai_clk, 101647058);
++}
+ /*!
+  * Board specific initialization.
+  */
+@@ -564,8 +623,11 @@ static void __init mx6_board_init(void)
+ 
+ 	imx6q_add_imx_snvs_rtc();
+ 
++	imx6q_add_imx_i2c(0, &mx6q_sabreauto_i2c0_data);
+ 	imx6q_add_imx_i2c(1, &mx6q_sabreauto_i2c_data);
+ 	imx6q_add_imx_i2c(2, &mx6q_sabreauto_i2c_data);
++	i2c_register_board_info(0, mxc_i2c0_board_info,
++			ARRAY_SIZE(mxc_i2c0_board_info));
+ 	i2c_register_board_info(1, mxc_i2c1_board_info,
+ 			ARRAY_SIZE(mxc_i2c1_board_info));
+ 	i2c_register_board_info(2, mxc_i2c2_board_info,
+@@ -583,6 +645,7 @@ static void __init mx6_board_init(void)
+ 	imx6q_sabreauto_init_usb();
+ 	imx6q_add_ahci(0, &mx6q_sabreauto_sata_data);
+ 	imx6q_add_vpu();
++	imx6q_init_audio();
+ 
+ 	/* DISP0 Detect */
+ 	gpio_request(MX6Q_SABREAUTO_DISP0_DET_INT, "disp0-detect");
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 1a50f83..e035bd3 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -610,6 +610,7 @@ static struct clk pll3_pfd_508M = {
+ 	.enable = _clk_pfd_enable,
+ 	.disable = _clk_pfd_disable,
+ 	.set_rate = pfd_set_rate,
++	.get_rate = pfd_get_rate,
+ 	.round_rate = pfd_round_rate,
+ };
+ 
+@@ -2849,7 +2850,7 @@ static int _clk_esai_set_parent(struct clk *clk, struct clk *parent)
+ {
+ 	u32 reg, mux;
+ 
+-	reg = __raw_readl(MXC_CCM_CSCMR2) & MXC_CCM_CSCMR2_ESAI_CLK_SEL_MASK;
++	reg = __raw_readl(MXC_CCM_CSCMR2) & ~MXC_CCM_CSCMR2_ESAI_CLK_SEL_MASK;
+ 
+ 	mux = _get_mux6(parent, &pll4_audio_main_clk, &pll3_pfd_508M,
+ 			&pll3_pfd_454M,	&pll3_sw_clk, NULL, NULL);
+diff --git a/arch/arm/mach-mx6/crm_regs.h b/arch/arm/mach-mx6/crm_regs.h
+index d53e0ea..c1b7fe9 100644
+--- a/arch/arm/mach-mx6/crm_regs.h
++++ b/arch/arm/mach-mx6/crm_regs.h
+@@ -284,13 +284,13 @@
+ #define MXC_CCM_CSCDR1_UART_CLK_PODF_OFFSET		(0)
+ 
+ /* Define the bits in register CS1CDR */
+-#define MXC_CCM_CS1CDR_ESAI_CLK_PODF_MASK		(0x3F << 25)
++#define MXC_CCM_CS1CDR_ESAI_CLK_PODF_MASK		(0x7 << 25)
+ #define MXC_CCM_CS1CDR_ESAI_CLK_PODF_OFFSET		(25)
+ #define MXC_CCM_CS1CDR_SSI3_CLK_PRED_MASK		(0x7 << 22)
+ #define MXC_CCM_CS1CDR_SSI3_CLK_PRED_OFFSET		(22)
+ #define MXC_CCM_CS1CDR_SSI3_CLK_PODF_MASK		(0x3F << 16)
+ #define MXC_CCM_CS1CDR_SSI3_CLK_PODF_OFFSET		(16)
+-#define MXC_CCM_CS1CDR_ESAI_CLK_PRED_MASK		(0x3 << 9)
++#define MXC_CCM_CS1CDR_ESAI_CLK_PRED_MASK		(0x7 << 9)
+ #define MXC_CCM_CS1CDR_ESAI_CLK_PRED_OFFSET		(9)
+ #define MXC_CCM_CS1CDR_SSI1_CLK_PRED_MASK		(0x7 << 6)
+ #define MXC_CCM_CS1CDR_SSI1_CLK_PRED_OFFSET		(6)
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 488ae59..e605468 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -73,6 +73,10 @@ extern const struct imx_fsl_usb2_wakeup_data imx6q_fsl_hs_wakeup_data[] __initco
+ #define imx6q_add_fsl_usb2_hs_wakeup(id, pdata)	\
+ 	imx_add_fsl_usb2_wakeup(&imx6q_fsl_hs_wakeup_data[id - 1], pdata)
+ 
++extern const struct imx_imx_esai_data imx6q_imx_esai_data[] __initconst;
++#define imx6q_add_imx_esai(id, pdata) \
++	imx_add_imx_esai(&imx6q_imx_esai_data[id], pdata)
++
+ extern const struct imx_viv_gpu_data imx6_gc2000_data __initconst;
+ extern const struct imx_viv_gpu_data imx6_gc320_data __initconst;
+ extern const struct imx_viv_gpu_data imx6_gc355_data __initconst;
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index 7c0e691..469c77f 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -47,6 +47,9 @@ config IMX_HAVE_PLATFORM_IMX_KEYPAD
+ config IMX_HAVE_PLATFORM_IMX_SSI
+ 	bool
+ 
++config IMX_HAVE_PLATFORM_IMX_ESAI
++	bool
++
+ config IMX_HAVE_PLATFORM_IMX_UART
+ 	bool
+ 
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index ff11fa9..bd1ad8d 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -14,6 +14,7 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_FB) += platform-imx-fb.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_I2C) += platform-imx-i2c.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_KEYPAD) += platform-imx-keypad.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_SSI) += platform-imx-ssi.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_ESAI) += platform-imx-esai.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_UART) += platform-imx-uart.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_UDC) += platform-imx_udc.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IPU_CORE) += platform-ipu-core.o
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-esai.c b/arch/arm/plat-mxc/devices/platform-imx-esai.c
+new file mode 100644
+index 0000000..b3a9503
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx-esai.c
+@@ -0,0 +1,60 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it under
++ * the terms of the GNU General Public License version 2 as published by the
++ * Free Software Foundation.
++ */
++
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++
++#define MX6Q_DMA_REQ_ESAI_RX            23
++#define MX6Q_DMA_REQ_ESAI_TX            24
++
++#define imx_imx_esai_data_entry(soc, _id, _size)			\
++	[_id] = {							\
++		.id = _id,						\
++		.iobase = ESAI1_BASE_ADDR,		\
++		.iosize = _size,					\
++		.irq = MXC_INT_ESAI,			\
++		.dmatx = soc ## _DMA_REQ_ESAI ## _TX,		\
++		.dmarx = soc ## _DMA_REQ_ESAI ## _RX,		\
++	}
++
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_imx_esai_data imx6q_imx_esai_data[] __initconst = {
++#define imx6q_imx_esai_data_entry(_id)				\
++	imx_imx_esai_data_entry(MX6Q, _id, SZ_4K)
++	imx6q_imx_esai_data_entry(0),
++};
++#endif /* ifdef CONFIG_SOC_IMX6Q */
++
++struct platform_device *__init imx_add_imx_esai(
++		const struct imx_imx_esai_data *data,
++		const struct imx_esai_platform_data *pdata)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + data->iosize - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.start = data->irq,
++			.end = data->irq,
++			.flags = IORESOURCE_IRQ,
++		},
++#define DMARES(_name) {							\
++	.name = #_name,							\
++	.start = data->dma ## _name,					\
++	.end = data->dma ## _name,					\
++	.flags = IORESOURCE_DMA,					\
++}
++		DMARES(tx),
++		DMARES(rx),
++	};
++
++	return imx_add_platform_device("imx-esai", data->id,
++			res, ARRAY_SIZE(res),
++			pdata, sizeof(*pdata));
++}
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 213e05c..27ecfdba 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -147,6 +147,19 @@ struct platform_device *__init imx_add_imx_ssi(
+ 		const struct imx_imx_ssi_data *data,
+ 		const struct imx_ssi_platform_data *pdata);
+ 
++#include <mach/esai.h>
++struct imx_imx_esai_data {
++	int id;
++	resource_size_t iobase;
++	resource_size_t iosize;
++	resource_size_t irq;
++	resource_size_t dmatx;
++	resource_size_t dmarx;
++};
++struct platform_device *__init imx_add_imx_esai(
++		const struct imx_imx_esai_data *data,
++		const struct imx_esai_platform_data *pdata);
++
+ #include <mach/imx-uart.h>
+ struct imx_imx_uart_3irq_data {
+ 	int id;
+diff --git a/arch/arm/plat-mxc/include/mach/esai.h b/arch/arm/plat-mxc/include/mach/esai.h
+new file mode 100644
+index 0000000..d77eb15
+--- /dev/null
++++ b/arch/arm/plat-mxc/include/mach/esai.h
+@@ -0,0 +1,18 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify it under
++ * the terms of the GNU General Public License version 2 as published by the
++ * Free Software Foundation.
++ */
++
++#ifndef __MACH_ESAI_H
++#define __MACH_ESAI_H
++
++struct imx_esai_platform_data {
++	unsigned int flags;
++#define IMX_ESAI_NET            (1 << 0)
++#define IMX_ESAI_SYN            (1 << 1)
++};
++
++#endif
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index 6a80467..5fdceeb 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -60,6 +60,9 @@ typedef enum iomux_config {
+ 		PAD_CTL_PKE | PAD_CTL_PUE | PAD_CTL_DSE_40ohm | \
+ 		PAD_CTL_PUS_100K_UP | PAD_CTL_HYS | PAD_CTL_SPEED_MED)
+ 
++#define MX6Q_ESAI_PAD_CTRL	(PAD_CTL_DSE_40ohm | PAD_CTL_HYS | \
++		PAD_CTL_PKE | PAD_CTL_PUE | PAD_CTL_PUS_100K_UP)
++
+ #define _MX6Q_PAD_SD2_DAT1__USDHC2_DAT1				\
+ 		IOMUX_PAD(0x0360, 0x004C, 0, 0x0000, 0, 0)
+ #define _MX6Q_PAD_SD2_DAT1__ECSPI5_SS0				\
+@@ -5161,7 +5164,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_ENET_MDIO__ENET_MDIO		\
+ 		(_MX6Q_PAD_ENET_MDIO__ENET_MDIO | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_MDIO__ESAI1_SCKR		\
+-		(_MX6Q_PAD_ENET_MDIO__ESAI1_SCKR | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_ENET_MDIO__ESAI1_SCKR | MUX_PAD_CTRL(MX6Q_ESAI_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_MDIO__SDMA_DEBUG_BUS_DEVICE_3		\
+ 		(_MX6Q_PAD_ENET_MDIO__SDMA_DEBUG_BUS_DEVICE_3 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_MDIO__ENET_1588_EVENT1_OUT		\
+@@ -5176,7 +5179,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_ENET_REF_CLK__ENET_TX_CLK		\
+ 		(_MX6Q_PAD_ENET_REF_CLK__ENET_TX_CLK | MUX_PAD_CTRL(MX6Q_ENET_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_REF_CLK__ESAI1_FSR		\
+-		(_MX6Q_PAD_ENET_REF_CLK__ESAI1_FSR | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_ENET_REF_CLK__ESAI1_FSR | MUX_PAD_CTRL(MX6Q_ESAI_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_REF_CLK__SDMA_DEBUG_BUS_DEVICE_4		\
+ 		(_MX6Q_PAD_ENET_REF_CLK__SDMA_DEBUG_BUS_DEVICE_4 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_REF_CLK__GPIO_1_23		\
+@@ -5189,7 +5192,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_ENET_RX_ER__ENET_RX_ER		\
+ 		(_MX6Q_PAD_ENET_RX_ER__ENET_RX_ER | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_RX_ER__ESAI1_HCKR		\
+-		(_MX6Q_PAD_ENET_RX_ER__ESAI1_HCKR | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_ENET_RX_ER__ESAI1_HCKR | MUX_PAD_CTRL(MX6Q_ESAI_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_RX_ER__SPDIF_IN1		\
+ 		(_MX6Q_PAD_ENET_RX_ER__SPDIF_IN1 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_RX_ER__ENET_1588_EVENT2_OUT		\
+@@ -5206,7 +5209,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_ENET_CRS_DV__ENET_RX_EN		\
+ 		(_MX6Q_PAD_ENET_CRS_DV__ENET_RX_EN | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_CRS_DV__ESAI1_SCKT		\
+-		(_MX6Q_PAD_ENET_CRS_DV__ESAI1_SCKT | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_ENET_CRS_DV__ESAI1_SCKT | MUX_PAD_CTRL(MX6Q_ESAI_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_CRS_DV__SPDIF_SPDIF_EXTCLK		\
+ 		(_MX6Q_PAD_ENET_CRS_DV__SPDIF_SPDIF_EXTCLK | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_CRS_DV__GPIO_1_25		\
+@@ -5221,7 +5224,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_ENET_RXD1__ENET_RDATA_1		\
+ 		(_MX6Q_PAD_ENET_RXD1__ENET_RDATA_1 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_RXD1__ESAI1_FST		\
+-		(_MX6Q_PAD_ENET_RXD1__ESAI1_FST | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_ENET_RXD1__ESAI1_FST | MUX_PAD_CTRL(MX6Q_ESAI_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_RXD1__ENET_1588_EVENT3_OUT		\
+ 		(_MX6Q_PAD_ENET_RXD1__ENET_1588_EVENT3_OUT | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_RXD1__GPIO_1_26		\
+@@ -5236,7 +5239,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_ENET_RXD0__ENET_RDATA_0		\
+ 		(_MX6Q_PAD_ENET_RXD0__ENET_RDATA_0 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_RXD0__ESAI1_HCKT		\
+-		(_MX6Q_PAD_ENET_RXD0__ESAI1_HCKT | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_ENET_RXD0__ESAI1_HCKT | MUX_PAD_CTRL(MX6Q_ESAI_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_RXD0__SPDIF_OUT1		\
+ 		(_MX6Q_PAD_ENET_RXD0__SPDIF_OUT1 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_RXD0__GPIO_1_27		\
+@@ -5251,7 +5254,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_ENET_TX_EN__ENET_TX_EN		\
+ 		(_MX6Q_PAD_ENET_TX_EN__ENET_TX_EN | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_TX_EN__ESAI1_TX3_RX2		\
+-		(_MX6Q_PAD_ENET_TX_EN__ESAI1_TX3_RX2 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_ENET_TX_EN__ESAI1_TX3_RX2 | MUX_PAD_CTRL(MX6Q_ESAI_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_TX_EN__GPIO_1_28		\
+ 		(_MX6Q_PAD_ENET_TX_EN__GPIO_1_28 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_TX_EN__SATA_PHY_TDI		\
+@@ -5264,7 +5267,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_ENET_TXD1__ENET_TDATA_1		\
+ 		(_MX6Q_PAD_ENET_TXD1__ENET_TDATA_1 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_TXD1__ESAI1_TX2_RX3		\
+-		(_MX6Q_PAD_ENET_TXD1__ESAI1_TX2_RX3 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_ENET_TXD1__ESAI1_TX2_RX3 | MUX_PAD_CTRL(MX6Q_ESAI_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_TXD1__ENET_1588_EVENT0_IN		\
+ 		(_MX6Q_PAD_ENET_TXD1__ENET_1588_EVENT0_IN | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_TXD1__GPIO_1_29		\
+@@ -5279,7 +5282,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_ENET_TXD0__ENET_TDATA_0		\
+ 		(_MX6Q_PAD_ENET_TXD0__ENET_TDATA_0 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_TXD0__ESAI1_TX4_RX1		\
+-		(_MX6Q_PAD_ENET_TXD0__ESAI1_TX4_RX1 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_ENET_TXD0__ESAI1_TX4_RX1 | MUX_PAD_CTRL(MX6Q_ESAI_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_TXD0__GPIO_1_30		\
+ 		(_MX6Q_PAD_ENET_TXD0__GPIO_1_30 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_TXD0__SATA_PHY_TCK		\
+@@ -5292,7 +5295,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_ENET_MDC__ENET_MDC		\
+ 		(_MX6Q_PAD_ENET_MDC__ENET_MDC | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_MDC__ESAI1_TX5_RX0		\
+-		(_MX6Q_PAD_ENET_MDC__ESAI1_TX5_RX0 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_ENET_MDC__ESAI1_TX5_RX0 | MUX_PAD_CTRL(MX6Q_ESAI_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_MDC__ENET_1588_EVENT1_IN		\
+ 		(_MX6Q_PAD_ENET_MDC__ENET_1588_EVENT1_IN | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_ENET_MDC__GPIO_1_31		\
+@@ -6186,7 +6189,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_CSI0_DAT8__KPP_COL_7		\
+ 		(_MX6Q_PAD_CSI0_DAT8__KPP_COL_7 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_CSI0_DAT8__I2C1_SDA		\
+-		(_MX6Q_PAD_CSI0_DAT8__I2C1_SDA | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_CSI0_DAT8__I2C1_SDA | MUX_PAD_CTRL(MX6Q_I2C_PAD_CTRL))
+ #define  MX6Q_PAD_CSI0_DAT8__GPIO_5_26		\
+ 		(_MX6Q_PAD_CSI0_DAT8__GPIO_5_26 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_CSI0_DAT8__MMDC_MMDC_DEBUG_47		\
+@@ -6203,7 +6206,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_CSI0_DAT9__KPP_ROW_7		\
+ 		(_MX6Q_PAD_CSI0_DAT9__KPP_ROW_7 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_CSI0_DAT9__I2C1_SCL		\
+-		(_MX6Q_PAD_CSI0_DAT9__I2C1_SCL | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_CSI0_DAT9__I2C1_SCL | MUX_PAD_CTRL(MX6Q_I2C_PAD_CTRL))
+ #define  MX6Q_PAD_CSI0_DAT9__GPIO_5_27		\
+ 		(_MX6Q_PAD_CSI0_DAT9__GPIO_5_27 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_CSI0_DAT9__MMDC_MMDC_DEBUG_48		\
+@@ -6765,7 +6768,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_NANDF_CS2__IPU1_SISG_0		\
+ 		(_MX6Q_PAD_NANDF_CS2__IPU1_SISG_0 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_CS2__ESAI1_TX0		\
+-		(_MX6Q_PAD_NANDF_CS2__ESAI1_TX0 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_CS2__ESAI1_TX0 | MUX_PAD_CTRL(MX6Q_ESAI_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_CS2__WEIM_WEIM_CRE		\
+ 		(_MX6Q_PAD_NANDF_CS2__WEIM_WEIM_CRE | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_CS2__CCM_CLKO2		\
+@@ -6780,7 +6783,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_NANDF_CS3__IPU1_SISG_1		\
+ 		(_MX6Q_PAD_NANDF_CS3__IPU1_SISG_1 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_CS3__ESAI1_TX1		\
+-		(_MX6Q_PAD_NANDF_CS3__ESAI1_TX1 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_NANDF_CS3__ESAI1_TX1 | MUX_PAD_CTRL(MX6Q_ESAI_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_CS3__WEIM_WEIM_A_26		\
+ 		(_MX6Q_PAD_NANDF_CS3__WEIM_WEIM_A_26 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_NANDF_CS3__PCIE_CTRL_DIAG_STATUS_BUS_MUX_4		\
+-- 
+1.7.7.4
+

@@ -1,0 +1,37 @@
+From 6470f4a7526022ebe76eb19f981f3c9f647ce5a5 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Fri, 25 Nov 2011 13:40:42 +0800
+Subject: [PATCH 0663/2463] ENGR00163120 pwm backlight: work-around for lvds
+ panel blank issue on mx6q
+
+make all display can control pwm backlight.
+
+NOTE!!!:
+
+it's not a good solution, will bring side-affect of no backlight display
+device can disable pwm backlight of other display device.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/video/backlight/pwm_bl.c |    5 ++++-
+ 1 files changed, 4 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/video/backlight/pwm_bl.c b/drivers/video/backlight/pwm_bl.c
+index 5d5c43b..80e8c78 100644
+--- a/drivers/video/backlight/pwm_bl.c
++++ b/drivers/video/backlight/pwm_bl.c
+@@ -67,7 +67,10 @@ static int pwm_backlight_check_fb(struct backlight_device *bl,
+ 					struct fb_info *info)
+ {
+ 	char *id = info->fix.id;
+-	if (!strcmp(id, "DISP3 BG"))
++	if (!strcmp(id, "DISP3 BG") ||
++		!strcmp(id, "DISP3 BG - DI1") ||
++		!strcmp(id, "DISP4 BG") ||
++		!strcmp(id, "DISP4 BG - DI1"))
+ 	    return 1;
+ 	else
+ 	return 0;
+-- 
+1.7.7.4
+

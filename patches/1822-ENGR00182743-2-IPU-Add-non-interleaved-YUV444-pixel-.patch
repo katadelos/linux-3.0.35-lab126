@@ -1,0 +1,134 @@
+From 3ff8ef26cd67a44504f10d098774a88b54cb9d24 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Tue, 3 Jul 2012 17:15:54 +0800
+Subject: [PATCH 1822/2463] ENGR00182743-2 IPU: Add non-interleaved YUV444
+ pixel format support
+
+Add non-interleaved YUV444 pixel format IPU_PIX_FMT_YUV444P support
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_calc_stripes_sizes.c |    4 +++-
+ drivers/mxc/ipu3/ipu_common.c             |    1 +
+ drivers/mxc/ipu3/ipu_device.c             |    7 +++++++
+ drivers/mxc/ipu3/ipu_param_mem.h          |   26 ++++++++++++++++++++++++++
+ 4 files changed, 37 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c b/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c
+index aa9fdaf..4cee1df 100644
+--- a/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c
++++ b/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2009-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2009-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -61,6 +61,7 @@ static unsigned int f_calc(unsigned int pfs, unsigned int bpp, unsigned int *wri
+ 	case IPU_PIX_FMT_YUV420P2:
+ 	case IPU_PIX_FMT_YUV420P:
+ 	case IPU_PIX_FMT_YVU420P:
++	case IPU_PIX_FMT_YUV444P:
+ 		f_calculated = 16;
+ 		break;
+ 
+@@ -114,6 +115,7 @@ static unsigned int m_calc(unsigned int pfs)
+ 	case IPU_PIX_FMT_YVU422P:
+ 	case IPU_PIX_FMT_YUV422P:
+ 	case IPU_PIX_FMT_YVU420P:
++	case IPU_PIX_FMT_YUV444P:
+ 	case IPU_PIX_FMT_NV12:
+ 		m_calculated = 8;
+ 		break;
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 561433f..4e3526c 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -2943,6 +2943,7 @@ uint32_t bytes_per_pixel(uint32_t fmt)
+ 	case IPU_PIX_FMT_YUV420P:
+ 	case IPU_PIX_FMT_YVU420P:
+ 	case IPU_PIX_FMT_YUV422P:
++	case IPU_PIX_FMT_YUV444P:
+ 		return 1;
+ 		break;
+ 	case IPU_PIX_FMT_RGB565:
+diff --git a/drivers/mxc/ipu3/ipu_device.c b/drivers/mxc/ipu3/ipu_device.c
+index 8c5aef0..215fc70 100644
+--- a/drivers/mxc/ipu3/ipu_device.c
++++ b/drivers/mxc/ipu3/ipu_device.c
+@@ -420,6 +420,7 @@ unsigned int fmt_to_bpp(unsigned int pixelformat)
+ 	case IPU_PIX_FMT_BGR24:
+ 	case IPU_PIX_FMT_RGB24:
+ 	case IPU_PIX_FMT_YUV444:
++	case IPU_PIX_FMT_YUV444P:
+ 		bpp = 24;
+ 		break;
+ 	case IPU_PIX_FMT_BGR32:
+@@ -465,6 +466,7 @@ cs_t colorspaceofpixel(int fmt)
+ 	case IPU_PIX_FMT_YVU422P:
+ 	case IPU_PIX_FMT_YUV422P:
+ 	case IPU_PIX_FMT_YUV444:
++	case IPU_PIX_FMT_YUV444P:
+ 	case IPU_PIX_FMT_NV12:
+ 	case IPU_PIX_FMT_TILED_NV12:
+ 	case IPU_PIX_FMT_TILED_NV12F:
+@@ -750,6 +752,11 @@ static void update_offset(unsigned int fmt,
+ 			+ (width * pos_y)/2 + pos_x/2;
+ 		*voff = *uoff + (width * height)/2;
+ 		break;
++	case IPU_PIX_FMT_YUV444P:
++		*off = pos_y * width + pos_x;
++		*uoff = width * height;
++		*voff = width * height * 2;
++		break;
+ 	case IPU_PIX_FMT_NV12:
+ 		*off = pos_y * width + pos_x;
+ 		*uoff = (width * (height - pos_y) - pos_x)
+diff --git a/drivers/mxc/ipu3/ipu_param_mem.h b/drivers/mxc/ipu3/ipu_param_mem.h
+index 8ae0a5e..68c6654 100644
+--- a/drivers/mxc/ipu3/ipu_param_mem.h
++++ b/drivers/mxc/ipu3/ipu_param_mem.h
+@@ -415,6 +415,14 @@ static inline void _ipu_ch_param_init(struct ipu_soc *ipu, int ch,
+ 		u_offset = (u == 0) ? stride * height : u;
+ 		v_offset = (v == 0) ? u_offset + u_offset / 2 : v;
+ 		break;
++	case IPU_PIX_FMT_YUV444P:
++		/* BPP & pixel format */
++		ipu_ch_param_set_field(&params, 1, 85, 4, 0);	/* pix format */
++		ipu_ch_param_set_field(&params, 1, 78, 7, 31);	/* burst size */
++		uv_stride = stride;
++		u_offset = (u == 0) ? stride * height : u;
++		v_offset = (v == 0) ? u_offset * 2 : v;
++		break;
+ 	case IPU_PIX_FMT_NV12:
+ 		/* BPP & pixel format */
+ 		ipu_ch_param_set_field(&params, 1, 85, 4, 4);	/* pix format */
+@@ -773,6 +781,24 @@ static inline void _ipu_ch_offset_update(struct ipu_soc *ipu,
+ 					v_offset;
+ 		break;
+ 
++	case IPU_PIX_FMT_YUV444P:
++		uv_stride = stride;
++		u_offset = stride * (height - vertical_offset - 1) +
++					(stride - horizontal_offset) +
++					(uv_stride * vertical_offset) +
++					horizontal_offset;
++		v_offset = u_offset + uv_stride * height;
++		u_fix = u ? (u + (uv_stride * vertical_offset) +
++					horizontal_offset -
++					(stride * vertical_offset) -
++					(horizontal_offset)) :
++					u_offset;
++		v_fix = v ? (v + (uv_stride * vertical_offset) +
++					horizontal_offset -
++					(stride * vertical_offset) -
++					(horizontal_offset)) :
++					v_offset;
++		break;
+ 	case IPU_PIX_FMT_NV12:
+ 		uv_stride = stride;
+ 		u_offset = stride * (height - vertical_offset - 1) +
+-- 
+1.7.7.4
+

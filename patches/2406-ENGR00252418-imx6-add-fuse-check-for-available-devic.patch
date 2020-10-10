@@ -1,0 +1,538 @@
+From 2786868e5f56c95afd1642fe487203ac4fa523dc Mon Sep 17 00:00:00 2001
+From: Dong Aisheng <b29396@freescale.com>
+Date: Wed, 27 Feb 2013 16:50:30 +0800
+Subject: [PATCH 2406/2463] ENGR00252418 imx6: add fuse check for available
+ devices
+
+Since device availability may be different on the same SoC,
+so we add fuse check for the supported device before we really
+adding the device to the kernel.
+This may avoid kernel crash once the CPU at the slot are changed to
+a different one which with different device available but the kernel is
+the same one.
+
+Reviewed-by: Jason Liu <r64343@freescale.com>
+Acked-by: Jason Liu <r64343@freescale.com>
+Signed-off-by: Dong Aisheng <b29396@freescale.com>
+---
+ arch/arm/plat-mxc/Makefile                         |    2 +-
+ arch/arm/plat-mxc/devices/platform-ahci-imx.c      |    5 +-
+ arch/arm/plat-mxc/devices/platform-fec.c           |    5 +-
+ arch/arm/plat-mxc/devices/platform-imx-epdc-fb.c   |    5 +-
+ .../plat-mxc/devices/platform-imx-hdmi-soc-dai.c   |    5 +-
+ arch/arm/plat-mxc/devices/platform-imx-hdmi-soc.c  |    9 +-
+ arch/arm/plat-mxc/devices/platform-imx-pcie.c      |    5 +-
+ arch/arm/plat-mxc/devices/platform-imx-pxp.c       |   15 ++-
+ arch/arm/plat-mxc/devices/platform-imx_vpu.c       |   14 +--
+ arch/arm/plat-mxc/devices/platform-mxc-hdmi-core.c |    5 +-
+ arch/arm/plat-mxc/devices/platform-mxc_hdmi.c      |    6 +-
+ arch/arm/plat-mxc/devices/platform-mxc_mlb.c       |    8 +-
+ arch/arm/plat-mxc/fuse.c                           |  165 ++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/mxc.h               |   24 +++-
+ 14 files changed, 244 insertions(+), 29 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/Makefile b/arch/arm/plat-mxc/Makefile
+index 6ff1c90..1aa1780 100755
+--- a/arch/arm/plat-mxc/Makefile
++++ b/arch/arm/plat-mxc/Makefile
+@@ -3,7 +3,7 @@
+ #
+ 
+ # Common support
+-obj-y := clock.o gpio.o time.o devices.o cpu.o system.o irq-common.o usb_common.o usb_wakeup.o
++obj-y := clock.o gpio.o time.o devices.o cpu.o system.o irq-common.o usb_common.o usb_wakeup.o fuse.o
+ 
+ # MX51 uses the TZIC interrupt controller, older platforms use AVIC
+ obj-$(CONFIG_MXC_TZIC) += tzic.o
+diff --git a/arch/arm/plat-mxc/devices/platform-ahci-imx.c b/arch/arm/plat-mxc/devices/platform-ahci-imx.c
+index 30bfeaa..90d994c 100755
+--- a/arch/arm/plat-mxc/devices/platform-ahci-imx.c
++++ b/arch/arm/plat-mxc/devices/platform-ahci-imx.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -54,6 +54,9 @@ struct platform_device *__init imx_add_ahci(
+ 		},
+ 	};
+ 
++	if (!fuse_dev_is_available(MXC_DEV_SATA))
++		return ERR_PTR(-ENODEV);
++
+ 	return imx_add_platform_device_dmamask("ahci", 0 /* -1? */,
+ 			res, ARRAY_SIZE(res),
+ 			pdata, sizeof(*pdata),  DMA_BIT_MASK(32));
+diff --git a/arch/arm/plat-mxc/devices/platform-fec.c b/arch/arm/plat-mxc/devices/platform-fec.c
+index 20422cf..0a03ea9 100644
+--- a/arch/arm/plat-mxc/devices/platform-fec.c
++++ b/arch/arm/plat-mxc/devices/platform-fec.c
+@@ -6,7 +6,7 @@
+  * the terms of the GNU General Public License version 2 as published by the
+  * Free Software Foundation.
+  *
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc.
+  */
+ #include <linux/dma-mapping.h>
+ #include <asm/sizes.h>
+@@ -74,6 +74,9 @@ struct platform_device *__init imx_add_fec(
+ 		},
+ 	};
+ 
++	if (!fuse_dev_is_available(MXC_DEV_ENET))
++		return ERR_PTR(-ENODEV);
++
+ 	return imx_add_platform_device_dmamask(data->devid, 0,
+ 			res, ARRAY_SIZE(res),
+ 			pdata, sizeof(*pdata), DMA_BIT_MASK(32));
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-epdc-fb.c b/arch/arm/plat-mxc/devices/platform-imx-epdc-fb.c
+index 404a264..459e6cc 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-epdc-fb.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-epdc-fb.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -55,6 +55,9 @@ struct platform_device *__init imx_add_imx_epdc(
+ 		},
+ 	};
+ 
++	if (!fuse_dev_is_available(MXC_DEV_EPDC))
++		return ERR_PTR(-ENODEV);
++
+ 	return imx_add_platform_device_dmamask("imx_epdc_fb", -1,
+ 		res, ARRAY_SIZE(res), pdata, sizeof(*pdata), DMA_BIT_MASK(32));
+ }
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-hdmi-soc-dai.c b/arch/arm/plat-mxc/devices/platform-imx-hdmi-soc-dai.c
+index 813f954..26f4ae7 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-hdmi-soc-dai.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-hdmi-soc-dai.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc.
+  */
+ 
+ /*
+@@ -42,6 +42,9 @@ struct platform_device *__init imx_add_hdmi_soc_dai(
+ 		},
+ 	};
+ 
++	if (!fuse_dev_is_available(MXC_DEV_HDMI))
++		return ERR_PTR(-ENODEV);
++
+ 	return imx_add_platform_device("imx-hdmi-soc-dai", 0,
+ 				res, ARRAY_SIZE(res), NULL, 0);
+ }
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-hdmi-soc.c b/arch/arm/plat-mxc/devices/platform-imx-hdmi-soc.c
+index 33c8a68..7be6756 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-hdmi-soc.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-hdmi-soc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -22,7 +22,12 @@
+ #include <mach/devices-common.h>
+ 
+ struct platform_device *__init imx_add_hdmi_soc(void)
+-{	return imx_add_platform_device("mxc_hdmi_soc", 0,
++{
++
++	if (!fuse_dev_is_available(MXC_DEV_HDMI))
++		return ERR_PTR(-ENODEV);
++
++	return imx_add_platform_device("mxc_hdmi_soc", 0,
+ 				       NULL, 0, NULL, 0);
+ }
+ 
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-pcie.c b/arch/arm/plat-mxc/devices/platform-imx-pcie.c
+index cf36093..7e0d630 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-pcie.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-pcie.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2012-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -55,6 +55,9 @@ struct platform_device *__init imx_add_pcie(
+ 		},
+ 	};
+ 
++	if (!fuse_dev_is_available(MXC_DEV_PCIE))
++		return ERR_PTR(-ENODEV);
++
+ 	return imx_add_platform_device("imx-pcie", -1,
+ 			res, ARRAY_SIZE(res),
+ 			pdata, sizeof(*pdata));
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-pxp.c b/arch/arm/plat-mxc/devices/platform-imx-pxp.c
+index 418489e..fed58d0 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-pxp.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-pxp.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -54,18 +54,27 @@ struct platform_device *__init imx_add_imx_pxp(
+ 		},
+ 	};
+ 
++	if (!fuse_dev_is_available(MXC_DEV_PXP))
++		return ERR_PTR(-ENODEV);
++
+ 	return imx_add_platform_device_dmamask("imx-pxp", -1,
+ 		res, ARRAY_SIZE(res), NULL, 0, DMA_BIT_MASK(32));
+ }
+ 
+ struct platform_device *__init imx_add_imx_pxp_client()
+ {
+-    return imx_add_platform_device("imx-pxp-client", -1,
++	if (!fuse_dev_is_available(MXC_DEV_PXP))
++		return ERR_PTR(-ENODEV);
++
++	return imx_add_platform_device("imx-pxp-client", -1,
+ 		NULL, 0, NULL, 0);
+ }
+ 
+ struct platform_device *__init imx_add_imx_pxp_v4l2()
+ {
+-    return imx_add_platform_device_dmamask("pxp-v4l2", -1,
++	if (!fuse_dev_is_available(MXC_DEV_PXP))
++		return ERR_PTR(-ENODEV);
++
++	return imx_add_platform_device_dmamask("pxp-v4l2", -1,
+ 		NULL, 0, NULL, 0, DMA_BIT_MASK(32));
+ }
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_vpu.c b/arch/arm/plat-mxc/devices/platform-imx_vpu.c
+index 83faed6..9e00b2f 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx_vpu.c
++++ b/arch/arm/plat-mxc/devices/platform-imx_vpu.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  * Jason Chen <jason.chen@freescale.com>
+  *
+  * This program is free software; you can redistribute it and/or modify it under
+@@ -167,15 +167,9 @@ struct platform_device *__init imx_add_vpu(
+ 	pdata.iram_enable = data->iram_enable;
+ 	pdata.iram_size = data->iram_size;
+ 
+-#ifdef CONFIG_SOC_IMX6Q
+-	if (cpu_is_mx6dl() || cpu_is_mx6q()) {
+-		#define HW_OCOTP_CFGn(n) (0x00000410 + (n) * 0x10)
+-		unsigned int vpu_disable;
+-		vpu_disable = readl(MX6_IO_ADDRESS(OCOTP_BASE_ADDR) + HW_OCOTP_CFGn(3));
+-		if (vpu_disable & 0x00008000)
+-			return ERR_PTR(-ENODEV);
+-	}
+-#endif
++	if (!fuse_dev_is_available(MXC_DEV_VPU))
++		return ERR_PTR(-ENODEV);
++
+ 	if (cpu_is_mx6dl())
+ 		pdata.iram_enable = false;
+ 
+diff --git a/arch/arm/plat-mxc/devices/platform-mxc-hdmi-core.c b/arch/arm/plat-mxc/devices/platform-mxc-hdmi-core.c
+index e0c1906..2c9a32a 100644
+--- a/arch/arm/plat-mxc/devices/platform-mxc-hdmi-core.c
++++ b/arch/arm/plat-mxc/devices/platform-mxc-hdmi-core.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -45,6 +45,9 @@ struct platform_device *__init imx_add_mxc_hdmi_core(
+ 		},
+ 	};
+ 
++	if (!fuse_dev_is_available(MXC_DEV_HDMI))
++		return ERR_PTR(-ENODEV);
++
+ 	return imx_add_platform_device_dmamask("mxc_hdmi_core", -1,
+ 		res, ARRAY_SIZE(res), pdata, sizeof(*pdata), DMA_BIT_MASK(32));
+ }
+diff --git a/arch/arm/plat-mxc/devices/platform-mxc_hdmi.c b/arch/arm/plat-mxc/devices/platform-mxc_hdmi.c
+index d495262..cdbdae4 100644
+--- a/arch/arm/plat-mxc/devices/platform-mxc_hdmi.c
++++ b/arch/arm/plat-mxc/devices/platform-mxc_hdmi.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -43,6 +43,10 @@ struct platform_device *__init imx_add_mxc_hdmi(
+ 			.flags = IORESOURCE_IRQ,
+ 		},
+ 	};
++
++	if (!fuse_dev_is_available(MXC_DEV_HDMI))
++		return ERR_PTR(-ENODEV);
++
+ 	imx_add_platform_device("mxc_hdmi_cec", 0,
+ 				       res, ARRAY_SIZE(res), NULL, 0);
+ 	return imx_add_platform_device_dmamask("mxc_hdmi", -1,
+diff --git a/arch/arm/plat-mxc/devices/platform-mxc_mlb.c b/arch/arm/plat-mxc/devices/platform-mxc_mlb.c
+index 661595f..8925f3e 100644
+--- a/arch/arm/plat-mxc/devices/platform-mxc_mlb.c
++++ b/arch/arm/plat-mxc/devices/platform-mxc_mlb.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -44,8 +44,6 @@ struct platform_device *__init imx_add_mlb(
+ struct platform_device *__init imx_add_mlb(
+ 		const struct mxc_mlb_platform_data *pdata)
+ {
+-#define HW_OCOTP_CFGn(n)        (0x00000410 + (n) * 0x10)
+-	unsigned int mlb_disable = 0;
+ 	struct resource res[] = {
+ 		{
+ 			.start = MLB_BASE_ADDR,
+@@ -69,9 +67,9 @@ struct platform_device *__init imx_add_mlb(
+ 		},
+ 	};
+ 
+-	mlb_disable = readl(MX6_IO_ADDRESS(OCOTP_BASE_ADDR) + HW_OCOTP_CFGn(2));
+-	if (mlb_disable & 0x04000000)
++	if (!fuse_dev_is_available(MXC_DEV_MLB))
+ 		return ERR_PTR(-ENODEV);
++
+ 	return imx_add_platform_device("mxc_mlb150", 0,
+ 			res, ARRAY_SIZE(res), pdata, sizeof(*pdata));
+ }
+diff --git a/arch/arm/plat-mxc/fuse.c b/arch/arm/plat-mxc/fuse.c
+new file mode 100644
+index 0000000..1238e76
+--- /dev/null
++++ b/arch/arm/plat-mxc/fuse.c
+@@ -0,0 +1,165 @@
++/*
++ * Copyright (C) 2013 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <linux/io.h>
++#include <linux/kernel.h>
++#include <mach/hardware.h>
++
++#define HW_OCOTP_CFGn(n)	(0x00000410 + (n) * 0x10)
++
++/* Note: the names oder is the same as device enum order defined in mxc.h */
++static char *names[] = {
++	"pxp", "ovg", "dsi_csi2", "enet", "mlb",
++	"epdc", "hdmi", "pcie", "sata", "dtcp",
++	"2d", "3d", "vpu", "divx3", "rv",
++	"sorensen",
++};
++
++int fuse_dev_is_available(enum mxc_dev_type dev)
++{
++	u32 uninitialized_var(reg);
++	u32 uninitialized_var(mask);
++	int ret;
++
++	if (!cpu_is_mx6())
++		return 1;
++
++	/* mx6sl is still not supported */
++	if (cpu_is_mx6sl())
++		return 1;
++
++	switch (dev) {
++	case MXC_DEV_PXP:
++		if (cpu_is_mx6q())
++			return 0;
++
++		if (cpu_is_mx6dl()) {
++			reg = HW_OCOTP_CFGn(2);
++			mask = 0x80000000;
++		}
++		break;
++	case MXC_DEV_OVG:
++		if (cpu_is_mx6dl())
++			return 0;
++
++		if (cpu_is_mx6q()) {
++			reg = HW_OCOTP_CFGn(2);
++			mask = 0x40000000;
++		}
++		break;
++	case MXC_DEV_DSI_CSI2:
++		if (cpu_is_mx6dl() || cpu_is_mx6q()) {
++			reg = HW_OCOTP_CFGn(2);
++			mask = 0x10000000;
++		}
++		break;
++	case MXC_DEV_ENET:
++		if (cpu_is_mx6dl() || cpu_is_mx6q()) {
++			reg = HW_OCOTP_CFGn(2);
++			mask = 0x08000000;
++		}
++		break;
++	case MXC_DEV_MLB:
++		if (cpu_is_mx6dl() || cpu_is_mx6q()) {
++			reg = HW_OCOTP_CFGn(2);
++			mask = 0x04000000;
++		}
++		break;
++	case MXC_DEV_EPDC:
++		if (cpu_is_mx6q())
++			return 0;
++
++		if (cpu_is_mx6dl()) {
++			reg = HW_OCOTP_CFGn(2);
++			mask = 0x02000000;
++		}
++		break;
++	case MXC_DEV_HDMI:
++		if (cpu_is_mx6dl() || cpu_is_mx6q()) {
++			reg = HW_OCOTP_CFGn(3);
++			mask = 0x00000080;
++		}
++		break;
++	case MXC_DEV_PCIE:
++		if (cpu_is_mx6dl() || cpu_is_mx6q()) {
++			reg = HW_OCOTP_CFGn(3);
++			mask = 0x00000040;
++		}
++		break;
++	case MXC_DEV_SATA:
++		if (cpu_is_mx6dl())
++			return 0;
++
++		if (cpu_is_mx6q()) {
++			reg = HW_OCOTP_CFGn(3);
++			mask = 0x00000020;
++		}
++		break;
++	case MXC_DEV_DTCP:
++		if (cpu_is_mx6dl() || cpu_is_mx6q()) {
++			reg = HW_OCOTP_CFGn(3);
++			mask = 0x00000010;
++		}
++		break;
++	case MXC_DEV_2D:
++		if (cpu_is_mx6dl() || cpu_is_mx6q()) {
++			reg = HW_OCOTP_CFGn(3);
++			mask = 0x00000008;
++		}
++		break;
++	case MXC_DEV_3D:
++		if (cpu_is_mx6dl() || cpu_is_mx6q()) {
++			reg = HW_OCOTP_CFGn(3);
++			mask = 0x00000004;
++		}
++		break;
++	case MXC_DEV_VPU:
++		if (cpu_is_mx6dl() || cpu_is_mx6q()) {
++			reg = HW_OCOTP_CFGn(3);
++			mask = 0x00008000;
++		}
++		break;
++	case MXC_DEV_DIVX3:
++		if (cpu_is_mx6dl() || cpu_is_mx6q()) {
++			reg = HW_OCOTP_CFGn(3);
++			mask = 0x00000400;
++		}
++		break;
++	case MXC_DEV_RV:
++		if (cpu_is_mx6dl() || cpu_is_mx6q()) {
++			reg = HW_OCOTP_CFGn(3);
++			mask = 0x00000200;
++		}
++		break;
++	case MXC_DEV_SORENSEN:
++		if (cpu_is_mx6dl() || cpu_is_mx6q()) {
++			reg = HW_OCOTP_CFGn(3);
++			mask = 0x00000100;
++		}
++		break;
++	default:
++		/* we treat the unkown device is avaiable by default */
++		return 1;
++	}
++
++	ret = readl(MX6_IO_ADDRESS(OCOTP_BASE_ADDR) + reg) & mask;
++	pr_debug("fuse_check: %s is %s\n", names[dev], ret ?
++					"unavailable" : "available");
++
++	return !ret;
++}
+diff --git a/arch/arm/plat-mxc/include/mach/mxc.h b/arch/arm/plat-mxc/include/mach/mxc.h
+index 4260d4a..75b99af 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc.h
++++ b/arch/arm/plat-mxc/include/mach/mxc.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2007, 2011-2012 Freescale Semiconductor, Inc.
++ * Copyright 2004-2007, 2011-2013 Freescale Semiconductor, Inc.
+  * Copyright (C) 2008 Juergen Beisert (kernel@pengutronix.de)
+  *
+  * This program is free software; you can redistribute it and/or
+@@ -275,6 +275,28 @@ int tzic_enable_wake(int is_idle);
+ 
+ extern void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode);
+ extern int tzic_enable_wake(int is_idle);
++
++/* available disableable devices in fuse */
++enum mxc_dev_type {
++	MXC_DEV_PXP,
++	MXC_DEV_OVG,
++	MXC_DEV_DSI_CSI2,
++	MXC_DEV_ENET,
++	MXC_DEV_MLB,
++	MXC_DEV_EPDC,
++	MXC_DEV_HDMI,
++	MXC_DEV_PCIE,
++	MXC_DEV_SATA,
++	MXC_DEV_DTCP,
++	MXC_DEV_2D,
++	MXC_DEV_3D,
++	MXC_DEV_VPU,
++	MXC_DEV_DIVX3,
++	MXC_DEV_RV,
++	MXC_DEV_SORENSEN,
++};
++extern int fuse_dev_is_available(enum mxc_dev_type dev);
++
+ #endif
+ 
+ #if defined(CONFIG_ARCH_MX3) || defined(CONFIG_ARCH_MX2)
+-- 
+1.7.7.4
+

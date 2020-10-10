@@ -1,0 +1,89 @@
+From b918da295054ee8a96c1b586b2d7a63a583d210b Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Fri, 8 Jun 2012 13:37:17 +0800
+Subject: [PATCH 1583/2463] ENGR00178617 MX6x HDMI hotplug,video
+ discontinuously after do a hotplug
+
+The issue only in play video on DP FG, no such issue on DP BG.
+HDMI drvier will call fb_set_var to config framebuffer after HDMI cable plugin.
+In Frame buffer driver, the DP FG and BG register as different fb.
+The function fb_set_var only update one fb.
+As IPU DP module, if DP BG is re-enabled, the FG should reconfig again.
+So after HDMI plugin, only BG fb is update, FG fb will work incorrect,
+no end of frame interrupt trigger, and print
+"mxc_sdc_fb mxc_sdc_fb.0: timeout when waiting for flip irq"
+to display.
+
+Change code in function fb_set_var, FG fb will reconfig with DP BG fb.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |   32 ++++++++++++++++++++++++++++++++
+ 1 files changed, 32 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index ad21ef8..f3f5bac 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -334,11 +334,30 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 	ipu_di_signal_cfg_t sig_cfg;
+ 	struct mxcfb_info *mxc_fbi = (struct mxcfb_info *)fbi->par;
+ 
++	struct mxcfb_info *mxc_fbi_fg = NULL;
++	bool ovfbi_enable = false;
++
++	if (mxc_fbi->ovfbi)
++		mxc_fbi_fg = (struct mxcfb_info *)mxc_fbi->ovfbi->par;
++
++	if (mxc_fbi->ovfbi && mxc_fbi_fg)
++		if (mxc_fbi_fg->next_blank == FB_BLANK_UNBLANK)
++			ovfbi_enable = true;
++
+ 	if (!mxcfb_need_to_set_par(fbi))
+ 		return 0;
+ 
+ 	dev_dbg(fbi->device, "Reconfiguring framebuffer\n");
+ 
++	if (ovfbi_enable) {
++		ipu_clear_irq(mxc_fbi_fg->ipu, mxc_fbi_fg->ipu_ch_irq);
++		ipu_disable_irq(mxc_fbi_fg->ipu, mxc_fbi_fg->ipu_ch_irq);
++		ipu_clear_irq(mxc_fbi_fg->ipu, mxc_fbi_fg->ipu_ch_nf_irq);
++		ipu_disable_irq(mxc_fbi_fg->ipu, mxc_fbi_fg->ipu_ch_nf_irq);
++		ipu_disable_channel(mxc_fbi_fg->ipu, mxc_fbi_fg->ipu_ch, true);
++		ipu_uninit_channel(mxc_fbi_fg->ipu, mxc_fbi_fg->ipu_ch);
++	}
++
+ 	ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+ 	ipu_disable_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+ 	ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_nf_irq);
+@@ -415,6 +434,8 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 	}
+ 
+ 	_setup_disp_channel1(fbi);
++	if (ovfbi_enable)
++		_setup_disp_channel1(mxc_fbi->ovfbi);
+ 
+ 	if (!mxc_fbi->overlay) {
+ 		uint32_t out_pixel_fmt;
+@@ -472,7 +493,18 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 		return retval;
+ 	}
+ 
++	if (ovfbi_enable) {
++		retval = _setup_disp_channel2(mxc_fbi->ovfbi);
++		if (retval) {
++			ipu_uninit_channel(mxc_fbi_fg->ipu, mxc_fbi_fg->ipu_ch);
++			ipu_uninit_channel(mxc_fbi->ipu, mxc_fbi->ipu_ch);
++			return retval;
++		}
++	}
++
+ 	ipu_enable_channel(mxc_fbi->ipu, mxc_fbi->ipu_ch);
++	if (ovfbi_enable)
++		ipu_enable_channel(mxc_fbi_fg->ipu, mxc_fbi_fg->ipu_ch);
+ 
+ 	if (mxc_fbi->dispdrv && mxc_fbi->dispdrv->drv->enable) {
+ 		retval = mxc_fbi->dispdrv->drv->enable(mxc_fbi->dispdrv);
+-- 
+1.7.7.4
+

@@ -1,0 +1,57 @@
+From 8dc48c38eed31e5c3043bbdac335e48be254c346 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Mon, 30 Jan 2012 11:34:03 +0800
+Subject: [PATCH 0977/2463] ENGR00173947-1 mtd/gpmi : add BBT support to gpmi
+ nand driver
+
+Add a new field to gpmi_nand_platform_data{}.
+Make the BBT support to board specific.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/mtd/nand/gpmi-nand/gpmi-nand.c |    2 ++
+ include/linux/mtd/gpmi-nand.h          |    4 +++-
+ 2 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mtd/nand/gpmi-nand/gpmi-nand.c b/drivers/mtd/nand/gpmi-nand/gpmi-nand.c
+index e7edca6..ea3ce22 100644
+--- a/drivers/mtd/nand/gpmi-nand/gpmi-nand.c
++++ b/drivers/mtd/nand/gpmi-nand/gpmi-nand.c
+@@ -1493,6 +1493,8 @@ static int __devinit gpmi_nfc_init(struct gpmi_nand_data *this)
+ 	chip->ecc.mode		= NAND_ECC_HW;
+ 	chip->ecc.size		= 1;
+ 	chip->ecc.layout	= &gpmi_hw_ecclayout;
++	if (pdata->enable_bbt)
++		chip->options |= NAND_BBT_USE_FLASH | NAND_USE_FLASH_BBT_NO_OOB;
+ 
+ 	/* Allocate a temporary DMA buffer for reading ID in the nand_scan() */
+ 	this->bch_geometry.payload_size = 1024;
+diff --git a/include/linux/mtd/gpmi-nand.h b/include/linux/mtd/gpmi-nand.h
+index 69b6dbf..6659446 100644
+--- a/include/linux/mtd/gpmi-nand.h
++++ b/include/linux/mtd/gpmi-nand.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -51,6 +51,7 @@
+  * @partitions:              An optional pointer to an array of partition
+  *                           descriptions.
+  * @partition_count:         The number of elements in the partitions array.
++ * @enable_bbt:              Enable the BBT or not.
+  */
+ struct gpmi_nand_platform_data {
+ 	/* SoC hardware information. */
+@@ -64,5 +65,6 @@ struct gpmi_nand_platform_data {
+ 	/* Medium information. */
+ 	struct		mtd_partition *partitions;
+ 	unsigned	partition_count;
++	unsigned int	enable_bbt:1;
+ };
+ #endif
+-- 
+1.7.7.4
+

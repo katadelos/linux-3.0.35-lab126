@@ -1,0 +1,34 @@
+From 3fc1b69b4d14e7e2a8cb9f906dd083abf9910569 Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Fri, 2 Sep 2011 14:36:11 +0800
+Subject: [PATCH 0398/2463] ENGR00155893 [mx6q]clock: correct set parent
+ function
+
+set periph_clk_sel to derive clock from periph_clk2_clk
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    5 ++++-
+ 1 files changed, 4 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 0ccae28..5848440 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -938,9 +938,12 @@ static int _clk_periph_set_parent(struct clk *clk, struct clk *parent)
+ 		reg &= ~MXC_CCM_CBCDR_PERIPH_CLK_SEL;
+ 		__raw_writel(reg, MXC_CCM_CBCDR);
+ 	} else {
+-		/* Set the periph_clk2_podf divider to divide by 1. */
+ 		reg = __raw_readl(MXC_CCM_CBCDR);
++		/* Set the periph_clk2_podf divider to divide by 1. */
+ 		reg &= ~MXC_CCM_CBCDR_PERIPH_CLK2_PODF_MASK;
++		/* Clear periph_clk_sel to select periph_clk2. */
++		reg |= MXC_CCM_CBCDR_PERIPH_CLK_SEL;
++
+ 		__raw_writel(reg, MXC_CCM_CBCDR);
+ 
+ 		/* Set the periph_clk2_sel mux. */
+-- 
+1.7.7.4
+

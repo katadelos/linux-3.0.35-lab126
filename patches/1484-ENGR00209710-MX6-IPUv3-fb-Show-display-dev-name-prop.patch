@@ -1,0 +1,108 @@
+From f80cc6caf96cff7693b900abb9941a9b1e6f435c Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Thu, 17 May 2012 14:56:24 +0800
+Subject: [PATCH 1484/2463] ENGR00209710 MX6 IPUv3 fb:Show display dev name
+ property
+
+1) Show display device name property:
+   HDMI monitor - hdmi
+   DVI monitor - dvi
+   VGA monitor - vga
+   dumb LCD panel - lcd
+   LVDS panel - ldb
+   MIPI LCD panel - mipi_dsi
+   TVout - tve
+2) Make fsl_disp_property device attribution be static.
+3) Support overlay fb fsl_disp_property and
+   fsl_disp_dev_property device attributions.
+4) Remove fsl_disp_property and fsl_disp_dev_property
+   device attributions when removing the driver.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |   43 ++++++++++++++++++++++++++++++++++++-
+ 1 files changed, 41 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index ade31f0..2d0ec84 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -1700,7 +1700,20 @@ static ssize_t swap_disp_chan(struct device *dev,
+ 	console_unlock();
+ 	return count;
+ }
+-DEVICE_ATTR(fsl_disp_property, 644, show_disp_chan, swap_disp_chan);
++static DEVICE_ATTR(fsl_disp_property, 644, show_disp_chan, swap_disp_chan);
++
++static ssize_t show_disp_dev(struct device *dev,
++			     struct device_attribute *attr, char *buf)
++{
++	struct fb_info *info = dev_get_drvdata(dev);
++	struct mxcfb_info *mxcfbi = (struct mxcfb_info *)info->par;
++
++	if (mxcfbi->ipu_ch == MEM_FG_SYNC)
++		return sprintf(buf, "overlay\n");
++	else
++		return sprintf(buf, "%s\n", mxcfbi->dispdrv->drv->name);
++}
++static DEVICE_ATTR(fsl_disp_dev_property, S_IRUGO, show_disp_dev, NULL);
+ 
+ static int mxcfb_dispdrv_init(struct platform_device *pdev,
+ 		struct fb_info *fbi)
+@@ -2099,6 +2112,20 @@ static int mxcfb_probe(struct platform_device *pdev)
+ 		}
+ 
+ 		g_dp_in_use[mxcfbi->ipu_id] = true;
++
++		ret = device_create_file(mxcfbi->ovfbi->dev,
++					 &dev_attr_fsl_disp_property);
++		if (ret)
++			dev_err(mxcfbi->ovfbi->dev, "Error %d on creating "
++						    "file for disp property\n",
++						    ret);
++
++		ret = device_create_file(mxcfbi->ovfbi->dev,
++					 &dev_attr_fsl_disp_dev_property);
++		if (ret)
++			dev_err(mxcfbi->ovfbi->dev, "Error %d on creating "
++						    "file for disp device "
++						    "propety\n", ret);
+ 	} else {
+ 		mxcfbi->ipu_ch_irq = IPU_IRQ_DC_SYNC_EOF;
+ 		mxcfbi->ipu_ch_nf_irq = IPU_IRQ_DC_SYNC_NFACK;
+@@ -2115,7 +2142,13 @@ static int mxcfb_probe(struct platform_device *pdev)
+ 
+ 	ret = device_create_file(fbi->dev, &dev_attr_fsl_disp_property);
+ 	if (ret)
+-		dev_err(&pdev->dev, "Error %d on creating file\n", ret);
++		dev_err(&pdev->dev, "Error %d on creating file for disp "
++				    "property\n", ret);
++
++	ret = device_create_file(fbi->dev, &dev_attr_fsl_disp_dev_property);
++	if (ret)
++		dev_err(&pdev->dev, "Error %d on creating file for disp "
++				    " device propety\n", ret);
+ 
+ #ifdef CONFIG_LOGO
+ 	fb_prepare_logo(fbi, 0);
+@@ -2144,11 +2177,17 @@ static int mxcfb_remove(struct platform_device *pdev)
+ 	if (!fbi)
+ 		return 0;
+ 
++	device_remove_file(fbi->dev, &dev_attr_fsl_disp_dev_property);
++	device_remove_file(fbi->dev, &dev_attr_fsl_disp_property);
+ 	mxcfb_blank(FB_BLANK_POWERDOWN, fbi);
+ 	mxcfb_unregister(fbi);
+ 	mxcfb_unmap_video_memory(fbi);
+ 
+ 	if (mxc_fbi->ovfbi) {
++		device_remove_file(mxc_fbi->ovfbi->dev,
++				   &dev_attr_fsl_disp_dev_property);
++		device_remove_file(mxc_fbi->ovfbi->dev,
++				   &dev_attr_fsl_disp_property);
+ 		mxcfb_blank(FB_BLANK_POWERDOWN, mxc_fbi->ovfbi);
+ 		mxcfb_unsetup_overlay(fbi);
+ 		mxcfb_unmap_video_memory(mxc_fbi->ovfbi);
+-- 
+1.7.7.4
+

@@ -1,0 +1,49 @@
+From 0875d109931ce8db105cc1d055ba498068b643b4 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Fri, 6 Jan 2012 17:37:29 +0800
+Subject: [PATCH 0879/2463] ENGR00172374-1 i.mx: CPUFREQ: not use
+ cpufreq_debug_printk
+
+fix the building errors when upgrade to v3.0
+
+commit: d06d8c [CPUFREQ] use dynamic debug instead of custom infrastructure
+has removed cpufreq_debug_printk, we will give one update for i.mx driver
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/plat-mxc/cpufreq.c |    7 ++-----
+ 1 files changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index 0b44d11..0774d52 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2010-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -29,9 +29,6 @@
+ #include <mach/hardware.h>
+ #include <mach/clock.h>
+ 
+-#define dprintk(msg...) cpufreq_debug_printk(CPUFREQ_DEBUG_CORE, \
+-						"cpufreq-core", msg)
+-
+ #define CLK32_FREQ	32768
+ #define NANOSECOND	(1000 * 1000 * 1000)
+ 
+@@ -135,7 +132,7 @@ static int mxc_set_target(struct cpufreq_policy *policy,
+ 		cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
+ 		cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
+ 
+-		dprintk("DVFS core is active, cannot change FREQ using CPUFREQ\n");
++		pr_debug("DVFS core is active, cannot change FREQ using CPUFREQ\n");
+ 		return ret;
+ 	}
+ 
+-- 
+1.7.7.4
+

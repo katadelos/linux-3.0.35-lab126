@@ -1,0 +1,59 @@
+From 8e35ba0544d3f7a7b80c8c732026447793669271 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Fri, 24 Aug 2012 12:32:36 +0800
+Subject: [PATCH 1962/2463] ENGR00219933 CS42888: abort delay powerdown if
+ codec is on
+
+CS42888 driver own 2 codec_dai for ESAI and ASRC P2P use. Due to the
+delay power down mechanism, if a ASRC P2P stream is played right after
+a finish of ESAI stream playback, ASRC P2P stream would be stop.
+
+In this patch, do nothing in the delay powerdown flow if CS42888
+codec is on.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ sound/soc/codecs/cs42888.c |   22 ++++++++++++++++++++++
+ 1 files changed, 22 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/codecs/cs42888.c b/sound/soc/codecs/cs42888.c
+index 73571da..ce24083 100644
+--- a/sound/soc/codecs/cs42888.c
++++ b/sound/soc/codecs/cs42888.c
+@@ -758,11 +758,33 @@ static void cs42888_shutdown(struct snd_pcm_substream *substream,
+ 
+ }
+ 
++static int cs42888_prepare(struct snd_pcm_substream *substream,
++				  struct snd_soc_dai *dai)
++{
++	struct snd_soc_pcm_runtime *rtd = substream->private_data;
++	struct snd_soc_card *card = rtd->card;
++	struct snd_soc_dai *tmp_codec_dai;
++	struct snd_soc_pcm_runtime *tmp_rtd;
++	u32 i;
++
++	for (i = 0; i < card->num_rtd; i++) {
++		tmp_codec_dai = card->rtd[i].codec_dai;
++		tmp_rtd = (struct snd_soc_pcm_runtime *)(card->rtd + i);
++		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK &&
++			tmp_codec_dai->pop_wait) {
++			tmp_codec_dai->pop_wait = 0;
++			cancel_delayed_work(&tmp_rtd->delayed_work);
++		}
++	}
++	return 0;
++}
++
+ static struct snd_soc_dai_ops cs42888_dai_ops = {
+ 	.set_fmt	= cs42888_set_dai_fmt,
+ 	.set_sysclk	= cs42888_set_dai_sysclk,
+ 	.hw_params	= cs42888_hw_params,
+ 	.shutdown	= cs42888_shutdown,
++	.prepare	= cs42888_prepare,
+ };
+ 
+ 
+-- 
+1.7.7.4
+

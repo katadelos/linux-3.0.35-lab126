@@ -1,0 +1,39 @@
+From ab187e938dcdbc3968def50fc55e7aec33901c34 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Mon, 13 Aug 2012 15:17:24 +0800
+Subject: [PATCH 1891/2463] ENGR00216786-1 IPU: Allocate DMA buffer from DMA
+ zone.
+
+Allocate DMA buffer from DMA zone, and the system can configure reserve dma zone
+size through proc fs file under /proc/sys/vm/lowmem_reserve_ratio.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_device.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_device.c b/drivers/mxc/ipu3/ipu_device.c
+index 215fc70..308b8cb 100644
+--- a/drivers/mxc/ipu3/ipu_device.c
++++ b/drivers/mxc/ipu3/ipu_device.c
+@@ -2602,7 +2602,7 @@ static void do_task(struct ipu_task_entry *t)
+ 			ipu->rot_dma[rot_idx].vaddr = dma_alloc_coherent(t->dev,
+ 						r_size,
+ 						&ipu->rot_dma[rot_idx].paddr,
+-						GFP_KERNEL);
++						GFP_DMA | GFP_KERNEL);
+ 			CHECK_RETCODE(ipu->rot_dma[rot_idx].vaddr == NULL,
+ 					"ic_and_rot", STATE_SYS_NO_MEM,
+ 					chan_setup, -ENOMEM);
+@@ -3301,7 +3301,7 @@ static long mxc_ipu_ioctl(struct file *file,
+ 
+ 			mem->cpu_addr = dma_alloc_coherent(ipu_dev, size,
+ 							   &mem->phy_addr,
+-							   GFP_KERNEL);
++							   GFP_DMA | GFP_KERNEL);
+ 			if (mem->cpu_addr == NULL) {
+ 				kfree(mem);
+ 				return -ENOMEM;
+-- 
+1.7.7.4
+

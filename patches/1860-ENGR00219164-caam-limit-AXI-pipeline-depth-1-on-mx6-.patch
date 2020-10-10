@@ -1,0 +1,45 @@
+From 65069a963114d88cea3f6b200148b2215369c76a Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Wed, 1 Aug 2012 16:09:27 -0700
+Subject: [PATCH 1860/2463] ENGR00219164: caam: limit AXI pipeline depth = 1
+ on mx6 for errata
+
+This patch limits AXI pipeline depth to 1 as a workaround for errta
+TKT134813, the write
+concurrency problem on mx6.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/crypto/caam/ctrl.c |   15 +++++++++++++++
+ 1 files changed, 15 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/crypto/caam/ctrl.c b/drivers/crypto/caam/ctrl.c
+index 28828b9..f2c8595 100644
+--- a/drivers/crypto/caam/ctrl.c
++++ b/drivers/crypto/caam/ctrl.c
+@@ -278,6 +278,21 @@ static int caam_probe(struct platform_device *pdev)
+ 	setbits32(&topregs->ctrl.mcr, MCFGR_WDENABLE |
+ 		  (sizeof(dma_addr_t) == sizeof(u64) ? MCFGR_LONG_PTR : 0));
+ 
++#ifdef CONFIG_ARCH_MX6
++	/*
++	 * ERRATA:  mx6 devices have an issue wherein AXI bus transactions
++	 * may not occur in the correct order. This isn't a problem running
++	 * single descriptors, but can be if running multiple concurrent
++	 * descriptors. Reworking the driver to throttle to single requests
++	 * is impractical, thus the workaround is to limit the AXI pipeline
++	 * to a depth of 1 (from it's default of 4) to preclude this situation
++	 * from occurring.
++	 */
++	wr_reg32(&topregs->ctrl.mcr,
++		 (rd_reg32(&topregs->ctrl.mcr) & ~(MCFGR_AXIPIPE_MASK)) |
++		 ((1 << MCFGR_AXIPIPE_SHIFT) & MCFGR_AXIPIPE_MASK));
++#endif
++
+ 	/* Set DMA masks according to platform ranging */
+ 	if (sizeof(dma_addr_t) == sizeof(u64))
+ 		dma_set_mask(dev, DMA_BIT_MASK(36));
+-- 
+1.7.7.4
+

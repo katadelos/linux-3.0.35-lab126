@@ -1,0 +1,280 @@
+From b14b8d7f06de65bb2b494c0ced821be7af609f84 Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Mon, 27 Aug 2012 10:47:10 +0800
+Subject: [PATCH 1975/2463] ENGR00221302 [MX6SL_ARM2/EVK]: VDDSOC adjust if
+ use LDO bypass
+
+The function has been implement in LDO enable , but not in LDO bypass.
+Implement it on mx6sl.
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_arm2.c         |    2 +
+ arch/arm/mach-mx6/board-mx6sl_evk.c          |    2 +
+ arch/arm/mach-mx6/mx6sl_arm2_pmic_pfuze100.c |   23 ++++++++++-
+ arch/arm/mach-mx6/mx6sl_evk_pmic_pfuze100.c  |   26 ++++++++++--
+ arch/arm/plat-mxc/cpufreq.c                  |   52 +++++++++++++++-----------
+ 5 files changed, 75 insertions(+), 30 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 45b33c9..7ff3b3e 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -582,6 +582,7 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ static struct mxc_dvfs_platform_data mx6sl_arm2_dvfscore_data = {
+ 	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	.reg_id			= "VDDCORE",
++	.soc_id			= "VDDSOC",
+ 	#else
+ 	.reg_id			= "cpu_vddgp",
+ 	.soc_id			= "cpu_vddsoc",
+@@ -1189,6 +1190,7 @@ static void __init mx6_arm2_init(void)
+ 
+ 	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	gp_reg_id = mx6sl_arm2_dvfscore_data.reg_id;
++	soc_reg_id = mx6sl_arm2_dvfscore_data.soc_id;
+ 	#else
+ 	gp_reg_id = mx6sl_arm2_dvfscore_data.reg_id;
+ 	soc_reg_id = mx6sl_arm2_dvfscore_data.soc_id;
+diff --git a/arch/arm/mach-mx6/board-mx6sl_evk.c b/arch/arm/mach-mx6/board-mx6sl_evk.c
+index 40c05c4..f1a1b45 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_evk.c
++++ b/arch/arm/mach-mx6/board-mx6sl_evk.c
+@@ -595,6 +595,7 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ static struct mxc_dvfs_platform_data mx6sl_evk_dvfscore_data = {
+ 	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	.reg_id			= "VDDCORE",
++	.soc_id			= "VDDSOC",
+ 	#else
+ 	.reg_id			= "cpu_vddgp",
+ 	.soc_id			= "cpu_vddsoc",
+@@ -1196,6 +1197,7 @@ static void __init mx6_evk_init(void)
+ 
+ 	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	gp_reg_id = mx6sl_evk_dvfscore_data.reg_id;
++	soc_reg_id = mx6sl_evk_dvfscore_data.soc_id;
+ 	#else
+ 	gp_reg_id = mx6sl_evk_dvfscore_data.reg_id;
+ 	soc_reg_id = mx6sl_evk_dvfscore_data.soc_id;
+diff --git a/arch/arm/mach-mx6/mx6sl_arm2_pmic_pfuze100.c b/arch/arm/mach-mx6/mx6sl_arm2_pmic_pfuze100.c
+index eaa9721..134700a 100644
+--- a/arch/arm/mach-mx6/mx6sl_arm2_pmic_pfuze100.c
++++ b/arch/arm/mach-mx6/mx6sl_arm2_pmic_pfuze100.c
+@@ -66,6 +66,9 @@
+ #define PFUZE100_SW1ACON		36
+ #define PFUZE100_SW1ACON_SPEED_VAL	(0x1<<6)	/*default */
+ #define PFUZE100_SW1ACON_SPEED_M	(0x3<<6)
++#define PFUZE100_SW1CCON		49
++#define PFUZE100_SW1CCON_SPEED_VAL	(0x1<<6)	/*default */
++#define PFUZE100_SW1CCON_SPEED_M	(0x3<<6)
+ 
+ 
+ #ifdef CONFIG_MX6_INTER_LDO_BYPASS
+@@ -74,6 +77,11 @@ static struct regulator_consumer_supply sw1_consumers[] = {
+ 		.supply	   = "VDDCORE",
+ 	}
+ };
++static struct regulator_consumer_supply sw1c_consumers[] = {
++	{
++		.supply	   = "VDDSOC",
++	},
++};
+ #endif
+ 
+ static struct regulator_consumer_supply sw2_consumers[] = {
+@@ -151,10 +159,10 @@ static struct regulator_init_data sw1a_init = {
+ 			.boot_on = 1,
+ 			.always_on = 1,
+ 			},
+-	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	.num_consumer_supplies = ARRAY_SIZE(sw1_consumers),
+ 	.consumer_supplies = sw1_consumers,
+-	#endif
++#endif
+ };
+ 
+ static struct regulator_init_data sw1b_init = {
+@@ -179,6 +187,10 @@ static struct regulator_init_data sw1c_init = {
+ 			.always_on = 1,
+ 			.boot_on = 1,
+ 			},
++	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++	.num_consumer_supplies = ARRAY_SIZE(sw1c_consumers),
++	.consumer_supplies = sw1c_consumers,
++	#endif
+ };
+ 
+ static struct regulator_init_data sw2_init = {
+@@ -391,12 +403,17 @@ static int pfuze100_init(struct mc_pfuze *pfuze)
+ 			    PFUZE100_SW1CSTANDBY_STBY_VAL);
+ 	if (ret)
+ 		goto err;
+-	/*set SW1ABDVSPEED as 25mV step each 4us,quick than 16us before.*/
++	/*set SW1AB/SW1C DVSPEED as 25mV step each 4us,quick than 16us before.*/
+ 	ret = pfuze_reg_rmw(pfuze, PFUZE100_SW1ACON,
+ 			    PFUZE100_SW1ACON_SPEED_M,
+ 			    PFUZE100_SW1ACON_SPEED_VAL);
+ 	if (ret)
+ 		goto err;
++	ret = pfuze_reg_rmw(pfuze, PFUZE100_SW1CCON,
++			    PFUZE100_SW1CCON_SPEED_M,
++			    PFUZE100_SW1CCON_SPEED_VAL);
++	if (ret)
++		goto err;
+ 	return 0;
+ err:
+ 	printk(KERN_ERR "pfuze100 init error!\n");
+diff --git a/arch/arm/mach-mx6/mx6sl_evk_pmic_pfuze100.c b/arch/arm/mach-mx6/mx6sl_evk_pmic_pfuze100.c
+index 958f8a0..ee66541 100644
+--- a/arch/arm/mach-mx6/mx6sl_evk_pmic_pfuze100.c
++++ b/arch/arm/mach-mx6/mx6sl_evk_pmic_pfuze100.c
+@@ -66,7 +66,9 @@
+ #define PFUZE100_SW1ACON		36
+ #define PFUZE100_SW1ACON_SPEED_VAL	(0x1<<6)	/*default */
+ #define PFUZE100_SW1ACON_SPEED_M	(0x3<<6)
+-
++#define PFUZE100_SW1CCON		49
++#define PFUZE100_SW1CCON_SPEED_VAL	(0x1<<6)	/*default */
++#define PFUZE100_SW1CCON_SPEED_M	(0x3<<6)
+ 
+ #ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ static struct regulator_consumer_supply sw1_consumers[] = {
+@@ -74,6 +76,11 @@ static struct regulator_consumer_supply sw1_consumers[] = {
+ 		.supply	   = "VDDCORE",
+ 	}
+ };
++static struct regulator_consumer_supply sw1c_consumers[] = {
++	{
++		.supply	   = "VDDSOC",
++	},
++};
+ #endif
+ 
+ static struct regulator_consumer_supply sw2_consumers[] = {
+@@ -126,7 +133,7 @@ static struct regulator_consumer_supply vgen3_consumers[] = {
+ };
+ static struct regulator_consumer_supply vgen4_consumers[] = {
+        {
+-	.supply = "VGEN4_1V58",
++	.supply = "VGEN4_1V8",
+ 	}
+ };
+ static struct regulator_consumer_supply vgen5_consumers[] = {
+@@ -155,10 +162,10 @@ static struct regulator_init_data sw1a_init = {
+ 			.boot_on = 1,
+ 			.always_on = 1,
+ 			},
+-	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	.num_consumer_supplies = ARRAY_SIZE(sw1_consumers),
+ 	.consumer_supplies = sw1_consumers,
+-	#endif
++#endif
+ };
+ 
+ static struct regulator_init_data sw1b_init = {
+@@ -183,6 +190,10 @@ static struct regulator_init_data sw1c_init = {
+ 			.always_on = 1,
+ 			.boot_on = 1,
+ 			},
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++	.num_consumer_supplies = ARRAY_SIZE(sw1c_consumers),
++	.consumer_supplies = sw1c_consumers,
++#endif
+ };
+ 
+ static struct regulator_init_data sw2_init = {
+@@ -397,12 +408,17 @@ static int pfuze100_init(struct mc_pfuze *pfuze)
+ 			    PFUZE100_SW1CSTANDBY_STBY_VAL);
+ 	if (ret)
+ 		goto err;
+-	/*set SW1ABDVSPEED as 25mV step each 4us,quick than 16us before.*/
++	/*set SW1AB/SW1CDVSPEED as 25mV step each 4us,quick than 16us before.*/
+ 	ret = pfuze_reg_rmw(pfuze, PFUZE100_SW1ACON,
+ 			    PFUZE100_SW1ACON_SPEED_M,
+ 			    PFUZE100_SW1ACON_SPEED_VAL);
+ 	if (ret)
+ 		goto err;
++	ret = pfuze_reg_rmw(pfuze, PFUZE100_SW1CCON,
++			    PFUZE100_SW1CCON_SPEED_M,
++			    PFUZE100_SW1CCON_SPEED_VAL);
++	if (ret)
++		goto err;
+ 	return 0;
+ err:
+ 	printk(KERN_ERR "pfuze100 init error!\n");
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index b6c1e28..6e6353a 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -92,18 +92,22 @@ int set_cpu_freq(int freq)
+ 		/* Check if the bus freq needs to be increased first */
+ 		bus_freq_update(cpu_clk, true);
+ 
+-		if (freq == cpu_op_tbl[0].cpu_rate && !IS_ERR(soc_regulator) && !IS_ERR(pu_regulator)) {
+-			ret = regulator_set_voltage(soc_regulator, soc_volt,
+-							soc_volt);
+-			if (ret < 0) {
+-				printk(KERN_DEBUG "COULD NOT SET SOC VOLTAGE!!!!\n");
+-				return ret;
++		if (freq == cpu_op_tbl[0].cpu_rate) {
++			if (!IS_ERR(soc_regulator)) {
++				ret = regulator_set_voltage(soc_regulator, soc_volt,
++								soc_volt);
++				if (ret < 0) {
++					printk(KERN_DEBUG "COULD NOT SET SOC VOLTAGE!!!!\n");
++					return ret;
++				}
+ 			}
+-			ret = regulator_set_voltage(pu_regulator, pu_volt,
+-							pu_volt);
+-			if (ret < 0) {
+-				printk(KERN_DEBUG "COULD NOT SET PU VOLTAGE!!!!\n");
+-				return ret;
++			if (!IS_ERR(pu_regulator)) {
++				ret = regulator_set_voltage(pu_regulator, pu_volt,
++								pu_volt);
++				if (ret < 0) {
++					printk(KERN_DEBUG "COULD NOT SET PU VOLTAGE!!!!\n");
++					return ret;
++				}
+ 			}
+ 			soc_regulator_set = 1;
+ 		}
+@@ -128,18 +132,22 @@ int set_cpu_freq(int freq)
+ 			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
+ 			return ret;
+ 		}
+-		if (soc_regulator_set && !IS_ERR(soc_regulator) && !IS_ERR(pu_regulator)) {
+-			ret = regulator_set_voltage(soc_regulator, soc_volt,
+-							soc_volt);
+-			if (ret < 0) {
+-				printk(KERN_DEBUG "COULD NOT SET SOC VOLTAGE BACK!!!!\n");
+-				return ret;
++		if (soc_regulator_set) {
++			if (!IS_ERR(soc_regulator)) {
++				ret = regulator_set_voltage(soc_regulator, soc_volt,
++								soc_volt);
++				if (ret < 0) {
++					printk(KERN_DEBUG "COULD NOT SET SOC VOLTAGE BACK!!!!\n");
++					return ret;
++				}
+ 			}
+-			ret = regulator_set_voltage(pu_regulator, pu_volt,
+-							pu_volt);
+-			if (ret < 0) {
+-				printk(KERN_DEBUG "COULD NOT SET PU VOLTAGE!!!!\n");
+-				return ret;
++			if (!IS_ERR(pu_regulator)) {
++				ret = regulator_set_voltage(pu_regulator, pu_volt,
++								pu_volt);
++				if (ret < 0) {
++					printk(KERN_DEBUG "COULD NOT SET PU VOLTAGE!!!!\n");
++					return ret;
++				}
+ 			}
+ 			soc_regulator_set = 0;
+ 		}
+-- 
+1.7.7.4
+

@@ -1,0 +1,202 @@
+From 2e671ab5fbd44d0ab3ac14b6d68240ed632a6e87 Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Thu, 18 Oct 2012 15:59:18 +0800
+Subject: [PATCH 2184/2463] ENGR00230167 MX6 regulator: enable and raise the
+ voltage of USB 3p0 LDO
+
+The USB FS eye test will fail in MX6 board if the 3V USB phy LDO is not enabled.
+Setting enable bit (bit-0) of LDO 3p0 will make 3p0 LDO to use bandgap output as
+reference voltage, LDO output will be accurate. And HW team suggest that it is
+better to raise the voltage of USB 3p0 phy LDO 3.2V to pass the USB compliance
+testing.
+
+- Implement vdd3p0 regulator enable and disable function to support
+  enable and disable the LDO 3p0 regulator.
+- Use regulator API to enable the USB 3p0 phy LDO and raise the LDO
+  to 3.2V during system boot up. And disable the LDO before system
+  enter suspend and enable the LDO again after system resume.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ arch/arm/mach-mx6/mx6_anatop_regulator.c |   50 ++++++++++++++++++++++-------
+ arch/arm/mach-mx6/pm.c                   |   35 ++++++++++++++++++++-
+ 2 files changed, 72 insertions(+), 13 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mx6_anatop_regulator.c b/arch/arm/mach-mx6/mx6_anatop_regulator.c
+index f2c2ebf..9599a54 100644
+--- a/arch/arm/mach-mx6/mx6_anatop_regulator.c
++++ b/arch/arm/mach-mx6/mx6_anatop_regulator.c
+@@ -273,6 +273,24 @@ static int is_enabled(struct anatop_regulator *sreg)
+ {
+ 	return 1;
+ }
++static int vdd3p0_enable(struct anatop_regulator *sreg)
++{
++	__raw_writel(BM_ANADIG_REG_3P0_ENABLE_LINREG,
++					sreg->rdata->control_reg+4);
++	return 0;
++}
++
++static int vdd3p0_disable(struct anatop_regulator *sreg)
++{
++	__raw_writel(BM_ANADIG_REG_3P0_ENABLE_LINREG,
++					sreg->rdata->control_reg+8);
++	return 0;
++}
++
++static int vdd3p0_is_enabled(struct anatop_regulator *sreg)
++{
++	return !!(__raw_readl(sreg->rdata->control_reg) & BM_ANADIG_REG_3P0_ENABLE_LINREG);
++}
+ 
+ static struct anatop_regulator_data vddpu_data = {
+ 	.name		= "vddpu",
+@@ -353,15 +371,15 @@ static struct anatop_regulator_data vdd3p0_data = {
+ 	.name		= "vdd3p0",
+ 	.set_voltage	= set_voltage,
+ 	.get_voltage	= get_voltage,
+-	.enable		= enable,
+-	.disable	= disable,
+-	.is_enabled	= is_enabled,
++	.enable		= vdd3p0_enable,
++	.disable		= vdd3p0_disable,
++	.is_enabled	= vdd3p0_is_enabled,
+ 	.control_reg	= (u32)(MXC_PLL_BASE + HW_ANADIG_REG_3P0),
+ 	.vol_bit_shift	= 8,
+ 	.vol_bit_mask	= 0x1F,
+-	.min_bit_val	= 7,
+-	.min_voltage	= 2800000,
+-	.max_voltage	= 3150000,
++	.min_bit_val	= 0,
++	.min_voltage	= 2625000,
++	.max_voltage	= 3400000,
+ };
+ 
+ /* CPU */
+@@ -386,6 +404,13 @@ static struct regulator_consumer_supply vddsoc_consumers[] = {
+ 	},
+ };
+ 
++/* USB phy 3P0 */
++static struct regulator_consumer_supply vdd3p0_consumers[] = {
++	{
++		.supply = "cpu_vdd3p0",
++	},
++};
++
+ static struct regulator_init_data vddpu_init = {
+ 	.constraints = {
+ 		.name			= "vddpu",
+@@ -467,16 +492,17 @@ static struct regulator_init_data vdd1p1_init = {
+ static struct regulator_init_data vdd3p0_init = {
+ 	.constraints = {
+ 		.name			= "vdd3p0",
+-		.min_uV			= 2800000,
+-		.max_uV			= 3150000,
++		.min_uV			= 2625000,
++		.max_uV			= 3400000,
+ 		.valid_modes_mask	= REGULATOR_MODE_FAST |
+ 					  REGULATOR_MODE_NORMAL,
+ 		.valid_ops_mask		= REGULATOR_CHANGE_VOLTAGE |
+-					  REGULATOR_CHANGE_MODE,
+-		.always_on		= 1,
++					  REGULATOR_CHANGE_MODE |
++					  REGULATOR_CHANGE_STATUS,
++		.always_on		= 0,
+ 	},
+-	.num_consumer_supplies = 0,
+-	.consumer_supplies = NULL,
++	.num_consumer_supplies = ARRAY_SIZE(vdd3p0_consumers),
++	.consumer_supplies = &vdd3p0_consumers[0],
+ };
+ 
+ static struct anatop_regulator vddpu_reg = {
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index 654881a..18b8de8 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -68,11 +68,13 @@
+ #define LOCAL_TWD_INT_OFFSET		0xc
+ #define ANATOP_REG_2P5_OFFSET		0x130
+ #define ANATOP_REG_CORE_OFFSET		0x140
++#define VDD3P0_VOLTAGE                   3200000
+ 
+ static struct clk *cpu_clk;
+ static struct clk *axi_clk;
+ static struct clk *periph_clk;
+ static struct clk *pll3_usb_otg_main_clk;
++static struct regulator *vdd3p0_regulator;
+ 
+ static struct pm_platform_data *pm_data;
+ 
+@@ -410,7 +412,12 @@ static int mx6_suspend_enter(suspend_state_t state)
+  */
+ static int mx6_suspend_prepare(void)
+ {
+-
++	int ret;
++	ret = regulator_disable(vdd3p0_regulator);
++	if (ret) {
++		printk(KERN_ERR "%s: failed to disable 3p0 regulator Err: %d\n",
++							__func__, ret);
++	}
+ 	return 0;
+ }
+ 
+@@ -419,6 +426,12 @@ static int mx6_suspend_prepare(void)
+  */
+ static void mx6_suspend_finish(void)
+ {
++	int ret;
++	ret = regulator_enable(vdd3p0_regulator);
++	if (ret) {
++		printk(KERN_ERR "%s: failed to enable 3p0 regulator Err: %d\n",
++						__func__, ret);
++	}
+ }
+ 
+ #ifdef CONFIG_MX6_INTER_LDO_BYPASS
+@@ -472,6 +485,7 @@ static struct platform_driver mx6_pm_driver = {
+ 
+ static int __init pm_init(void)
+ {
++	int ret = 0;
+ 	scu_base = IO_ADDRESS(SCU_BASE_ADDR);
+ 	gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ 	src_base = IO_ADDRESS(SRC_BASE_ADDR);
+@@ -529,6 +543,24 @@ static int __init pm_init(void)
+ 		return PTR_ERR(pll3_usb_otg_main_clk);
+ 	}
+ 
++	vdd3p0_regulator = regulator_get(NULL, "cpu_vdd3p0");
++	if (IS_ERR(vdd3p0_regulator)) {
++		printk(KERN_ERR "%s: failed to get 3p0 regulator Err: %d\n",
++						__func__, ret);
++		return PTR_ERR(vdd3p0_regulator);
++	}
++	ret = regulator_set_voltage(vdd3p0_regulator, VDD3P0_VOLTAGE,
++							VDD3P0_VOLTAGE);
++	if (ret) {
++		printk(KERN_ERR "%s: failed to set 3p0 regulator voltage Err: %d\n",
++						__func__, ret);
++	}
++	ret = regulator_enable(vdd3p0_regulator);
++	if (ret) {
++		printk(KERN_ERR "%s: failed to enable 3p0 regulator Err: %d\n",
++						__func__, ret);
++	}
++
+ 	printk(KERN_INFO "PM driver module loaded\n");
+ 
+ 	return 0;
+@@ -538,6 +570,7 @@ static void __exit pm_cleanup(void)
+ {
+ 	/* Unregister the device structure */
+ 	platform_driver_unregister(&mx6_pm_driver);
++	regulator_put(vdd3p0_regulator);
+ }
+ 
+ module_init(pm_init);
+-- 
+1.7.7.4
+

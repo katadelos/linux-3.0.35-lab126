@@ -1,0 +1,36 @@
+From fa94bc564e81b09c4c72d20e1128dc93379ef110 Mon Sep 17 00:00:00 2001
+From: Dong Aisheng <b29396@freescale.com>
+Date: Fri, 3 Aug 2012 22:03:15 +0800
+Subject: [PATCH 1861/2463] ENGR00217318-1 flexcan: exit stop mode when resume
+
+Currently flexcan only exits stop mode by remote wakeup,
+if system resumes normally, the flexcan may still in stop mode
+and can not work anymore.
+
+Change to also exit stop mode during normal resume in case system
+is not remote wakeup by flexcan.
+
+Signed-off-by: Dong Aisheng <b29396@freescale.com>
+---
+ drivers/net/can/flexcan.c |    5 +++++
+ 1 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/net/can/flexcan.c b/drivers/net/can/flexcan.c
+index 467b535..0f0b76f 100644
+--- a/drivers/net/can/flexcan.c
++++ b/drivers/net/can/flexcan.c
+@@ -1100,6 +1100,11 @@ static int flexcan_resume(struct platform_device *pdev)
+ 	if (ret)
+ 		return ret;
+ 
++	/* remove stop request */
++	if (priv->version >= FLEXCAN_VER_10_0_12)
++		/* CAN1/CAN2_STOP_REQ bit 28/29 in group 13 */
++		mxc_iomux_set_gpr_register(13, 28 + priv->id, 1, 0);
++
+ 	priv->can.state = CAN_STATE_ERROR_ACTIVE;
+ 
+ 	if (netif_running(dev)) {
+-- 
+1.7.7.4
+

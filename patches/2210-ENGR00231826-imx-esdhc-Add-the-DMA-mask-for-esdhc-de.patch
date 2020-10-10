@@ -1,0 +1,70 @@
+From a0cf2469aa0322932d311c60da60bf079e9b79b2 Mon Sep 17 00:00:00 2001
+From: Xinyu Chen <xinyu.chen@freescale.com>
+Date: Wed, 31 Oct 2012 14:41:37 +0800
+Subject: [PATCH 2210/2463] ENGR00231826 imx esdhc: Add the DMA mask for esdhc
+ device register.
+
+We must set the DMA mask for esdhc device.
+To avoid the following crash when we do not have highmem pages:
+
+[<c0044f90>] (__dabt_svc+0x70/0xa0) from [<c00cf460>]
+[<c00cf460>] (mempool_alloc+0x3c/0x108) from [<c00f4aa4>]
+[<c00f4aa4>] (blk_queue_bounce+0xc0/0x2fc) from [<c023761c>]
+[<c023761c>] (__make_request+0x20/0x2b8) from [<c0235bb4>]
+[<c0235bb4>] (generic_make_request+0x3b4/0x4cc) from [<c0235d74>]
+[<c0235d74>] (submit_bio+0xa8/0x128) from [<c01279c4>]
+[<c01279c4>] (submit_bh+0x108/0x178) from [<c012baa0>]
+[<c012baa0>] (block_read_full_pag+e0x278/0x394) from [<c00cd520>]
+[<c00cd520>] (do_read_cache_page+0x70/0x154) from [<c00cd64c>]
+[<c00cd64c>] (read_cache_page_async+0x1c/0x24) from [<c00cd65c>]
+[<c00cd65c>] (read_cache_page+0x8/0x10) from [<c014c354>]
+[<c014c354>] (read_dev_sector+0x30/0x68) from [<c014dd4c>]
+[<c014dd4c>] (read_lba+0xa0/0x164) from [<c014e300>]
+[<c014e300>] (efi_partition+0x9c/0xed4) from [<c014ca0c>]
+[<c014ca0c>] (rescan_partitions+0x15c/0x480) from [<c012f190>]
+[<c012f190>] (__blkdev_get+0x324/0x394) from [<c012f300>]
+[<c012f300>] (blkdev_get+0x100/0x358) from [<c023e5f4>]
+[<c023e5f4>] (register_disk+0x140/0x164) from [<c023e73c>]
+[<c023e73c>] (add_disk+0x124/0x2a0) from [<c03a7528>]
+[<c03a7528>] (mmc_add_disk+0x10/0x68) from [<c03a7820>]
+[<c03a7820>] (mmc_blk_probe+0x15c/0x20c) from [<c039cc90>]
+[<c039cc90>] (mmc_bus_probe+0x18/0x1c) from [<c0294e28>]
+
+When our DDR size is small or reserved memory are large and
+the lowmem can cover all the available pages for kernel,
+the highmem pages will not be setup. That means the page_pool
+for bounce queue can not be create in init_emergency_pool().
+And page_pool will stay NULL without initialized.
+In the mmc/card/queue.c the blk_queue_bounce_limit()
+function will be called in mmc_init_queue() to
+initialize the request_queue and it's bounce_gfp.
+If we do not define the DMA mask for our platform,
+then the BLK_BOUNCE_HIGH (lowmem pfn) will be set
+as limit to queue bounce, which means the blk_queue_bounce
+will use page_pool to iterate over the bio segment.
+Under the circumstances that highmem is not setup,
+the page_pool is null, and causes kernel crash.
+After set the DMA mask for esdhci device, the page_pool
+will not be used to iterate over the bio segment.
+
+Signed-off-by: Xinyu Chen <xinyu.chen@freescale.com>
+---
+ .../plat-mxc/devices/platform-sdhci-esdhc-imx.c    |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/platform-sdhci-esdhc-imx.c b/arch/arm/plat-mxc/devices/platform-sdhci-esdhc-imx.c
+index 0829ff8..4aaaecc 100755
+--- a/arch/arm/plat-mxc/devices/platform-sdhci-esdhc-imx.c
++++ b/arch/arm/plat-mxc/devices/platform-sdhci-esdhc-imx.c
+@@ -115,6 +115,6 @@ struct platform_device *__init imx_add_sdhci_esdhc_imx(
+ 		},
+ 	};
+ 
+-	return imx_add_platform_device("sdhci-esdhc-imx", data->id, res,
+-			ARRAY_SIZE(res), pdata, sizeof(*pdata));
++	return imx_add_platform_device_dmamask("sdhci-esdhc-imx", data->id, res,
++			ARRAY_SIZE(res), pdata, sizeof(*pdata), DMA_BIT_MASK(32));
+ }
+-- 
+1.7.7.4
+

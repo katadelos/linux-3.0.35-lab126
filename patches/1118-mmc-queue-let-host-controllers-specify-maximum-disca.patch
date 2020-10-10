@@ -1,0 +1,194 @@
+From 22416cd34a2a7c6908aac2c715388bf225225066 Mon Sep 17 00:00:00 2001
+From: Adrian Hunter <adrian.hunter@intel.com>
+Date: Tue, 28 Jun 2011 17:16:02 +0300
+Subject: [PATCH 1118/2463] mmc: queue: let host controllers specify maximum
+ discard timeout
+
+Some host controllers will not operate without a hardware
+timeout that is limited in value.  However large discards
+require large timeouts, so there needs to be a way to
+specify the maximum discard size.
+
+A host controller driver may now specify the maximum discard
+timeout possible so that max_discard_sectors can be calculated.
+
+However, for eMMC when the High Capacity Erase Group Size
+is not in use, the timeout calculation depends on clock
+rate which may change.  For that case Preferred Erase Size
+is used instead.
+
+Signed-off-by: Adrian Hunter <adrian.hunter@intel.com>
+Signed-off-by: Chris Ball <cjb@laptop.org>
+---
+ drivers/mmc/card/queue.c |   33 ++++++++++++++------
+ drivers/mmc/core/core.c  |   76 ++++++++++++++++++++++++++++++++++++++++++++++
+ include/linux/mmc/core.h |    1 +
+ include/linux/mmc/host.h |    2 +
+ 4 files changed, 102 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/mmc/card/queue.c b/drivers/mmc/card/queue.c
+index 6413afa..defc11b 100644
+--- a/drivers/mmc/card/queue.c
++++ b/drivers/mmc/card/queue.c
+@@ -101,6 +101,27 @@ static void mmc_request(struct request_queue *q)
+ 		wake_up_process(mq->thread);
+ }
+ 
++static void mmc_queue_setup_discard(struct request_queue *q,
++				    struct mmc_card *card)
++{
++	unsigned max_discard;
++
++	max_discard = mmc_calc_max_discard(card);
++	if (!max_discard)
++		return;
++
++	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, q);
++	q->limits.max_discard_sectors = max_discard;
++	if (card->erased_byte == 0)
++		q->limits.discard_zeroes_data = 1;
++	q->limits.discard_granularity = card->pref_erase << 9;
++	/* granularity must not be greater than max. discard */
++	if (card->pref_erase > max_discard)
++		q->limits.discard_granularity = 0;
++	if (mmc_can_secure_erase_trim(card))
++		queue_flag_set_unlocked(QUEUE_FLAG_SECDISCARD, q);
++}
++
+ /**
+  * mmc_init_queue - initialise a queue structure.
+  * @mq: mmc queue
+@@ -130,16 +151,8 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
+ 
+ 	blk_queue_prep_rq(mq->queue, mmc_prep_request);
+ 	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, mq->queue);
+-	if (mmc_can_erase(card)) {
+-		queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, mq->queue);
+-		mq->queue->limits.max_discard_sectors = UINT_MAX;
+-		if (card->erased_byte == 0)
+-			mq->queue->limits.discard_zeroes_data = 1;
+-		mq->queue->limits.discard_granularity = card->pref_erase << 9;
+-		if (mmc_can_secure_erase_trim(card))
+-			queue_flag_set_unlocked(QUEUE_FLAG_SECDISCARD,
+-						mq->queue);
+-	}
++	if (mmc_can_erase(card))
++		mmc_queue_setup_discard(mq->queue, card);
+ 
+ #ifdef CONFIG_MMC_BLOCK_BOUNCE
+ 	if (host->max_segs == 1) {
+diff --git a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
+index 8fbecf3..7c36645 100644
+--- a/drivers/mmc/core/core.c
++++ b/drivers/mmc/core/core.c
+@@ -1652,6 +1652,82 @@ int mmc_erase_group_aligned(struct mmc_card *card, unsigned int from,
+ }
+ EXPORT_SYMBOL(mmc_erase_group_aligned);
+ 
++static unsigned int mmc_do_calc_max_discard(struct mmc_card *card,
++					    unsigned int arg)
++{
++	struct mmc_host *host = card->host;
++	unsigned int max_discard, x, y, qty = 0, max_qty, timeout;
++	unsigned int last_timeout = 0;
++
++	if (card->erase_shift)
++		max_qty = UINT_MAX >> card->erase_shift;
++	else if (mmc_card_sd(card))
++		max_qty = UINT_MAX;
++	else
++		max_qty = UINT_MAX / card->erase_size;
++
++	/* Find the largest qty with an OK timeout */
++	do {
++		y = 0;
++		for (x = 1; x && x <= max_qty && max_qty - x >= qty; x <<= 1) {
++			timeout = mmc_erase_timeout(card, arg, qty + x);
++			if (timeout > host->max_discard_to)
++				break;
++			if (timeout < last_timeout)
++				break;
++			last_timeout = timeout;
++			y = x;
++		}
++		qty += y;
++	} while (y);
++
++	if (!qty)
++		return 0;
++
++	if (qty == 1)
++		return 1;
++
++	/* Convert qty to sectors */
++	if (card->erase_shift)
++		max_discard = --qty << card->erase_shift;
++	else if (mmc_card_sd(card))
++		max_discard = qty;
++	else
++		max_discard = --qty * card->erase_size;
++
++	return max_discard;
++}
++
++unsigned int mmc_calc_max_discard(struct mmc_card *card)
++{
++	struct mmc_host *host = card->host;
++	unsigned int max_discard, max_trim;
++
++	if (!host->max_discard_to)
++		return UINT_MAX;
++
++	/*
++	 * Without erase_group_def set, MMC erase timeout depends on clock
++	 * frequence which can change.  In that case, the best choice is
++	 * just the preferred erase size.
++	 */
++	if (mmc_card_mmc(card) && !(card->ext_csd.erase_group_def & 1))
++		return card->pref_erase;
++
++	max_discard = mmc_do_calc_max_discard(card, MMC_ERASE_ARG);
++	if (mmc_can_trim(card)) {
++		max_trim = mmc_do_calc_max_discard(card, MMC_TRIM_ARG);
++		if (max_trim < max_discard)
++			max_discard = max_trim;
++	} else if (max_discard < card->erase_size) {
++		max_discard = 0;
++	}
++	pr_debug("%s: calculated max. discard sectors %u for timeout %u ms\n",
++		 mmc_hostname(host), max_discard, host->max_discard_to);
++	return max_discard;
++}
++EXPORT_SYMBOL(mmc_calc_max_discard);
++
+ int mmc_set_blocklen(struct mmc_card *card, unsigned int blocklen)
+ {
+ 	struct mmc_command cmd = {0};
+diff --git a/include/linux/mmc/core.h b/include/linux/mmc/core.h
+index 1b5a496..1b1d92d 100644
+--- a/include/linux/mmc/core.h
++++ b/include/linux/mmc/core.h
+@@ -159,6 +159,7 @@ extern int mmc_can_trim(struct mmc_card *card);
+ extern int mmc_can_secure_erase_trim(struct mmc_card *card);
+ extern int mmc_erase_group_aligned(struct mmc_card *card, unsigned int from,
+ 				   unsigned int nr);
++extern unsigned int mmc_calc_max_discard(struct mmc_card *card);
+ 
+ extern int mmc_set_blocklen(struct mmc_card *card, unsigned int blocklen);
+ 
+diff --git a/include/linux/mmc/host.h b/include/linux/mmc/host.h
+index 5984877..94ff413 100644
+--- a/include/linux/mmc/host.h
++++ b/include/linux/mmc/host.h
+@@ -256,6 +256,8 @@ struct mmc_host {
+ 	unsigned int		tuning_min;
+ 	unsigned int		tuning_max;
+ 	unsigned int		tuning_step;
++	unsigned int		max_discard_to;	/* max. discard timeout in ms */
++
+ 	/* private data */
+ 	spinlock_t		lock;		/* lock for claim and bus ops */
+ 
+-- 
+1.7.7.4
+

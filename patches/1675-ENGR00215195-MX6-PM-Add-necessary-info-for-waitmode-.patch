@@ -1,0 +1,59 @@
+From 4a0c581a385d0fa240432a1a81dcc9ceeeaaa96d Mon Sep 17 00:00:00 2001
+From: Lin Fuzhen <fuzhen.lin@freescale.com>
+Date: Thu, 28 Jun 2012 14:54:36 +0800
+Subject: [PATCH 1675/2463] ENGR00215195 MX6 PM:Add necessary info for
+ waitmode to help debug system issue
+
+Add debug message for wait mode to check it was enabled or not.
+it will easy to get the wait mode status from this info
+e.g, if wait mode is enabled, there are below info from console:
+
+wait mode is enabled for i.MX6
+
+Signed-off-by: Lin Fuzhen <fuzhen.lin@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    4 +++-
+ arch/arm/mach-mx6/pm.c    |    4 ++++
+ 2 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index d0f37d6..547e24e 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -1306,8 +1306,10 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		if ((mx6q_revision() > IMX_CHIP_REVISION_1_1) ||
+ 			(mx6dl_revision() > IMX_CHIP_REVISION_1_0))
+ 			arm_mem_clked_in_wait = true;
+-		else
++		else {
+ 			enable_wait_mode = false;
++			pr_info("wait mode is disabled due to ipg clock is too low\n");
++		}
+ 	}
+ 
+ 	if (div == 0)
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index ee7fd0a..4217fbe 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -84,6 +84,7 @@ extern void mx6_suspend(suspend_state_t state);
+ extern void mx6_init_irq(void);
+ extern unsigned int gpc_wake_irq[4];
+ 
++extern bool enable_wait_mode;
+ static struct device *pm_dev;
+ struct clk *gpc_dvfs_clk;
+ static void __iomem *scu_base;
+@@ -450,6 +451,9 @@ static int __init pm_init(void)
+ 
+ 	pr_info("Static Power Management for Freescale i.MX6\n");
+ 
++	pr_info("wait mode is %s for i.MX6\n", enable_wait_mode ?
++			"enabled" : "disabled");
++
+ 	if (platform_driver_register(&mx6_pm_driver) != 0) {
+ 		printk(KERN_ERR "mx6_pm_driver register failed\n");
+ 		return -ENODEV;
+-- 
+1.7.7.4
+

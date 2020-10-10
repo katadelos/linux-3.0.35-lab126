@@ -1,0 +1,95 @@
+From 7aea3d96c693e0ee5af74d1c1bb87e6d7c8601d0 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Mon, 19 Mar 2012 20:35:30 +0800
+Subject: [PATCH 1188/2463] ENGR00177186 - MX6 : modify board_is_mx6_xxx
+ macro.
+
+- Redefine MX6 board revision ID, and modify the following macros
+  to make codes readable.
+  board_is_mx6_reva()
+  board_is_mx6_revb()
+  board_is_mx6_revc()
+
+Signed-off-by: Fugang Duan <B38611@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    8 ++++----
+ arch/arm/plat-mxc/include/mach/mxc.h     |   14 ++++++++++----
+ 2 files changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index aa144b9..bea516d 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -300,7 +300,7 @@ static int mx6q_sabreauto_fec_phy_init(struct phy_device *phydev)
+ {
+ 	unsigned short val;
+ 
+-	if (!board_is_mx6_sabreauto_reva()) {
++	if (!board_is_mx6_reva()) {
+ 		/* To enable AR8031 ouput a 125MHz clk from CLK_25M */
+ 		phy_write(phydev, 0xd, 0x7);
+ 		phy_write(phydev, 0xe, 0x8016);
+@@ -1231,7 +1231,7 @@ static void __init mx6_board_init(void)
+ 		can0_pads_cnt = ARRAY_SIZE(mx6q_sabreauto_can0_pads);
+ 		can1_pads_cnt = ARRAY_SIZE(mx6q_sabreauto_can1_pads);
+ 		mipi_sensor_pads_cnt = ARRAY_SIZE(mx6q_sabreauto_mipi_sensor_pads);
+-		if (board_is_mx6_sabreauto_reva()) {
++		if (board_is_mx6_reva()) {
+ 			i2c3_pads = mx6q_i2c3_pads_rev_a;
+ 			i2c3_pads_cnt = ARRAY_SIZE(mx6q_i2c3_pads_rev_a);
+ 		} else {
+@@ -1248,7 +1248,7 @@ static void __init mx6_board_init(void)
+ 		can0_pads_cnt = ARRAY_SIZE(mx6dl_sabreauto_can0_pads);
+ 		can1_pads_cnt = ARRAY_SIZE(mx6dl_sabreauto_can1_pads);
+ 		mipi_sensor_pads_cnt = ARRAY_SIZE(mx6dl_sabreauto_mipi_sensor_pads);
+-		if (board_is_mx6_sabreauto_reva()) {
++		if (board_is_mx6_reva()) {
+ 			i2c3_pads = mx6dl_i2c3_pads_rev_a;
+ 			i2c3_pads_cnt = ARRAY_SIZE(mx6dl_i2c3_pads_rev_a);
+ 		} else {
+@@ -1276,7 +1276,7 @@ static void __init mx6_board_init(void)
+ 	gpio_request(SABREAUTO_I2C_EXP_RST, "i2c-rst");
+ 	gpio_direction_output(SABREAUTO_I2C_EXP_RST, 1);
+ 
+-	if (!board_is_mx6_sabreauto_reva()) {
++	if (!board_is_mx6_reva()) {
+ 		/* enable i2c3_sda route path */
+ 		gpio_request(SABREAUTO_I2C3_STEER, "i2c3-steer");
+ 		gpio_direction_output(SABREAUTO_I2C3_STEER, 1);
+diff --git a/arch/arm/plat-mxc/include/mach/mxc.h b/arch/arm/plat-mxc/include/mach/mxc.h
+index caa218b..6e7dfcc 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc.h
++++ b/arch/arm/plat-mxc/include/mach/mxc.h
+@@ -73,8 +73,9 @@
+ 
+ #ifndef __ASSEMBLY__
+ extern unsigned int system_rev;
+-#define board_is_rev(rev)	(((system_rev & 0x0F00) == rev) ? 1 : 0)
++#define board_is_rev(rev)      (((system_rev & 0x0F00) == rev) ? 1 : 0)
+ #define imx_cpu_ver()		(system_rev & 0xFF)
++
+ #endif
+ 
+ #ifdef CONFIG_ARCH_MX5
+@@ -92,10 +93,15 @@ extern unsigned int system_rev;
+ 	board_is_rev(IMX_BOARD_REV_2))
+ #define board_is_mx6q_sabre_auto() (cpu_is_mx6q() && \
+ 	board_is_rev(IMX_BOARD_REV_3))
+-#define board_is_mx6_sabreauto_reva() \
+-	board_is_rev(IMX_BOARD_REV_2)
+-#define board_is_mx6_sabreauto_revb() \
++
++#define board_is_mx6_unknown() \
+ 	board_is_rev(IMX_BOARD_REV_1)
++#define board_is_mx6_reva() \
++	board_is_rev(IMX_BOARD_REV_2)
++#define board_is_mx6_revb() \
++	board_is_rev(IMX_BOARD_REV_3)
++#define board_is_mx6_revc() \
++	board_is_rev(IMX_BOARD_REV_4)
+ #endif
+ 
+ #ifndef __ASSEMBLY__
+-- 
+1.7.7.4
+

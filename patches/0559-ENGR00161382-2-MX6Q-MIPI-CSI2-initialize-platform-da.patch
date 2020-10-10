@@ -1,0 +1,147 @@
+From aee4b7cf013cf9072aaf27ca05395107b26f6e58 Mon Sep 17 00:00:00 2001
+From: Even Xu <Feng.Xu@freescale.com>
+Date: Fri, 4 Nov 2011 13:51:08 +0800
+Subject: [PATCH 0559/2463] ENGR00161382-2 MX6Q MIPI CSI2: initialize platform
+ data
+
+Initialize MIPI CSI2 platform data
+
+Signed-off-by: Even Xu <b21019@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig           |    1 +
+ arch/arm/mach-mx6/board-mx6q_arm2.c |   29 ++++++++++++++++++++++++++++-
+ arch/arm/mach-mx6/clock.c           |    3 +++
+ arch/arm/mach-mx6/devices-imx6q.h   |    4 ++++
+ 4 files changed, 36 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 95e1ad4..6a1a99d 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -53,6 +53,7 @@ config MACH_MX6Q_ARM2
+ 	select IMX_HAVE_PLATFORM_IMX_SPDIF
+ 	select IMX_HAVE_PLATFORM_IMX_MIPI_DSI
+ 	select IMX_HAVE_PLATFORM_FLEXCAN
++	select IMX_HAVE_PLATFORM_IMX_MIPI_CSI2
+ 	help
+ 	  Include support for i.MX 6Quad Armadillo2 platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 43db966..a6e57d9 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -64,6 +64,7 @@
+ #include <mach/mxc_hdmi.h>
+ #include <mach/mxc_asrc.h>
+ #include <mach/mipi_dsi.h>
++#include <mach/mipi_csi2.h>
+ 
+ #include <asm/irq.h>
+ #include <asm/setup.h>
+@@ -269,6 +270,10 @@ static iomux_v3_cfg_t mx6q_arm2_pads[] = {
+ 	/* camera powerdown */
+ 	MX6Q_PAD_CSI0_DAT5__GPIO_5_23,
+ 
++#ifdef CONFIG_MXC_CAMERA_OV5640_MIPI
++	MX6Q_PAD_CSI0_MCLK__CCM_CLKO,
++#endif
++
+ 	MX6Q_PAD_EIM_D24__GPIO_3_24,
+ 
+ 	/* PWM1 */
+@@ -588,7 +593,7 @@ static int max7310_u48_setup(struct i2c_client *client,
+ 	void *context)
+ {
+ 	int max7310_gpio_value[] = {
+-		0, 1, 1, 1, 0, 0, 0, 0,
++		1, 1, 1, 1, 0, 0, 0, 0,
+ 	};
+ 
+ 	int n;
+@@ -641,6 +646,12 @@ static struct fsl_mxc_camera_platform_data camera_data = {
+ 	.csi = 0,
+ };
+ 
++static struct fsl_mxc_camera_platform_data ov5640_mipi_data = {
++	.mclk = 24000000,
++	.csi = 0,
++};
++
++
+ static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
+ 	{
+ 		I2C_BOARD_INFO("cs42888", 0x48),
+@@ -688,6 +699,10 @@ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+ 	{
+ 		I2C_BOARD_INFO("mxc_hdmi_i2c", 0x50),
+ 	},
++	{
++		I2C_BOARD_INFO("ov5640_mipi", 0x3c),
++		.platform_data = (void *)&ov5640_mipi_data,
++	},
+ };
+ 
+ static void imx6q_arm2_usbotg_vbus(bool on)
+@@ -960,6 +975,15 @@ static const struct flexcan_platform_data
+ 	}
+ };
+ 
++static struct mipi_csi2_platform_data mipi_csi2_pdata = {
++	.ipu_id	 = 0,
++	.csi_id = 0,
++	.v_channel = 0,
++	.lanes = 2,
++	.dphy_clk = "mipi_pllref_clk",
++	.pixel_clk = "emi_clk",
++};
++
+ static void arm2_suspend_enter(void)
+ {
+ 	/* suspend preparation */
+@@ -1355,6 +1379,7 @@ static void __init mx6_board_init(void)
+ 
+ 	gp_reg_id = arm2_dvfscore_data.reg_id;
+ 	mx6q_arm2_init_uart();
++	imx6q_add_mipi_csi2(&mipi_csi2_pdata);
+ 	imx6q_add_mxc_hdmi_core(&hdmi_core_data);
+ 
+ 	imx6q_add_ipuv3(0, &ipu_data[0]);
+@@ -1407,7 +1432,9 @@ static void __init mx6_board_init(void)
+ 	imx_asrc_data.asrc_audio_clk = clk_get(NULL, "asrc_serial_clk");
+ 	imx6q_add_asrc(&imx_asrc_data);
+ 
++#ifndef CONFIG_MXC_CAMERA_OV5640_MIPI
+ 	mx6q_csi0_io_init();
++#endif
+ 	/* DISP0 Detect */
+ 	gpio_request(MX6Q_ARM2_DISP0_DET_INT, "disp0-detect");
+ 	gpio_direction_input(MX6Q_ARM2_DISP0_DET_INT);
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 7ddd287..d3c352c 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4836,6 +4836,9 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	clk_set_rate(&cko1_clk0, 22000000);
+ 	clk_enable(&cko1_clk0);
+ 
++	clk_set_parent(&emi_clk, &pll2_pfd_400M);
++	clk_set_rate(&emi_clk, 200000000);
++
+ 	clk_set_parent(&gpu3d_shader_clk, &pll2_pfd_594M);
+ 	clk_set_rate(&gpu3d_shader_clk, 594000000);
+ 	clk_set_parent(&gpu3d_core_clk[0], &mmdc_ch0_axi_clk[0]);
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index c4b876b..e46c97e 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -185,3 +185,7 @@ extern const struct imx_flexcan_data imx6q_flexcan_data[] __initconst;
+ 	imx_add_flexcan(&imx6q_flexcan_data[id], pdata)
+ #define imx6q_add_flexcan0(pdata)	imx6q_add_flexcan(0, pdata)
+ #define imx6q_add_flexcan1(pdata)	imx6q_add_flexcan(1, pdata)
++
++extern const struct imx_mipi_csi2_data imx6q_mipi_csi2_data __initconst;
++#define imx6q_add_mipi_csi2(pdata)	\
++	imx_add_mipi_csi2(&imx6q_mipi_csi2_data, pdata)
+-- 
+1.7.7.4
+

@@ -1,0 +1,78 @@
+From ded241d97e9d37e766efc61ce5a8950fc8427e8a Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Thu, 26 Jan 2012 11:37:01 -0600
+Subject: [PATCH 0990/2463] ENGR00172342-1 EDID parse audio data blocks
+
+Add functionality to parse Audio Data Blocks from EDID data to
+find out what modes of LPCM are suppored by the HDMI sink device.
+
+The parsed settings are saved in the hdmi mfd.  The HDMI audio driver
+will check the settings when the audio stream is opened and will
+then apply appropriate constraints.
+
+If we are unable to read from the EDID, then we default to supporting
+Basic Audio as defined by the HDMI specification (stereo, 16 bit,
+32KHz, 44.1KHz, 48KHz PCM).
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ arch/arm/plat-mxc/include/mach/mxc_edid.h |   27 ++++++++++++++++++++++++++-
+ 1 files changed, 26 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/include/mach/mxc_edid.h b/arch/arm/plat-mxc/include/mach/mxc_edid.h
+index 4cbbb78..10baa01 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc_edid.h
++++ b/arch/arm/plat-mxc/include/mach/mxc_edid.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2009-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2009-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -26,10 +26,31 @@
+ #ifndef MXC_EDID_H
+ #define MXC_EDID_H
+ 
++#include <linux/fb.h>
++
+ #define FB_VMODE_ASPECT_4_3	0x10
+ #define FB_VMODE_ASPECT_16_9	0x20
+ #define FB_VMODE_ASPECT_MASK	(FB_VMODE_ASPECT_4_3 | FB_VMODE_ASPECT_16_9)
+ 
++enum cea_audio_coding_types {
++	AUDIO_CODING_TYPE_REF_STREAM_HEADER	=  0,
++	AUDIO_CODING_TYPE_LPCM			=  1,
++	AUDIO_CODING_TYPE_AC3			=  2,
++	AUDIO_CODING_TYPE_MPEG1			=  3,
++	AUDIO_CODING_TYPE_MP3			=  4,
++	AUDIO_CODING_TYPE_MPEG2			=  5,
++	AUDIO_CODING_TYPE_AACLC			=  6,
++	AUDIO_CODING_TYPE_DTS			=  7,
++	AUDIO_CODING_TYPE_ATRAC			=  8,
++	AUDIO_CODING_TYPE_SACD			=  9,
++	AUDIO_CODING_TYPE_EAC3			= 10,
++	AUDIO_CODING_TYPE_DTS_HD		= 11,
++	AUDIO_CODING_TYPE_MLP			= 12,
++	AUDIO_CODING_TYPE_DST			= 13,
++	AUDIO_CODING_TYPE_WMAPRO		= 14,
++	AUDIO_CODING_TYPE_RESERVED		= 15,
++};
++
+ struct mxc_edid_cfg {
+ 	bool cea_underscan;
+ 	bool cea_basicaudio;
+@@ -43,6 +64,10 @@ struct mxc_edid_cfg {
+ 	bool vsd_dc_30bit;
+ 	bool vsd_dc_y444;
+ 	bool vsd_dvi_dual;
++
++	u8 max_channels;
++	u8 sample_sizes;
++	u8 sample_rates;
+ };
+ 
+ int mxc_edid_var_to_vic(struct fb_var_screeninfo *var);
+-- 
+1.7.7.4
+

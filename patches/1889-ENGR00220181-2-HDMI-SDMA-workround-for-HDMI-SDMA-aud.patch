@@ -1,0 +1,37 @@
+From 3230533766cc3feba91edbc2e209744158729606 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Sat, 11 Aug 2012 15:36:20 +0800
+Subject: [PATCH 1889/2463] ENGR00220181-2 HDMI SDMA: workround for HDMI SDMA
+ audio no sound issue
+
+Issue: When playback HDMI audio in SDMA stress test, HDMI audio may stop
+caused by SDMA channel's failing to work. While checking the SDMA register
+and HDMI module stauts, we found that SDMA fall to an unknown error state.
+The issue is detected both in RIGEL TO1.1 and ARIK TO1.2.
+
+This patch introduces a workround for this issue: For the memory passed
+to SDMA core, HDMI driver would allocate it with the attribute of C=0,
+B=0 instead of C=0, B=1. This patch have be tested in RIGEL TO1.1 for
+about 60 hours, no issue happens.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ sound/soc/imx/imx-hdmi-dma.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/sound/soc/imx/imx-hdmi-dma.c b/sound/soc/imx/imx-hdmi-dma.c
+index 18e3a01..f0afcf1 100644
+--- a/sound/soc/imx/imx-hdmi-dma.c
++++ b/sound/soc/imx/imx-hdmi-dma.c
+@@ -1337,7 +1337,7 @@ static int __devinit imx_soc_platform_probe(struct platform_device *pdev)
+ 	if (hdmi_SDMA_check()) {
+ 		/*To alloc a buffer non cacheable for hdmi script use*/
+ 		hdmi_dma_priv->hdmi_sdma_t =
+-			dma_alloc_coherent(NULL,
++			dma_alloc_noncacheable(NULL,
+ 				sizeof(struct hdmi_sdma_script_data),
+ 				&hdmi_dma_priv->phy_hdmi_sdma_t,
+ 				GFP_KERNEL);
+-- 
+1.7.7.4
+

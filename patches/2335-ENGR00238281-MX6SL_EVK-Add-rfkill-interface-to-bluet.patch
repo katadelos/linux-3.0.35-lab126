@@ -1,0 +1,316 @@
+From 1ffc70ec65c3f78359236cad33f788d49ee97d14 Mon Sep 17 00:00:00 2001
+From: Lionel Xu <Lionel.Xu@freescale.com>
+Date: Wed, 26 Dec 2012 13:54:49 +0800
+Subject: [PATCH 2335/2463] ENGR00238281 MX6SL_EVK: Add rfkill interface to
+ bluetooth
+
+MX6SL EVK board uses Silex SX-SDMAN board for bluetooth.
+Add rfkill interface to control SX-SDMAN reset.
+The reset signal is required before using bluetooth.
+
+Signed-off-by: Lionel Xu <R63889@freescale.com>
+---
+ arch/arm/configs/imx6s_defconfig       |    1 +
+ arch/arm/mach-mx6/Kconfig              |    6 +
+ arch/arm/mach-mx6/Makefile             |    3 +-
+ arch/arm/mach-mx6/board-mx6sl_common.h |    4 +-
+ arch/arm/mach-mx6/board-mx6sl_evk.c    |   31 ++++++-
+ arch/arm/mach-mx6/mx6_bt_rfkill.c      |  167 ++++++++++++++++++++++++++++++++
+ 6 files changed, 209 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/configs/imx6s_defconfig b/arch/arm/configs/imx6s_defconfig
+index 0c980c9..7620cab 100644
+--- a/arch/arm/configs/imx6s_defconfig
++++ b/arch/arm/configs/imx6s_defconfig
+@@ -336,6 +336,7 @@ CONFIG_ARCH_MXC_AUDMUX_V2=y
+ CONFIG_IRAM_ALLOC=y
+ CONFIG_CLK_DEBUG=y
+ CONFIG_DMA_ZONE_SIZE=184
++CONFIG_MACH_IMX_BLUETOOTH_RFKILL=y
+ 
+ #
+ # System MMU
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index e7a3580..fac4d05 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -312,4 +312,10 @@ config MX6_CLK_FOR_BOOTUI_TRANS
+ 	 avoid setting IPU related clocks' parents when initializing clock tree
+ 	 so that bootloader splashimage can transition to kernel smoothly.
+ 
++config MACH_IMX_BLUETOOTH_RFKILL
++       tristate "i.MX Bluetooth rfkill interface support"
++       depends on RFKILL
++       ---help---
++	Say Y to get the standard rfkill interface of Bluetooth
++
+ endif
+diff --git a/arch/arm/mach-mx6/Makefile b/arch/arm/mach-mx6/Makefile
+index 6310673..f26ac15 100644
+--- a/arch/arm/mach-mx6/Makefile
++++ b/arch/arm/mach-mx6/Makefile
+@@ -19,4 +19,5 @@ obj-$(CONFIG_SMP) += plat_hotplug.o platsmp.o headsmp.o
+ obj-$(CONFIG_LOCAL_TIMERS) += localtimer.o
+ obj-$(CONFIG_IMX_PCIE) += pcie.o
+ obj-$(CONFIG_USB_FSL_ARC_OTG) += usb_dr.o
+-obj-$(CONFIG_USB_EHCI_ARC_H1) += usb_h1.o
+\ No newline at end of file
++obj-$(CONFIG_USB_EHCI_ARC_H1) += usb_h1.o
++obj-$(CONFIG_MACH_IMX_BLUETOOTH_RFKILL) += mx6_bt_rfkill.o
+diff --git a/arch/arm/mach-mx6/board-mx6sl_common.h b/arch/arm/mach-mx6/board-mx6sl_common.h
+index 1170cb6..2b2dd6b 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_common.h
++++ b/arch/arm/mach-mx6/board-mx6sl_common.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2012-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -85,6 +85,8 @@
+ /* CSI */
+ #define MX6SL_BRD_CSI_PWDN		IMX_GPIO_NR(1, 25)
+ #define MX6SL_BRD_CSI_RST		IMX_GPIO_NR(1, 26)
++/* bt */
++#define MX6SL_BRD_BT_RESET		IMX_GPIO_NR(5, 11)
+ 
+ static iomux_v3_cfg_t mx6sl_brd_pads[] = {
+ 
+diff --git a/arch/arm/mach-mx6/board-mx6sl_evk.c b/arch/arm/mach-mx6/board-mx6sl_evk.c
+index 46bacc1..ad759ef 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_evk.c
++++ b/arch/arm/mach-mx6/board-mx6sl_evk.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2012-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -61,6 +61,7 @@
+ #include <mach/iomux-mx6sl.h>
+ #include <mach/imx-uart.h>
+ #include <mach/viv_gpu.h>
++#include <mach/imx_rfkill.h>
+ 
+ #include <asm/irq.h>
+ #include <asm/setup.h>
+@@ -1415,6 +1416,32 @@ static void __init uart2_init(void)
+ 	imx6sl_add_imx_uart(1, &mx6sl_evk_uart1_data);
+ }
+ 
++static void mx6sl_evk_bt_reset(void)
++{
++	gpio_request(MX6SL_BRD_BT_RESET, "bt-reset");
++	gpio_direction_output(MX6SL_BRD_BT_RESET, 0);
++	/* pull down reset pin at least >5ms */
++	mdelay(6);
++	/* pull up after power supply BT */
++	gpio_set_value(MX6SL_BRD_BT_RESET, 1);
++	gpio_free(MX6SL_BRD_BT_RESET);
++}
++
++static int mx6sl_evk_bt_power_change(int status)
++{
++	if (status)
++		mx6sl_evk_bt_reset();
++	return 0;
++}
++
++static struct platform_device mxc_bt_rfkill = {
++	.name = "mxc_bt_rfkill",
++};
++
++static struct imx_bt_rfkill_platform_data mxc_bt_rfkill_data = {
++	.power_change = mx6sl_evk_bt_power_change,
++};
++
+ static void mx6sl_evk_suspend_enter()
+ {
+ 	iomux_v3_cfg_t *p = suspend_enter_pads;
+@@ -1542,6 +1569,8 @@ static void __init mx6_evk_init(void)
+ 	if (uart2_enabled)
+ 		uart2_init();
+ 
++	mxc_register_device(&mxc_bt_rfkill, &mxc_bt_rfkill_data);
++
+ 	imx6q_add_viim();
+ 	imx6q_add_imx2_wdt(0, NULL);
+ 
+diff --git a/arch/arm/mach-mx6/mx6_bt_rfkill.c b/arch/arm/mach-mx6/mx6_bt_rfkill.c
+new file mode 100644
+index 0000000..3b256e9
+--- /dev/null
++++ b/arch/arm/mach-mx6/mx6_bt_rfkill.c
+@@ -0,0 +1,167 @@
++/*
++ * Copyright (C) 2012-2013 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++/*!
++ * @file mx6_bt_rfkill.c
++ *
++ * @brief This driver is implement a rfkill control interface of bluetooth
++ * chip on i.MX serial boards. Register the power regulator function and
++ * reset function in platform data.
++ */
++
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/device.h>
++#include <linux/kernel.h>
++#include <linux/suspend.h>
++#include <linux/init.h>
++#include <linux/rfkill.h>
++#include <mach/hardware.h>
++#include <mach/imx_rfkill.h>
++
++static int system_in_suspend;
++
++static int mxc_bt_set_block(void *rfkdata, bool blocked)
++{
++	struct imx_bt_rfkill_platform_data *data = rfkdata;
++	int ret;
++
++	/* Bluetooth stack will reset the bluetooth chip during
++	 * resume, since we keep bluetooth's power during suspend,
++	 * don't let rfkill to actually reset the chip. */
++	if (system_in_suspend)
++		return 0;
++	pr_info("rfkill: BT RF going to : %s\n", blocked ? "off" : "on");
++	if (!blocked)
++		ret = data->power_change(1);
++	else
++		ret = data->power_change(0);
++
++	return ret;
++}
++
++static const struct rfkill_ops mxc_bt_rfkill_ops = {
++	.set_block = mxc_bt_set_block,
++};
++
++static int mxc_bt_power_event(struct notifier_block *this,
++			      unsigned long event, void *dummy)
++{
++	switch (event) {
++	case PM_SUSPEND_PREPARE:
++		system_in_suspend = 1;
++		/* going to suspend, don't reset chip */
++		break;
++	case PM_POST_SUSPEND:
++		system_in_suspend = 0;
++		/* System is resume, can reset chip */
++		break;
++	default:
++		break;
++	}
++	return NOTIFY_DONE;
++}
++
++static struct notifier_block mxc_bt_power_notifier = {
++	.notifier_call = mxc_bt_power_event,
++};
++
++static int mxc_bt_rfkill_probe(struct platform_device *dev)
++{
++	int rc;
++	struct rfkill *rfk;
++
++	struct imx_bt_rfkill_platform_data *data = dev->dev.platform_data;
++
++	if (data->power_change == NULL) {
++		rc = -EINVAL;
++		dev_err(&dev->dev, "no power_change function\n");
++		goto error_check_func;
++	}
++
++	rc = register_pm_notifier(&mxc_bt_power_notifier);
++	if (rc)
++		goto error_check_func;
++
++	rfk = rfkill_alloc("mxc-bt", &dev->dev, RFKILL_TYPE_BLUETOOTH,
++			   &mxc_bt_rfkill_ops, data);
++
++	if (!rfk) {
++		rc = -ENOMEM;
++		goto error_rfk_alloc;
++	}
++
++	rc = rfkill_register(rfk);
++	if (rc)
++		goto error_rfkill;
++
++	platform_set_drvdata(dev, rfk);
++	printk(KERN_INFO "mxc_bt_rfkill driver success loaded\n");
++	return 0;
++
++error_rfkill:
++	rfkill_destroy(rfk);
++error_rfk_alloc:
++error_check_func:
++	return rc;
++}
++
++static int __devexit mxc_bt_rfkill_remove(struct platform_device *dev)
++{
++	struct imx_bt_rfkill_platform_data *data = dev->dev.platform_data;
++	struct rfkill *rfk = platform_get_drvdata(dev);
++
++	platform_set_drvdata(dev, NULL);
++
++	if (rfk) {
++		rfkill_unregister(rfk);
++		rfkill_destroy(rfk);
++	}
++
++	data->power_change(0);
++
++	return 0;
++}
++
++static struct platform_driver mxc_bt_rfkill_driver = {
++	.driver = {
++		.name = "mxc_bt_rfkill",
++	},
++	.probe	= mxc_bt_rfkill_probe,
++	.remove = __devexit_p(mxc_bt_rfkill_remove),
++};
++
++static int __init mxc_bt_rfkill_init(void)
++{
++	return platform_driver_register(&mxc_bt_rfkill_driver);
++}
++
++module_init(mxc_bt_rfkill_init);
++
++static void __exit mxc_bt_rfkill_exit(void)
++{
++	platform_driver_unregister(&mxc_bt_rfkill_driver);
++}
++
++module_exit(mxc_bt_rfkill_exit);
++
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("RFKill control interface of BT on MX6 Platform");
+-- 
+1.7.7.4
+

@@ -1,0 +1,40 @@
+From 8bf9aa453b72237662187fb3a7e716060cc35fd3 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Thu, 11 Aug 2011 10:51:45 +0800
+Subject: [PATCH 0339/2463] ENGR00154704 usb-gadget: wmb is needed after dtd
+ pointer is updated for armv7
+
+At armv7 SoC, the dma_alloc_coherent returns non-cachable, but
+bufferable region, so the driver needs to drain write buffer by
+itself, if the controller needs to visit dma buffer immediately
+after cpu writes
+
+There is a discussion for this armv7 change:
+http://marc.info/?t=127918539100004&r=1&w=2
+
+For this issue, the next dtd pointer is invalid sometimes, the reason
+is the region which is used to store dtd is dma buffer, so the data may
+not be written to memory when the controller visit this data.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 95dd31e..f33ba52 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -879,6 +879,9 @@ static int fsl_queue_td(struct fsl_ep *ep, struct fsl_req *req)
+ 			lastreq->tail->next_td_ptr =
+ 			    cpu_to_hc32(req->head->td_dma & DTD_ADDR_MASK);
+ 		}
++	#ifdef CONFIG_ARM_DMA_MEM_BUFFERABLE
++		wmb();
++	#endif
+ 		/* Read prime bit, if 1 goto done */
+ 		if (fsl_readl(&dr_regs->endpointprime) & bitmask)
+ 			goto out;
+-- 
+1.7.7.4
+

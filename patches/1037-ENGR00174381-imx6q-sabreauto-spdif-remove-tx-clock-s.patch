@@ -1,0 +1,53 @@
+From e12f444919e18a005f826b95eed4a47fe177f87a Mon Sep 17 00:00:00 2001
+From: Adrian Alonso <aalonso@freescale.com>
+Date: Mon, 13 Feb 2012 14:15:00 -0600
+Subject: [PATCH 1037/2463] ENGR00174381 imx6q-sabreauto: spdif remove tx
+ clock settings
+
+* Sabreauto platform only supports spdif in (Rx)
+  Remove unused Tx clock settings
+
+Signed-off-by: Adrian Alonso <aalonso@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   21 ---------------------
+ 1 files changed, 0 insertions(+), 21 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 081b1e9..8b582d5 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -1349,31 +1349,10 @@ static inline void __init mx6q_csi0_io_init(void)
+ 	mxc_iomux_set_gpr_register(1, 19, 1, 1);
+ }
+ 
+-static int spdif_clk_set_rate(struct clk *clk, unsigned long rate)
+-{
+-	unsigned long rate_actual;
+-	rate_actual = clk_round_rate(clk, rate);
+-	clk_set_rate(clk, rate_actual);
+-	return 0;
+-}
+-
+ static struct mxc_spdif_platform_data mxc_spdif_data = {
+ 	.spdif_tx = 0,		/* disable tx */
+ 	.spdif_rx = 1,		/* enable rx */
+-	/*
+-	 * spdif0_clk will be 454.7MHz divided by ccm dividers.
+-	 *
+-	 * 44.1KHz: 454.7MHz / 7 (ccm) / 23 (spdif) = 44,128 Hz ~ 0.06% error
+-	 * 48KHz:   454.7MHz / 4 (ccm) / 37 (spdif) = 48,004 Hz ~ 0.01% error
+-	 * 32KHz:   454.7MHz / 6 (ccm) / 37 (spdif) = 32,003 Hz ~ 0.01% error
+-	 */
+-	.spdif_clk_44100 = 1,	/* tx clk from spdif0_clk_root */
+-	.spdif_clk_48000 = 1,	/* tx clk from spdif0_clk_root */
+-	.spdif_div_44100 = 23,
+-	.spdif_div_48000 = 37,
+-	.spdif_div_32000 = 37,
+ 	.spdif_rx_clk = 0,	/* rx clk from spdif stream */
+-	.spdif_clk_set_rate = spdif_clk_set_rate,
+ 	.spdif_clk = NULL,	/* spdif bus clk */
+ };
+ 
+-- 
+1.7.7.4
+

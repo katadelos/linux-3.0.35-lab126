@@ -1,0 +1,35 @@
+From fbec3dec341444ba41f42c05d73b23edf3a99922 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Wed, 22 Feb 2012 11:38:55 +0800
+Subject: [PATCH 1083/2463] ENGR00174734-3 usb: change function name for
+ discharge data line
+
+In order to reflect the function well, it needs to discharge
+both dp and dm, so change the function name.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ include/linux/fsl_devices.h |    7 ++++++-
+ 1 files changed, 6 insertions(+), 1 deletions(-)
+
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index f6098fb..849d4e4 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -124,7 +124,12 @@ struct fsl_usb2_platform_data {
+ 	void (*wakeup_handler)(struct fsl_usb2_platform_data *);
+ 	void (*hsic_post_ops)(void);
+ 	void (*hsic_device_connected)(void);
+-	void (*gadget_discharge_dp) (bool);
++	/*
++	 * Some platforms, like i.mx6x needs to discharge dp/dm at device mode
++	 * or there is wakeup interrupt caused by dp/dm change when the cable
++	 * is disconnected with Host.
++	 */
++	void (*dr_discharge_line) (bool);
+ 
+ 	struct fsl_usb2_wakeup_platform_data *wakeup_pdata;
+ 	struct platform_device *pdev;
+-- 
+1.7.7.4
+

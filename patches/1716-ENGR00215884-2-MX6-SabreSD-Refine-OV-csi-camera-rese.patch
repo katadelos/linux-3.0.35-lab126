@@ -1,0 +1,43 @@
+From 017db6b0e6c32afd2e5b117e91d004122f30afa6 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Thu, 5 Jul 2012 18:58:13 +0800
+Subject: [PATCH 1716/2463] ENGR00215884-2 MX6 SabreSD:Refine OV csi camera
+ reset sequence
+
+This patch refines OV csi camera reset sequence according to
+OV's recommendation:
+reset --------------------|_____|----------------
+                        ->| 1ms |<-
+pwdn  ----------|_________________________|------
+              ->|   5ms   |<- ->|   5ms   |<-
+    ->|   5ms   |<-
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit b4d3898a01c232b2525637fa1bb443f8b6208d0e)
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |    8 +++++++-
+ 1 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 07d76ce..cefb3b3 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -495,8 +495,14 @@ static void mx6q_csi0_io_init(void)
+ 	/* Camera power down */
+ 	gpio_request(SABRESD_CSI0_PWN, "cam-pwdn");
+ 	gpio_direction_output(SABRESD_CSI0_PWN, 1);
+-	msleep(1);
++	msleep(5);
+ 	gpio_set_value(SABRESD_CSI0_PWN, 0);
++	msleep(5);
++	gpio_set_value(SABRESD_CSI0_RST, 0);
++	msleep(1);
++	gpio_set_value(SABRESD_CSI0_RST, 1);
++	msleep(5);
++	gpio_set_value(SABRESD_CSI0_PWN, 1);
+ 
+ 	/* For MX6Q:
+ 	 * GPR1 bit19 and bit20 meaning:
+-- 
+1.7.7.4
+

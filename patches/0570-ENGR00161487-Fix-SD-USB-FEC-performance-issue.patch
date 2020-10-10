@@ -1,0 +1,65 @@
+From b39a8a44e5aa6388cc53f8d45a491a8f42f39a48 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Fri, 4 Nov 2011 16:19:19 -0500
+Subject: [PATCH 0570/2463] ENGR00161487: Fix SD/USB/FEC performance issue.
+
+When WAIT mode is not enabled, execute cpu_do_idle() code.
+Currently WAIT mode requires the code to be run from IRAM with caches disabled.
+No L2 cache access should be done for a specified period after the system exits
+WAIT mode. This delay and running code from IRAM adversely affects the
+SDHC performance.
+Hardware team is looking into the extended delay that is required.
+Till its root caused, default should be to execute cpu_do_idle() and
+disable entry into WAIT mode.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/cpu.c    |    2 +-
+ arch/arm/mach-mx6/system.c |   11 +++++++----
+ 2 files changed, 8 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index 0e85d92..0833b57 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -37,7 +37,7 @@ extern void mx6_wait(void);
+ 
+ struct cpu_op *(*get_cpu_op)(int *op);
+ static void __iomem *arm_base = IO_ADDRESS(MX6Q_A9_PLATFRM_BASE);
+-static bool enable_wait_mode;
++bool enable_wait_mode;
+ 
+ void __iomem *gpc_base;
+ void __iomem *ccm_base;
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index db1dea5..418e23e 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -54,6 +54,7 @@ static void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ extern void (*mx6_wait_in_iram)(void *ccm_base);
+ extern void mx6_wait(void);
+ extern void *mx6_wait_in_iram_base;
++extern bool enable_wait_mode;
+ 
+ void gpc_set_wakeup(unsigned int irq[4])
+ {
+@@ -144,10 +145,12 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 
+ void arch_idle(void)
+ {
+-	if ((num_online_cpus() == num_present_cpus())
+-		&& mx6_wait_in_iram != NULL) {
+-		mxc_cpu_lp_set(WAIT_UNCLOCKED_POWER_OFF);
+-		mx6_wait_in_iram(MXC_CCM_BASE);
++	if (enable_wait_mode) {
++		if ((num_online_cpus() == num_present_cpus())
++			&& mx6_wait_in_iram != NULL) {
++			mxc_cpu_lp_set(WAIT_UNCLOCKED_POWER_OFF);
++			mx6_wait_in_iram(MXC_CCM_BASE);
++		}
+ 	} else
+ 		cpu_do_idle();
+ }
+-- 
+1.7.7.4
+

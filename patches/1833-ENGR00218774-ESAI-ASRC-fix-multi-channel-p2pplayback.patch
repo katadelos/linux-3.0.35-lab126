@@ -1,0 +1,48 @@
+From d42089486ee99811e9a24ed04391376b56cba538 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Mon, 30 Jul 2012 14:55:39 +0800
+Subject: [PATCH 1833/2463] ENGR00218774 ESAI ASRC: fix multi channel
+ p2pplayback bug
+
+ASRC driver would configure ASRC as ideal ratio mode for p2p playback.
+However, multi channel convert can't work well with ideal ratio mode.
+
+In this patch, change ASRC p2p playbck mode to internal ratio mode to
+better support multi channel p2p playback.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/mxc/asrc/mxc_asrc.c |   11 ++---------
+ 1 files changed, 2 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index f67274f..cf41f29 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -586,21 +586,14 @@ int asrc_config_pair(struct asrc_config *config)
+ 	if ((config->inclk == INCLK_ASRCK1_CLK) &&
+ 			(config->outclk == OUTCLK_ESAI_TX)) {
+ 		reg = __raw_readl(g_asrc->vaddr + ASRC_ASRCTR_REG);
+-		reg &= ~(1 << (20 + config->pair));
+-		reg |= (0x03 << (13 + (config->pair << 1)));
++		reg |= (1 << (20 + config->pair));
++		reg |= (0x02 << (13 + (config->pair << 1)));
+ 		__raw_writel(reg, g_asrc->vaddr + ASRC_ASRCTR_REG);
+ 		err = asrc_set_clock_ratio(config->pair,
+ 					   config->input_sample_rate,
+ 					   config->output_sample_rate);
+ 		if (err < 0)
+ 			return err;
+-
+-		err = asrc_set_process_configuration(config->pair,
+-						     config->input_sample_rate,
+-						     config->
+-						     output_sample_rate);
+-		if (err < 0)
+-			return err;
+ 	}
+ 
+ 	/* Config input and output wordwidth */
+-- 
+1.7.7.4
+

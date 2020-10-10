@@ -1,0 +1,36 @@
+From 9ccd1cbdec28284620d4ca5aea975b9bd5a0f4b0 Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Thu, 12 Apr 2012 15:23:08 +0800
+Subject: [PATCH 1311/2463] ENGR00179510 ipu capture: fix system hang when
+ running capture
+
+Add _ipu_get() and _ipu_put() when calling ipu_csi_get_sensor_protocol
+function.
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_capture.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_capture.c b/drivers/mxc/ipu3/ipu_capture.c
+index 2b818a0..c4eac45 100644
+--- a/drivers/mxc/ipu3/ipu_capture.c
++++ b/drivers/mxc/ipu3/ipu_capture.c
+@@ -215,9 +215,13 @@ EXPORT_SYMBOL(ipu_csi_init_interface);
+  */
+ int32_t ipu_csi_get_sensor_protocol(struct ipu_soc *ipu, uint32_t csi)
+ {
+-	return (ipu_csi_read(ipu, csi, CSI_SENS_CONF) &
++	int ret;
++	_ipu_get(ipu);
++	ret = (ipu_csi_read(ipu, csi, CSI_SENS_CONF) &
+ 		CSI_SENS_CONF_SENS_PRTCL_MASK) >>
+ 		CSI_SENS_CONF_SENS_PRTCL_SHIFT;
++	_ipu_put(ipu);
++	return ret;
+ }
+ EXPORT_SYMBOL(ipu_csi_get_sensor_protocol);
+ 
+-- 
+1.7.7.4
+

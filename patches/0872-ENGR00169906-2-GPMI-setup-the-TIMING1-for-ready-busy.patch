@@ -1,0 +1,43 @@
+From c2aad9dea58a00b970b3e8b464c3913cb507d715 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Mon, 9 Jan 2012 15:59:01 +0800
+Subject: [PATCH 0872/2463] ENGR00169906-2 GPMI : setup the TIMING1 for
+ ready/busy
+
+The TIMING1 specifies the timeouts used when monitoring the
+NAND READY pin and IOWAIT signals.
+
+We should set a default value for it.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/mtd/nand/gpmi-nfc/hal-mx50.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mtd/nand/gpmi-nfc/hal-mx50.c b/drivers/mtd/nand/gpmi-nfc/hal-mx50.c
+index 6545c84..c8238b2 100644
+--- a/drivers/mtd/nand/gpmi-nfc/hal-mx50.c
++++ b/drivers/mtd/nand/gpmi-nfc/hal-mx50.c
+@@ -1,7 +1,7 @@
+ /*
+  * Freescale GPMI NFC NAND Flash Driver
+  *
+- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2010-2012 Freescale Semiconductor, Inc.
+  * Copyright (C) 2008 Embedded Alley Solutions, Inc.
+  *
+  * This program is free software; you can redistribute it and/or modify
+@@ -525,6 +525,10 @@ static void begin(struct gpmi_nfc_data *this)
+ 		clk_enable(ahb_max_clk);
+ 	clk_enable(resources->clock);
+ 
++	/* set ready/busy timeout */
++	writel(BF_GPMI_TIMING1_DEVICE_BUSY_TIMEOUT(0x500),
++		resources->gpmi_regs + HW_GPMI_TIMING1);
++
+ 	/* Get the timing information we need. */
+ 	nfc->clock_frequency_in_hz = clk_get_rate(resources->clock);
+ 	gpmi_nfc_compute_hardware_timing(this, &hw);
+-- 
+1.7.7.4
+

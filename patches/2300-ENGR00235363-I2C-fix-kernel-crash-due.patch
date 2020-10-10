@@ -1,0 +1,51 @@
+From 812b6f85bf68332b6566e92a5b651db37d476c6b Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Fri, 30 Nov 2012 08:58:17 +0800
+Subject: [PATCH 2300/2463] ENGR00235363 I2C: fix kernel crash due
+
+Kernel crash log:
+Unable to handle kernel NULL pointer dereference at
+virtual address 00000001 pgd = d02ec000
+[00000001] *pgd=00000000
+Internal error: Oops: 1 [#1] PREEMPT SMP
+Modules linked in:
+CPU: 0    Not tainted  (3.0.35-05332-ga7a1dec-dirty #38)
+PC is at i2c_imx_probe+0xdc/0x434
+LR is at i2c_imx_xfer+0x53c/0x75c
+pc : [<c002645c>]    lr : [<c03b1e98>]    psr: 20000013
+sp : d41c3dd8  ip : 00000001  fp : 00000001
+r10: 00000001  r9 : ffff8fcc  r8 : d41c3e48
+r7 : c08f4dc0  r6 : 00000001  r5 : d41c3e48  r4 : d447f000
+r3 : d417cbe0  r2 : 00000001  r1 : 000186a0  r0 : d447f000
+Flags:nzCv IRQs on  FIQs on Mode SVC_32 ISA ARM Segment kernel
+...
+Process kworker/0:3 (pid: 1254, stack limit = 0xd41c22f0)
+Stack: (0xd41c3dd8 to 0xd41c4000)
+3dc0:  00000000
+
+I2C driver call the function "static void __init i2c_imx_set_clk()"
+in runtime, the function is linked to init.text section, and don't
+be used after kernel bootup. Remove the "__init" statement to fix
+the issue.
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ drivers/i2c/busses/i2c-imx.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/i2c/busses/i2c-imx.c b/drivers/i2c/busses/i2c-imx.c
+index 3aedafd..70b97b0 100644
+--- a/drivers/i2c/busses/i2c-imx.c
++++ b/drivers/i2c/busses/i2c-imx.c
+@@ -181,7 +181,7 @@ static int i2c_imx_acked(struct imx_i2c_struct *i2c_imx)
+ 	return 0;
+ }
+ 
+-static void __init i2c_imx_set_clk(struct imx_i2c_struct *i2c_imx,
++static void i2c_imx_set_clk(struct imx_i2c_struct *i2c_imx,
+ 							unsigned int rate)
+ {
+ 	unsigned int i2c_clk_rate;
+-- 
+1.7.7.4
+

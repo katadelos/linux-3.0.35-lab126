@@ -1,0 +1,74 @@
+From 29dc869eba443eda337012281c3507352bee0d0b Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Fri, 14 Mar 2008 21:53:04 -0500
+Subject: [PATCH 0004/2463] ENGR00068619 JFFS2 community fix with not use OOB
+
+JFFS2 community fix with not use OOB at MLC NAND, this patch
+is coming from the MTD community
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ fs/jffs2/fs.c         |    6 ++++--
+ fs/jffs2/os-linux.h   |    2 +-
+ include/mtd/mtd-abi.h |    3 ++-
+ 3 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/fs/jffs2/fs.c b/fs/jffs2/fs.c
+index 46ad619..fed08c1 100644
+--- a/fs/jffs2/fs.c
++++ b/fs/jffs2/fs.c
+@@ -692,7 +692,9 @@ void jffs2_gc_release_page(struct jffs2_sb_info *c,
+ static int jffs2_flash_setup(struct jffs2_sb_info *c) {
+ 	int ret = 0;
+ 
+-	if (jffs2_cleanmarker_oob(c)) {
++	if (c->mtd->type == MTD_NANDFLASH) {
++		if (!(c->mtd->flags & MTD_OOB_WRITEABLE))
++			printk(KERN_INFO "JFFS2 doesn't use OOB.\n");
+ 		/* NAND flash... do setup accordingly */
+ 		ret = jffs2_nand_flash_setup(c);
+ 		if (ret)
+@@ -725,7 +727,7 @@ static int jffs2_flash_setup(struct jffs2_sb_info *c) {
+ 
+ void jffs2_flash_cleanup(struct jffs2_sb_info *c) {
+ 
+-	if (jffs2_cleanmarker_oob(c)) {
++	if (c->mtd->type == MTD_NANDFLASH) {
+ 		jffs2_nand_flash_cleanup(c);
+ 	}
+ 
+diff --git a/fs/jffs2/os-linux.h b/fs/jffs2/os-linux.h
+index 65c6c43..dce73c3 100644
+--- a/fs/jffs2/os-linux.h
++++ b/fs/jffs2/os-linux.h
+@@ -106,7 +106,7 @@ static inline void jffs2_init_inode_info(struct jffs2_inode_info *f)
+ #define jffs2_can_mark_obsolete(c) (c->mtd->flags & (MTD_BIT_WRITEABLE))
+ #endif
+ 
+-#define jffs2_cleanmarker_oob(c) (c->mtd->type == MTD_NANDFLASH)
++#define jffs2_cleanmarker_oob(c) (c->mtd->type == MTD_NANDFLASH && (c->mtd->flags & MTD_OOB_WRITEABLE))
+ 
+ #define jffs2_flash_write_oob(c, ofs, len, retlen, buf) ((c)->mtd->write_oob((c)->mtd, ofs, len, retlen, buf))
+ #define jffs2_flash_read_oob(c, ofs, len, retlen, buf) ((c)->mtd->read_oob((c)->mtd, ofs, len, retlen, buf))
+diff --git a/include/mtd/mtd-abi.h b/include/mtd/mtd-abi.h
+index 2f7d45b..e486432 100644
+--- a/include/mtd/mtd-abi.h
++++ b/include/mtd/mtd-abi.h
+@@ -58,12 +58,13 @@ struct mtd_oob_buf64 {
+ #define MTD_BIT_WRITEABLE	0x800	/* Single bits can be flipped */
+ #define MTD_NO_ERASE		0x1000	/* No erase necessary */
+ #define MTD_POWERUP_LOCK	0x2000	/* Always locked after reset */
++#define MTD_OOB_WRITEABLE	0x4000	/* Use Out-Of-Band area */
+ 
+ // Some common devices / combinations of capabilities
+ #define MTD_CAP_ROM		0
+ #define MTD_CAP_RAM		(MTD_WRITEABLE | MTD_BIT_WRITEABLE | MTD_NO_ERASE)
+ #define MTD_CAP_NORFLASH	(MTD_WRITEABLE | MTD_BIT_WRITEABLE)
+-#define MTD_CAP_NANDFLASH	(MTD_WRITEABLE)
++#define MTD_CAP_NANDFLASH	(MTD_WRITEABLE | MTD_OOB_WRITEABLE)
+ 
+ /* ECC byte placement */
+ #define MTD_NANDECC_OFF		0	// Switch off ECC (Not recommended)
+-- 
+1.7.7.4
+

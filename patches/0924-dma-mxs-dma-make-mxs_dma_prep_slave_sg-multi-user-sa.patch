@@ -1,0 +1,58 @@
+From b2f402b2f853b94c6007bc20e758dc54e7ea2176 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Lothar=20Wa=C3=9Fmann?= <LW@KARO-electronics.de>
+Date: Thu, 8 Dec 2011 09:15:43 +0100
+Subject: [PATCH 0924/2463] dma: mxs-dma: make mxs_dma_prep_slave_sg() multi
+ user safe
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Using a static variable for counting the number of CCWs attached to
+a DMA channel when appending a new descriptor is not multi user safe.
+
+Signed-off-by: Lothar Waßmann <LW@KARO-electronics.de>
+Signed-off-by: Vinod Koul <vinod.koul@linux.intel.com>
+---
+ drivers/dma/mxs-dma.c |    5 ++++-
+ 1 files changed, 4 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/dma/mxs-dma.c b/drivers/dma/mxs-dma.c
+index 365e7ac..afa53d5 100644
+--- a/drivers/dma/mxs-dma.c
++++ b/drivers/dma/mxs-dma.c
+@@ -111,6 +111,7 @@ struct mxs_dma_chan {
+ 	int				chan_irq;
+ 	struct mxs_dma_ccw		*ccw;
+ 	dma_addr_t			ccw_phys;
++	int				desc_count;
+ 	dma_cookie_t			last_completed;
+ 	enum dma_status			status;
+ 	unsigned int			flags;
+@@ -386,7 +387,7 @@ static struct dma_async_tx_descriptor *mxs_dma_prep_slave_sg(
+ 	struct scatterlist *sg;
+ 	int i, j;
+ 	u32 *pio;
+-	static int idx;
++	int idx = append ? mxs_chan->desc_count : 0;
+ 
+ 	if (mxs_chan->status == DMA_IN_PROGRESS && !append)
+ 		return NULL;
+@@ -462,6 +463,7 @@ static struct dma_async_tx_descriptor *mxs_dma_prep_slave_sg(
+ 			}
+ 		}
+ 	}
++	mxs_chan->desc_count = idx;
+ 
+ 	return &mxs_chan->desc;
+ 
+@@ -523,6 +525,7 @@ static struct dma_async_tx_descriptor *mxs_dma_prep_dma_cyclic(
+ 
+ 		i++;
+ 	}
++	mxs_chan->desc_count = i;
+ 
+ 	return &mxs_chan->desc;
+ 
+-- 
+1.7.7.4
+

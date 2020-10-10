@@ -1,0 +1,32 @@
+From 34052edeb287f1964a20f77c2ef84bb42742be06 Mon Sep 17 00:00:00 2001
+From: Hongzhang Yang <Hongzhang.Yang@freescale.com>
+Date: Thu, 1 Nov 2012 19:34:26 +0800
+Subject: [PATCH 2209/2463] ENGR00232087-2 VPU: Fix suspend/resume bugs
+
+1. Fix ENGR00230203 [Android_MX6DL_SD] Gallery: System hang
+after resume from suspend during video playback. 20%
+
+2. Fix ENGR00231830 [MX6DL/S_SD] VPU: VPU encode can't
+finish and print "VPU blocking: timeout." if suspend/resume. 100%
+
+Signed-off-by: Hongzhang Yang <Hongzhang.Yang@freescale.com>
+---
+ drivers/mxc/vpu/mxc_vpu.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/vpu/mxc_vpu.c b/drivers/mxc/vpu/mxc_vpu.c
+index 6d77afb..f473fdf 100644
+--- a/drivers/mxc/vpu/mxc_vpu.c
++++ b/drivers/mxc/vpu/mxc_vpu.c
+@@ -874,6 +874,8 @@ static int vpu_resume(struct platform_device *pdev)
+ 
+ 		WRITE_REG(0x0, BIT_RESET_CTRL);
+ 		WRITE_REG(0x0, BIT_CODE_RUN);
++		/* MX6 RTL has a bug not to init MBC_SET_SUBBLK_EN on reset */
++		WRITE_REG(0x0, MBC_SET_SUBBLK_EN);
+ 
+ 		/*
+ 		 * Re-load boot code, from the codebuffer in external RAM.
+-- 
+1.7.7.4
+

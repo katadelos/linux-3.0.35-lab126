@@ -1,0 +1,28 @@
+From 05cc843449f50948eb2b78cae3c48575085e3d6c Mon Sep 17 00:00:00 2001
+From: Larry Li <b20787@freescale.com>
+Date: Wed, 15 Feb 2012 16:59:06 +0800
+Subject: [PATCH 1045/2463] ENGR00174532 [mx6Q]Change 2D clock to 480M
+
+Change GPU2D core clock to 480M and use PLL3 as parent
+
+Signed-off-by: Larry Li <b20787@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 58dcbe10..c230098 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5224,6 +5224,8 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 		clk_set_parent(&gpu2d_axi_clk, &mmdc_ch0_axi_clk[0]);
+ 		gpu2d_axi_clk.secondary = NULL;
+ 	}
++	if (cpu_is_mx6q())
++		clk_set_parent(&gpu2d_core_clk[0], &pll3_usb_otg_main_clk);
+ 
+ 	/* PCLK camera - J5 */
+ 	clk_set_parent(&clko2_clk, &osc_clk);
+-- 
+1.7.7.4
+

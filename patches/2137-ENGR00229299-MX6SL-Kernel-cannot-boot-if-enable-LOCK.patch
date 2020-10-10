@@ -1,0 +1,129 @@
+From 50a5b16e6902768a45ca1b654e8626af969c661e Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Thu, 11 Oct 2012 10:18:24 -0500
+Subject: [PATCH 2137/2463] ENGR00229299 [MX6SL] Kernel cannot boot if enable
+ LOCKDEP
+
+1. Fix mutex_lock nested issue in idle mode
+2. Fix mutex_lock nested issue in suspend mode
+3. Fix spin_lock nested issue in busfreq
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ arch/arm/mach-mx6/bus_freq.c    |    7 +------
+ arch/arm/mach-mx6/clock_mx6sl.c |    2 --
+ arch/arm/mach-mx6/pm.c          |    3 ---
+ arch/arm/mach-mx6/system.c      |   10 ++++------
+ 4 files changed, 5 insertions(+), 17 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index d96ac6a..6e35418 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -110,7 +110,7 @@ static struct clk *pll1;
+ static struct clk *pll1_sw_clk;
+ static struct clk *pll3_sw_clk;
+ static struct clk *pll2_200;
+-static struct clk *mmdc_ch0_axi;
++struct clk *mmdc_ch0_axi;
+ static struct clk *pll3_540;
+ 
+ static struct delayed_work low_bus_freq_handler;
+@@ -155,8 +155,6 @@ void reduce_bus_freq(void)
+ 		u32  div;
+ 		unsigned long flags;
+ 
+-		spin_lock_irqsave(&freq_lock, flags);
+-
+ 		if (high_bus_freq_mode) {
+ 			/* Set periph_clk to be sourced from OSC_CLK */
+ 			/* Set AXI to 24MHz. */
+@@ -220,7 +218,6 @@ void reduce_bus_freq(void)
+ 			low_bus_freq_mode = 1;
+ 			audio_bus_freq_mode = 0;
+ 		}
+-		spin_unlock_irqrestore(&freq_lock, flags);
+ 	}
+ 	high_bus_freq_mode = 0;
+ 
+@@ -322,7 +319,6 @@ int set_high_bus_freq(int high_bus_freq)
+ 		u32 reg;
+ 		unsigned long flags;
+ 
+-		spin_lock_irqsave(&freq_lock, flags);
+ 		/* Change DDR freq in IRAM. */
+ 		mx6sl_ddr_freq_change_iram(ddr_normal_rate, low_bus_freq_mode);
+ 
+@@ -348,7 +344,6 @@ int set_high_bus_freq(int high_bus_freq)
+ 		high_bus_freq_mode = 1;
+ 		low_bus_freq_mode = 0;
+ 		audio_bus_freq_mode = 0;
+-		spin_unlock_irqrestore(&freq_lock, flags);
+ 	} else {
+ 		clk_enable(pll3);
+ 		if (high_bus_freq) {
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 6de1562..a18427c 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -103,7 +103,6 @@ DEFINE_SPINLOCK(mx6sl_clk_lock);
+ 	u32 reg; \
+ 	unsigned long flags; \
+ 	int result = 1; \
+-	spin_lock_irqsave(&mx6sl_clk_lock, flags); \
+ 	gpt_rate = clk_get_rate(&gpt_clk[0]); \
+ 	gpt_ticks = timeout / (1000000000 / gpt_rate); \
+ 	reg = __raw_readl(timer_base + V2_TSTAT);\
+@@ -133,7 +132,6 @@ DEFINE_SPINLOCK(mx6sl_clk_lock);
+ 			} \
+ 		} \
+ 	} \
+-	spin_unlock_irqrestore(&mx6sl_clk_lock, flags); \
+ 	result; \
+ })
+ 
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index faf1a59..b80a6b2 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -335,9 +335,6 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 		return -EINVAL;
+ 	}
+ 
+-	axi_org_parent = clk_get_parent(axi_clk);
+-	clk_set_parent(axi_clk, periph_clk);
+-
+ 	if (state == PM_SUSPEND_MEM || state == PM_SUSPEND_STANDBY) {
+ 		if (pm_data && pm_data->suspend_enter)
+ 			pm_data->suspend_enter();
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 533d4f5..fdbf58c 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -51,7 +51,7 @@
+ extern unsigned int gpc_wake_irq[4];
+ 
+ static void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+-static struct clk *ddr_clk;
++extern struct clk *mmdc_ch0_axi;
+ 
+ volatile unsigned int num_cpu_idle;
+ volatile unsigned int num_cpu_idle_lock = 0x0;
+@@ -272,11 +272,9 @@ void arch_idle_single_core(void)
+ 		ca9_do_idle();
+ 	} else {
+ 		if (low_bus_freq_mode || audio_bus_freq_mode) {
+-				u32 ddr_usecount;
+-				if (ddr_clk == NULL)
+-					ddr_clk = clk_get(NULL ,
+-								"mmdc_ch0_axi");
+-				ddr_usecount = clk_get_usecount(ddr_clk);
++			u32 ddr_usecount;
++			if ((mmdc_ch0_axi != NULL) && ddr_usecount)
++				ddr_usecount = clk_get_usecount(mmdc_ch0_axi);
+ 
+ 			if (cpu_is_mx6sl() && low_bus_freq_mode
+ 				&& ddr_usecount == 1) {
+-- 
+1.7.7.4
+

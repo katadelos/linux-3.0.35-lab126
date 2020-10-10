@@ -1,0 +1,190 @@
+From 7227ff69e142764b73a7998df6059697e7788d0e Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Tue, 21 Aug 2012 17:25:36 +0800
+Subject: [PATCH 1980/2463] ENGR00182456-1 HDMI: Add interface for HDMI audio
+ management
+
+In this patch, add support for:
+
+1. Interface for HDMI audio to register PCM into HDMI core driver.
+2. Interface for HDMI video driver to stop HDMI audio
+3. Interface for HDMI video driver to inform the state of HDMI cable and
+state of HDMI blank.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/mfd/mxc-hdmi-core.c       |  116 +++++++++++++++++++++++++++++++++++++
+ include/linux/mfd/mxc-hdmi-core.h |   10 +++
+ 2 files changed, 126 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mfd/mxc-hdmi-core.c b/drivers/mfd/mxc-hdmi-core.c
+index 3328436..e932247 100644
+--- a/drivers/mfd/mxc-hdmi-core.c
++++ b/drivers/mfd/mxc-hdmi-core.c
+@@ -63,6 +63,104 @@ int mxc_hdmi_disp_id;
+ static struct mxc_edid_cfg hdmi_core_edid_cfg;
+ static int hdmi_core_init;
+ static unsigned int hdmi_dma_running;
++static struct snd_pcm_substream *hdmi_audio_stream_playback;
++static unsigned int hdmi_cable_state;
++static unsigned int hdmi_blank_state;
++static spinlock_t hdmi_audio_lock, hdmi_blank_state_lock, hdmi_cable_state_lock;
++
++
++unsigned int hdmi_set_cable_state(unsigned int state)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&hdmi_cable_state_lock, flags);
++	hdmi_cable_state = state;
++	spin_unlock_irqrestore(&hdmi_cable_state_lock, flags);
++
++	return 0;
++}
++
++unsigned int hdmi_set_blank_state(unsigned int state)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&hdmi_blank_state_lock, flags);
++	hdmi_blank_state = state;
++	spin_unlock_irqrestore(&hdmi_blank_state_lock, flags);
++
++	return 0;
++}
++
++static void hdmi_audio_abort_stream(struct snd_pcm_substream *substream)
++{
++	unsigned long flags;
++
++	snd_pcm_stream_lock_irqsave(substream, flags);
++
++	if (snd_pcm_running(substream))
++		snd_pcm_stop(substream, SNDRV_PCM_STATE_DISCONNECTED);
++
++	snd_pcm_stream_unlock_irqrestore(substream, flags);
++}
++
++int mxc_hdmi_abort_stream(void)
++{
++	unsigned long flags;
++	spin_lock_irqsave(&hdmi_audio_lock, flags);
++	if (hdmi_audio_stream_playback)
++		hdmi_audio_abort_stream(hdmi_audio_stream_playback);
++	spin_unlock_irqrestore(&hdmi_audio_lock, flags);
++
++	return 0;
++}
++
++static int check_hdmi_state(void)
++{
++	unsigned long flags1, flags2;
++	unsigned int ret;
++
++	spin_lock_irqsave(&hdmi_cable_state_lock, flags1);
++	spin_lock_irqsave(&hdmi_blank_state_lock, flags2);
++
++	ret = hdmi_cable_state && hdmi_blank_state;
++
++	spin_unlock_irqrestore(&hdmi_blank_state_lock, flags2);
++	spin_unlock_irqrestore(&hdmi_cable_state_lock, flags1);
++
++	return ret;
++}
++
++int mxc_hdmi_register_audio(struct snd_pcm_substream *substream)
++{
++	unsigned long flags, flags1;
++	int ret = 0;
++
++	snd_pcm_stream_lock_irqsave(substream, flags);
++
++	if (substream && check_hdmi_state()) {
++		spin_lock_irqsave(&hdmi_audio_lock, flags1);
++		if (hdmi_audio_stream_playback) {
++			pr_err("%s unconsist hdmi auido stream!\n", __func__);
++			ret = -EINVAL;
++		}
++		hdmi_audio_stream_playback = substream;
++		spin_unlock_irqrestore(&hdmi_audio_lock, flags1);
++	} else
++		ret = -EINVAL;
++
++	snd_pcm_stream_unlock_irqrestore(substream, flags);
++
++	return ret;
++}
++
++void mxc_hdmi_unregister_audio(struct snd_pcm_substream *substream)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&hdmi_audio_lock, flags);
++	hdmi_audio_stream_playback = NULL;
++	spin_unlock_irqrestore(&hdmi_audio_lock, flags);
++}
+ 
+ u8 hdmi_readb(unsigned int reg)
+ {
+@@ -466,6 +564,7 @@ static int mxc_hdmi_core_probe(struct platform_device *pdev)
+ 	struct fsl_mxc_hdmi_core_platform_data *pdata = pdev->dev.platform_data;
+ 	struct mxc_hdmi_data *hdmi_data;
+ 	struct resource *res;
++	unsigned long flags;
+ 	int ret = 0;
+ 
+ #ifdef DEBUG
+@@ -495,6 +594,23 @@ static int mxc_hdmi_core_probe(struct platform_device *pdev)
+ 	spin_lock_init(&irq_spinlock);
+ 	spin_lock_init(&edid_spinlock);
+ 
++
++	spin_lock_init(&hdmi_cable_state_lock);
++	spin_lock_init(&hdmi_blank_state_lock);
++	spin_lock_init(&hdmi_audio_lock);
++
++	spin_lock_irqsave(&hdmi_cable_state_lock, flags);
++	hdmi_cable_state = 0;
++	spin_unlock_irqrestore(&hdmi_cable_state_lock, flags);
++
++	spin_lock_irqsave(&hdmi_blank_state_lock, flags);
++	hdmi_blank_state = 0;
++	spin_unlock_irqrestore(&hdmi_blank_state_lock, flags);
++
++	spin_lock_irqsave(&hdmi_audio_lock, flags);
++	hdmi_audio_stream_playback = NULL;
++	spin_unlock_irqrestore(&hdmi_audio_lock, flags);
++
+ 	isfr_clk = clk_get(&hdmi_data->pdev->dev, "hdmi_isfr_clk");
+ 	if (IS_ERR(isfr_clk)) {
+ 		ret = PTR_ERR(isfr_clk);
+diff --git a/include/linux/mfd/mxc-hdmi-core.h b/include/linux/mfd/mxc-hdmi-core.h
+index 8ddea5a..f16b11c 100644
+--- a/include/linux/mfd/mxc-hdmi-core.h
++++ b/include/linux/mfd/mxc-hdmi-core.h
+@@ -21,6 +21,11 @@
+ 
+ #include <mach/mxc_edid.h>
+ 
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++
+ #define IRQ_DISABLE_SUCCEED	0
+ #define IRQ_DISABLE_FAIL	1
+ 
+@@ -50,5 +55,10 @@ extern int mxc_hdmi_disp_id;
+ void hdmi_set_registered(int registered);
+ int hdmi_get_registered(void);
+ unsigned int hdmi_SDMA_check(void);
++int mxc_hdmi_abort_stream(void);
++int mxc_hdmi_register_audio(struct snd_pcm_substream *substream);
++void mxc_hdmi_unregister_audio(struct snd_pcm_substream *substream);
++unsigned int hdmi_set_cable_state(unsigned int state);
++unsigned int hdmi_set_blank_state(unsigned int state);
+ 
+ #endif
+-- 
+1.7.7.4
+

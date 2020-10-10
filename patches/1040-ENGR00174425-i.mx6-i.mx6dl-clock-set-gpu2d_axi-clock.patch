@@ -1,0 +1,29 @@
+From b897cb5a36ed425337b6c97beaadc236be74ca6d Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Tue, 14 Feb 2012 17:22:03 +0800
+Subject: [PATCH 1040/2463] ENGR00174425: i.mx6: i.mx6dl: clock: set gpu2d_axi
+ clock parent to mmdc0
+
+on i.mx6dl, gpu2d_axi clock is directly connected to mmdc0
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 13026f9..e52dcab 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5203,6 +5203,8 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	if (cpu_is_mx6dl()) {
+ 		/*on mx6dl, 2d core clock sources from 3d shader core clock*/
+ 		clk_set_parent(&gpu2d_core_clk[0], &gpu3d_shader_clk);
++		/* on mx6dl gpu2d_axi_clk source from mmdc0 directly */
++		clk_set_parent(&gpu2d_axi_clk, &mmdc_ch0_axi_clk[0]);
+ 		gpu2d_axi_clk.secondary = NULL;
+ 	}
+ 
+-- 
+1.7.7.4
+

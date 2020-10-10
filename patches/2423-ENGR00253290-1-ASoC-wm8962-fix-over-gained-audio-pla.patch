@@ -1,0 +1,53 @@
+From 30359e7e4cfb4be8de420a1414cc271a9000ed82 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <b42378@freescale.com>
+Date: Fri, 8 Mar 2013 11:01:57 +0800
+Subject: [PATCH 2423/2463] ENGR00253290-1 ASoC: wm8962: fix over-gained audio
+ playback issue
+
+  We put some code to set default volumes in codec driver, but later we found
+that one of volume was higher than 0db, which would cause over-gained volume.
+  So this patch removed DAC default volume setting, and reverted the volume
+interface of it to let user control the register from user space.
+
+Acked-by: Wang Shengjiu <b02247@freescale.com>
+Signed-off-by: Nicolin Chen <b42378@freescale.com>
+---
+ sound/soc/codecs/wm8962.c |    8 +++-----
+ 1 files changed, 3 insertions(+), 5 deletions(-)
+
+diff --git a/sound/soc/codecs/wm8962.c b/sound/soc/codecs/wm8962.c
+index 784b595..6e7a5e9 100644
+--- a/sound/soc/codecs/wm8962.c
++++ b/sound/soc/codecs/wm8962.c
+@@ -5,7 +5,7 @@
+  *
+  * Author: Mark Brown <broonie@opensource.wolfsonmicro.com>
+  *
+- * Copyright (C) 2012 Freescale Semiconductor, Inc.
++ * Copyright (C) 2013 Freescale Semiconductor, Inc.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+@@ -2218,6 +2218,8 @@ SOC_ENUM("Capture LHPF Mode", cap_lhpf_mode),
+ SOC_DOUBLE_R_TLV("Sidetone Volume", WM8962_DAC_DSP_MIXING_1,
+ 		 WM8962_DAC_DSP_MIXING_2, 4, 12, 0, st_tlv),
+ 
++SOC_DOUBLE_R_TLV("Digital Playback Volume", WM8962_LEFT_DAC_VOLUME,
++		 WM8962_RIGHT_DAC_VOLUME, 1, 127, 0, digital_tlv),
+ SOC_SINGLE("DAC High Performance Switch", WM8962_ADC_DAC_CONTROL_2, 0, 1, 0),
+ 
+ SOC_SINGLE("ADC High Performance Switch", WM8962_ADDITIONAL_CONTROL_1,
+@@ -4099,10 +4101,6 @@ static int wm8962_probe(struct snd_soc_codec *codec)
+ 			    WM8962_SPKOUTL_VOL_MASK, 0x72);
+ 	snd_soc_update_bits(codec, WM8962_SPKOUTR_VOLUME,
+ 			    WM8962_SPKOUTR_VOL_MASK, 0x72);
+-	snd_soc_update_bits(codec, WM8962_LEFT_DAC_VOLUME,
+-			    WM8962_DACL_VOL_MASK, 0xd8);
+-	snd_soc_update_bits(codec, WM8962_RIGHT_DAC_VOLUME,
+-			    WM8962_DACR_VOL_MASK, 0xd8);
+ 
+ 	snd_soc_update_bits(codec, WM8962_LEFT_INPUT_VOLUME,
+ 			    WM8962_INL_VOL_MASK, 0x3f);
+-- 
+1.7.7.4
+

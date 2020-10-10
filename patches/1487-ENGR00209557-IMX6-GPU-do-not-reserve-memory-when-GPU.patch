@@ -1,0 +1,102 @@
+From 61d5f2c422f5b282342b7d0e73fdc91b490484c3 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Wed, 16 May 2012 18:39:14 +0800
+Subject: [PATCH 1487/2463] ENGR00209557 IMX6: GPU: do not reserve memory when
+ GPU is not enabled
+
+The current code will reserve 128M for GPU even when it is not enabled.
+
+It is not needed. So do not reserve the memory when the GPU is not enabled.
+(this can save 128M for Mfgtool.)
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c      |    2 ++
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    2 ++
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |    2 ++
+ arch/arm/mach-mx6/board-mx6q_sabresd.c   |    2 ++
+ 4 files changed, 8 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 967212a..43a0b37 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -2204,6 +2204,7 @@ static struct sys_timer mxc_timer = {
+ 
+ static void __init mx6_arm2_reserve(void)
+ {
++#ifdef CONFIG_MXC_GPU_VIV
+ 	phys_addr_t phys;
+ 
+ 	if (imx6_gpu_pdata.reserved_mem_size) {
+@@ -2213,6 +2214,7 @@ static void __init mx6_arm2_reserve(void)
+ 		memblock_remove(phys, imx6_gpu_pdata.reserved_mem_size);
+ 		imx6_gpu_pdata.reserved_mem_base = phys;
+ 	}
++#endif
+ }
+ 
+ MACHINE_START(MX6Q_ARM2, "Freescale i.MX 6Quad/Solo/DualLite Armadillo2 Board")
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 99a7c86..d7ea2df 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -1535,6 +1535,7 @@ static struct sys_timer mxc_timer = {
+ 
+ static void __init mx6q_reserve(void)
+ {
++#ifdef CONFIG_MXC_GPU_VIV
+ 	phys_addr_t phys;
+ 
+ 	if (imx6q_gpu_pdata.reserved_mem_size) {
+@@ -1544,6 +1545,7 @@ static void __init mx6q_reserve(void)
+ 		memblock_remove(phys, imx6q_gpu_pdata.reserved_mem_size);
+ 		imx6q_gpu_pdata.reserved_mem_base = phys;
+ 	}
++#endif
+ }
+ 
+ MACHINE_START(MX6Q_SABREAUTO, "Freescale i.MX 6Quad/DualLite/Solo Sabre Auto Board")
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index 95145f4..ce7305a 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -1185,6 +1185,7 @@ static struct sys_timer mx6_sabrelite_timer = {
+ 
+ static void __init mx6q_sabrelite_reserve(void)
+ {
++#ifdef CONFIG_MXC_GPU_VIV
+ 	phys_addr_t phys;
+ 
+ 	if (imx6q_gpu_pdata.reserved_mem_size) {
+@@ -1194,6 +1195,7 @@ static void __init mx6q_sabrelite_reserve(void)
+ 		memblock_remove(phys, imx6q_gpu_pdata.reserved_mem_size);
+ 		imx6q_gpu_pdata.reserved_mem_base = phys;
+ 	}
++#endif
+ }
+ 
+ /*
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index a52cc42..66c9df9 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1807,6 +1807,7 @@ static struct sys_timer mx6_sabresd_timer = {
+ 
+ static void __init mx6q_sabresd_reserve(void)
+ {
++#ifdef CONFIG_MXC_GPU_VIV
+ 	phys_addr_t phys;
+ 
+ 	if (imx6q_gpu_pdata.reserved_mem_size) {
+@@ -1816,6 +1817,7 @@ static void __init mx6q_sabresd_reserve(void)
+ 		memblock_remove(phys, imx6q_gpu_pdata.reserved_mem_size);
+ 		imx6q_gpu_pdata.reserved_mem_base = phys;
+ 	}
++#endif
+ }
+ 
+ /*
+-- 
+1.7.7.4
+

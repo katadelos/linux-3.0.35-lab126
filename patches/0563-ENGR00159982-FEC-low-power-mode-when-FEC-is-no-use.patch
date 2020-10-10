@@ -1,0 +1,94 @@
+From a5025df24d702fb9bd2ff0eca241b728bf5efd0f Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Fri, 4 Nov 2011 16:13:43 +0800
+Subject: [PATCH 0563/2463] ENGR00159982 - FEC: low power mode when FEC is no
+ use.
+
+- Set phy AR8031 to save power mode when no cable connect.
+- Close enet clock gate when FEC is no use.
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ drivers/net/fec.c   |   17 +++++++++++++++--
+ include/linux/fec.h |    1 +
+ 2 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index 7108240..f9f7350 100644
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -42,6 +42,7 @@
+ #include <linux/io.h>
+ #include <linux/irq.h>
+ #include <linux/clk.h>
++#include <mach/clock.h>
+ #include <linux/platform_device.h>
+ #include <linux/phy.h>
+ #include <linux/fec.h>
+@@ -684,6 +685,7 @@ static void fec_enet_adjust_link(struct net_device *ndev)
+ {
+ 	struct fec_enet_private *fep = netdev_priv(ndev);
+ 	struct phy_device *phy_dev = fep->phy_dev;
++	struct fec_platform_data *pdata = fep->pdev->dev.platform_data;
+ 	unsigned long flags;
+ 
+ 	int status_change = 0;
+@@ -698,6 +700,8 @@ static void fec_enet_adjust_link(struct net_device *ndev)
+ 
+ 	/* Duplex link change */
+ 	if (phy_dev->link) {
++		if (!clk_get_usecount(fep->clk))
++			clk_enable(fep->clk);
+ 		if (fep->full_duplex != phy_dev->duplex) {
+ 			fec_restart(ndev, phy_dev->duplex);
+ 			status_change = 1;
+@@ -717,8 +721,11 @@ static void fec_enet_adjust_link(struct net_device *ndev)
+ spin_unlock:
+ 	spin_unlock_irqrestore(&fep->hw_lock, flags);
+ 
+-	if (status_change)
++	if (status_change) {
++		if (!phy_dev->link && phy_dev && pdata && pdata->power_hibernate)
++			pdata->power_hibernate(phy_dev);
+ 		phy_print_status(phy_dev);
++	}
+ }
+ 
+ static int fec_enet_mdio_read(struct mii_bus *bus, int mii_id, int regnum)
+@@ -1071,7 +1078,9 @@ fec_enet_open(struct net_device *ndev)
+ 	 * a simple way to do that.
+ 	 */
+ 
+-	ret = fec_enet_alloc_buffers(ndev);
++	if (!clk_get_usecount(fep->clk))
++		clk_enable(fep->clk);
++	ret = fec_enet_alloc_buffers(dev);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -1110,6 +1119,10 @@ fec_enet_close(struct net_device *ndev)
+ 
+ 	fec_enet_free_buffers(ndev);
+ 
++	/* Clock gate close for saving power */
++	if (clk_get_usecount(fep->clk))
++		clk_disable(fep->clk);
++
+ 	return 0;
+ }
+ 
+diff --git a/include/linux/fec.h b/include/linux/fec.h
+index d6a0704..8f69cb5 100644
+--- a/include/linux/fec.h
++++ b/include/linux/fec.h
+@@ -18,6 +18,7 @@
+ 
+ struct fec_platform_data {
+ 	int (*init) (struct phy_device *);
++	int (*power_hibernate) (struct phy_device *);
+ 	phy_interface_t phy;
+ 	unsigned char mac[ETH_ALEN];
+ };
+-- 
+1.7.7.4
+

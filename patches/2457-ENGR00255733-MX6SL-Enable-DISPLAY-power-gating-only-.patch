@@ -1,0 +1,56 @@
+From 2d7839da6027efe65feb4c854330ef7a8cdc6ecc Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Mon, 25 Mar 2013 16:04:40 +0800
+Subject: [PATCH 2457/2463] ENGR00255733 MX6SL: Enable DISPLAY power gating
+ only on TO1.2
+
+Add chip revision checking and only enable DISPLAY power gating on TO1.2
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ arch/arm/mach-mx6/pm.c |   11 +++--------
+ 1 files changed, 3 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index 6e306c2..0b36c30 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -176,9 +176,8 @@ static void usb_power_up_handler(void)
+ 
+ static void disp_power_down(void)
+ {
+-#if !defined(CONFIG_FB_MXC_ELCDIF_FB) && \
+-    !defined(CONFIG_FB_MXC_ELCDIF_FB_MODULE)
+-	if (cpu_is_mx6sl()) {
++	if (cpu_is_mx6sl() && (mx6sl_revision() >= IMX_CHIP_REVISION_1_2)) {
++
+ 		__raw_writel(0xFFFFFFFF, gpc_base + GPC_PGC_DISP_PUPSCR_OFFSET);
+ 		__raw_writel(0xFFFFFFFF, gpc_base + GPC_PGC_DISP_PDNSCR_OFFSET);
+ 
+@@ -194,14 +193,11 @@ static void disp_power_down(void)
+ 			~MXC_CCM_CCGRx_CG1_MASK, MXC_CCM_CCGR3);
+ 
+ 	}
+-#endif
+ }
+ 
+ static void disp_power_up(void)
+ {
+-#if !defined(CONFIG_FB_MXC_ELCDIF_FB) && \
+-    !defined(CONFIG_FB_MXC_ELCDIF_FB_MODULE)
+-	if (cpu_is_mx6sl()) {
++	if (cpu_is_mx6sl() && (mx6sl_revision() >= IMX_CHIP_REVISION_1_2)) {
+ 		/*
+ 		 * Need to enable EPDC/LCDIF pix clock, and
+ 		 * EPDC/LCDIF/PXP axi clock before power up.
+@@ -217,7 +213,6 @@ static void disp_power_up(void)
+ 		__raw_writel(0x20, gpc_base + GPC_CNTR_OFFSET);
+ 		__raw_writel(0x1, gpc_base + GPC_PGC_DISP_SR_OFFSET);
+ 	}
+-#endif
+ }
+ 
+ static void mx6_suspend_store(void)
+-- 
+1.7.7.4
+

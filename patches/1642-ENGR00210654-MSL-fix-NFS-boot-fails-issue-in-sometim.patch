@@ -1,0 +1,76 @@
+From e3a2e5049ab2880d9bbd8f017db72e695e4fe3d1 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Thu, 21 Jun 2012 16:28:57 +0800
+Subject: [PATCH 1642/2463] ENGR00210654 - MSL : fix NFS boot fails issue in
+ sometime
+
+- MX6 sololite cpu board NFS boot fails in sometimes, because MAC
+  cannot get any packets while sending DHCP to require IP. The
+  reproduce rate is 10%.
+- Lan8720 phy enter a unexpected status, and need software reset
+  phy before transmition.
+- Do some below overnight tests after add the changes, no NFS
+  boot issue found.
+  	1. Kernel boot from MMC, rootfs mount from NFS.
+	2. Kernel boot from tftp, rootfs mount form NFS.
+
+  Signed-off-by: Fugang Duan <B38611@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_arm2.c |   33 +++++++++++++++++++++++++++------
+ 1 files changed, 27 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index dc0059f..78952d8 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -664,7 +664,34 @@ static inline void mx6_arm2_init_uart(void)
+ 	imx6q_add_imx_uart(0, NULL); /* DEBUG UART1 */
+ }
+ 
++static int mx6sl_arm2_fec_phy_init(struct phy_device *phydev)
++{
++	int val;
++
++	/* power on FEC phy and reset phy */
++	gpio_request(MX6_ARM2_FEC_PWR_EN, "fec-pwr");
++	gpio_direction_output(MX6_ARM2_FEC_PWR_EN, 1);
++	/* wait RC ms for hw reset */
++	udelay(50);
++
++	/* check phy power */
++	val = phy_read(phydev, 0x0);
++	if (val & BMCR_PDOWN) {
++		phy_write(phydev, 0x0, (val & ~BMCR_PDOWN));
++		udelay(50);
++	}
++
++	/* sw reset phy */
++	val = phy_read(phydev, 0x0);
++	val |= BMCR_RESET;
++	phy_write(phydev, 0x0, val);
++	udelay(50);
++
++	return 0;
++}
++
+ static struct fec_platform_data fec_data __initdata = {
++	.init = mx6sl_arm2_fec_phy_init,
+ 	.phy = PHY_INTERFACE_MODE_RMII,
+ };
+ 
+@@ -1219,12 +1246,6 @@ static void __init mx6_arm2_init(void)
+ 	mxc_iomux_set_gpr_register(1, 14, 1, 0);
+ 	mxc_iomux_set_gpr_register(1, 17, 2, 0);
+ 
+-	/* power on FEC phy and reset phy */
+-	gpio_request(MX6_ARM2_FEC_PWR_EN, "fec-pwr");
+-	gpio_direction_output(MX6_ARM2_FEC_PWR_EN, 1);
+-	/* wait RC ms for hw reset */
+-	udelay(500);
+-
+ 	imx6_init_fec(fec_data);
+ 
+ 	platform_device_register(&arm2_vmmc_reg_devices);
+-- 
+1.7.7.4
+

@@ -1,0 +1,42 @@
+From 5b8e69b716e18bb13a59c9c12185dc6c7a367f91 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Fri, 28 Dec 2012 16:42:42 +0800
+Subject: [PATCH 2332/2463] ENGR00238439 ASRC: add delay before reading ASRC
+ FIFO status
+
+ASRC driver would read the sample number of ASRC output FIFO to fetch
+the data from ASRC output FIFO. However, SDMA's fetching operation may
+not finished before ASRC's reading. In this case, ASRC driver may read a
+error data from the register.
+
+In this patch, add delay before reading ASRC FIFO status to prevent
+noise.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/mxc/asrc/mxc_asrc.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index 9962698..8746bcc 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -946,6 +946,7 @@ static void asrc_read_output_FIFO_S16(struct asrc_pair_params *params)
+ 	u16 *index = params->output_last_period.dma_vaddr;
+ 
+ 	t_size = 0;
++	udelay(100);
+ 	size = asrc_get_output_FIFO_size(params->index);
+ 	while (size) {
+ 		for (i = 0; i < size; i++) {
+@@ -972,6 +973,7 @@ static void asrc_read_output_FIFO_S24(struct asrc_pair_params *params)
+ 	u32 *index = params->output_last_period.dma_vaddr;
+ 
+ 	t_size = 0;
++	udelay(100);
+ 	size = asrc_get_output_FIFO_size(params->index);
+ 	while (size) {
+ 		for (i = 0; i < size; i++) {
+-- 
+1.7.7.4
+

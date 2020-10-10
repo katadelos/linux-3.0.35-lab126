@@ -1,0 +1,45 @@
+From 4c5a959c270e973bb16804b820848ffddfcf9a48 Mon Sep 17 00:00:00 2001
+From: Colin Cross <ccross@android.com>
+Date: Fri, 3 Sep 2010 12:41:21 -0700
+Subject: [PATCH 1405/2463] mmc_block: Allow more than 8 partitions per card
+
+Set the GENHD_FL_EXT_DEVT flag, which will allocate minor numbers
+in major 259 for partitions past disk->minors.
+
+Also remove the use of disk_devt to determine devidx from md->disk.
+md->disk->first_minor is always initialized from devidx and can
+always be used to recover it.
+
+Signed-off-by: Colin Cross <ccross@android.com>
+---
+ drivers/mmc/card/block.c |    7 ++-----
+ 1 files changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/mmc/card/block.c b/drivers/mmc/card/block.c
+index 453695e..c97ada2 100644
+--- a/drivers/mmc/card/block.c
++++ b/drivers/mmc/card/block.c
+@@ -136,11 +136,7 @@ static struct mmc_blk_data *mmc_blk_get(struct gendisk *disk)
+ 
+ static inline int mmc_get_devidx(struct gendisk *disk)
+ {
+-	int devmaj = MAJOR(disk_devt(disk));
+-	int devidx = MINOR(disk_devt(disk)) / perdev_minors;
+-
+-	if (!devmaj)
+-		devidx = disk->first_minor / perdev_minors;
++	int devidx = disk->first_minor / perdev_minors;
+ 	return devidx;
+ }
+ 
+@@ -1293,6 +1289,7 @@ static struct mmc_blk_data *mmc_blk_alloc_req(struct mmc_card *card,
+ 	md->disk->queue = md->queue.queue;
+ 	md->disk->driverfs_dev = parent;
+ 	set_disk_ro(md->disk, md->read_only || default_ro);
++	md->disk->flags = GENHD_FL_EXT_DEVT;
+ 
+ 	/*
+ 	 * As discussed on lkml, GENHD_FL_REMOVABLE should:
+-- 
+1.7.7.4
+

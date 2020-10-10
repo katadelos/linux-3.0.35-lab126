@@ -1,0 +1,150 @@
+From a737fa327afb29395782b8cef93106c44a31a4e0 Mon Sep 17 00:00:00 2001
+From: Lionel Xu <Lionel.Xu@freescale.com>
+Date: Sat, 29 Sep 2012 16:56:04 +0800
+Subject: [PATCH 2120/2463] ENGR00226392 MX6SL Bluetooth: Setup uart2 to
+ enable bluetooth
+
+Setup uart2 to enable bluetooth basic functionality on mx6sl evk board.
+DMA mode was not enabled for uart2 operation.
+
+Signed-off-by: Lionel Xu <Lionel.Xu@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_common.h        |    7 +++++++
+ arch/arm/mach-mx6/board-mx6sl_evk.c           |   24 ++++++++++++++++++++++++
+ arch/arm/mach-mx6/devices-imx6q.h             |    4 ++++
+ arch/arm/plat-mxc/devices/platform-imx-uart.c |   12 ++++++++++++
+ arch/arm/plat-mxc/include/mach/mx6.h          |    6 ++++++
+ 5 files changed, 53 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_common.h b/arch/arm/mach-mx6/board-mx6sl_common.h
+index 6ac5473..4a04cbe 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_common.h
++++ b/arch/arm/mach-mx6/board-mx6sl_common.h
+@@ -416,6 +416,13 @@ static iomux_v3_cfg_t mx6sl_brd_elan_pads[] = {
+ 	MX6SL_PAD_EPDC_PWRCTRL2__GPIO_2_9,	/* CE */
+ 	MX6SL_PAD_KEY_COL6__GPIO_4_4,		/* RST */
+ };
++	/* uart2 pins */
++static iomux_v3_cfg_t mx6sl_uart2_pads[] = {
++	MX6SL_PAD_SD2_DAT5__UART2_TXD,
++	MX6SL_PAD_SD2_DAT4__UART2_RXD,
++	MX6SL_PAD_SD2_DAT6__UART2_RTS,
++	MX6SL_PAD_SD2_DAT7__UART2_CTS,
++};
+ 
+ #define MX6SL_USDHC_8BIT_PAD_SETTING(id, speed)	\
+ mx6sl_sd##id##_##speed##mhz[] = {		\
+diff --git a/arch/arm/mach-mx6/board-mx6sl_evk.c b/arch/arm/mach-mx6/board-mx6sl_evk.c
+index 5be1922..e656638 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_evk.c
++++ b/arch/arm/mach-mx6/board-mx6sl_evk.c
+@@ -754,6 +754,12 @@ static struct viv_gpu_platform_data imx6q_gpu_pdata __initdata = {
+ 
+ void __init early_console_setup(unsigned long base, struct clk *clk);
+ 
++static const struct imxuart_platform_data mx6sl_evk_uart1_data __initconst = {
++	.flags      = IMXUART_HAVE_RTSCTS | IMXUART_SDMA,
++	.dma_req_rx = MX6Q_DMA_REQ_UART2_RX,
++	.dma_req_tx = MX6Q_DMA_REQ_UART2_TX,
++};
++
+ static inline void mx6_evk_init_uart(void)
+ {
+ 	imx6q_add_imx_uart(0, NULL); /* DEBUG UART1 */
+@@ -1356,6 +1362,20 @@ static void mx6_snvs_poweroff(void)
+ 	writel(value | 0x60, mx6_snvs_base + SNVS_LPCR);
+ }
+ 
++static int uart2_enabled;
++static int __init uart2_setup(char * __unused)
++{
++	uart2_enabled = 1;
++	return 1;
++}
++__setup("bluetooth", uart2_setup);
++
++static void __init uart2_init(void)
++{
++	mxc_iomux_v3_setup_multiple_pads(mx6sl_uart2_pads,
++					ARRAY_SIZE(mx6sl_uart2_pads));
++	imx6sl_add_imx_uart(1, &mx6sl_evk_uart1_data);
++}
+ /*!
+  * Board specific initialization.
+  */
+@@ -1457,6 +1477,10 @@ static void __init mx6_evk_init(void)
+ 
+ 	imx6q_init_audio();
+ 
++	/* uart2 for bluetooth */
++	if (uart2_enabled)
++		uart2_init();
++
+ 	imx6q_add_viim();
+ 	imx6q_add_imx2_wdt(0, NULL);
+ 
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 8595f7f..f7ad317 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -23,6 +23,10 @@ extern const struct imx_imx_uart_1irq_data imx6q_imx_uart_data[] __initconst;
+ #define imx6q_add_imx_uart(id, pdata)	\
+ 	imx_add_imx_uart_1irq(&imx6q_imx_uart_data[id], pdata)
+ 
++extern const struct imx_imx_uart_1irq_data imx6sl_imx_uart_data[] __initconst;
++#define imx6sl_add_imx_uart(id, pdata)	\
++	imx_add_imx_uart_1irq(&imx6sl_imx_uart_data[id], pdata)
++
+ extern const struct imx_snvs_rtc_data imx6q_imx_snvs_rtc_data __initconst;
+ #define imx6q_add_imx_snvs_rtc()	\
+ 	imx_add_snvs_rtc(&imx6q_imx_snvs_rtc_data)
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-uart.c b/arch/arm/plat-mxc/devices/platform-imx-uart.c
+index ecfadc3..7f70dc9 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-uart.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-uart.c
+@@ -137,6 +137,18 @@ const struct imx_imx_uart_1irq_data imx6q_imx_uart_data[] __initconst = {
+ };
+ #endif /* ifdef CONFIG_SOC_IMX6Q */
+ 
++#ifdef CONFIG_SOC_IMX6SL
++const struct imx_imx_uart_1irq_data imx6sl_imx_uart_data[] __initconst = {
++#define imx6sl_imx_uart_data_entry(_id, _hwid)				\
++	imx_imx_uart_1irq_data_entry(MX6SL, _id, _hwid, SZ_4K)
++	imx6sl_imx_uart_data_entry(0, 1),
++	imx6sl_imx_uart_data_entry(1, 2),
++	imx6sl_imx_uart_data_entry(2, 3),
++	imx6sl_imx_uart_data_entry(3, 4),
++	imx6sl_imx_uart_data_entry(4, 5),
++};
++#endif /* ifdef CONFIG_SOC_IMX6SL */
++
+ struct platform_device *__init imx_add_imx_uart_3irq(
+ 		const struct imx_imx_uart_3irq_data *data,
+ 		const struct imxuart_platform_data *pdata)
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index f8e1d1c..dfb3f64 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -145,6 +145,7 @@
+ #define MX6SL_UART5_BASE_ADDR		(ATZ1_BASE_ADDR + 0x18000) /* MX6SL */
+ #define UART1_BASE_ADDR			(ATZ1_BASE_ADDR + 0x20000) /* slot 8 */
+ #define ESAI1_BASE_ADDR			(ATZ1_BASE_ADDR + 0x24000) /* slot 9 */
++#define MX6SL_UART1_BASE_ADDR		(ATZ1_BASE_ADDR + 0x20000) /* MX6SL */
+ #define MX6SL_UART2_BASE_ADDR		(ATZ1_BASE_ADDR + 0x24000) /* MX6SL */
+ #define MX6Q_SSI1_BASE_ADDR		(ATZ1_BASE_ADDR + 0x28000) /* slot 10 */
+ #define MX6Q_SSI2_BASE_ADDR		(ATZ1_BASE_ADDR + 0x2C000) /* slot 11 */
+@@ -483,6 +484,11 @@
+ #define MX6Q_INT_UART2			MXC_INT_UART2_ANDED
+ #define MX6Q_INT_UART3			MXC_INT_UART3_ANDED
+ #define MX6Q_INT_UART4			MXC_INT_UART4_ANDED
++#define MX6SL_INT_UART1			MXC_INT_UART1_ANDED
++#define MX6SL_INT_UART2			MXC_INT_UART2_ANDED
++#define MX6SL_INT_UART3			MXC_INT_UART3_ANDED
++#define MX6SL_INT_UART4			MXC_INT_UART4_ANDED
++#define MX6SL_INT_UART5			MXC_INT_UART5_ANDED
+ #define MX6Q_INT_FEC			MXC_INT_ENET1
+ #define MX6Q_INT_DSI			MXC_INT_DSI
+ 
+-- 
+1.7.7.4
+

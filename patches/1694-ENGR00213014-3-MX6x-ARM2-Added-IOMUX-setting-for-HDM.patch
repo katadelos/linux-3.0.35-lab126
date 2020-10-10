@@ -1,0 +1,95 @@
+From 039e2ca002d0d034c55240f2ab149856b76a7b1d Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Tue, 26 Jun 2012 17:45:10 +0800
+Subject: [PATCH 1694/2463] ENGR00213014-3 MX6x ARM2: Added IOMUX setting for
+ HDMI HDCP
+
+Added enable_pins/disable_pins functions for Mx6q/dl arm2 HDMI.
+Added HDMI DDC IOMUX setting.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6dl_arm2.h |   10 ++++++++++
+ arch/arm/mach-mx6/board-mx6q_arm2.c  |   28 +++++++++++++++++++++++++++-
+ arch/arm/mach-mx6/board-mx6q_arm2.h  |   10 ++++++++++
+ 3 files changed, 47 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6dl_arm2.h b/arch/arm/mach-mx6/board-mx6dl_arm2.h
+index 4528da5..6ed3e65 100644
+--- a/arch/arm/mach-mx6/board-mx6dl_arm2.h
++++ b/arch/arm/mach-mx6/board-mx6dl_arm2.h
+@@ -319,3 +319,13 @@ static iomux_v3_cfg_t mx6dl_gpmi_nand[] __initdata = {
+ 	MX6DL_PAD_SD4_CLK__RAWNAND_WRN,
+ 	MX6DL_PAD_NANDF_WP_B__RAWNAND_RESETN,
+ };
++
++static iomux_v3_cfg_t mx6dl_arm2_hdmi_ddc_pads[] = {
++	MX6DL_PAD_KEY_COL3__HDMI_TX_DDC_SCL, /* HDMI DDC SCL */
++	MX6DL_PAD_KEY_ROW3__HDMI_TX_DDC_SDA, /* HDMI DDC SDA */
++};
++
++static iomux_v3_cfg_t mx6dl_arm2_i2c2_pads[] = {
++	MX6DL_PAD_KEY_COL3__I2C2_SCL,	/* I2C2 SCL */
++	MX6DL_PAD_KEY_ROW3__I2C2_SDA,	/* I2C2 SDA */
++};
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 7dce47f..0aa0941 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -1411,8 +1411,34 @@ static void hdmi_init(int ipu_id, int disp_id)
+ 	mxc_iomux_set_gpr_register(3, 2, 2, hdmi_mux_setting);
+ }
+ 
++/* On mx6x arm2 board i2c2 iomux with hdmi ddc,
++ * the pins default work at i2c2 function,
++ when hdcp enable, the pins should work at ddc function */
++
++static void hdmi_enable_ddc_pin(void)
++{
++	if (cpu_is_mx6dl())
++		mxc_iomux_v3_setup_multiple_pads(mx6dl_arm2_hdmi_ddc_pads,
++			ARRAY_SIZE(mx6dl_arm2_hdmi_ddc_pads));
++	else
++		mxc_iomux_v3_setup_multiple_pads(mx6q_arm2_hdmi_ddc_pads,
++			ARRAY_SIZE(mx6q_arm2_hdmi_ddc_pads));
++}
++
++static void hdmi_disable_ddc_pin(void)
++{
++	if (cpu_is_mx6dl())
++		mxc_iomux_v3_setup_multiple_pads(mx6dl_arm2_i2c2_pads,
++			ARRAY_SIZE(mx6dl_arm2_i2c2_pads));
++	else
++		mxc_iomux_v3_setup_multiple_pads(mx6q_arm2_i2c2_pads,
++			ARRAY_SIZE(mx6q_arm2_i2c2_pads));
++}
++
+ static struct fsl_mxc_hdmi_platform_data hdmi_data = {
+-	.init		= hdmi_init,
++	.init = hdmi_init,
++	.enable_pins = hdmi_enable_ddc_pin,
++	.disable_pins = hdmi_disable_ddc_pin,
+ };
+ 
+ static struct fsl_mxc_hdmi_core_platform_data hdmi_core_data = {
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.h b/arch/arm/mach-mx6/board-mx6q_arm2.h
+index 8c3277d..eb06ef8 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.h
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.h
+@@ -315,3 +315,13 @@ static iomux_v3_cfg_t mx6q_gpmi_nand[] __initdata = {
+ 	MX6Q_PAD_SD4_CLK__RAWNAND_WRN,
+ 	MX6Q_PAD_NANDF_WP_B__RAWNAND_RESETN,
+ };
++
++static iomux_v3_cfg_t mx6q_arm2_hdmi_ddc_pads[] = {
++	MX6Q_PAD_KEY_COL3__HDMI_TX_DDC_SCL, /* HDMI DDC SCL */
++	MX6Q_PAD_KEY_ROW3__HDMI_TX_DDC_SDA, /* HDMI DDC SDA */
++};
++
++static iomux_v3_cfg_t mx6q_arm2_i2c2_pads[] = {
++	MX6Q_PAD_KEY_COL3__I2C2_SCL,	/* I2C2 SCL */
++	MX6Q_PAD_KEY_ROW3__I2C2_SDA,	/* I2C2 SDA */
++};
+-- 
+1.7.7.4
+

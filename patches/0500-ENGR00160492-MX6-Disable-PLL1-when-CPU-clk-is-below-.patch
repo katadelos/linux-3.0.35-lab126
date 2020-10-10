@@ -1,0 +1,140 @@
+From 9f27f73686cea1a8f64d5529c1f34aba88a5a638 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Wed, 19 Oct 2011 14:38:19 -0500
+Subject: [PATCH 0500/2463] ENGR00160492: MX6-Disable PLL1 when CPU clk is
+ below 400MHz.
+
+When CPU frequency is below 400MHz (due to CPUFREQ or dvfs-core), we can source
+pll1_sw_clk from PLL2_PFD_400M and disable PLL1. This can save some power.
+
+Fixed warnings in dvfs_core driver.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c      |   32 +++++++++++++++++++++++++-------
+ arch/arm/mach-mx6/cpu_op-mx6.c |   12 ++++++------
+ arch/arm/plat-mxc/dvfs_core.c  |   17 +++++++++++++++++
+ 3 files changed, 48 insertions(+), 13 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index f97617c..cdb602a 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -894,7 +894,7 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 	int i;
+ 	u32 div;
+ 	u32 parent_rate;
+-
++	struct clk *old_parent = pll1_sw_clk.parent;
+ 
+ 	for (i = 0; i < cpu_op_nr; i++) {
+ 		if (rate == cpu_op_tbl[i].cpu_rate)
+@@ -903,14 +903,23 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 	if (i >= cpu_op_nr)
+ 		return -EINVAL;
+ 
+-	if (cpu_op_tbl[i].pll_rate != clk_get_rate(&pll1_sys_main_clk)) {
+-		/* Change the PLL1 rate. */
+-		if (pll2_pfd_400M.usecount != 0)
+-			pll1_sw_clk.set_parent(&pll1_sw_clk, &pll2_pfd_400M);
+-		else
+-			pll1_sw_clk.set_parent(&pll1_sw_clk, &osc_clk);
++	if (rate <= clk_get_rate(&pll2_pfd_400M)) {
++		/*
++		  * Move pll1_sw_clk to PLL2_PFD_400M
++		  * so that we can disable PLL1.
++		  */
++		if (pll2_pfd_400M.usecount == 0)
++			pll2_pfd_400M.enable(&pll2_pfd_400M);
++		pll1_sw_clk.set_parent(&pll1_sw_clk, &pll2_pfd_400M);
++		pll1_sw_clk.parent = &pll2_pfd_400M;
++	} else {
++		/* Rate is above 400MHz.  We may need to relock PLL1. */
++		pll1_sw_clk.set_parent(&pll1_sw_clk, &osc_clk);
++		if (pll1_sys_main_clk.usecount == 0)
++			pll1_sys_main_clk.enable(&pll1_sys_main_clk);
+ 		pll1_sys_main_clk.set_rate(&pll1_sys_main_clk, cpu_op_tbl[i].pll_rate);
+ 		pll1_sw_clk.set_parent(&pll1_sw_clk, &pll1_sys_main_clk);
++		pll1_sw_clk.parent = &pll1_sys_main_clk;
+ 	}
+ 
+ 	parent_rate = clk_get_rate(clk->parent);
+@@ -927,6 +936,15 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 
+ 	__raw_writel(div - 1, MXC_CCM_CACRR);
+ 
++	/* Increment current parent's usecount. */
++	pll1_sw_clk.parent->usecount++;
++
++	/* Decrement the current parent's usecount */
++	old_parent->usecount--;
++
++	if (old_parent->usecount == 0)
++		old_parent->disable(old_parent);
++
+ 	return 0;
+ }
+ 
+diff --git a/arch/arm/mach-mx6/cpu_op-mx6.c b/arch/arm/mach-mx6/cpu_op-mx6.c
+index 51bc917..c0694fd 100644
+--- a/arch/arm/mach-mx6/cpu_op-mx6.c
++++ b/arch/arm/mach-mx6/cpu_op-mx6.c
+@@ -42,14 +42,14 @@ static struct cpu_op mx6_cpu_op[] = {
+ 	 .cpu_podf = 0,
+ 	 .cpu_voltage = 1150000,},
+ 	 {
+-	  .pll_rate = 792000000,
+-	  .cpu_rate = 400000000,
+-	  .cpu_podf = 1,
++	  .pll_rate = 396000000,
++	  .cpu_rate = 396000000,
++	  .cpu_podf = 0,
+ 	  .cpu_voltage = 1050000,},
+ 	{
+-	 .pll_rate = 792000000,
+-	 .cpu_rate = 167000000,
+-	 .cpu_podf = 4,
++	 .pll_rate = 396000000,
++	 .cpu_rate = 198000000,
++	 .cpu_podf = 1,
+ 	 .cpu_voltage = 900000,},
+ };
+ 
+diff --git a/arch/arm/plat-mxc/dvfs_core.c b/arch/arm/plat-mxc/dvfs_core.c
+index f1a74ba..a8812d8 100755
+--- a/arch/arm/plat-mxc/dvfs_core.c
++++ b/arch/arm/plat-mxc/dvfs_core.c
+@@ -903,6 +903,9 @@ static DEVICE_ATTR(enable, S_IRUGO | S_IWUSR,
+ 				dvfs_enable_show, dvfs_enable_store);
+ static DEVICE_ATTR(show_regs, S_IRUGO, dvfs_regs_show,
+ 				dvfs_regs_store);
++static DEVICE_ATTR(down_threshold, 0644, downthreshold_show,
++						downthreshold_store);
++static DEVICE_ATTR(down_count, 0644, downcount_show, downcount_store);
+ 
+ /*!
+  * This is the probe routine for the DVFS driver.
+@@ -993,6 +996,20 @@ static int __devinit mxc_dvfs_core_probe(struct platform_device *pdev)
+ 		goto err3;
+ 	}
+ 
++	err = sysfs_create_file(&dvfs_dev->kobj, &dev_attr_down_threshold.attr);
++	if (err) {
++		printk(KERN_ERR
++		       "DVFS: Unable to register sysdev entry for DVFS");
++		goto err3;
++	}
++
++	err = sysfs_create_file(&dvfs_dev->kobj, &dev_attr_down_count.attr);
++	if (err) {
++		printk(KERN_ERR
++		       "DVFS: Unable to register sysdev entry for DVFS");
++		goto err3;
++	}
++
+ 	/* Set the current working point. */
+ 	cpu_op_tbl = get_cpu_op(&cpu_op_nr);
+ 	old_op = 0;
+-- 
+1.7.7.4
+

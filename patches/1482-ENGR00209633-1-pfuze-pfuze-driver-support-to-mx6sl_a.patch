@@ -1,0 +1,34 @@
+From c0f28bd786f0c899f4d3cbc1f3ef14a4670fe433 Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Thu, 17 May 2012 12:29:38 +0800
+Subject: [PATCH 1482/2463] ENGR00209633-1 pfuze:pfuze driver support to
+ mx6sl_arm2 which not use interrupt
+
+because mx6sl arm2 board didn't use pfuse INT, pfuze driver should judge if no
+interrupt.
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ drivers/mfd/pfuze-core.c |    7 ++++---
+ 1 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mfd/pfuze-core.c b/drivers/mfd/pfuze-core.c
+index 96b6292..9c7a988 100644
+--- a/drivers/mfd/pfuze-core.c
++++ b/drivers/mfd/pfuze-core.c
+@@ -501,9 +501,10 @@ static int pfuze_probe(struct i2c_client *client,
+ 		if (ret)
+ 			goto err_mask;
+ 	}
+-	ret = request_threaded_irq(client->irq, NULL, pfuze_irq_thread,
+-				   IRQF_ONESHOT | IRQF_TRIGGER_LOW, "pfuze",
+-				   mc_pfuze);
++	if (client->irq)
++		ret = request_threaded_irq(client->irq, NULL, pfuze_irq_thread,
++					IRQF_ONESHOT | IRQF_TRIGGER_LOW, "pfuze",
++					mc_pfuze);
+ 	if (ret) {
+ 	      err_mask:
+ 	      err_revision:
+-- 
+1.7.7.4
+

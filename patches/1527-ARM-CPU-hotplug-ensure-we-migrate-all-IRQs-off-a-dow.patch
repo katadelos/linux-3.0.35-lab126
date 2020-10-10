@@ -1,0 +1,106 @@
+From a645342fc1e33e74c02d7107c349f253a607bccd Mon Sep 17 00:00:00 2001
+From: Russell King <rmk+kernel@arm.linux.org.uk>
+Date: Thu, 21 Jul 2011 15:14:21 +0100
+Subject: [PATCH 1527/2463] ARM: CPU hotplug: ensure we migrate all IRQs off a
+ downed CPU
+
+Our selection of interrupts to consider for IRQ migration is sub-
+standard.  We were potentially including per-CPU interrupts in our
+migration strategy, but omitting chained interrupts.  This caused
+some interrupts to remain on a downed CPU.
+
+We were also trying to migrate interrupts which were not migratable,
+resulting in an OOPS.
+
+Instead, iterate over all interrupts, skipping per-CPU interrupts
+or interrupts whose affinity does not include the downed CPU, and
+attempt to set the affinity for every one else if their chip
+implements irq_set_affinity().
+
+Signed-off-by: Russell King <rmk+kernel@arm.linux.org.uk>
+---
+ arch/arm/kernel/irq.c |   39 ++++++++++++++++++++++++++++-----------
+ 1 files changed, 28 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/kernel/irq.c b/arch/arm/kernel/irq.c
+index 30d6806..de3dcab 100644
+--- a/arch/arm/kernel/irq.c
++++ b/arch/arm/kernel/irq.c
+@@ -140,46 +140,63 @@ int __init arch_probe_nr_irqs(void)
+ 
+ #ifdef CONFIG_HOTPLUG_CPU
+ 
+-static bool migrate_one_irq(struct irq_data *d)
++static bool migrate_one_irq(struct irq_desc *desc)
+ {
++	struct irq_data *d = irq_desc_get_irq_data(desc);
+ 	const struct cpumask *affinity = d->affinity;
++	struct irq_chip *c;
+ 	bool ret = false;
+ 
++	/*
++	 * If this is a per-CPU interrupt, or the affinity does not
++	 * include this CPU, then we have nothing to do.
++	 */
++	if (irqd_is_per_cpu(d) || !cpumask_test_cpu(smp_processor_id(), affinity))
++		return false;
++
+ 	if (cpumask_any_and(affinity, cpu_online_mask) >= nr_cpu_ids) {
+-		affinity cpu_online_mask;
++		affinity = cpu_online_mask;
+ 		ret = true;
+ 	}
+ 
+-	d->chip->irq_set_affinity(d, affinity, true);
++	c = irq_data_get_irq_chip(d);
++	if (c->irq_set_affinity)
++		c->irq_set_affinity(d, affinity, true);
++	else
++		pr_debug("IRQ%u: unable to set affinity\n", d->irq);
+ 
+ 	return ret;
+ }
+ 
+ /*
+- * The CPU has been marked offline.  Migrate IRQs off this CPU.  If
+- * the affinity settings do not allow other CPUs, force them onto any
++ * The current CPU has been marked offline.  Migrate IRQs off this CPU.
++ * If the affinity settings do not allow other CPUs, force them onto any
+  * available CPU.
++ *
++ * Note: we must iterate over all IRQs, whether they have an attached
++ * action structure or not, as we need to get chained interrupts too.
+  */
+ void migrate_irqs(void)
+ {
+-	unsigned int i, cpu = smp_processor_id();
++	unsigned int i;
+ 	struct irq_desc *desc;
+ 	unsigned long flags;
+ 
+ 	local_irq_save(flags);
+ 
+ 	for_each_irq_desc(i, desc) {
+-		struct irq_data *d = &desc->irq_data;
+ 		bool affinity_broken = false;
+ 
++		if (!desc)
++			continue;
++
+ 		raw_spin_lock(&desc->lock);
+-		if (desc->action != NULL &&
+-		    cpumask_test_cpu(smp_processor_id(), d->affinity))
+-			affinity_broken = migrate_one_irq(d);
++		affinity_broken = migrate_one_irq(desc);
+ 		raw_spin_unlock(&desc->lock);
+ 
+ 		if (affinity_broken && printk_ratelimit())
+-			pr_warning("IRQ%u no longer affine to CPU%u\n", i, cpu);
++			pr_warning("IRQ%u no longer affine to CPU%u\n", i,
++				smp_processor_id());
+ 	}
+ 
+ 	local_irq_restore(flags);
+-- 
+1.7.7.4
+

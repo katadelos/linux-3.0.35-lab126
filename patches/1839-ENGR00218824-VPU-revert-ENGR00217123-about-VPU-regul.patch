@@ -1,0 +1,71 @@
+From ba0ad582e921bb4208b75289f3ecc22f773feb6e Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Mon, 30 Jul 2012 19:21:18 +0800
+Subject: [PATCH 1839/2463] ENGR00218824 VPU: revert  ENGR00217123 about VPU
+ regulator
+
+Two reason:
+1. VPU regulator is not enough stable,sometimes will cause system hang
+2. GPU regulator is not ready, because GPU/VPU share PU LDO, so revert
+the patch firstly.
+
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ drivers/mxc/vpu/mxc_vpu.c |   23 +----------------------
+ 1 files changed, 1 insertions(+), 22 deletions(-)
+
+diff --git a/drivers/mxc/vpu/mxc_vpu.c b/drivers/mxc/vpu/mxc_vpu.c
+index 0d36a25..26fc95a 100644
+--- a/drivers/mxc/vpu/mxc_vpu.c
++++ b/drivers/mxc/vpu/mxc_vpu.c
+@@ -39,7 +39,6 @@
+ #include <linux/workqueue.h>
+ #include <linux/sched.h>
+ #include <linux/vmalloc.h>
+-#include <linux/regulator/consumer.h>
+ #include <linux/page-flags.h>
+ #include <linux/mm_types.h>
+ #include <linux/types.h>
+@@ -247,19 +246,8 @@ bool vpu_is_valid_phy_memory(u32 paddr)
+  */
+ static int vpu_open(struct inode *inode, struct file *filp)
+ {
+-	struct regulator *vpu_regulator;
+-
+ 	mutex_lock(&vpu_data.lock);
+-
+-	if (open_count++ == 0) {
+-		vpu_regulator = regulator_get(NULL, "cpu_vddvpu");
+-		if (IS_ERR(vpu_regulator))
+-			printk(KERN_ERR
+-			       "%s: failed to get vpu regulator\n", __func__);
+-		else
+-			regulator_enable(vpu_regulator);
+-	}
+-
++	open_count++;
+ 	filp->private_data = (void *)(&vpu_data);
+ 	mutex_unlock(&vpu_data.lock);
+ 	return 0;
+@@ -541,18 +529,9 @@ static long vpu_ioctl(struct file *filp, u_int cmd,
+  */
+ static int vpu_release(struct inode *inode, struct file *filp)
+ {
+-	struct regulator *vpu_regulator;
+ 
+ 	mutex_lock(&vpu_data.lock);
+ 	if (open_count > 0 && !(--open_count)) {
+-
+-		vpu_regulator = regulator_get(NULL, "cpu_vddvpu");
+-		if (IS_ERR(vpu_regulator))
+-			printk(KERN_ERR
+-			       "%s: failed to get vpu regulator\n", __func__);
+-		else
+-			regulator_disable(vpu_regulator);
+-
+ 		vpu_free_buffers();
+ 
+ 		/* Free shared memory when vpu device is idle */
+-- 
+1.7.7.4
+

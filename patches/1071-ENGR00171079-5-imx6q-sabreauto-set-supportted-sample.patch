@@ -1,0 +1,51 @@
+From 188c9cb5930a6e435e196d7e4d2712fb77007bda Mon Sep 17 00:00:00 2001
+From: Adrian Alonso <aalonso@freescale.com>
+Date: Fri, 17 Feb 2012 15:09:31 -0600
+Subject: [PATCH 1071/2463] ENGR00171079-5 imx6q-sabreauto set supportted
+ sample rates
+
+* cs42888 set imx6q-sabreauto supportted play/record sample rates
+  master clk signal is a fixed source clock @24576000Mhz, thus
+  limit the play/record sample rates lrclk.
+
+Signed-off-by: Adrian Alonso <aalonso@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    8 ++++++++
+ 1 files changed, 8 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index cff1fdd..1c9db71 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -50,6 +50,7 @@
+ #include <linux/regulator/consumer.h>
+ #include <linux/regulator/machine.h>
+ #include <linux/regulator/fixed.h>
++#include <sound/pcm.h>
+ 
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+@@ -754,6 +755,12 @@ static struct imxi2c_platform_data mx6q_sabreauto_i2c1_data = {
+ 	.bitrate = 100000,
+ };
+ 
++static struct mxc_audio_codec_platform_data cs42888_data = {
++	.rates = (SNDRV_PCM_RATE_48000 |
++			SNDRV_PCM_RATE_96000 |
++			SNDRV_PCM_RATE_192000),
++};
++
+ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ 	{
+ 		I2C_BOARD_INFO("max7310", 0x30),
+@@ -791,6 +798,7 @@ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+ 	},
+ 	{
+ 		I2C_BOARD_INFO("cs42888", 0x48),
++		.platform_data = (void *)&cs42888_data,
+ 	},
+ };
+ 
+-- 
+1.7.7.4
+

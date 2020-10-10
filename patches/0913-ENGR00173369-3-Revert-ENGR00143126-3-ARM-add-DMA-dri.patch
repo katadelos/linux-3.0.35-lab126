@@ -1,0 +1,57 @@
+From 40cdcb2163321a9a6c9e6ad80581dc98f85ccfae Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Tue, 31 Jan 2012 10:54:39 +0800
+Subject: [PATCH 0913/2463] ENGR00173369-3 Revert "ENGR00143126-3 ARM: add DMA
+ driver for mx50"
+
+This reverts commit 6257fa54c1c66de2c9f72172895ea7e0e3c0845c.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/dma/Kconfig   |    2 +-
+ drivers/dma/mxs-dma.c |    8 --------
+ 2 files changed, 1 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/dma/Kconfig b/drivers/dma/Kconfig
+index 2df7ceb..30edc36 100644
+--- a/drivers/dma/Kconfig
++++ b/drivers/dma/Kconfig
+@@ -239,7 +239,7 @@ config IMX_DMA
+ 
+ config MXS_DMA
+ 	bool "MXS DMA support"
+-	depends on SOC_IMX23 || SOC_IMX28 || SOC_IMX50
++	depends on SOC_IMX23 || SOC_IMX28
+ 	select DMA_ENGINE
+ 	help
+ 	  Support the MXS DMA engine. This engine including APBH-DMA
+diff --git a/drivers/dma/mxs-dma.c b/drivers/dma/mxs-dma.c
+index a44c2ba..e8d386e 100644
+--- a/drivers/dma/mxs-dma.c
++++ b/drivers/dma/mxs-dma.c
+@@ -27,9 +27,6 @@
+ #include <mach/mxs.h>
+ #include <mach/dma.h>
+ #include <mach/common.h>
+-#ifdef CONFIG_SOC_IMX50
+-#include <mach/system.h>
+-#endif
+ 
+ /*
+  * NOTE: The term "PIO" throughout the mxs-dma implementation means
+@@ -585,12 +582,7 @@ static int __init mxs_dma_init(struct mxs_dma_engine *mxs_dma)
+ 	if (ret)
+ 		goto err_out;
+ 
+-#if defined(CONFIG_SOC_IMX23) || defined(CONFIG_SOC_IMX28)
+ 	ret = mxs_reset_block(mxs_dma->base);
+-#elif defined(CONFIG_SOC_IMX50)
+-	ret = mxs_reset_block(mxs_dma->base, true);
+-#endif
+-
+ 	if (ret)
+ 		goto err_out;
+ 
+-- 
+1.7.7.4
+

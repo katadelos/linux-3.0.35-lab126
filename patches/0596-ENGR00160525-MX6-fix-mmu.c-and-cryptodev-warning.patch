@@ -1,0 +1,103 @@
+From fde133cb5b621d190ca11f16054078107933dd2c Mon Sep 17 00:00:00 2001
+From: Frank Li <Frank.Li@freescale.com>
+Date: Fri, 11 Nov 2011 10:29:48 +0800
+Subject: [PATCH 0596/2463] ENGR00160525 MX6: fix mmu.c and cryptodev warning
+
+skip build cryptodev because no one use it now.
+
+Signed-off-by: Frank Li <Frank.Li@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig |    4 ++--
+ arch/arm/mm/mmu.c               |   24 ++++++++++++------------
+ 2 files changed, 14 insertions(+), 14 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index cc21f450..ff4a464 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux/arm 2.6.38 Kernel Configuration
+-# Wed Nov  9 15:44:43 2011
++# Fri Nov 11 09:57:21 2011
+ #
+ CONFIG_ARM=y
+ CONFIG_HAVE_PWM=y
+@@ -2249,7 +2249,7 @@ CONFIG_CRYPTO_WORKQUEUE=y
+ # CONFIG_CRYPTO_CRYPTD is not set
+ # CONFIG_CRYPTO_AUTHENC is not set
+ CONFIG_CRYPTO_TEST=m
+-CONFIG_CRYPTO_CRYPTODEV=y
++# CONFIG_CRYPTO_CRYPTODEV is not set
+ 
+ #
+ # Authenticated Encryption with Associated Data
+diff --git a/arch/arm/mm/mmu.c b/arch/arm/mm/mmu.c
+index 594d677..a1ee7e8 100644
+--- a/arch/arm/mm/mmu.c
++++ b/arch/arm/mm/mmu.c
+@@ -609,7 +609,7 @@ static void __init create_36bit_mapping(struct map_desc *md,
+ 	if (!(cpu_architecture() >= CPU_ARCH_ARMv6 || cpu_is_xsc3())) {
+ 		printk(KERN_ERR "MM: CPU does not support supersection "
+ 		       "mapping for 0x%08llx at 0x%08lx\n",
+-		       (long long)__pfn_to_phys((u64)md->pfn), addr);
++		       (uint64_t) __pfn_to_phys((u64)md->pfn), addr);
+ 		return;
+ 	}
+ 
+@@ -622,14 +622,14 @@ static void __init create_36bit_mapping(struct map_desc *md,
+ 	if (type->domain) {
+ 		printk(KERN_ERR "MM: invalid domain in supersection "
+ 		       "mapping for 0x%08llx at 0x%08lx\n",
+-		       (long long)__pfn_to_phys((u64)md->pfn), addr);
++		       (uint64_t) __pfn_to_phys((u64)md->pfn), addr);
+ 		return;
+ 	}
+ 
+ 	if ((addr | length | __pfn_to_phys(md->pfn)) & ~SUPERSECTION_MASK) {
+-		printk(KERN_ERR "MM: cannot create mapping for 0x%08llx"
+-		       " at 0x%08lx invalid alignment\n",
+-		       (long long)__pfn_to_phys((u64)md->pfn), addr);
++		printk(KERN_ERR "MM: cannot create mapping for "
++		       "0x%08llx at 0x%08lx invalid alignment\n",
++		       (uint64_t) __pfn_to_phys((u64)md->pfn), addr);
+ 		return;
+ 	}
+ 
+@@ -670,17 +670,17 @@ static void __init create_mapping(struct map_desc *md)
+ 	pgd_t *pgd;
+ 
+ 	if (md->virtual != vectors_base() && md->virtual < TASK_SIZE) {
+-		printk(KERN_WARNING "BUG: not creating mapping for 0x%08llx"
+-		       " at 0x%08lx in user region\n",
+-		       (long long)__pfn_to_phys((u64)md->pfn), md->virtual);
++		printk(KERN_WARNING "BUG: not creating mapping for "
++		       "0x%08llx at 0x%08lx in user region\n",
++		       (uint64_t) __pfn_to_phys((u64)md->pfn), md->virtual);
+ 		return;
+ 	}
+ 
+ 	if ((md->type == MT_DEVICE || md->type == MT_ROM) &&
+ 	    md->virtual >= PAGE_OFFSET && md->virtual < VMALLOC_END) {
+-		printk(KERN_WARNING "BUG: mapping for 0x%08llx"
+-		       " at 0x%08lx overlaps vmalloc space\n",
+-		       (long long)__pfn_to_phys((u64)md->pfn), md->virtual);
++		printk(KERN_WARNING "BUG: mapping for 0x%08llx at 0x%08lx "
++		       "overlaps vmalloc space\n",
++		       (uint64_t) __pfn_to_phys((u64)md->pfn), md->virtual);
+ 	}
+ 
+ 	type = &mem_types[md->type];
+@@ -700,7 +700,7 @@ static void __init create_mapping(struct map_desc *md)
+ 	if (type->prot_l1 == 0 && ((addr | phys | length) & ~SECTION_MASK)) {
+ 		printk(KERN_WARNING "BUG: map for 0x%08llx at 0x%08lx can not "
+ 		       "be mapped using pages, ignoring.\n",
+-		       (long long)__pfn_to_phys(md->pfn), addr);
++		       (uint64_t) __pfn_to_phys(md->pfn), addr);
+ 		return;
+ 	}
+ 
+-- 
+1.7.7.4
+

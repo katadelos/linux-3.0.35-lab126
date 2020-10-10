@@ -1,0 +1,106 @@
+From 9514bd667f8d6b341727f37873c04b1eef6f04d7 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Thu, 23 Feb 2012 08:24:53 +0800
+Subject: [PATCH 1090/2463] ENGR00175221-02 [MX6] MMCSD: clear EXE_TUNE bit
+ after tuning finishes.
+
+- add hook for post tuning in common code
+- add hook for post tuning for platform code to deal with clean up stuff on
+finishing tuning.
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/core/core.c  |    7 +++++++
+ drivers/mmc/core/core.h  |    1 +
+ drivers/mmc/core/sd.c    |    1 +
+ drivers/mmc/host/sdhci.c |    6 ++++++
+ drivers/mmc/host/sdhci.h |    1 +
+ include/linux/mmc/host.h |    1 +
+ 6 files changed, 17 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
+index fb541cc..c3f7117 100644
+--- a/drivers/mmc/core/core.c
++++ b/drivers/mmc/core/core.c
+@@ -662,6 +662,13 @@ void mmc_set_clock(struct mmc_host *host, unsigned int hz)
+ 	mmc_host_clk_release(host);
+ }
+ 
++void mmc_finish_tuning(struct mmc_host *host)
++{
++	host->ios.finish_tuning_flag = 1;
++	mmc_set_ios(host);
++	host->ios.finish_tuning_flag = 0;
++}
++
+ void mmc_set_tuning(struct mmc_host *host, unsigned int tuning)
+ {
+ 	WARN_ON(tuning < host->tuning_min);
+diff --git a/drivers/mmc/core/core.h b/drivers/mmc/core/core.h
+index 84370ca..afed70f 100644
+--- a/drivers/mmc/core/core.h
++++ b/drivers/mmc/core/core.h
+@@ -34,6 +34,7 @@ void mmc_init_erase(struct mmc_card *card);
+ void mmc_set_chip_select(struct mmc_host *host, int mode);
+ void mmc_set_clock(struct mmc_host *host, unsigned int hz);
+ void mmc_set_tuning(struct mmc_host *host, unsigned int tuning);
++void mmc_finish_tuning(struct mmc_host *host);
+ void mmc_gate_clock(struct mmc_host *host);
+ void mmc_ungate_clock(struct mmc_host *host);
+ void mmc_set_ungated(struct mmc_host *host);
+diff --git a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
+index 8fddc55..b7291e0 100644
+--- a/drivers/mmc/core/sd.c
++++ b/drivers/mmc/core/sd.c
+@@ -648,6 +648,7 @@ static int mmc_sd_init_uhs_card(struct mmc_card *card)
+ 		avg = (min + max) / 2;
+ 		mmc_set_tuning(card->host, avg);
+ 		mmc_send_tuning_cmd(card);
++		mmc_finish_tuning(card->host);
+ 	}
+ #else
+ 	if (!mmc_host_is_spi(card->host) && card->host->ops->execute_tuning)
+diff --git a/drivers/mmc/host/sdhci.c b/drivers/mmc/host/sdhci.c
+index 84ec611..519f713 100755
+--- a/drivers/mmc/host/sdhci.c
++++ b/drivers/mmc/host/sdhci.c
+@@ -1328,6 +1328,12 @@ static void sdhci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
+ 	if (host->flags & SDHCI_DEVICE_DEAD)
+ 		goto out;
+ 
++	if (ios->finish_tuning_flag) {
++		if (host->ops->post_tuning)
++			host->ops->post_tuning(host);
++		goto out;
++	}
++
+ 	if (ios->tuning_flag) {
+ 		/* means this request is for tuning only */
+ 		if (host->ops->pre_tuning)
+diff --git a/drivers/mmc/host/sdhci.h b/drivers/mmc/host/sdhci.h
+index e6af69e..27b1250 100644
+--- a/drivers/mmc/host/sdhci.h
++++ b/drivers/mmc/host/sdhci.h
+@@ -275,6 +275,7 @@ struct sdhci_ops {
+ 	int	(*set_uhs_signaling)(struct sdhci_host *host, unsigned int uhs);
+ 
+ 	void		(*pre_tuning)(struct sdhci_host *host, u32 val);
++	void		(*post_tuning)(struct sdhci_host *host);
+ 	void		(*platform_clk_ctrl)(struct sdhci_host *host, bool enable);
+ };
+ 
+diff --git a/include/linux/mmc/host.h b/include/linux/mmc/host.h
+index 66bf0fb..3fc0cc7 100644
+--- a/include/linux/mmc/host.h
++++ b/include/linux/mmc/host.h
+@@ -75,6 +75,7 @@ struct mmc_ios {
+ #define MMC_SET_DRIVER_TYPE_C	2
+ #define MMC_SET_DRIVER_TYPE_D	3
+ 	unsigned int	tuning_flag;		/* request tuning only */
++	unsigned int	finish_tuning_flag;
+ 	unsigned int	tuning;			/* tuning parameter */
+ };
+ 
+-- 
+1.7.7.4
+

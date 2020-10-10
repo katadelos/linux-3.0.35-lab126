@@ -1,0 +1,373 @@
+From 1ebe9b5a2300b4c78e059a6a4ad2332d8e656e08 Mon Sep 17 00:00:00 2001
+From: Sammy He <r62914@freescale.com>
+Date: Wed, 22 Jun 2011 00:16:20 +0800
+Subject: [PATCH 0189/2463] ENGR00151494-1 vpu: remove the code for vpu of
+ mx32/mx37 platforms
+
+The vpu code in driver for mx32/mx37 is out of date already, and
+we won't support the platforms, so clean the code for removing it.
+
+Signed-off-by: Sammy He <r62914@freescale.com>
+---
+ drivers/mxc/vpu/Makefile    |    3 +-
+ drivers/mxc/vpu/mxc_vl2cc.c |  124 ------------------------------------------
+ drivers/mxc/vpu/mxc_vpu.c   |  126 +++++++------------------------------------
+ 3 files changed, 21 insertions(+), 232 deletions(-)
+
+diff --git a/drivers/mxc/vpu/Makefile b/drivers/mxc/vpu/Makefile
+index 88e8f2c..1a821f4 100644
+--- a/drivers/mxc/vpu/Makefile
++++ b/drivers/mxc/vpu/Makefile
+@@ -2,8 +2,7 @@
+ # Makefile for the VPU drivers.
+ #
+ 
+-obj-$(CONFIG_MXC_VPU)                  += vpu.o
+-vpu-objs	:= mxc_vpu.o mxc_vl2cc.o
++obj-$(CONFIG_MXC_VPU)                  += mxc_vpu.o
+ 
+ ifeq ($(CONFIG_MXC_VPU_DEBUG),y)
+ EXTRA_CFLAGS += -DDEBUG
+diff --git a/drivers/mxc/vpu/mxc_vl2cc.c b/drivers/mxc/vpu/mxc_vl2cc.c
+deleted file mode 100644
+index f30efea..0000000
+--- a/drivers/mxc/vpu/mxc_vl2cc.c
++++ /dev/null
+@@ -1,124 +0,0 @@
+-/*
+- * Copyright 2007-2011 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * The code contained herein is licensed under the GNU General Public
+- * License. You may obtain a copy of the GNU General Public License
+- * Version 2 or later at the following locations:
+- *
+- * http://www.opensource.org/licenses/gpl-license.html
+- * http://www.gnu.org/copyleft/gpl.html
+- */
+-
+-/*!
+- * @file mxc_vl2cc.c
+- *
+- * @brief VL2CC initialization and flush operation implementation
+- *
+- * @ingroup VL2CC
+- */
+-
+-#include <linux/module.h>
+-#include <linux/kernel.h>
+-#include <linux/init.h>
+-#include <linux/clk.h>
+-#include <linux/err.h>
+-#include <linux/io.h>
+-
+-#define VL2CC_CTRL_OFFSET	(0x100)
+-#define VL2CC_AUXCTRL_OFFSET	(0x104)
+-#define VL2CC_INVWAY_OFFSET	(0x77C)
+-#define VL2CC_CLEANWAY_OFFSET	(0x7BC)
+-
+-/*! VL2CC clock handle. */
+-static struct clk *vl2cc_clk;
+-static u32 *vl2cc_base;
+-
+-/*!
+- * Initialization function of VL2CC. Remap the VL2CC base address.
+- *
+- * @return status  0 success.
+- */
+-int vl2cc_init(u32 vl2cc_hw_base)
+-{
+-	vl2cc_base = ioremap(vl2cc_hw_base, SZ_8K - 1);
+-	if (vl2cc_base == NULL) {
+-		printk(KERN_INFO "vl2cc: Unable to ioremap\n");
+-		return -ENOMEM;
+-	}
+-
+-	vl2cc_clk = clk_get(NULL, "vl2cc_clk");
+-	if (IS_ERR(vl2cc_clk)) {
+-		printk(KERN_INFO "vl2cc: Unable to get clock\n");
+-		iounmap(vl2cc_base);
+-		return -EIO;
+-	}
+-
+-	printk(KERN_INFO "VL2CC initialized\n");
+-	return 0;
+-}
+-
+-/*!
+- * Enable VL2CC hardware
+- */
+-void vl2cc_enable(void)
+-{
+-	volatile u32 reg;
+-
+-	clk_enable(vl2cc_clk);
+-
+-	/* Disable VL2CC */
+-	reg = __raw_readl(vl2cc_base + VL2CC_CTRL_OFFSET);
+-	reg &= 0xFFFFFFFE;
+-	__raw_writel(reg, vl2cc_base + VL2CC_CTRL_OFFSET);
+-
+-	/* Set the latency for data RAM reads, data RAM writes, tag RAM and
+-	 * dirty RAM to 1 cycle - write 0x0 to AUX CTRL [11:0] and also
+-	 * configure the number of ways to 8 - write 8 to AUX CTRL [16:13]
+-	 */
+-	reg = __raw_readl(vl2cc_base + VL2CC_AUXCTRL_OFFSET);
+-	reg &= 0xFFFE1000;	/* Clear [16:13] too */
+-	reg |= (0x8 << 13);	/* [16:13] = 8; */
+-	__raw_writel(reg, vl2cc_base + VL2CC_AUXCTRL_OFFSET);
+-
+-	/* Invalidate the VL2CC ways - write 0xff to INV BY WAY and poll the
+-	 * register until its value is 0x0
+-	 */
+-	__raw_writel(0xff, vl2cc_base + VL2CC_INVWAY_OFFSET);
+-	while (__raw_readl(vl2cc_base + VL2CC_INVWAY_OFFSET) != 0x0)
+-		;
+-
+-	/* Enable VL2CC */
+-	reg = __raw_readl(vl2cc_base + VL2CC_CTRL_OFFSET);
+-	reg |= 0x1;
+-	__raw_writel(reg, vl2cc_base + VL2CC_CTRL_OFFSET);
+-}
+-
+-/*!
+- * Flush VL2CC
+- */
+-void vl2cc_flush(void)
+-{
+-	__raw_writel(0xff, vl2cc_base + VL2CC_CLEANWAY_OFFSET);
+-	while (__raw_readl(vl2cc_base + VL2CC_CLEANWAY_OFFSET) != 0x0)
+-		;
+-}
+-
+-/*!
+- * Disable VL2CC
+- */
+-void vl2cc_disable(void)
+-{
+-	__raw_writel(0, vl2cc_base + VL2CC_CTRL_OFFSET);
+-	clk_disable(vl2cc_clk);
+-}
+-
+-/*!
+- * Cleanup VL2CC
+- */
+-void vl2cc_cleanup(void)
+-{
+-	clk_put(vl2cc_clk);
+-	iounmap(vl2cc_base);
+-}
+diff --git a/drivers/mxc/vpu/mxc_vpu.c b/drivers/mxc/vpu/mxc_vpu.c
+index 6f7f30a..da2ae53 100644
+--- a/drivers/mxc/vpu/mxc_vpu.c
++++ b/drivers/mxc/vpu/mxc_vpu.c
+@@ -235,8 +235,6 @@ static irqreturn_t vpu_irq_handler(int irq, void *dev_id)
+ static int vpu_open(struct inode *inode, struct file *filp)
+ {
+ 	spin_lock(&vpu_lock);
+-	if ((open_count++ == 0) && cpu_is_mx32())
+-		vl2cc_enable();
+ 	filp->private_data = (void *)(&vpu_data);
+ 	spin_unlock(&vpu_lock);
+ 	return 0;
+@@ -339,11 +337,6 @@ static long vpu_ioctl(struct file *filp, u_int cmd,
+ 				codec_done = 0;
+ 			break;
+ 		}
+-	case VPU_IOC_VL2CC_FLUSH:
+-		if (cpu_is_mx32()) {
+-			vl2cc_flush();
+-		}
+-		break;
+ 	case VPU_IOC_IRAM_SETTING:
+ 		{
+ 			ret = copy_to_user((void __user *)arg, &iram,
+@@ -421,54 +414,6 @@ static long vpu_ioctl(struct file *filp, u_int cmd,
+ 			}
+ 			break;
+ 		}
+-	case VPU_IOC_GET_PIC_PARA_ADDR:
+-		{
+-			if (pic_para_mem.cpu_addr != 0) {
+-				ret =
+-				    copy_to_user((void __user *)arg,
+-						 &pic_para_mem,
+-						 sizeof(struct vpu_mem_desc));
+-				break;
+-			} else {
+-				if (copy_from_user(&pic_para_mem,
+-						   (struct vpu_mem_desc *)arg,
+-						   sizeof(struct vpu_mem_desc)))
+-					return -EFAULT;
+-
+-				if (vpu_alloc_dma_buffer(&pic_para_mem) == -1)
+-					ret = -EFAULT;
+-				else if (copy_to_user((void __user *)arg,
+-						      &pic_para_mem,
+-						      sizeof(struct
+-							     vpu_mem_desc)))
+-					ret = -EFAULT;
+-			}
+-			break;
+-		}
+-	case VPU_IOC_GET_USER_DATA_ADDR:
+-		{
+-			if (user_data_mem.cpu_addr != 0) {
+-				ret =
+-				    copy_to_user((void __user *)arg,
+-						 &user_data_mem,
+-						 sizeof(struct vpu_mem_desc));
+-				break;
+-			} else {
+-				if (copy_from_user(&user_data_mem,
+-						   (struct vpu_mem_desc *)arg,
+-						   sizeof(struct vpu_mem_desc)))
+-					return -EFAULT;
+-
+-				if (vpu_alloc_dma_buffer(&user_data_mem) == -1)
+-					ret = -EFAULT;
+-				else if (copy_to_user((void __user *)arg,
+-						      &user_data_mem,
+-						      sizeof(struct
+-							     vpu_mem_desc)))
+-					ret = -EFAULT;
+-			}
+-			break;
+-		}
+ 	case VPU_IOC_SYS_SW_RESET:
+ 		{
+ 			if (vpu_plat->reset)
+@@ -499,9 +444,6 @@ static int vpu_release(struct inode *inode, struct file *filp)
+ 	if (open_count > 0 && !(--open_count)) {
+ 		vpu_free_buffers();
+ 
+-		if (cpu_is_mx32())
+-			vl2cc_disable();
+-
+ 		/* Free shared memory when vpu device is idle */
+ 		vpu_free_dma_buffer(&share_mem);
+ 		share_mem.cpu_addr = 0;
+@@ -603,12 +545,6 @@ static int vpu_dev_probe(struct platform_device *pdev)
+ 		iram.end = addr +  vpu_plat->iram_size - 1;
+ 	}
+ 
+-	if (cpu_is_mx32()) {
+-		err = vl2cc_init(iram.start);
+-		if (err != 0)
+-			return err;
+-	}
+-
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (!res) {
+ 		printk(KERN_ERR "vpu: unable to get vpu base addr\n");
+@@ -668,9 +604,6 @@ static int vpu_dev_probe(struct platform_device *pdev)
+ 	unregister_chrdev(vpu_major, "mxc_vpu");
+       error:
+ 	iounmap(vpu_base);
+-	if (cpu_is_mx32()) {
+-		vl2cc_cleanup();
+-	}
+       out:
+ 	return err;
+ }
+@@ -713,7 +646,7 @@ static int vpu_suspend(struct platform_device *pdev, pm_message_t state)
+ 	for (i = 0; i < vpu_clk_usercount; i++)
+ 		clk_disable(vpu_clk);
+ 
+-	if (!cpu_is_mx53()) {
++	if (cpu_is_mx51()) {
+ 		clk_enable(vpu_clk);
+ 		if (bitwork_mem.cpu_addr != 0) {
+ 			SAVE_WORK_REGS;
+@@ -729,7 +662,7 @@ static int vpu_suspend(struct platform_device *pdev, pm_message_t state)
+ 		clk_disable(vpu_clk);
+ 	}
+ 
+-	if ((cpu_is_mx37() || cpu_is_mx51()) && vpu_plat->pg)
++	if (cpu_is_mx51() && vpu_plat->pg)
+ 		vpu_plat->pg(1);
+ 
+ 	return 0;
+@@ -744,12 +677,12 @@ static int vpu_resume(struct platform_device *pdev)
+ {
+ 	int i;
+ 
+-	if ((cpu_is_mx37() || cpu_is_mx51()) && vpu_plat->pg)
+-		vpu_plat->pg(0);
+-
+ 	if (cpu_is_mx53())
+ 		goto recover_clk;
+ 
++	if (vpu_plat->pg)
++		vpu_plat->pg(0);
++
+ 	clk_enable(vpu_clk);
+ 	if (bitwork_mem.cpu_addr != 0) {
+ 		u32 *p = (u32 *) bitwork_mem.cpu_addr;
+@@ -766,36 +699,21 @@ static int vpu_resume(struct platform_device *pdev)
+ 		 * Re-load boot code, from the codebuffer in external RAM.
+ 		 * Thankfully, we only need 4096 bytes, same for all platforms.
+ 		 */
+-		if (cpu_is_mx51()) {
+-			for (i = 0; i < 2048; i += 4) {
+-				data = p[(i / 2) + 1];
+-				data_hi = (data >> 16) & 0xFFFF;
+-				data_lo = data & 0xFFFF;
+-				WRITE_REG((i << 16) | data_hi, BIT_CODE_DOWN);
+-				WRITE_REG(((i + 1) << 16) | data_lo,
+-					  BIT_CODE_DOWN);
+-
+-				data = p[i / 2];
+-				data_hi = (data >> 16) & 0xFFFF;
+-				data_lo = data & 0xFFFF;
+-				WRITE_REG(((i + 2) << 16) | data_hi,
+-					  BIT_CODE_DOWN);
+-				WRITE_REG(((i + 3) << 16) | data_lo,
+-					  BIT_CODE_DOWN);
+-			}
+-		} else {
+-			for (i = 0; i < 2048; i += 2) {
+-				if (cpu_is_mx37())
+-					data = swab32(p[i / 2]);
+-				else
+-					data = p[i / 2];
+-				data_hi = (data >> 16) & 0xFFFF;
+-				data_lo = data & 0xFFFF;
+-
+-				WRITE_REG((i << 16) | data_hi, BIT_CODE_DOWN);
+-				WRITE_REG(((i + 1) << 16) | data_lo,
+-					  BIT_CODE_DOWN);
+-			}
++		for (i = 0; i < 2048; i += 4) {
++			data = p[(i / 2) + 1];
++			data_hi = (data >> 16) & 0xFFFF;
++			data_lo = data & 0xFFFF;
++			WRITE_REG((i << 16) | data_hi, BIT_CODE_DOWN);
++			WRITE_REG(((i + 1) << 16) | data_lo,
++				  BIT_CODE_DOWN);
++
++			data = p[i / 2];
++			data_hi = (data >> 16) & 0xFFFF;
++			data_lo = data & 0xFFFF;
++			WRITE_REG(((i + 2) << 16) | data_hi,
++				  BIT_CODE_DOWN);
++			WRITE_REG(((i + 3) << 16) | data_lo,
++				  BIT_CODE_DOWN);
+ 		}
+ 
+ 		RESTORE_CTRL_REGS;
+@@ -860,10 +778,6 @@ static void __exit vpu_exit(void)
+ 		vpu_major = 0;
+ 	}
+ 
+-	if (cpu_is_mx32()) {
+-		vl2cc_cleanup();
+-	}
+-
+ 	vpu_free_dma_buffer(&bitwork_mem);
+ 	vpu_free_dma_buffer(&pic_para_mem);
+ 	vpu_free_dma_buffer(&user_data_mem);
+-- 
+1.7.7.4
+

@@ -1,0 +1,42 @@
+From 33ba600c59b3e2edfdff712e59b983a19b1982e2 Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Wed, 18 Apr 2012 11:59:37 -0700
+Subject: [PATCH 1387/2463] ENGR00180943-6: Place CAAM Job Ring resources in
+ their own struct
+
+Place CAAM Job Ring resources in their own struct,
+and treat as array to the limit of instantiable rings.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+---
+ arch/arm/plat-mxc/include/mach/devices-common.h |   10 ++++++----
+ 1 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 4ae60dc..0bd80b9 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -104,14 +104,16 @@ struct imx_snvs_rtc_data {
+ struct platform_device *__init imx_add_snvs_rtc(
+ 		const struct imx_snvs_rtc_data *data);
+ 
++struct imx_caam_jr_data {
++	resource_size_t offset_jr;
++	resource_size_t irq_jr;
++};
++
+ struct imx_caam_data {
+ 	resource_size_t iobase_caam;
+ 	resource_size_t irq_sec_vio;
+ 	resource_size_t irq_snvs;
+-	resource_size_t irq_jr0;
+-	resource_size_t irq_jr1;
+-	resource_size_t irq_jr2;
+-	resource_size_t irq_jr3;
++	struct imx_caam_jr_data jr[4];	/* offset+IRQ for each possible ring */
+ };
+ 
+ struct platform_device *__init imx_add_caam(
+-- 
+1.7.7.4
+

@@ -1,0 +1,133 @@
+From 0059272eea51b2b8fa73c64c79ca56fe694fa953 Mon Sep 17 00:00:00 2001
+From: Alan Tull <alan.tull@freescale.com>
+Date: Tue, 28 Jun 2011 11:18:05 -0500
+Subject: [PATCH 0478/2463] ENGR00139265-3 mxc alsa soc spdif driver
+
+* Add spdif block clock divider settings and spdif_clk_set_rate
+  function to mxc_spdif_platform_data.
+
+Signed-off-by: Alan Tull <alan.tull@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx51_3ds.c     |    9 ++++++---
+ arch/arm/mach-mx5/board-mx51_babbage.c |    9 ++++++---
+ arch/arm/mach-mx5/board-mx53_ard.c     |    9 ++++++---
+ arch/arm/mach-mx5/board-mx53_evk.c     |    9 ++++++---
+ arch/arm/mach-mx5/board-mx53_loco.c    |    5 ++++-
+ arch/arm/mach-mx5/board-mx53_smd.c     |    5 ++++-
+ 6 files changed, 32 insertions(+), 14 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx51_3ds.c b/arch/arm/mach-mx5/board-mx51_3ds.c
+index c279555..b51f08e 100644
+--- a/arch/arm/mach-mx5/board-mx51_3ds.c
++++ b/arch/arm/mach-mx5/board-mx51_3ds.c
+@@ -135,9 +135,12 @@ static struct spi_board_info mx51_3ds_spi_nor_device[] = {
+ static struct mxc_spdif_platform_data mxc_spdif_data = {
+ 	.spdif_tx = 1,
+ 	.spdif_rx = 0,
+-	.spdif_clk_44100 = 0,	/* spdif_ext_clk source for 44.1KHz */
+-	.spdif_clk_48000 = 7,	/* audio osc source */
+-	.spdif_clkid = 0,
++	.spdif_clk_44100 = 0,	/* tx clk from CKIH1 for 44.1K */
++	.spdif_clk_48000 = 7,	/* tx clk from CKIH2 for 48k and 32k */
++	.spdif_div_44100 = 8,
++	.spdif_div_48000 = 8,
++	.spdif_div_32000 = 12,
++	.spdif_rx_clk = 0,	/* rx clk from spdif stream */
+ 	.spdif_clk = NULL,	/* spdif bus clk */
+ };
+ 
+diff --git a/arch/arm/mach-mx5/board-mx51_babbage.c b/arch/arm/mach-mx5/board-mx51_babbage.c
+index 8a7d8af..17a0220 100755
+--- a/arch/arm/mach-mx5/board-mx51_babbage.c
++++ b/arch/arm/mach-mx5/board-mx51_babbage.c
+@@ -673,9 +673,12 @@ static struct platform_device bbg_audio_device = {
+ static struct mxc_spdif_platform_data mxc_spdif_data = {
+ 	.spdif_tx = 1,
+ 	.spdif_rx = 0,
+-	.spdif_clk_44100 = 0,	/* spdif_ext_clk source for 44.1KHz */
+-	.spdif_clk_48000 = 7,	/* audio osc source */
+-	.spdif_clkid = 0,
++	.spdif_clk_44100 = 0,	/* tx clk from CKIH1 for 44.1K */
++	.spdif_clk_48000 = 7,	/* tx clk from CKIH2 for 48k and 32k */
++	.spdif_div_44100 = 8,
++	.spdif_div_48000 = 8,
++	.spdif_div_32000 = 12,
++	.spdif_rx_clk = 0,	/* rx clk from spdif stream */
+ 	.spdif_clk = NULL,	/* spdif bus clk */
+ };
+ 
+diff --git a/arch/arm/mach-mx5/board-mx53_ard.c b/arch/arm/mach-mx5/board-mx53_ard.c
+index 8f0cb9c..f07ed8e 100755
+--- a/arch/arm/mach-mx5/board-mx53_ard.c
++++ b/arch/arm/mach-mx5/board-mx53_ard.c
+@@ -341,9 +341,12 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ static struct mxc_spdif_platform_data mxc_spdif_data = {
+ 	.spdif_tx = 0,
+ 	.spdif_rx = 1,
+-	.spdif_clk_44100 = 0,	/* Souce from CKIH1 for 44.1K */
+-	.spdif_clk_48000 = 7,	/* Source from CKIH2 for 48k and 32k */
+-	.spdif_clkid = 0,
++	.spdif_clk_44100 = 0,	/* tx clk from CKIH1 for 44.1K */
++	.spdif_clk_48000 = 7,	/* tx clk from CKIH2 for 48k and 32k */
++	.spdif_div_44100 = 8,
++	.spdif_div_48000 = 8,
++	.spdif_div_32000 = 12,
++	.spdif_rx_clk = 0,	/* rx clk from spdif stream */
+ 	.spdif_clk = NULL,	/* spdif bus clk */
+ };
+ 
+diff --git a/arch/arm/mach-mx5/board-mx53_evk.c b/arch/arm/mach-mx5/board-mx53_evk.c
+index 81aa397..63d5558 100755
+--- a/arch/arm/mach-mx5/board-mx53_evk.c
++++ b/arch/arm/mach-mx5/board-mx53_evk.c
+@@ -714,9 +714,12 @@ static void __init mx53_evk_io_init(void)
+ static struct mxc_spdif_platform_data mxc_spdif_data = {
+ 	.spdif_tx = 1,
+ 	.spdif_rx = 0,
+-	.spdif_clk_44100 = 0,	/* Souce from CKIH1 for 44.1K */
+-	.spdif_clk_48000 = 7,	/* Source from CKIH2 for 48k and 32k */
+-	.spdif_clkid = 0,
++	.spdif_clk_44100 = 0,	/* tx clk from CKIH1 for 44.1K */
++	.spdif_clk_48000 = 7,	/* tx clk from CKIH2 for 48k and 32k */
++	.spdif_div_44100 = 8,
++	.spdif_div_48000 = 8,
++	.spdif_div_32000 = 12,
++	.spdif_rx_clk = 0,	/* rx clk from spdif stream */
+ 	.spdif_clk = NULL,	/* spdif bus clk */
+ };
+ 
+diff --git a/arch/arm/mach-mx5/board-mx53_loco.c b/arch/arm/mach-mx5/board-mx53_loco.c
+index b9a8a8e..e8dfdad 100755
+--- a/arch/arm/mach-mx5/board-mx53_loco.c
++++ b/arch/arm/mach-mx5/board-mx53_loco.c
+@@ -675,7 +675,10 @@ static struct mxc_spdif_platform_data mxc_spdif_data = {
+ 	 * It's not accurate: for 48Khz it is actually 46875Hz (2.3% off)
+ 	 */
+ 	.spdif_clk_48000 = 1,
+-	.spdif_clkid = 0,
++	.spdif_div_44100 = 8,
++	.spdif_div_48000 = 8,
++	.spdif_div_32000 = 12,
++	.spdif_rx_clk = 0,	/* rx clk from spdif stream */
+ 	.spdif_clk = NULL,	/* spdif bus clk */
+ };
+ 
+diff --git a/arch/arm/mach-mx5/board-mx53_smd.c b/arch/arm/mach-mx5/board-mx53_smd.c
+index 79d0c76..51ef71d 100755
+--- a/arch/arm/mach-mx5/board-mx53_smd.c
++++ b/arch/arm/mach-mx5/board-mx53_smd.c
+@@ -734,7 +734,10 @@ static struct mxc_spdif_platform_data mxc_spdif_data = {
+ 	 * It's not accurate
+ 	 */
+ 	.spdif_clk_48000 = 1,
+-	.spdif_clkid = 0,
++	.spdif_div_44100 = 8,
++	.spdif_div_48000 = 8,
++	.spdif_div_32000 = 12,
++	.spdif_rx_clk = 0,	/* rx clk from spdif stream */
+ 	.spdif_clk = NULL,	/* spdif bus clk */
+ };
+ 
+-- 
+1.7.7.4
+

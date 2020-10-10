@@ -1,0 +1,56 @@
+From 15b5954a61bc08652c3d07ab7ee9453fdf4fdf90 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Mon, 7 May 2012 11:25:17 +0800
+Subject: [PATCH 1425/2463] ENGR00182048: Revert "ENGR00175578 serial/imx..."
+
+This reverts commit a7d9c8864ab801920f6a630767656f6777a95de2.
+
+This commit will break i.mx6dl boot up on SD board and hang at:
+Bus freq driver loaded...
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ drivers/tty/serial/imx.c |    6 ++----
+ 1 files changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/tty/serial/imx.c b/drivers/tty/serial/imx.c
+index 9a6e8b6..a2a33fb 100644
+--- a/drivers/tty/serial/imx.c
++++ b/drivers/tty/serial/imx.c
+@@ -932,8 +932,6 @@ static int imx_startup(struct uart_port *port)
+ 	unsigned long flags, temp;
+ 	struct tty_struct *tty;
+ 
+-	clk_enable(sport->clk);
+-
+ #ifndef CONFIG_SERIAL_CORE_CONSOLE
+ 	imx_setup_ufcr(sport, 0);
+ #endif
+@@ -1164,7 +1162,6 @@ static void imx_shutdown(struct uart_port *port)
+ 		writel(temp, sport->port.membase + UCR4);
+ 	}
+ 	spin_unlock_irqrestore(&sport->port.lock, flags);
+-	clk_disable(sport->clk);
+ }
+ 
+ static void
+@@ -1711,7 +1708,6 @@ static int serial_imx_probe(struct platform_device *pdev)
+ 		goto deinit;
+ 	platform_set_drvdata(pdev, &sport->port);
+ 
+-	clk_disable(sport->clk);
+ 	return 0;
+ deinit:
+ 	if (pdata && pdata->exit)
+@@ -1741,6 +1737,8 @@ static int serial_imx_remove(struct platform_device *pdev)
+ 		clk_put(sport->clk);
+ 	}
+ 
++	clk_disable(sport->clk);
++
+ 	if (pdata && pdata->exit)
+ 		pdata->exit(pdev);
+ 
+-- 
+1.7.7.4
+

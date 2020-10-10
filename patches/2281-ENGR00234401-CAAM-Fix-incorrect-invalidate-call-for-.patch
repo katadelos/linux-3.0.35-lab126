@@ -1,0 +1,56 @@
+From 25629f049a98d16b1b956ab414fe3b770498cdc3 Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Tue, 20 Nov 2012 16:21:26 -0700
+Subject: [PATCH 2281/2463] ENGR00234401: CAAM: Fix incorrect invalidate call
+ for output ring
+
+The job ring driver exhibited a hang condition in the top of
+caam_jr_dequeue() where a BUG_ON statement looks for a condition
+where the output ring is said to have valid entries by the ring logic,
+but the ring entries apparently have NULL descriptor pointers.
+
+In the initial ARM port of this driver, the cache flush call
+of the output ring content occured before the output ring read index
+register read occurred, exposing a condition where the driver sensed valid
+output entries, yet the entries written by the ring hardware were not
+invalidated, and therefore were not visible to the processor, appearing
+as false NULL entries.
+
+This patch relocates the invalidate call to immediately follow the
+check of the output read index, where it is required.
+
+Signed-off-by: Vicki Milhoan <vicki.milhoan@freescale.com>
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/crypto/caam/jr.c |    7 ++++---
+ 1 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/crypto/caam/jr.c b/drivers/crypto/caam/jr.c
+index 280aaaa..d7394ea 100644
+--- a/drivers/crypto/caam/jr.c
++++ b/drivers/crypto/caam/jr.c
+@@ -62,9 +62,6 @@ static void caam_jr_dequeue(unsigned long devarg)
+ 	unsigned long flags;
+ 
+ 	outbusaddr = rd_reg64(&jrp->rregs->outring_base);
+-	dma_sync_single_for_cpu(dev, outbusaddr,
+-				sizeof(struct jr_outentry) * JOBR_DEPTH,
+-				DMA_FROM_DEVICE);
+ 
+ 	spin_lock_irqsave(&jrp->outlock, flags);
+ 
+@@ -75,6 +72,10 @@ static void caam_jr_dequeue(unsigned long devarg)
+ 	       rd_reg32(&jrp->rregs->outring_used)) {
+ 
+ 		hw_idx = jrp->out_ring_read_index;
++		dma_sync_single_for_cpu(dev, outbusaddr,
++					sizeof(struct jr_outentry) * JOBR_DEPTH,
++					DMA_FROM_DEVICE);
++
+ 		for (i = 0; CIRC_CNT(head, tail + i, JOBR_DEPTH) >= 1; i++) {
+ 			sw_idx = (tail + i) & (JOBR_DEPTH - 1);
+ 
+-- 
+1.7.7.4
+

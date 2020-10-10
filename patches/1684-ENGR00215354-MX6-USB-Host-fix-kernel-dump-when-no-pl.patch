@@ -1,0 +1,101 @@
+From 63f1b42f5eb822e574522cbfb3713bbdab2f0f73 Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Fri, 29 Jun 2012 16:56:02 +0800
+Subject: [PATCH 1684/2463] ENGR00215354 MX6 USB Host:fix kernel dump when no
+ platform_data
+
+Kernel dump when no platform_data.
+PC is at hub_thread+0xdb0/0x1538
+LR is at 0xbfd43400
+pc : [<80311eb4>]    lr : [<bfd43400>]    psr: 60000013
+sp : bfdbff08  ip : ba3cd500  fp : ba3cd600
+r10: bfd43400  r9 : 00000000  r8 : 00000001
+r7 : 00000000  r6 : 00000000  r5 : ba3cd600  r4 : 00000001
+r3 : 00000000  r2 : bfd24c60  r1 : bfd43400  r0 : 00000000
+Flags: nZCv  IRQs on  FIQs on  Mode SVC_32  ISA ARM  Segment kernel
+Control: 10c53c7d  Table: 1000404a  DAC: 00000015
+Process khubd (pid: 338, stack limit = 0xbfdbe2f0)
+Stack: (0xbfdbff08 to 0xbfdc0000)
+ff00:                   00000101 00000000 80a01d38 8c008f40 bfdbff3c 8006612c
+ff20: bff8c000 bfd43400 bfd43400 ba3cd648 ba62a220 ba3cd608 bfd4349c ba62a200
+ff40: 00000000 ba3cd644 ba3cd640 00000101 00000001 0000009e ba3cd500 ba62a220
+ff60: 00000009 ba3cd64c bfdbff9c 800654ac ba3cd6a4 bfdbe000 00000000 bfeac3a0
+ff80: 8008d700 bfdbff84 bfdbff84 00000000 01010000 00000001 bfdbffbc bff8bf48
+ffa0: bfdbffcc 00000000 80311104 00000000 00000000 00000000 00000000 8008d330
+ffc0: bff8bf48 00000000 00000000 00000000 00000000 00000000 bfdbffd8 bfdbffd8
+ffe0: 00000000 bff8bf48 8008d2ac 80042040 00000013 80042040 00000000 00000000
+[<80311eb4>] (hub_thread+0xdb0/0x1538) from [<8008d330>] (kthread+0x84/0x8c)
+[<8008d330>] (kthread+0x84/0x8c) from [<80042040>] (kernel_thread_exit+0x0/0x8)
+
+If no platform_data ,the pdata will be NULL.If the driver try to access the
+pdata->platform_set_disconnect_det,dump will occor.SO we should check the
+pdata is NULL before checking  pdata->platform_set_disconnect_det.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ drivers/usb/core/hub.c      |    8 ++++----
+ drivers/usb/host/ehci-hub.c |    4 ++--
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/usb/core/hub.c b/drivers/usb/core/hub.c
+index 3c99167..55a63e4 100644
+--- a/drivers/usb/core/hub.c
++++ b/drivers/usb/core/hub.c
+@@ -2543,7 +2543,7 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
+ 			struct usb_hcd *hcd = bus_to_hcd(hdev->bus);
+ 			struct fsl_usb2_platform_data *pdata;
+ 			pdata = hcd->self.controller->platform_data;
+-			if (pdata->platform_rh_resume)
++			if (pdata && pdata->platform_rh_resume)
+ 				pdata->platform_rh_resume(pdata);
+ 		}
+ #endif
+@@ -2565,7 +2565,7 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
+ 		struct usb_hcd *hcd = bus_to_hcd(hdev->bus);
+ 		struct fsl_usb2_platform_data *pdata;
+ 		pdata = hcd->self.controller->platform_data;
+-		if (pdata->platform_rh_resume)
++		if (pdata && pdata->platform_rh_resume)
+ 			pdata->platform_rh_resume(pdata);
+ 	}
+ #endif
+@@ -3245,12 +3245,12 @@ static void hub_port_connect_change(struct usb_hub *hub, int port1,
+ 
+ 		pdata = (struct fsl_usb2_platform_data *)dev->platform_data;
+ 		if (dev->parent && (hdev->level == 0) && dev->type) {
+-			if (port1 == 1 && pdata->init)
++			if (port1 == 1 && pdata && pdata->init)
+ 				pdata->init(NULL);
+ 		}
+ 		if ((port1 == 1) && (hdev->level == 0)) {
+ 			/* Must clear HOSTDISCONDETECT when port connect change happen*/
+-			if (pdata->platform_set_disconnect_det)
++			if (pdata && pdata->platform_set_disconnect_det)
+ 				pdata->platform_set_disconnect_det(pdata, 0);
+ 
+ 		}
+diff --git a/drivers/usb/host/ehci-hub.c b/drivers/usb/host/ehci-hub.c
+index b49e65f..361bc3e 100644
+--- a/drivers/usb/host/ehci-hub.c
++++ b/drivers/usb/host/ehci-hub.c
+@@ -434,7 +434,7 @@ static int ehci_bus_resume (struct usb_hcd *hcd)
+ 		{
+ 			struct fsl_usb2_platform_data *pdata;
+ 			pdata = hcd->self.controller->platform_data;
+-			if (pdata->platform_rh_resume)
++			if (pdata && pdata->platform_rh_resume)
+ 				pdata->platform_rh_resume(pdata);
+ 		}
+ #endif
+@@ -1079,7 +1079,7 @@ static int ehci_hub_control (
+ 			{
+ 				struct fsl_usb2_platform_data *pdata;
+ 				pdata = hcd->self.controller->platform_data;
+-				if (pdata->platform_rh_suspend)
++				if (pdata && pdata->platform_rh_suspend)
+ 					pdata->platform_rh_suspend(pdata);
+ 			}
+ #endif
+-- 
+1.7.7.4
+

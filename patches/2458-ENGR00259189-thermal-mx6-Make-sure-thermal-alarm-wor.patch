@@ -1,0 +1,54 @@
+From 9b9f093ac6ff712d9553434f2bc8741d3ed98af5 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Wed, 17 Apr 2013 16:10:59 +0800
+Subject: [PATCH 2458/2463] ENGR00259189 thermal:mx6: Make sure thermal alarm
+ working safely
+
+The thermal sensor's value will be updated even it is power down,
+as thermal sensor's clock source is from PLL3, so there is chance
+that PLL3 is disabled before thermal driver is probed during kernel
+boot up, so the value in thermal sensor can be incorrect in this
+PLL3 disabled window.
+
+Previous flow of thermal driver probe routine will enable PLL3
+clock, then set the thermal alarm value and enable the alarm irq,
+there is no delay or check about the thermal sensor's value, only
+when the thermal sensor's value is correct, its alarm function
+can be enabled. As adding delay in the probe routine is not a
+good option, so we move the enabling of thermal alarm function
+into the get temperature routine, as after the thermal value is
+read, the alarm function is safe enough, as the thermal sensor
+will be always working right after a read if its clock is enabled.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ drivers/mxc/thermal/thermal.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/thermal/thermal.c b/drivers/mxc/thermal/thermal.c
+index 109ea2b..ea83121 100644
+--- a/drivers/mxc/thermal/thermal.c
++++ b/drivers/mxc/thermal/thermal.c
+@@ -334,6 +334,11 @@ static int anatop_thermal_get_temp(struct thermal_zone_device *thermal,
+ 	*temp = (cooling_device_disable && tz->temperature >= KELVIN_TO_CEL(TEMP_CRITICAL, KELVIN_OFFSET)) ?
+ 			KELVIN_TO_CEL(TEMP_CRITICAL - 1, KELVIN_OFFSET) : tz->temperature;
+ 
++	/* Set alarm threshold if necessary */
++	if ((__raw_readl(anatop_base + HW_ANADIG_TEMPSENSE0) &
++		BM_ANADIG_TEMPSENSE0_ALARM_VALUE) == 0)
++		anatop_update_alarm(raw_critical);
++
+ 	return 0;
+ }
+ 
+@@ -874,7 +879,6 @@ static int anatop_thermal_counting_ratio(unsigned int fuse_data)
+ 	/* Init default critical temp to set alarm */
+ 	raw_critical = raw_25c - ratio * (KELVIN_TO_CEL(TEMP_CRITICAL, KELVIN_OFFSET) - 25) / 100;
+ 	clk_enable(pll3_clk);
+-	anatop_update_alarm(raw_critical);
+ 
+ 	return ret;
+ }
+-- 
+1.7.7.4
+

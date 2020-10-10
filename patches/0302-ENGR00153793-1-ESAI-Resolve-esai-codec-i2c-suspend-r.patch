@@ -1,0 +1,202 @@
+From 722b2aa797d3fae111ca0f297812c79ea709d18f Mon Sep 17 00:00:00 2001
+From: Lionel Xu <Lionel.Xu@freescale.com>
+Date: Wed, 27 Jul 2011 16:04:53 +0800
+Subject: [PATCH 0302/2463] ENGR00153793-1 ESAI: Resolve esai codec i2c
+ suspend/resume problem
+
+1)Resolve esai codec i2c suspend/resume problem;
+2)Remove imx pcm operating function which already defined in imx-ssi.c
+
+Signed-off-by: Lionel Xu <R63889@freescale.com>
+---
+ sound/soc/codecs/cs42888.c |   11 +++--
+ sound/soc/imx/Makefile     |    2 +-
+ sound/soc/imx/imx-esai.c   |   88 --------------------------------------------
+ sound/soc/imx/imx-esai.h   |    5 --
+ 4 files changed, 8 insertions(+), 98 deletions(-)
+
+diff --git a/sound/soc/codecs/cs42888.c b/sound/soc/codecs/cs42888.c
+index 90894c0..2ccc9df 100644
+--- a/sound/soc/codecs/cs42888.c
++++ b/sound/soc/codecs/cs42888.c
+@@ -31,7 +31,6 @@
+ #include <sound/tlv.h>
+ #include <sound/initval.h>
+ #include <asm/div64.h>
+-
+ #include "cs42888.h"
+ #define CS42888_NUM_SUPPLIES 4
+ static const char *cs42888_supply_names[CS42888_NUM_SUPPLIES] = {
+@@ -147,7 +146,7 @@ static const char *cs42888_supply_names[CS42888_NUM_SUPPLIES] = {
+ 
+ /* Private data for the CS42888 */
+ struct cs42888_private {
+-	struct snd_soc_codec codec;
++	struct snd_soc_codec *codec;
+ 	u8 reg_cache[CS42888_NUMREGS + 1];
+ 	unsigned int mclk; /* Input frequency of the MCLK pin */
+ 	unsigned int mode; /* The mode (I2S or left-justified) */
+@@ -195,6 +194,8 @@ static void dump_reg(struct snd_soc_codec *codec)
+ {
+ 	int i, reg;
+ 	int ret;
++	u8 *cache = codec->reg_cache + 1;
++
+ 	printk(KERN_DEBUG "dump begin\n");
+ 	printk(KERN_DEBUG "reg value in cache\n");
+ 	for (i = 0; i < CS42888_NUMREGS; i++)
+@@ -781,6 +782,8 @@ static int cs42888_probe(struct snd_soc_codec *codec)
+ 	int val;
+ 
+ 	struct cs42888_private *cs42888 = snd_soc_codec_get_drvdata(codec);
++	cs42888->codec = codec;
++
+ 	/* setup i2c data ops */
+ 	ret = snd_soc_codec_set_cache_io(codec, 8, 8, SND_SOC_I2C);
+ 	if (ret < 0) {
+@@ -964,7 +967,7 @@ MODULE_DEVICE_TABLE(i2c, cs42888_i2c_id);
+ static int cs42888_i2c_suspend(struct i2c_client *client, pm_message_t mesg)
+ {
+ 	struct cs42888_private *cs42888 = i2c_get_clientdata(client);
+-	struct snd_soc_codec *codec = &cs42888->codec;
++	struct snd_soc_codec *codec = cs42888->codec;
+ 	int reg = snd_soc_read(codec, CS42888_PWRCTL) | CS42888_PWRCTL_PDN_MASK;
+ 
+ 	return snd_soc_write(codec, CS42888_PWRCTL, reg);
+@@ -973,7 +976,7 @@ static int cs42888_i2c_suspend(struct i2c_client *client, pm_message_t mesg)
+ static int cs42888_i2c_resume(struct i2c_client *client)
+ {
+ 	struct cs42888_private *cs42888 = i2c_get_clientdata(client);
+-	struct snd_soc_codec *codec = &cs42888->codec;
++	struct snd_soc_codec *codec = cs42888->codec;
+ 	int reg;
+ 
+ 	/* In case the device was put to hard reset during sleep, we need to
+diff --git a/sound/soc/imx/Makefile b/sound/soc/imx/Makefile
+index e9e2c10..a6e135b 100644
+--- a/sound/soc/imx/Makefile
++++ b/sound/soc/imx/Makefile
+@@ -1,5 +1,5 @@
+ # i.MX Platform Support
+-snd-soc-imx-objs := imx-esai.o
++snd-soc-imx-objs := imx-ssi.o imx-esai.o
+ snd-soc-imx-fiq-objs := imx-pcm-fiq.o
+ snd-soc-imx-mx2-objs := imx-pcm-dma-mx2.o
+ 
+diff --git a/sound/soc/imx/imx-esai.c b/sound/soc/imx/imx-esai.c
+index 03bf074..c07b69b 100644
+--- a/sound/soc/imx/imx-esai.c
++++ b/sound/soc/imx/imx-esai.c
+@@ -543,94 +543,6 @@ static struct snd_soc_dai_driver imx_esai_dai = {
+ 	 .ops = &imx_esai_dai_ops,
+ };
+ 
+-int snd_imx_pcm_mmap(struct snd_pcm_substream *substream,
+-		struct vm_area_struct *vma)
+-{
+-	struct snd_pcm_runtime *runtime = substream->runtime;
+-	int ret;
+-
+-	ret = dma_mmap_coherent(NULL, vma, runtime->dma_area,
+-			runtime->dma_addr, runtime->dma_bytes);
+-
+-	pr_debug("%s: ret: %d %p 0x%08x 0x%08x\n", __func__, ret,
+-			runtime->dma_area,
+-			runtime->dma_addr,
+-			runtime->dma_bytes);
+-	return ret;
+-}
+-EXPORT_SYMBOL_GPL(snd_imx_pcm_mmap);
+-
+-static int imx_pcm_preallocate_dma_buffer(struct snd_pcm *pcm, int stream)
+-{
+-	struct snd_pcm_substream *substream = pcm->streams[stream].substream;
+-	struct snd_dma_buffer *buf = &substream->dma_buffer;
+-	size_t size = IMX_ESAI_DMABUF_SIZE;
+-
+-	buf->dev.type = SNDRV_DMA_TYPE_DEV;
+-	buf->dev.dev = pcm->card->dev;
+-	buf->private_data = NULL;
+-	buf->area = dma_alloc_writecombine(pcm->card->dev, size,
+-					   &buf->addr, GFP_KERNEL);
+-	if (!buf->area)
+-		return -ENOMEM;
+-	buf->bytes = size;
+-
+-	return 0;
+-}
+-
+-static u64 imx_pcm_dmamask = DMA_BIT_MASK(32);
+-
+-int imx_pcm_new(struct snd_card *card, struct snd_soc_dai *dai,
+-	struct snd_pcm *pcm)
+-{
+-
+-	int ret = 0;
+-
+-	if (!card->dev->dma_mask)
+-		card->dev->dma_mask = &imx_pcm_dmamask;
+-	if (!card->dev->coherent_dma_mask)
+-		card->dev->coherent_dma_mask = DMA_BIT_MASK(32);
+-	if (dai->driver->playback.channels_min) {
+-		ret = imx_pcm_preallocate_dma_buffer(pcm,
+-			SNDRV_PCM_STREAM_PLAYBACK);
+-		if (ret)
+-			goto out;
+-	}
+-
+-	if (dai->driver->capture.channels_min) {
+-		ret = imx_pcm_preallocate_dma_buffer(pcm,
+-			SNDRV_PCM_STREAM_CAPTURE);
+-		if (ret)
+-			goto out;
+-	}
+-
+-out:
+-	return ret;
+-}
+-EXPORT_SYMBOL_GPL(imx_pcm_new);
+-
+-void imx_pcm_free(struct snd_pcm *pcm)
+-{
+-	struct snd_pcm_substream *substream;
+-	struct snd_dma_buffer *buf;
+-	int stream;
+-
+-	for (stream = 0; stream < 2; stream++) {
+-		substream = pcm->streams[stream].substream;
+-		if (!substream)
+-			continue;
+-
+-		buf = &substream->dma_buffer;
+-		if (!buf->area)
+-			continue;
+-
+-		dma_free_writecombine(pcm->card->dev, buf->bytes,
+-				      buf->area, buf->addr);
+-		buf->area = NULL;
+-	}
+-}
+-EXPORT_SYMBOL_GPL(imx_pcm_free);
+-
+ static int imx_esai_probe(struct platform_device *pdev)
+ {
+ 	struct resource *res;
+diff --git a/sound/soc/imx/imx-esai.h b/sound/soc/imx/imx-esai.h
+index ac50e72..e8f2a71 100644
+--- a/sound/soc/imx/imx-esai.h
++++ b/sound/soc/imx/imx-esai.h
+@@ -326,10 +326,5 @@ struct imx_esai {
+ 	struct platform_device *soc_platform_pdev;
+ 	struct platform_device *soc_platform_pdev_fiq;
+ };
+-int snd_imx_pcm_mmap(struct snd_pcm_substream *substream, \
+-	struct vm_area_struct *vma);
+-int imx_pcm_new(struct snd_card *card, struct snd_soc_dai *dai,
+-	struct snd_pcm *pcm);
+-void imx_pcm_free(struct snd_pcm *pcm);
+ 
+ #endif
+-- 
+1.7.7.4
+

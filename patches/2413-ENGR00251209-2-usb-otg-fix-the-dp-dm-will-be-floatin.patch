@@ -1,0 +1,46 @@
+From 59fc3c58c471a125e5882ae3823545f24843eb75 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Fri, 1 Mar 2013 16:37:42 +0800
+Subject: [PATCH 2413/2463] ENGR00251209-2 usb: otg: fix the dp/dm will be
+ floating when phy is no 3v3
+
+For the design which the phy is no power (no 5v for VBUS), the
+PHY can't get dp/dm correctly, so it the port change interrpt
+is enabled or the host enters low power mode, the unexpected
+interrupt will occur.
+This commit will make the dp/dm as zero at otg configuration.
+For gadget-only, the same function is existed at probe.
+For host-only, the vbus will be on before port change interrupt
+is enabled.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/otg/fsl_otg.c |    7 ++++++-
+ 1 files changed, 6 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/usb/otg/fsl_otg.c b/drivers/usb/otg/fsl_otg.c
+index 292c2e9..9fd3c87 100755
+--- a/drivers/usb/otg/fsl_otg.c
++++ b/drivers/usb/otg/fsl_otg.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2005-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2005-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * Author: Li Yang <LeoLi@freescale.com>
+  *         Jerry Huang <Chang-Ming.Huang@freescale.com>
+@@ -631,6 +631,11 @@ static int fsl_otg_set_host(struct otg_transceiver *otg_p, struct usb_bus *host)
+ 
+ 		if (otg_dev->fsm.id) {
+ 			otg_dev->host_first_call = true;
++			/* The discharge will be false when the controller
++			 * is ready to use.
++			 */
++			if (pdata->dr_discharge_line)
++				pdata->dr_discharge_line(true);
+ 			schedule_otg_work(&otg_dev->otg_event, 100);
+ 		}
+ 		else {
+-- 
+1.7.7.4
+

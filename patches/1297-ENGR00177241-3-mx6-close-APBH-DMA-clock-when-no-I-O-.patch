@@ -1,0 +1,30 @@
+From 8817bbd14c471c0784121047e5e885894e0ed33b Mon Sep 17 00:00:00 2001
+From: Allen Xu <allen.xu@freescale.com>
+Date: Tue, 10 Apr 2012 11:38:24 +0800
+Subject: [PATCH 1297/2463] ENGR00177241-3 mx6 close APBH DMA clock when no
+ I/O operation
+
+When there is no NAND I/O operation, close all the reference
+clock, include GPMI,BCH and APBH clock.
+
+Signed-off-by: Allen Xu <allen.xu@freescale.com>
+---
+ drivers/dma/mxs-dma.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/dma/mxs-dma.c b/drivers/dma/mxs-dma.c
+index 4456b33..162e6c3 100644
+--- a/drivers/dma/mxs-dma.c
++++ b/drivers/dma/mxs-dma.c
+@@ -637,7 +637,7 @@ static int __init mxs_dma_probe(struct platform_device *pdev)
+ 		goto err_ioremap;
+ 	}
+ 
+-	mxs_dma->clk = clk_get(&pdev->dev, NULL);
++	mxs_dma->clk = clk_get(NULL, "mxs-dma-apbh");
+ 	if (IS_ERR(mxs_dma->clk)) {
+ 		ret = PTR_ERR(mxs_dma->clk);
+ 		goto err_clk;
+-- 
+1.7.7.4
+

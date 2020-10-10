@@ -1,0 +1,61 @@
+From d38cbf2648d63295e8f0c0c24243ac72692e5f3a Mon Sep 17 00:00:00 2001
+From: Zhang Jiejing <jiejing.zhang@freescale.com>
+Date: Mon, 9 Jul 2012 12:38:05 +0800
+Subject: [PATCH 1754/2463] ENGR00216013-1 memblock: add
+ memblock_end_of_DRAM_with_reserved() function.
+
+add a function to check the end address including reserved memory,
+this API can provide the top address of phy memory,
+it can be used to check if the phy memory is valild in some driver
+like VPU.
+
+Signed-off-by: Zhang Jiejing <jiejing.zhang@freescale.com>
+---
+ include/linux/memblock.h |    1 +
+ mm/memblock.c            |   18 ++++++++++++++++++
+ 2 files changed, 19 insertions(+), 0 deletions(-)
+
+diff --git a/include/linux/memblock.h b/include/linux/memblock.h
+index 7525e38..7b72782 100644
+--- a/include/linux/memblock.h
++++ b/include/linux/memblock.h
+@@ -81,6 +81,7 @@ extern phys_addr_t __memblock_alloc_base(phys_addr_t size,
+ 					   phys_addr_t max_addr);
+ extern phys_addr_t memblock_phys_mem_size(void);
+ extern phys_addr_t memblock_end_of_DRAM(void);
++extern phys_addr_t memblock_end_of_DRAM_with_reserved(void);
+ extern void memblock_enforce_memory_limit(phys_addr_t memory_limit);
+ extern int memblock_is_memory(phys_addr_t addr);
+ extern int memblock_is_region_memory(phys_addr_t base, phys_addr_t size);
+diff --git a/mm/memblock.c b/mm/memblock.c
+index a0562d1..cf52324 100644
+--- a/mm/memblock.c
++++ b/mm/memblock.c
+@@ -633,6 +633,24 @@ phys_addr_t __init_memblock memblock_end_of_DRAM(void)
+ 	return (memblock.memory.regions[idx].base + memblock.memory.regions[idx].size);
+ }
+ 
++phys_addr_t __init_memblock memblock_end_of_DRAM_with_reserved(void)
++{
++	int idx = memblock.memory.cnt - 1;
++	phys_addr_t top_addr = 0;
++	int i;
++
++	for (i = 0; i < memblock.reserved.cnt; i++) {
++		phys_addr_t t;
++		t = memblock.reserved.regions[i].base
++			+ memblock.reserved.regions[i].size;
++		top_addr = max(t, top_addr);
++	}
++
++	return max(top_addr,
++		   memblock.memory.regions[idx].base
++		   + memblock.memory.regions[idx].size);
++}
++
+ /* You must call memblock_analyze() after this. */
+ void __init memblock_enforce_memory_limit(phys_addr_t memory_limit)
+ {
+-- 
+1.7.7.4
+

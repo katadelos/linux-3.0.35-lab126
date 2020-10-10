@@ -1,0 +1,42 @@
+From 453925e469741391c293cf33514ed3e2198f7646 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Tue, 2 Aug 2011 15:27:59 +0800
+Subject: [PATCH 0315/2463] ENGR00154132 ipuv3 fb: add fb unblank event after
+ set var
+
+1. some display dev need unblank event to power up.
+2. add EOF to disp dev string to avoid overflow error.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |    7 +++++++
+ 1 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index a278150..d1252ba 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -1640,6 +1640,7 @@ static int mxcfb_option_setup(struct platform_device *pdev)
+ 
+ 		if (!strncmp(opt, "dev=", 4)) {
+ 			memcpy(pdata->disp_dev, opt + 4, strlen(opt) - 4);
++			pdata->disp_dev[strlen(opt) - 4] = '\0';
+ 			continue;
+ 		}
+ 		if (!strncmp(opt, "if=", 3)) {
+@@ -1759,6 +1760,12 @@ static int mxcfb_register(struct fb_info *fbi)
+ 	fbi->flags &= ~FBINFO_MISC_USEREVENT;
+ 	console_unlock();
+ 
++	if (mxcfbi->next_blank == FB_BLANK_UNBLANK) {
++		console_lock();
++		fb_blank(fbi, FB_BLANK_UNBLANK);
++		console_unlock();
++	}
++
+ 	ret = register_framebuffer(fbi);
+ 	if (ret < 0)
+ 		goto err2;
+-- 
+1.7.7.4
+

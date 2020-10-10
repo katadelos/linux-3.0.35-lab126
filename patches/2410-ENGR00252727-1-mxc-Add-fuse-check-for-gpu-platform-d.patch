@@ -1,0 +1,71 @@
+From 0e55f015236e5337eecb655b6c39c811eac3497e Mon Sep 17 00:00:00 2001
+From: Loren Huang <b02279@freescale.com>
+Date: Tue, 5 Mar 2013 15:40:22 +0800
+Subject: [PATCH 2410/2463] ENGR00252727-1 [mxc]Add fuse check for gpu
+ platform device
+
+Add fuse check for gpu platform device. Bypass gpu core
+initialization if certain core is fused.If all gpu cores
+are fused, bypass gpu driver loading.
+
+Signed-off-by: Loren Huang <b02279@freescale.com>
+---
+ arch/arm/plat-mxc/devices/platform-viv_gpu.c |   35 +++++++++++++++++++++----
+ 1 files changed, 29 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/platform-viv_gpu.c b/arch/arm/plat-mxc/devices/platform-viv_gpu.c
+index 9b02196..52c9b08 100644
+--- a/arch/arm/plat-mxc/devices/platform-viv_gpu.c
++++ b/arch/arm/plat-mxc/devices/platform-viv_gpu.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -90,13 +90,36 @@ struct platform_device *__init imx_add_viv_gpu(
+ 		},
+ 	};
+ 
+-	if (cpu_is_mx6q() || cpu_is_mx6sl())
+-		res_count = ARRAY_SIZE(res);
+-	else if (cpu_is_mx6dl())
+-		/* No openVG on i.mx6 Solo/DL */
+-		res_count = ARRAY_SIZE(res) - 2;
++	res_count = ARRAY_SIZE(res);
+ 	BUG_ON(!res_count);
+ 
++	if (!fuse_dev_is_available(MXC_DEV_3D)) {
++		res[1].start = 0;
++		res[1].end = 0;
++		res[2].start = -1;
++		res[2].end = -1;
++	}
++
++	if (!fuse_dev_is_available(MXC_DEV_2D)) {
++		res[3].start = 0;
++		res[3].end = 0;
++		res[4].start = -1;
++		res[4].end = -1;
++	}
++
++	if (!fuse_dev_is_available(MXC_DEV_OVG)) {
++		res[5].start = 0;
++		res[5].end = 0;
++		res[6].start = -1;
++		res[6].end = -1;
++	}
++
++	/* None GPU core exists */
++	if ((res[2].start == -1) &&
++			(res[4].start == -1) &&
++			(res[6].start == -1))
++		return ERR_PTR(-ENODEV);
++
+ 	return imx_add_platform_device_dmamask("galcore", 0,
+ 			res, res_count,
+ 			pdata, sizeof(*pdata),
+-- 
+1.7.7.4
+

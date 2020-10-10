@@ -1,0 +1,129 @@
+From 0b67bfedaa8dc7e4b8061efe96e37eba677b22a6 Mon Sep 17 00:00:00 2001
+From: Eric Sun <jian.sun@freescale.com>
+Date: Mon, 25 Jun 2012 19:03:46 +0800
+Subject: [PATCH 1649/2463] ENGR00214813 MX6DL SabreSD : Kernel, Enable ARM
+ Perfromance Monitor
+
+Register PMU resources during system bootup, so that "Perf" Command can
+be used to get misc performance data of a running program
+
+The "Perf" Exe should be built manually in
+"./tools/perf" using the following command line
+> make CROSS_COMPILER=... ARCH=arm CFLAGS="-static -DGElf_Nhdr=Elf32_Nhdr"
+then copy the "Perf" executable to rootfs/bin
+
+Usage :
+perf            # show help content
+perf list       # show all available statistics options
+perf stat ls    # show all statistics of a "ls" command
+perf stat -e cycles tar cvfz bin.tgz /bin
+                # show "cycles" statistics of command
+                #     "tar cvfz ...."
+
+MX6 Series Chips bound all CPUs PERFMON IRQ to one, this may cause some
+problems when get per-CPU statistics. Need further investigation
+
+Signed-off-by: Eric Sun <jian.sun@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c          |    2 +
+ arch/arm/mach-mx6/devices-imx6q.h               |    2 +
+ arch/arm/plat-mxc/devices/Makefile              |    1 +
+ arch/arm/plat-mxc/devices/platform-imx-pmu.c    |   44 +++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h |    2 +
+ 5 files changed, 51 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index bc1f4d1..fdd7023 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1817,6 +1817,8 @@ static void __init mx6_sabresd_board_init(void)
+ 		gpio_direction_output(SABRESD_ELAN_RST, 1);
+ 		gpio_direction_output(SABRESD_ELAN_CE, 1);
+ 	}
++
++	imx6_add_armpmu();
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 7695d12..0a30052 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -242,3 +242,5 @@ extern const struct imx_pcie_data imx6q_pcie_data __initconst;
+ extern const struct imx_imx_keypad_data imx6sl_imx_keypad_data;
+ #define imx6sl_add_imx_keypad(pdata)	\
+ 	imx_add_imx_keypad(&imx6sl_imx_keypad_data, pdata)
++
++#define imx6_add_armpmu() imx_add_imx_armpmu()
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index 386b9cb..4128778 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -66,3 +66,4 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_DSI) += platform-imx-mipi_dsi.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_CSI2) += platform-imx-mipi_csi2.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_VDOA) += platform-imx-vdoa.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_PCIE) += platform-imx-pcie.o
++obj-y += platform-imx-pmu.o
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-pmu.c b/arch/arm/plat-mxc/devices/platform-imx-pmu.c
+new file mode 100644
+index 0000000..cf29415
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx-pmu.c
+@@ -0,0 +1,44 @@
++/*
++ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <asm/sizes.h>
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++#include <asm/pmu.h>
++
++static struct resource mx6_pmu_resources[] = {
++	[0] = {
++		.start	= MXC_INT_CHEETAH_PERFORM,
++		.end	= MXC_INT_CHEETAH_PERFORM,
++		.flags	= IORESOURCE_IRQ,
++	},
++};
++
++struct platform_device mx6_pmu_device = {
++	.name		= "arm-pmu",
++	.id		= ARM_PMU_DEVICE_CPU,
++	.num_resources	= ARRAY_SIZE(mx6_pmu_resources),
++	.resource	= mx6_pmu_resources,
++};
++
++void __init imx_add_imx_armpmu()
++{
++	platform_device_register(&mx6_pmu_device);
++}
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 369ec0f..8aa1322 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -685,3 +685,5 @@ struct imx_pcie_data {
+ struct platform_device *__init imx_add_pcie(
+ 		const struct imx_pcie_data *data,
+ 		const struct imx_pcie_platform_data *pdata);
++
++void __init imx_add_imx_armpmu(void);
+-- 
+1.7.7.4
+

@@ -1,0 +1,49 @@
+From 92ec1cdfa8798f47e7fc447df3dae1823aacee8e Mon Sep 17 00:00:00 2001
+From: Adrian Alonso <aalonso@freescale.com>
+Date: Mon, 19 Dec 2011 16:35:06 -0600
+Subject: [PATCH 0777/2463] ENGR00170627 imx-cs42888: overwrite codec_name if
+ passed as platform data
+
+* Overwrite codec_name if passed as platform data
+* Add codec_name in mxc_audio_platform_data
+* Codec name follows the naming convention
+  <codec>.<i2c-channel>-<codec i2c address> i.e. cs42888.0-0048
+* For IMX6Q-ARD this name convention doesn't follow previous settings for
+  imx6q platforms codec is on different i2c channel and can't be resolved
+  by CONFIG macros on imx_3stack_dai data structure; So we overwrite in
+  probe function by getting the correct value from plat_data->codec_name.
+
+Signed-off-by: Adrian Alonso <aalonso@freescale.com>
+---
+ include/linux/fsl_devices.h |    1 +
+ sound/soc/imx/imx-cs42888.c |    2 ++
+ 2 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index 2e99580..2a37406 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -317,6 +317,7 @@ struct mxc_audio_platform_data {
+ 
+ 	int sysclk;
+ 	int rst_gpio;
++	const char *codec_name;
+ 
+ 	int (*init) (void);	/* board specific init */
+ 	int (*amp_enable) (int enable);
+diff --git a/sound/soc/imx/imx-cs42888.c b/sound/soc/imx/imx-cs42888.c
+index 71d519e..4e97ec2 100644
+--- a/sound/soc/imx/imx-cs42888.c
++++ b/sound/soc/imx/imx-cs42888.c
+@@ -268,6 +268,8 @@ static int __devinit imx_3stack_cs42888_probe(struct platform_device *pdev)
+ 	}
+ 	mclk_freq = plat_data->sysclk;
+ 	rst_gpio = plat_data->rst_gpio;
++	if (plat_data->codec_name)
++		imx_3stack_dai[0].codec_name = plat_data->codec_name;
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

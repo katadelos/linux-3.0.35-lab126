@@ -1,0 +1,35 @@
+From 7a3dae84ed99a52db875131cfc247db92fb01ff2 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.liu@freescale.com>
+Date: Tue, 11 Sep 2012 12:49:49 +0800
+Subject: [PATCH 2089/2463] ENGR00223797-7 MX6 SabreSD:Fix ipuv3 fb platform
+ driver register
+
+As there is only one IPU embedded in MX6DL and two IPUs embedded
+in MX6DQ. The max ipuv3 fb platform driver number is two for
+MX6DL and four for MX6DQ.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 18e5d1a..ab24bb4 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1712,10 +1712,10 @@ static void __init mx6_sabresd_board_init(void)
+ 	imx6q_add_ipuv3(0, &ipu_data[0]);
+ 	if (cpu_is_mx6q()) {
+ 		imx6q_add_ipuv3(1, &ipu_data[1]);
+-		for (i = 0; i < ARRAY_SIZE(sabresd_fb_data); i++)
++		for (i = 0; i < 4 && i < ARRAY_SIZE(sabresd_fb_data); i++)
+ 			imx6q_add_ipuv3fb(i, &sabresd_fb_data[i]);
+ 	} else
+-		for (i = 0; i < (ARRAY_SIZE(sabresd_fb_data) + 1) / 2; i++)
++		for (i = 0; i < 2 && i < ARRAY_SIZE(sabresd_fb_data); i++)
+ 			imx6q_add_ipuv3fb(i, &sabresd_fb_data[i]);
+ 
+ 	imx6q_add_vdoa();
+-- 
+1.7.7.4
+

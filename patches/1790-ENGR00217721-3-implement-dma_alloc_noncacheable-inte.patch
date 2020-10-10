@@ -1,0 +1,57 @@
+From 5b2968bc052045d1bd31add2fd67a64f159d638f Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Fri, 20 Jul 2012 17:53:05 +0800
+Subject: [PATCH 1790/2463] ENGR00217721-3 implement dma_alloc_noncacheable
+ interface
+
+arch/arm/mm part
+
+- After USB driver prime a bulk transfer(whatever IN or OUT, take
+  OUT for example) on ep1, only one dTD is primed, an USB Interrupt
+  (bit 0 of USBSTS) will be issued, and find that endptcomplete
+  register is 0x2 which means an OUT transfer on ep1 is completed,
+  at this time the ep1 out queue head status is 0x1e18000, and next
+  dtd pointer is 0x1 which means transfer is done and everything is
+  OK, while the dTD token status is 0x2008080 which means this dTD
+  is still active, not completed yet.
+- Audio SDMA and Ethernet have the similar issue
+- root cause is not found yet
+- work around:
+  change the non-cacheable bufferable memory to non-cacheable
+  non-bufferable memory to make this issue disappear.
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ arch/arm/mm/dma-mapping.c |   16 ++++++++++++++++
+ 1 files changed, 16 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mm/dma-mapping.c b/arch/arm/mm/dma-mapping.c
+index 79e05f6..e134cff 100644
+--- a/arch/arm/mm/dma-mapping.c
++++ b/arch/arm/mm/dma-mapping.c
+@@ -369,6 +369,22 @@ dma_alloc_writethrough(struct device *dev, size_t size, dma_addr_t *handle, gfp_
+ }
+ EXPORT_SYMBOL(dma_alloc_writethrough);
+ 
++
++#ifdef CONFIG_FSL_UTP
++/*
++ *  Allocate noncacheable memory space and return both the kernel remapped
++ * virtual and bus address for that space.
++ */
++void *
++dma_alloc_noncacheable(struct device *dev, size_t size, dma_addr_t *handle, gfp_t gfp)
++{
++	return __dma_alloc(dev, size, handle, gfp,
++			  /*pgprot_writethrough(pgprot_kernel));*/
++			  pgprot_noncached(pgprot_kernel));
++}
++EXPORT_SYMBOL(dma_alloc_noncacheable);
++#endif
++
+ static int dma_mmap(struct device *dev, struct vm_area_struct *vma,
+ 		    void *cpu_addr, dma_addr_t dma_addr, size_t size)
+ {
+-- 
+1.7.7.4
+

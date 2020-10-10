@@ -1,0 +1,65 @@
+From 80ad41a3690dea9cde2bfcaf0ef516f19e5f23f7 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Tue, 8 Jan 2013 16:13:07 +0800
+Subject: [PATCH 2345/2463] fix echo 1 > compact_memory return error issue
+
+when run the folloing command under shell, it will return error
+sh/$ echo 1 > /proc/sys/vm/compact_memory
+sh/$ sh: write error: Bad address
+
+After strace, I found the following log:
+...
+write(1, "1\n", 2)               = 3
+write(1, "", 4294967295)         = -1 EFAULT (Bad address)
+write(2, "echo: write error: Bad address\n", 31echo: write error: Bad address
+) = 31
+
+This tells system return 3(COMPACT_COMPLETE) after write data to compact_memory.
+
+The fix is to make the system just return 0 instead 3(COMPACT_COMPLETE) from
+sysctl_compaction_handler after compaction_nodes finished.
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+Suggested-by: David Rientjes <rientjes@google.com>
+Cc: Mel Gorman <mgorman@suse.de>
+Cc: Rik van Riel <riel@redhat.com>
+Cc: Minchan Kim <minchan@kernel.org>
+Cc: KAMEZAWA Hiroyuki <kamezawa.hiroyu@jp.fujitsu.com>
+Cc: <stable@vger.kernel.org>
+Signed-off-by: Andrew Morton <akpm@linux-foundation.org>
+---
+ mm/compaction.c |    6 ++----
+ 1 files changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/mm/compaction.c b/mm/compaction.c
+index c4bc5ac..bf6bc32 100644
+--- a/mm/compaction.c
++++ b/mm/compaction.c
+@@ -715,14 +715,12 @@ static int compact_node(int nid)
+ }
+ 
+ /* Compact all nodes in the system */
+-static int compact_nodes(void)
++static void compact_nodes(void)
+ {
+ 	int nid;
+ 
+ 	for_each_online_node(nid)
+ 		compact_node(nid);
+-
+-	return COMPACT_COMPLETE;
+ }
+ 
+ /* The written value is actually unused, all memory is compacted */
+@@ -733,7 +731,7 @@ int sysctl_compaction_handler(struct ctl_table *table, int write,
+ 			void __user *buffer, size_t *length, loff_t *ppos)
+ {
+ 	if (write)
+-		return compact_nodes();
++		compact_nodes();
+ 
+ 	return 0;
+ }
+-- 
+1.7.7.4
+

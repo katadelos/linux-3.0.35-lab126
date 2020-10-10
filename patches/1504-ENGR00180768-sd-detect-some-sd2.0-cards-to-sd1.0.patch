@@ -1,0 +1,42 @@
+From f1b98d23d8006abb5c4a5b00c8a6b27e2069530b Mon Sep 17 00:00:00 2001
+From: B38613 <B38613@freescale.com>
+Date: Wed, 25 Apr 2012 13:51:44 +0800
+Subject: [PATCH 1504/2463] ENGR00180768 sd:detect some sd2.0 cards to sd1.0
+
+when SD_SPEC=2, no matter Physical Layer Spec v3.0
+is supported or not, should both be recognized as
+SD2.0card.
+
+Signed-off-by: Zhou Jianzheng <B38613@freescale.com>
+(cherry picked from commit 59f5c06bba9e426326346fc00c1524cb789d695a)
+---
+ drivers/mmc/core/sd.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
+index 5d9d752..ae4b1af 100644
+--- a/drivers/mmc/core/sd.c
++++ b/drivers/mmc/core/sd.c
+@@ -306,6 +306,9 @@ static int mmc_read_switch(struct mmc_card *card)
+ 		goto out;
+ 	}
+ 
++	if (status[13] & 0x02)
++		card->sw_caps.hs_max_dtr = 50000000;
++
+ 	if (card->scr.sda_spec3) {
+ 		card->sw_caps.sd3_bus_mode = status[13];
+ 
+@@ -348,9 +351,6 @@ static int mmc_read_switch(struct mmc_card *card)
+ 		}
+ 
+ 		card->sw_caps.sd3_curr_limit = status[7];
+-	} else {
+-		if (status[13] & 0x02)
+-			card->sw_caps.hs_max_dtr = 50000000;
+ 	}
+ 
+ out:
+-- 
+1.7.7.4
+

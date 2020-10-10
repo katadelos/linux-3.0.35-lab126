@@ -1,0 +1,43 @@
+From 5beb93eb2840fab052de6554ba6f93ee3974855b Mon Sep 17 00:00:00 2001
+From: Rob Herring <r.herring@freescale.com>
+Date: Fri, 16 Oct 2009 14:41:52 -0500
+Subject: [PATCH 0007/2463] tsc2007: fail registration on i2c error
+
+Return an error on probe if i2c errors occur indicating the device
+is not present.
+
+Signed-off-by: Rob Herring <r.herring@freescale.com>
+---
+ drivers/input/touchscreen/tsc2007.c |    9 +++++++++
+ 1 files changed, 9 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/input/touchscreen/tsc2007.c b/drivers/input/touchscreen/tsc2007.c
+index fadc115..da74327 100644
+--- a/drivers/input/touchscreen/tsc2007.c
++++ b/drivers/input/touchscreen/tsc2007.c
+@@ -300,6 +300,13 @@ static int __devinit tsc2007_probe(struct i2c_client *client,
+ 	ts->get_pendown_state = pdata->get_pendown_state;
+ 	ts->clear_penirq      = pdata->clear_penirq;
+ 
++	pdata->init_platform_hw();
++
++	if (tsc2007_xfer(ts, PWRDOWN) < 0) {
++		err = -ENODEV;
++		goto err_no_dev;
++	}
++
+ 	snprintf(ts->phys, sizeof(ts->phys),
+ 		 "%s/input0", dev_name(&client->dev));
+ 
+@@ -344,6 +351,8 @@ static int __devinit tsc2007_probe(struct i2c_client *client,
+ 		pdata->exit_platform_hw();
+  err_free_mem:
+ 	input_free_device(input_dev);
++ err_no_dev:
++	pdata->exit_platform_hw();
+ 	kfree(ts);
+ 	return err;
+ }
+-- 
+1.7.7.4
+

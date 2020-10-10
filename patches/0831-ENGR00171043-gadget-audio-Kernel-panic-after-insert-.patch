@@ -1,0 +1,31 @@
+From 24eb55424e4c2431db37242df3379c474f510722 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Sat, 31 Dec 2011 14:56:47 +0800
+Subject: [PATCH 0831/2463] ENGR00171043 gadget-audio: Kernel panic after
+ insert g_audio at second time
+
+The reason is it does not call usb_ep_disable at gadget disable routine.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/gadget/f_audio.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/gadget/f_audio.c b/drivers/usb/gadget/f_audio.c
+index 325bfb4..62e2122 100644
+--- a/drivers/usb/gadget/f_audio.c
++++ b/drivers/usb/gadget/f_audio.c
+@@ -644,6 +644,10 @@ static int f_audio_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
+ 
+ static void f_audio_disable(struct usb_function *f)
+ {
++	struct f_audio		*audio = func_to_audio(f);
++
++	usb_ep_disable(audio->out_ep);
++
+ 	return;
+ }
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,60 @@
+From fa071f78922dfce4b473bf85a8b2627bfec8a540 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Tue, 28 Feb 2012 20:16:52 +0800
+Subject: [PATCH 1103/2463] ENGR00174839 i.mx: asrc: enable clock before
+ access the asrc register
+
+proc01 test fail on MX6dl and system hange after
+the following output:
+
+proc01 0 TINFO: /proc/kmsg: known issue: errno=EAGAIN(11):
+<hang>
+system will hang when access the proc file under: /proc/driver/asrc/ChSettings
+The issue is that the asrc clock is off when try toaccess the asrc register.
+
+Enable the asrc clock before access the asrc register fix the issue.
+
+And we need turn off the clock after we finished accessing the register
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ drivers/mxc/asrc/mxc_asrc.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index f088e40..2ac5cb0 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -1607,7 +1607,9 @@ static int asrc_read_proc_attr(char *page, char **start, off_t off,
+ {
+ 	unsigned long reg;
+ 	int len = 0;
++	clk_enable(mxc_asrc_data->asrc_core_clk);
+ 	reg = __raw_readl(asrc_vrt_base_addr + ASRC_ASRCNCR_REG);
++	clk_disable(mxc_asrc_data->asrc_core_clk);
+ 
+ 	len += sprintf(page, "ANCA: %d\n",
+ 		       (int)(reg &
+@@ -1647,7 +1649,9 @@ static int asrc_write_proc_attr(struct file *file, const char *buffer,
+ 		return -EFAULT;
+ 	}
+ 
++	clk_enable(mxc_asrc_data->asrc_core_clk);
+ 	reg = __raw_readl(asrc_vrt_base_addr + ASRC_ASRCNCR_REG);
++	clk_disable(mxc_asrc_data->asrc_core_clk);
+ 	sscanf(buf, "ANCA: %d\nANCB: %d\nANCC: %d", &na, &nb, &nc);
+ 	if (mxc_asrc_data->channel_bits > 3)
+ 		total = 10;
+@@ -1660,7 +1664,9 @@ static int asrc_write_proc_attr(struct file *file, const char *buffer,
+ 	reg = na | (nb << mxc_asrc_data->
+ 		    channel_bits) | (nc << (mxc_asrc_data->channel_bits * 2));
+ 
++	clk_enable(mxc_asrc_data->asrc_core_clk);
+ 	__raw_writel(reg, asrc_vrt_base_addr + ASRC_ASRCNCR_REG);
++	clk_disable(mxc_asrc_data->asrc_core_clk);
+ 
+ 	return count;
+ }
+-- 
+1.7.7.4
+

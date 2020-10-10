@@ -1,0 +1,193 @@
+From 01b0b8aa2e0703cfca0befc3baa6c2151b673372 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Tue, 5 Jul 2011 16:29:47 +0800
+Subject: [PATCH 0215/2463] ENGR00139241-1 mx6 sata: refine the imx ahci sata
+ driver
+
+refine the imx ahci sata driver, when enable mx6q sata
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/plat-mxc/Makefile                      |    1 +
+ arch/arm/plat-mxc/ahci_sata.c                   |   58 +++++++++++++++++++++++
+ arch/arm/plat-mxc/devices/Kconfig               |    2 +-
+ arch/arm/plat-mxc/devices/Makefile              |    2 +-
+ arch/arm/plat-mxc/devices/platform-ahci-imx.c   |   11 +++-
+ arch/arm/plat-mxc/include/mach/ahci_sata.h      |    5 ++
+ arch/arm/plat-mxc/include/mach/devices-common.h |    6 +-
+ 7 files changed, 77 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/Makefile b/arch/arm/plat-mxc/Makefile
+index 8b864bb..458397c 100755
+--- a/arch/arm/plat-mxc/Makefile
++++ b/arch/arm/plat-mxc/Makefile
+@@ -19,6 +19,7 @@ obj-$(CONFIG_ARCH_MXC_AUDMUX_V1) += audmux-v1.o
+ obj-$(CONFIG_ARCH_MXC_AUDMUX_V2) += audmux-v2.o
+ obj-$(CONFIG_MXC_DEBUG_BOARD) += 3ds_debugboard.o
+ obj-$(CONFIG_CPU_FREQ_IMX)    += cpufreq.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_AHCI)	+= ahci_sata.o
+ ifdef CONFIG_SND_IMX_SOC
+ obj-y += ssi-fiq.o
+ obj-y += ssi-fiq-ksym.o
+diff --git a/arch/arm/plat-mxc/ahci_sata.c b/arch/arm/plat-mxc/ahci_sata.c
+new file mode 100644
+index 0000000..9dd607e
+--- /dev/null
++++ b/arch/arm/plat-mxc/ahci_sata.c
+@@ -0,0 +1,58 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <linux/io.h>
++#include <linux/clk.h>
++#include <linux/kernel.h>
++#include <mach/ahci_sata.h>
++
++/* AHCI module Initialization, if return 0, initialization is successful. */
++int sata_init(void __iomem *addr, unsigned long timer1ms)
++{
++	u32 tmpdata;
++
++	/* Reset HBA */
++	writel(HOST_RESET, addr + HOST_CTL);
++
++	tmpdata = readl(addr + HOST_VERSIONR);
++	tmpdata = 0;
++	while (readl(addr + HOST_VERSIONR) == 0) {
++		tmpdata++;
++		if (tmpdata > 100000) {
++			printk(KERN_ERR "Can't recover from RESET HBA!\n");
++			break;
++		}
++	}
++
++	tmpdata = readl(addr + HOST_CAP);
++	if (!(tmpdata & HOST_CAP_SSS)) {
++		tmpdata |= HOST_CAP_SSS;
++		writel(tmpdata, addr + HOST_CAP);
++	}
++	tmpdata = readl(addr + HOST_CAP);
++
++	if (!(readl(addr + HOST_PORTS_IMPL) & 0x1))
++		writel((readl(addr + HOST_PORTS_IMPL) | 0x1),
++			addr + HOST_PORTS_IMPL);
++
++	writel(timer1ms, addr + HOST_TIMER1MS);
++
++	return 0;
++}
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index b6eda42..554adb8 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -99,7 +99,7 @@ config IMX_HAVE_PLATFORM_IMX_VPU
+ config IMX_HAVE_PLATFORM_IMX_DVFS
+ 	bool
+ 
+-config IMX_HAVE_PLATFORM_SATA_AHCI
++config IMX_HAVE_PLATFORM_AHCI
+ 	bool
+ 
+ config IMX_HAVE_PLATFORM_IMX_IIM
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index c4203cf..992b715 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -31,7 +31,7 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_IPUV3) +=  platform-imx_ipuv3.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_TVE) += platform-imx_tve.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_VPU) +=  platform-imx_vpu.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_DVFS) +=  platform-imx_dvfs.o
+-obj-$(CONFIG_IMX_HAVE_PLATFORM_SATA_AHCI) +=  platform-ahci-imx.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_AHCI) +=  platform-ahci-imx.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_IIM)	+= platform-imx-iim.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_MXC_GPU) +=  platform-mxc_gpu.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_OCOTP) += platform-imx-ocotp.o
+diff --git a/arch/arm/plat-mxc/devices/platform-ahci-imx.c b/arch/arm/plat-mxc/devices/platform-ahci-imx.c
+index 9f730f1..30bfeaa 100755
+--- a/arch/arm/plat-mxc/devices/platform-ahci-imx.c
++++ b/arch/arm/plat-mxc/devices/platform-ahci-imx.c
+@@ -29,12 +29,17 @@
+ 	}
+ 
+ #ifdef CONFIG_SOC_IMX53
+-const struct imx_ahci_imx_data imx53_ahci_imx_data __initconst =
++const struct imx_ahci_data imx53_ahci_data __initconst =
+ 	imx_ahci_data_entry_single(MX53);
+ #endif
+ 
+-struct platform_device *__init imx_add_ahci_imx(
+-		const struct imx_ahci_imx_data *data,
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_ahci_data imx6q_ahci_data __initconst =
++	imx_ahci_data_entry_single(MX6Q);
++#endif
++
++struct platform_device *__init imx_add_ahci(
++		const struct imx_ahci_data *data,
+ 		const struct ahci_platform_data *pdata)
+ {
+ 	struct resource res[] = {
+diff --git a/arch/arm/plat-mxc/include/mach/ahci_sata.h b/arch/arm/plat-mxc/include/mach/ahci_sata.h
+index 25df23e..2118995 100755
+--- a/arch/arm/plat-mxc/include/mach/ahci_sata.h
++++ b/arch/arm/plat-mxc/include/mach/ahci_sata.h
+@@ -22,8 +22,12 @@
+ enum {
+ 	HOST_CAP = 0x00,
+ 	HOST_CAP_SSS = (1 << 27), /* Staggered Spin-up */
++	HOST_CTL		= 0x04, /* global host control */
++	HOST_RESET		= (1 << 0),  /* reset controller; self-clear */
+ 	HOST_PORTS_IMPL	= 0x0c,
+ 	HOST_TIMER1MS = 0xe0, /* Timer 1-ms */
++	HOST_VERSIONR = 0xfc, /* host version register*/
++
+ 	/* Offest used to control the MPLL input clk */
+ 	PHY_CR_CLOCK_FREQ_OVRD = 0x12,
+ 	/* Port0 SATA Status */
+@@ -48,4 +52,5 @@ enum {
+ 	SATA_PHY_CR_CLOCK_MPLL_TST = 0x0017,
+ };
+ 
++extern int sata_init(void __iomem *addr, unsigned long timer1ms);
+ #endif /* __PLAT_MXC_AHCI_SATA_H__ */
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 01466e5..f941299 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -354,13 +354,13 @@ struct platform_device *__init imx_add_tve(
+ 		const struct fsl_mxc_tve_platform_data *pdata);
+ 
+ #include <linux/ahci_platform.h>
+-struct imx_ahci_imx_data {
++struct imx_ahci_data {
+ 	int id;
+ 	resource_size_t iobase;
+ 	resource_size_t irq;
+ };
+-struct platform_device *__init imx_add_ahci_imx(
+-		const struct imx_ahci_imx_data *data,
++struct platform_device *__init imx_add_ahci(
++		const struct imx_ahci_data *data,
+ 		const struct ahci_platform_data *pdata);
+ 
+ struct imx_iim_data {
+-- 
+1.7.7.4
+

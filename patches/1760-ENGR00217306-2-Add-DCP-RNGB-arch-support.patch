@@ -1,0 +1,294 @@
+From c29f7b2ee903b648750a567313d362637c64a903 Mon Sep 17 00:00:00 2001
+From: Terry Lv <r65388@freescale.com>
+Date: Mon, 16 Jul 2012 15:58:06 +0800
+Subject: [PATCH 1760/2463] ENGR00217306-2: Add DCP/RNGB arch support
+
+This patch will add arch support of DCP/RNGB.
+
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ arch/arm/configs/imx6s_defconfig              |   10 +++++
+ arch/arm/mach-mx6/Kconfig                     |    7 ++++
+ arch/arm/mach-mx6/board-mx6sl_arm2.c          |    4 ++-
+ arch/arm/mach-mx6/devices-imx6q.h             |    8 ++++
+ arch/arm/plat-mxc/devices/platform-imx-dcp.c  |   46 +++++++++++++++++++------
+ arch/arm/plat-mxc/devices/platform-imx-rngb.c |   11 ++++--
+ arch/arm/plat-mxc/include/mach/mx6.h          |    8 ++--
+ 7 files changed, 74 insertions(+), 20 deletions(-)
+
+diff --git a/arch/arm/configs/imx6s_defconfig b/arch/arm/configs/imx6s_defconfig
+index 01f9bed..231b4f1 100644
+--- a/arch/arm/configs/imx6s_defconfig
++++ b/arch/arm/configs/imx6s_defconfig
+@@ -274,6 +274,8 @@ CONFIG_IMX_HAVE_PLATFORM_IMX_DVFS=y
+ CONFIG_IMX_HAVE_PLATFORM_AHCI=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_OCOTP=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_VIIM=y
++CONFIG_IMX_HAVE_PLATFORM_IMX_DCP=y
++CONFIG_IMX_HAVE_PLATFORM_RANDOM_RNGC=y
+ CONFIG_IMX_HAVE_PLATFORM_PERFMON=y
+ CONFIG_IMX_HAVE_PLATFORM_LDB=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_PXP=y
+@@ -324,6 +326,7 @@ CONFIG_MXC_PWM=y
+ # CONFIG_MXC_DEBUG_BOARD is not set
+ # CONFIG_MXC_REBOOT_MFGMODE is not set
+ # CONFIG_MXC_REBOOT_ANDROID_CMD is not set
++CONFIG_ARCH_HAS_RNGC=y
+ CONFIG_ARCH_MXC_IOMUX_V3=y
+ CONFIG_ARCH_MXC_AUDMUX_V2=y
+ CONFIG_IRAM_ALLOC=y
+@@ -1147,6 +1150,7 @@ CONFIG_FSL_OTP=y
+ # CONFIG_IPMI_HANDLER is not set
+ CONFIG_HW_RANDOM=y
+ # CONFIG_HW_RANDOM_TIMERIOMEM is not set
++CONFIG_HW_RANDOM_FSL_RNGC=y
+ # CONFIG_R3964 is not set
+ # CONFIG_RAW_DRIVER is not set
+ # CONFIG_TCG_TPM is not set
+@@ -2287,6 +2291,11 @@ CONFIG_ANATOP_THERMAL=y
+ CONFIG_MXC_MIPI_CSI2=y
+ 
+ #
++# MXC HDMI CEC (Consumer Electronics Control) support
++#
++# CONFIG_MXC_HDMI_CEC is not set
++
++#
+ # File systems
+ #
+ CONFIG_EXT2_FS=y
+@@ -2628,6 +2637,7 @@ CONFIG_CRYPTO_LZO=y
+ # CONFIG_CRYPTO_USER_API_SKCIPHER is not set
+ CONFIG_CRYPTO_HW=y
+ # CONFIG_CRYPTO_DEV_FSL_CAAM is not set
++CONFIG_CRYPTO_DEV_DCP=y
+ # CONFIG_BINARY_PRINTF is not set
+ 
+ #
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index ea0c7e7..5c60c56 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -65,6 +65,7 @@ config MACH_MX6Q_ARM2
+ 	select IMX_HAVE_PLATFORM_IMX_ELCDIF
+ 	select IMX_HAVE_PLATFORM_IMX_PXP
+ 	select IMX_HAVE_PLATFORM_IMX_PCIE
++	select IMX_HAVE_PLATFORM_IMX_CAAM
+ 	help
+ 	  Include support for i.MX 6Quad Armadillo2 platform. This includes specific
+ 	  configurations for the board and its peripherals.
+@@ -99,6 +100,9 @@ config MACH_MX6SL_ARM2
+ 	select IMX_HAVE_PLATFORM_IMX_SPDC
+ 	select IMX_HAVE_PLATFORM_IMX_PXP
+ 	select IMX_HAVE_PLATFORM_IMX_KEYPAD
++	select IMX_HAVE_PLATFORM_IMX_DCP
++	select IMX_HAVE_PLATFORM_RANDOM_RNGC
++	select ARCH_HAS_RNGC
+ 	help
+ 	  Include support for i.MX 6Sololite Armadillo2 platform. This includes specific
+ 	  configurations for the board and its peripherals.
+@@ -131,6 +135,7 @@ config MACH_MX6Q_SABRELITE
+ 	select IMX_HAVE_PLATFORM_MXC_HDMI
+ 	select IMX_HAVE_PLATFORM_IMX_ASRC
+ 	select IMX_HAVE_PLATFORM_FLEXCAN
++	select IMX_HAVE_PLATFORM_IMX_CAAM
+ 	help
+ 	  Include support for i.MX 6Quad SABRE Lite platform. This includes specific
+ 	  configurations for the board and its peripherals.
+@@ -164,6 +169,7 @@ config MACH_MX6Q_SABRESD
+ 	select IMX_HAVE_PLATFORM_IMX_ASRC
+ 	select IMX_HAVE_PLATFORM_FLEXCAN
+ 	select IMX_HAVE_PLATFORM_IMX_PCIE
++	select IMX_HAVE_PLATFORM_IMX_CAAM
+ 	help
+ 	  Include support for i.MX 6Quad SABRE SD platform. This includes specific
+ 	  configurations for the board and its peripherals.
+@@ -201,6 +207,7 @@ config MACH_MX6Q_SABREAUTO
+ 	select IMX_HAVE_PLATFORM_FLEXCAN
+ 	select IMX_HAVE_PLATFORM_IMX_MIPI_CSI2
+ 	select IMX_HAVE_PLATFORM_IMX_PCIE
++	select IMX_HAVE_PLATFORM_IMX_CAAM
+ 	help
+ 	  Include support for i.MX 6Quad SABRE Auto platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 1053b15..3608e51 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -1288,7 +1288,7 @@ static void __init mx6_arm2_init(void)
+ 	imx6sl_add_imx_spdc(&spdc_data);
+ 	imx6q_add_dvfs_core(&mx6sl_arm2_dvfscore_data);
+ 
+-    imx6q_init_audio();
++	imx6q_init_audio();
+ 
+ 	imx6q_add_viim();
+ 	imx6q_add_imx2_wdt(0, NULL);
+@@ -1296,6 +1296,8 @@ static void __init mx6_arm2_init(void)
+ 	imx_add_viv_gpu(&imx6_gpu_data, &imx6q_gpu_pdata);
+ 	imx6sl_add_imx_keypad(&mx6sl_arm2_map_data);
+ 	imx6q_add_busfreq();
++	imx6sl_add_dcp();
++	imx6sl_add_rngb();
+ 
+ 	pm_power_off = mx6_snvs_poweroff;
+ }
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 0a30052..c75aed8 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -243,4 +243,12 @@ extern const struct imx_imx_keypad_data imx6sl_imx_keypad_data;
+ #define imx6sl_add_imx_keypad(pdata)	\
+ 	imx_add_imx_keypad(&imx6sl_imx_keypad_data, pdata)
+ 
++extern const struct imx_dcp_data imx6sl_dcp_data __initconst;
++#define imx6sl_add_dcp() \
++	imx_add_dcp(&imx6sl_dcp_data);
++
++extern const struct imx_rngb_data imx6sl_rngb_data __initconst;
++#define imx6sl_add_rngb() \
++	imx_add_rngb(&imx6sl_rngb_data);
++
+ #define imx6_add_armpmu() imx_add_imx_armpmu()
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-dcp.c b/arch/arm/plat-mxc/devices/platform-imx-dcp.c
+index 3a36de5..a77840b 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx-dcp.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-dcp.c
+@@ -1,28 +1,50 @@
+ /*
+  * Copyright (C) 2010 Pengutronix
+  * Uwe Kleine-Koenig <u.kleine-koenig@pengutronix.de>
+- * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+  *
+- * This program is free software; you can redistribute it and/or modify it under
+- * the terms of the GNU General Public License version 2 as published by the
+- * Free Software Foundation.
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+  */
+ #include <asm/sizes.h>
+ #include <mach/hardware.h>
+ #include <mach/devices-common.h>
+ 
+-#define imx_ocp_data_entry_single(soc)	\
++#ifdef CONFIG_SOC_IMX50
++#define imx_dcp_data_entry_single(soc)	\
+ {						\
+ 	.iobase = soc ## _DCP_BASE_ADDR,	\
+ 	.irq1 = soc ## _INT_DCP_CHAN0,		\
+ 	.irq2 = soc ## _INT_DCP_CHAN1_3,	\
+ }
+ 
+-#ifdef CONFIG_SOC_IMX50
+ const struct imx_dcp_data imx50_dcp_data __initconst =
+-	imx_ocp_data_entry_single(MX50);
++	imx_dcp_data_entry_single(MX50);
+ #endif /* ifdef CONFIG_SOC_IMX50 */
+ 
++#ifdef CONFIG_SOC_IMX6SL
++#define imx_dcp_data_entry_single(soc)	\
++{						\
++	.iobase = soc ## _DCP_BASE_ADDR,	\
++	.irq1 = soc ## _INT_DCP_CH0,		\
++	.irq2 = soc ## _INT_DCP_GEN,		\
++}
++
++const struct imx_dcp_data imx6sl_dcp_data __initconst =
++	imx_dcp_data_entry_single(MX6SL);
++#endif /* ifdef CONFIG_SOC_IMX6SL */
++
+ struct platform_device *__init imx_add_dcp(
+ 		const struct imx_dcp_data *data)
+ {
+@@ -31,17 +53,19 @@ struct platform_device *__init imx_add_dcp(
+ 			.start = data->iobase,
+ 			.end = data->iobase + SZ_8K - 1,
+ 			.flags = IORESOURCE_MEM,
+-		}, {
++		},
++		{
+ 			.start = data->irq1,
+ 			.end = data->irq1,
+ 			.flags = IORESOURCE_IRQ,
+-		}, {
++		},
++		{
+ 			.start = data->irq2,
+ 			.end = data->irq2,
+ 			.flags = IORESOURCE_IRQ,
+ 		},
+ 	};
+ 
+-	return imx_add_platform_device("dcp", 0,
+-			res, ARRAY_SIZE(res), NULL, 0);
++	return imx_add_platform_device_dmamask("dcp", 0,
++			res, ARRAY_SIZE(res), NULL, 0, DMA_BIT_MASK(32));
+ }
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-rngb.c b/arch/arm/plat-mxc/devices/platform-imx-rngb.c
+index 3407ea0..9a0a652 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx-rngb.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-rngb.c
+@@ -1,8 +1,6 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+  * the Free Software Foundation; either version 2 of the License, or
+@@ -33,6 +31,11 @@ const struct imx_rngb_data imx50_rngb_data __initconst =
+ 	imx_rngb_data_entry_single(MX50);
+ #endif /* ifdef CONFIG_SOC_IMX50 */
+ 
++#ifdef CONFIG_SOC_IMX6SL
++const struct imx_rngb_data imx6sl_rngb_data __initconst =
++	imx_rngb_data_entry_single(MX6SL);
++#endif /* ifdef CONFIG_SOC_IMX6SL */
++
+ struct platform_device *__init imx_add_rngb(
+ 		const struct imx_rngb_data *data)
+ {
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 76458a0..aaf8b99 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -322,7 +322,7 @@
+ #define MX6DL_INT_MSHC			35
+ #define MXC_INT_INTERRUPT_36_NUM	36
+ #define MX6Q_INT_IPU1_ERR		37
+-#define MX6DL_INT_RNGB			37
++#define MX6SL_INT_RNGB			37
+ #define MX6Q_INT_IPU1_SYN		38
+ #define MX6SL_INT_SPDC			38
+ #define MX6Q_INT_IPU2_ERR		39
+@@ -436,9 +436,9 @@
+ #define MX6DL_INT_EPDC			129
+ #define MX6DL_INT_EPXP			130
+ #define MXC_INT_INTERRUPT_131_NUM	131
+-#define MX6DL_INT_DCP_GEN		131
+-#define MX6DL_INT_DCP_CH0		132
+-#define MX6DL_INT_DCP_SEC		133
++#define MX6SL_INT_DCP_GEN		131
++#define MX6SL_INT_DCP_CH0		132
++#define MX6SL_INT_DCP_SEC		133
+ #define MXC_INT_CSI_INTR1		132
+ #define MXC_INT_CSI_INTR2		133
+ #define MXC_INT_DSI			134
+-- 
+1.7.7.4
+

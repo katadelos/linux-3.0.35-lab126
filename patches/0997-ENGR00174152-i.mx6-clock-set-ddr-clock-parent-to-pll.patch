@@ -1,0 +1,35 @@
+From 58a1ec0db6b5a192a5329e4f4156e711cfa45dcb Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Thu, 9 Feb 2012 14:09:58 +0800
+Subject: [PATCH 0997/2463] ENGR00174152 i.mx6/clock: set ddr clock parent to
+ pll2_mfd_400M
+
+on i.mx6dl, DDR clock is sourcing from pll2_mfd_400M, so, we need
+set DDR/periph_clk parent to pll2_mfd_400M during clock init, which
+will setup the clock usecount of pll2_mfd_400M correctly, otherwise,
+when all the child device with clock source from pll2_mfd_400M turn
+off, the pll2_mfd_400M will turns off automaticly, which will cause
+system hang due to DDR clock is off when code is runing on it.
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index c508b41..5e703a8 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5083,7 +5083,8 @@ static void clk_tree_init(void)
+ 
+ 	reg = __raw_readl(MMDC_MDMISC_OFFSET);
+ 	if ((reg & MMDC_MDMISC_DDR_TYPE_MASK) ==
+-		(0x1 << MMDC_MDMISC_DDR_TYPE_OFFSET)) {
++		(0x1 << MMDC_MDMISC_DDR_TYPE_OFFSET) ||
++		cpu_is_mx6dl()) {
+ 		clk_set_parent(&periph_clk, &pll2_pfd_400M);
+ 		printk(KERN_INFO "Set periph_clk's parent to pll2_pfd_400M!\n");
+ 	}
+-- 
+1.7.7.4
+

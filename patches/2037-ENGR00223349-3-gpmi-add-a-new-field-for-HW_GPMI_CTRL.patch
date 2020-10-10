@@ -1,0 +1,60 @@
+From 96462179b61be749a7d1ac580e1b2352febbe3da Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Fri, 7 Sep 2012 14:37:47 +0800
+Subject: [PATCH 2037/2463] ENGR00223349-3 gpmi: add a new field for
+ HW_GPMI_CTRL1
+
+add the WRN_DLY_SEL field for HW_GPMI_CTRL1.
+This field is used as delay for gpmi write strobe.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/mtd/nand/gpmi-nand/gpmi-lib.c  |    4 ++++
+ drivers/mtd/nand/gpmi-nand/gpmi-nand.h |    2 ++
+ 2 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mtd/nand/gpmi-nand/gpmi-lib.c b/drivers/mtd/nand/gpmi-nand/gpmi-lib.c
+index a65b679..c13ae42 100644
+--- a/drivers/mtd/nand/gpmi-nand/gpmi-lib.c
++++ b/drivers/mtd/nand/gpmi-nand/gpmi-lib.c
+@@ -992,6 +992,7 @@ return_results:
+ 	hw->use_half_periods        = dll_use_half_periods;
+ 	hw->sample_delay_factor     = sample_delay_factor;
+ 	hw->device_busy_timeout     = 0x500; /* default busy timeout value. */
++	hw->wrn_dly_sel             = 0;
+ 
+ 	/* Return success. */
+ 	return 0;
+@@ -1037,6 +1038,9 @@ void gpmi_begin(struct gpmi_nand_data *this)
+ 		gpmi_regs + HW_GPMI_TIMING1);
+ 
+ 	/* [3] The following code is to set the HW_GPMI_CTRL1. */
++	writel(BM_GPMI_CTRL1_WRN_DLY_SEL, gpmi_regs + HW_GPMI_CTRL1_CLR);
++	writel(BF_GPMI_CTRL1_WRN_DLY_SEL(hw.wrn_dly_sel),
++					gpmi_regs + HW_GPMI_CTRL1_SET);
+ 
+ 	/* DLL_ENABLE must be set to 0 when setting RDN_DELAY or HALF_PERIOD. */
+ 	writel(BM_GPMI_CTRL1_DLL_ENABLE, gpmi_regs + HW_GPMI_CTRL1_CLR);
+diff --git a/drivers/mtd/nand/gpmi-nand/gpmi-nand.h b/drivers/mtd/nand/gpmi-nand/gpmi-nand.h
+index cf50a60..19b049f 100644
+--- a/drivers/mtd/nand/gpmi-nand/gpmi-nand.h
++++ b/drivers/mtd/nand/gpmi-nand/gpmi-nand.h
+@@ -194,6 +194,7 @@ struct gpmi_nand_data {
+  * @use_half_periods:          Indicates the clock is running slowly, so the
+  *                             NFC DLL should use half-periods.
+  * @sample_delay_factor:       The sample delay factor.
++ * @wrn_dly_sel:               The delay on the GPMI write strobe.
+  */
+ struct gpmi_nfc_hardware_timing {
+ 	/* for GPMI_HW_GPMI_TIMING0 */
+@@ -207,6 +208,7 @@ struct gpmi_nfc_hardware_timing {
+ 	/* for GPMI_HW_GPMI_CTRL1 */
+ 	bool     use_half_periods;
+ 	uint8_t  sample_delay_factor;
++	uint8_t  wrn_dly_sel;
+ };
+ 
+ /**
+-- 
+1.7.7.4
+

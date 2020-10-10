@@ -1,0 +1,45 @@
+From 409bd258668e38bd13e29534c04c64b3c1a11b9e Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Fri, 20 Jul 2012 17:54:35 +0800
+Subject: [PATCH 1792/2463] ENGR00217721-5 usb gadget random transfer fail
+
+usb driver part
+
+- After USB driver prime a bulk transfer(whatever IN or OUT, take
+  OUT for example) on ep1, only one dTD is primed, an USB Interrupt
+  (bit 0 of USBSTS) will be issued, and find that endptcomplete
+  register is 0x2 which means an OUT transfer on ep1 is completed,
+  at this time the ep1 out queue head status is 0x1e18000, and next
+  dtd pointer is 0x1 which means transfer is done and everything is
+  OK, while the dTD token status is 0x2008080 which means this dTD
+  is still active, not completed yet.
+- Audio SDMA and Ethernet have the similar issue
+- root cause is not found yet
+- work around:
+  change the non-cacheable bufferable memory to non-cacheable
+  non-bufferable memory to make this issue disappear.
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index a7bc480..2415c87 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -956,7 +956,11 @@ static struct ep_td_struct *fsl_build_dtd(struct fsl_req *req, unsigned *length,
+ 			(unsigned)EP_MAX_LENGTH_TRANSFER);
+ 	if (NEED_IRAM(req->ep))
+ 		*length = min(*length, g_iram_size);
++#ifdef CONFIG_FSL_UTP
++	dtd = dma_pool_alloc_nonbufferable(udc_controller->td_pool, GFP_ATOMIC, dma);
++#else
+ 	dtd = dma_pool_alloc(udc_controller->td_pool, GFP_ATOMIC, dma);
++#endif
+ 	if (dtd == NULL)
+ 		return dtd;
+ 
+-- 
+1.7.7.4
+

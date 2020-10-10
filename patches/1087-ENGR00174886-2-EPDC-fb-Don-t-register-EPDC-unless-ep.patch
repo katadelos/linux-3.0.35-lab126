@@ -1,0 +1,31 @@
+From 7b6cb73b0a86a1d274633830fed5c65c1a0dd7d8 Mon Sep 17 00:00:00 2001
+From: Danny Nold <dannynold@freescale.com>
+Date: Wed, 22 Feb 2012 12:59:59 -0600
+Subject: [PATCH 1087/2463] ENGR00174886-2 - EPDC fb: Don't register EPDC
+ unless "epdc" kernel option set
+
+- EPDC firmware build was breaking due to binary build pre-empting
+the conversion from .fw.ihex->.fw.  Resolve this by forcing
+firmware objects to be built in order.
+
+Signed-off-by: Danny Nold <dannynold@freescale.com>
+---
+ firmware/Makefile |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/firmware/Makefile b/firmware/Makefile
+index c469e86..459d5b0 100644
+--- a/firmware/Makefile
++++ b/firmware/Makefile
+@@ -226,6 +226,8 @@ $(patsubst %,$(obj)/%.gen.o, $(fw-external-y)): $(obj)/%.gen.o: $(fwdir)/%
+ $(obj)/%: $(obj)/%.ihex | $(objtree)/$(obj)/$$(dir %)
+ 	$(call cmd,ihex)
+ 
++.NOTPARALLEL: $(obj)/%
++
+ # Don't depend on ihex2fw if we're installing and it already exists.
+ # Putting it after | in the dependencies doesn't seem sufficient when
+ # we're installing after a cross-compile, because ihex2fw has dependencies
+-- 
+1.7.7.4
+

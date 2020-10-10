@@ -1,0 +1,95 @@
+From 844aab72e7edcdced9f8e4e0d8e54eb4b0461cd9 Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Fri, 11 Jan 2013 15:28:51 +0800
+Subject: [PATCH 2358/2463] ENGR00239734 Mx6 HDMI PHY: Add 2 variable to pass
+ board specific config
+
+The PHY register 0x9 and 0xe should setting
+to different value in different board to pass HCT.
+Add variable phy_reg_vlev and phy_reg_cksymtx to pass
+phy config data.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ drivers/video/mxc_hdmi.c    |   20 ++++++++++++++++++++
+ include/linux/fsl_devices.h |    5 ++++-
+ 2 files changed, 24 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index ddfa027..34fb1b2 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -152,6 +152,12 @@ struct hdmi_data_info {
+ 	struct hdmi_vmode video_mode;
+ };
+ 
++struct hdmi_phy_reg_config {
++	/* HDMI PHY register config for pass HCT */
++	u16 reg_vlev;
++	u16 reg_cksymtx;
++};
++
+ struct mxc_hdmi {
+ 	struct platform_device *pdev;
+ 	struct platform_device *core_pdev;
+@@ -179,6 +185,8 @@ struct mxc_hdmi {
+ 	struct fb_videomode previous_mode;
+ 	struct fb_videomode previous_non_vga_mode;
+ 	bool requesting_vga_for_initialization;
++
++	struct hdmi_phy_reg_config phy_config;
+ };
+ 
+ struct i2c_client *hdmi_i2c;
+@@ -1087,6 +1095,14 @@ static int hdmi_phy_configure(struct mxc_hdmi *hdmi, unsigned char pRep,
+ 	hdmi_phy_i2c_write(hdmi, 0x800d, 0x09);  /* CKSYMTXCTRL */
+ 	/* TX/CK LVL 10 */
+ 	hdmi_phy_i2c_write(hdmi, 0x01ad, 0x0E);  /* VLEVCTRL */
++
++	/* Board specific setting for PHY register 0x09, 0x0e to pass HCT */
++	if (hdmi->phy_config.reg_cksymtx != 0)
++		hdmi_phy_i2c_write(hdmi, hdmi->phy_config.reg_cksymtx, 0x09);
++
++	if (hdmi->phy_config.reg_vlev != 0)
++		hdmi_phy_i2c_write(hdmi, hdmi->phy_config.reg_vlev, 0x0E);
++
+ 	/* REMOVE CLK TERM */
+ 	hdmi_phy_i2c_write(hdmi, 0x8000, 0x05);  /* CKCALCTRL */
+ 
+@@ -2189,6 +2205,10 @@ static int mxc_hdmi_disp_init(struct mxc_dispdrv_handle *disp,
+ 	if (plat->init)
+ 		plat->init(mxc_hdmi_ipu_id, mxc_hdmi_disp_id);
+ 
++	/* Specific phy config */
++	hdmi->phy_config.reg_cksymtx = plat->phy_reg_cksymtx;
++	hdmi->phy_config.reg_vlev = plat->phy_reg_vlev;
++
+ 	hdmi->hdmi_isfr_clk = clk_get(&hdmi->pdev->dev, "hdmi_isfr_clk");
+ 	if (IS_ERR(hdmi->hdmi_isfr_clk)) {
+ 		ret = PTR_ERR(hdmi->hdmi_isfr_clk);
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index 78a50ac..ac56f18 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -6,7 +6,7 @@
+  *
+  * Maintainer: Kumar Gala <galak@kernel.crashing.org>
+  *
+- * Copyright 2004-2012 Freescale Semiconductor, Inc.
++ * Copyright 2004-2013 Freescale Semiconductor, Inc.
+  *
+  * This program is free software; you can redistribute  it and/or modify it
+  * under  the terms of  the GNU General  Public License as published by the
+@@ -284,6 +284,9 @@ struct fsl_mxc_hdmi_platform_data {
+ 	void (*put_pins) (void);
+ 	void (*enable_pins) (void);
+ 	void (*disable_pins) (void);
++	/* HDMI PHY register config for pass HCT */
++	u16 phy_reg_vlev;
++	u16 phy_reg_cksymtx;
+ };
+ 
+ struct fsl_mxc_hdmi_core_platform_data {
+-- 
+1.7.7.4
+

@@ -1,0 +1,56 @@
+From 594dab1eab8c34532893fa2b5a7d28e5a68d0a6a Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Mon, 22 Aug 2011 11:24:23 +0800
+Subject: [PATCH 0371/2463] ENGR00153474 ipuv3 split mode: vf and enc task
+ display with error
+
+For split mode, if using vf/enc task, the display is not correct.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_ic.c |   22 ++++++++++++++--------
+ 1 files changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_ic.c b/drivers/mxc/ipu3/ipu_ic.c
+index 27cf2d4..581f7c2 100644
+--- a/drivers/mxc/ipu3/ipu_ic.c
++++ b/drivers/mxc/ipu3/ipu_ic.c
+@@ -215,10 +215,13 @@ void _ipu_ic_init_prpvf(struct ipu_soc *ipu, ipu_channel_params_t *params, bool
+ 	ipu_color_space_t in_fmt, out_fmt;
+ 
+ 	/* Setup vertical resizing */
+-	_calc_resize_coeffs(ipu, params->mem_prp_vf_mem.in_height,
+-			    params->mem_prp_vf_mem.out_height,
+-			    &resizeCoeff, &downsizeCoeff);
+-	reg = (downsizeCoeff << 30) | (resizeCoeff << 16);
++	if (!(params->mem_prp_vf_mem.outv_resize_ratio)) {
++		_calc_resize_coeffs(ipu, params->mem_prp_vf_mem.in_height,
++				params->mem_prp_vf_mem.out_height,
++				&resizeCoeff, &downsizeCoeff);
++		reg = (downsizeCoeff << 30) | (resizeCoeff << 16);
++	} else
++		reg = (params->mem_prp_vf_mem.outv_resize_ratio) << 16;
+ 
+ 	/* Setup horizontal resizing */
+ 	/* Upadeted for IC split case */
+@@ -337,10 +340,13 @@ void _ipu_ic_init_prpenc(struct ipu_soc *ipu, ipu_channel_params_t *params, bool
+ 	ipu_color_space_t in_fmt, out_fmt;
+ 
+ 	/* Setup vertical resizing */
+-	_calc_resize_coeffs(ipu, params->mem_prp_enc_mem.in_height,
+-			    params->mem_prp_enc_mem.out_height,
+-			    &resizeCoeff, &downsizeCoeff);
+-	reg = (downsizeCoeff << 30) | (resizeCoeff << 16);
++	if (!(params->mem_prp_enc_mem.outv_resize_ratio)) {
++		_calc_resize_coeffs(ipu, params->mem_prp_enc_mem.in_height,
++				params->mem_prp_enc_mem.out_height,
++				&resizeCoeff, &downsizeCoeff);
++		reg = (downsizeCoeff << 30) | (resizeCoeff << 16);
++	} else
++		reg = (params->mem_prp_enc_mem.outv_resize_ratio) << 16;
+ 
+ 	/* Setup horizontal resizing */
+ 	/* Upadeted for IC split case */
+-- 
+1.7.7.4
+

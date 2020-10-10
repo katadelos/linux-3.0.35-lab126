@@ -1,0 +1,43 @@
+From f63a8292fe128987ea4f8ab695f08a7fd9ea69bc Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Wed, 25 Jul 2012 13:58:46 +0800
+Subject: [PATCH 1808/2463] ENGR00215346: mmc: esdhc: change to use sdma
+ instead of adma due to ic limit.
+
+Due to ic issue, adma2 failed to work when ahb freq is slow (<50Mhz),
+while SDMA does not have issue.
+
+workaround:
+- use SDMA instead.
+
+performance comparison between SDMA & ADMA:
+
+|			|	SDMA		|	ADMA		|
+---------------------------------------------------------------------
+| wifi downlink*	|	~38Mbps		|	~38Mbps		|
+| memory card**	| ~20MBps(r)/~4MBps(w)	| ~20MBps(r)/~9MBps(w)	|
+
+* wifi downlink throughput is tested by iperf in open air.
+** writing performance for SDMA is much slower than ADMA, it might
+be an issue which needs further investigation.
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/host/sdhci-esdhc-imx.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index 3f809a6..7beb8b9 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -957,6 +957,7 @@ struct sdhci_pltfm_data sdhci_esdhc_imx_pdata = {
+ 	.quirks = ESDHC_DEFAULT_QUIRKS | SDHCI_QUIRK_NO_ENDATTR_IN_NOPDESC
+ 			| SDHCI_QUIRK_BROKEN_ADMA_ZEROLEN_DESC
+ 			| SDHCI_QUIRK_BROKEN_CARD_DETECTION
++			| SDHCI_QUIRK_BROKEN_ADMA
+ 			| SDHCI_QUIRK_NO_HISPD_BIT,
+ 	/* ADMA has issues. Might be fixable */
+ 	.ops = &sdhci_esdhc_ops,
+-- 
+1.7.7.4
+

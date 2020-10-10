@@ -1,0 +1,40 @@
+From c7e0fc2071e732cb83e93f7d4522adeb00931db3 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Fri, 15 Apr 2011 16:25:57 +0800
+Subject: [PATCH 0104/2463] ENGR00141363 ARM imx53 clock: change di0 clock
+ default parent to pll3
+
+If enable both LVDS and one display device use external di clock, there will
+be conflict between their clock parent -- both use pll4 on mx53. So it need
+change di0 clock parent to pll3, and then uart parent need change to pll2 to
+avoid console mess.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/mach-mx5/clock.c |    3 ---
+ 1 files changed, 0 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/clock.c b/arch/arm/mach-mx5/clock.c
+index c540f08..64209fc 100755
+--- a/arch/arm/mach-mx5/clock.c
++++ b/arch/arm/mach-mx5/clock.c
+@@ -5036,8 +5036,6 @@ int __init mx53_clocks_init(unsigned long ckil, unsigned long osc, unsigned long
+ 	clk_set_parent(&esdhc2_clk[0], &esdhc1_clk[0]);
+ 	clk_set_parent(&esdhc3_clk[0], &pll2_sw_clk);
+ 
+-	clk_set_parent(&ipu_di_clk[0], &pll4_sw_clk);
+-
+ #if 0
+ 	/*Setup the LPM bypass bits */
+ 	reg = __raw_readl(MXC_CCM_CLPCR);
+@@ -5146,7 +5144,6 @@ int __init mx53_clocks_init(unsigned long ckil, unsigned long osc, unsigned long
+ 
+ 	clk_set_parent(&arm_axi_clk, &axi_b_clk);
+ 	clk_set_parent(&ipu_clk[0], &axi_b_clk);
+-	clk_set_parent(&uart_main_clk, &pll3_sw_clk);
+ 	clk_set_parent(&gpu3d_clk, &axi_b_clk);
+ 	clk_set_parent(&gpu2d_clk, &axi_b_clk);
+ 
+-- 
+1.7.7.4
+

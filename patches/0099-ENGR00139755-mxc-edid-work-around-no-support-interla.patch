@@ -1,0 +1,85 @@
+From d0a1a639788f1d73a10dacf01e51408e1cd55564 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Fri, 25 Feb 2011 16:00:17 +0800
+Subject: [PATCH 0099/2463] ENGR00139755 mxc edid: work around no support
+ interlaced mode
+
+Remove interlaced mode from fb modelist before it can be supported.
+Should revert this patch after interlaced mode support on normal display port.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+(cherry picked from commit 079a6024a7369117b8f2ca8f3a905702a0175394)
+---
+ drivers/video/mxc/mxc_edid.c      |    6 ++++--
+ drivers/video/mxc/mxc_ipuv3_fb.c  |   15 ++++++++++++++-
+ drivers/video/mxc/mxcfb_sii902x.c |    9 ++++++---
+ 3 files changed, 24 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_edid.c b/drivers/video/mxc/mxc_edid.c
+index d5f4ebe..3a171c7 100644
+--- a/drivers/video/mxc/mxc_edid.c
++++ b/drivers/video/mxc/mxc_edid.c
+@@ -217,8 +217,10 @@ static void det_worker(struct work_struct *work)
+ 				fb_destroy_modelist(&mxc_ddc.fbi->modelist);
+ 
+ 				for (i = 0; i < mxc_ddc.fbi->monspecs.modedb_len; i++)
+-					fb_add_videomode(&mxc_ddc.fbi->monspecs.modedb[i],
+-							&mxc_ddc.fbi->modelist);
++					/*FIXME now we do not support interlaced mode */
++					if (!(mxc_ddc.fbi->monspecs.modedb[i].vmode & FB_VMODE_INTERLACED))
++						fb_add_videomode(&mxc_ddc.fbi->monspecs.modedb[i],
++								&mxc_ddc.fbi->modelist);
+ 
+ 				fb_var_to_videomode(&m, &mxc_ddc.fbi->var);
+ 				mode = fb_find_nearest_mode(&m,
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 7631445..03c07b9 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -1693,9 +1693,22 @@ static int mxcfb_setup(struct fb_info *fbi, struct platform_device *pdev)
+ 			INIT_LIST_HEAD(&fbi->modelist);
+ 
+ 			if (mxc_disp_mode[mxcfbi->ipu_di].num_modes) {
++				int i;
+ 				mode = mxc_disp_mode[mxcfbi->ipu_di].mode;
+ 				num = mxc_disp_mode[mxcfbi->ipu_di].num_modes;
+-				fb_videomode_to_modelist(mode, num, &fbi->modelist);
++
++				for (i = 0; i < num; i++) {
++					/*
++					 * FIXME now we do not support interlaced
++					 * mode for ddc mode
++					 */
++					if ((mxc_disp_mode[mxcfbi->ipu_di].dev_mode
++						& MXC_DISP_DDC_DEV) &&
++						(mode[i].vmode & FB_VMODE_INTERLACED))
++						continue;
++					else
++						fb_add_videomode(&mode[i], &fbi->modelist);
++				}
+ 			}
+ 
+ 			if ((mxc_disp_mode[mxcfbi->ipu_di].dev_mode
+diff --git a/drivers/video/mxc/mxcfb_sii902x.c b/drivers/video/mxc/mxcfb_sii902x.c
+index 9749aea..7e1080f 100644
+--- a/drivers/video/mxc/mxcfb_sii902x.c
++++ b/drivers/video/mxc/mxcfb_sii902x.c
+@@ -233,9 +233,12 @@ static void det_worker(struct work_struct *work)
+ 
+ 					fb_destroy_modelist(&sii902x.fbi->modelist);
+ 
+-					for (i = 0; i < sii902x.fbi->monspecs.modedb_len; i++)
+-						fb_add_videomode(&sii902x.fbi->monspecs.modedb[i],
+-								&sii902x.fbi->modelist);
++					for (i = 0; i < sii902x.fbi->monspecs.modedb_len; i++) {
++						/*FIXME now we do not support interlaced mode */
++						if (!(sii902x.fbi->monspecs.modedb[i].vmode & FB_VMODE_INTERLACED))
++							fb_add_videomode(&sii902x.fbi->monspecs.modedb[i],
++									&sii902x.fbi->modelist);
++					}
+ 
+ 					fb_var_to_videomode(&m, &sii902x.fbi->var);
+ 					mode = fb_find_nearest_mode(&m,
+-- 
+1.7.7.4
+

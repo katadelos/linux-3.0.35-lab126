@@ -1,0 +1,51 @@
+From 3f1ac3d6297353d13ddd27079e7a08b5426df966 Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Wed, 28 Dec 2011 11:43:08 +0800
+Subject: [PATCH 0814/2463] ENGR00171001-2 MX6Q PFUZE100: fix build warnings
+
+fix build warnings on pfuze driver:
+
+arch/arm/mach-mx6/mx6q_sabreauto_pmic_pfuze100.c:388:
+  warning: initialization from incompatible pointer type
+drivers/mfd/pfuze-core.c:523:
+  warning: initialization from incompatible pointer type
+drivers/mfd/pfuze-core.c:412:
+  warning: 'pfuze_add_subdevice' defined but not used
+
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ drivers/mfd/pfuze-core.c  |    5 -----
+ include/linux/mfd/pfuze.h |    2 +-
+ 2 files changed, 1 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/mfd/pfuze-core.c b/drivers/mfd/pfuze-core.c
+index ae3a37e..5efc552 100644
+--- a/drivers/mfd/pfuze-core.c
++++ b/drivers/mfd/pfuze-core.c
+@@ -409,11 +409,6 @@ static int pfuze_add_subdevice_pdata(struct mc_pfuze *mc_pfuze,
+ 			       0);
+ }
+ 
+-static int pfuze_add_subdevice(struct mc_pfuze *mc_pfuze, const char *format)
+-{
+-	return pfuze_add_subdevice_pdata(mc_pfuze, format, NULL, 0);
+-}
+-
+ static ssize_t pfuze_show(struct device *dev,
+ 			  struct device_attribute *attr, char *buf)
+ {
+diff --git a/include/linux/mfd/pfuze.h b/include/linux/mfd/pfuze.h
+index a4c51c5..4297642 100644
+--- a/include/linux/mfd/pfuze.h
++++ b/include/linux/mfd/pfuze.h
+@@ -105,6 +105,6 @@ struct pfuze_platform_data {
+ #define PFUZE_USE_REGULATOR	(1 << 0)
+ 	unsigned int flags;
+ 	int num_regulators;
+-	struct fuze_regulator_init_data *regulators;
++	struct pfuze_regulator_init_data *regulators;
+ };
+ #endif
+-- 
+1.7.7.4
+

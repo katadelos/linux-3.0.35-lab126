@@ -1,0 +1,44 @@
+From e4bdc0bf1531ac4aab62ba822dc265c29eadf9da Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Fri, 6 Jul 2012 17:35:55 -0700
+Subject: [PATCH 1773/2463] ENGR00215945-2: Fix directions in cache coherence
+ functions
+
+During a bug search, a review turned up two places where the wrong
+direction was used in dma_sync function calls. In practice. these
+compiled away to be inconsequential on the platform in question, but
+this may not be true on all platforms.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/crypto/caam/caamhash.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/crypto/caam/caamhash.c b/drivers/crypto/caam/caamhash.c
+index fe6af79..cdc3f3e 100644
+--- a/drivers/crypto/caam/caamhash.c
++++ b/drivers/crypto/caam/caamhash.c
+@@ -167,7 +167,7 @@ static inline dma_addr_t buf_map_to_sec4_sg(struct device *jrdev,
+ 	dma_addr_t buf_dma;
+ 
+ 	buf_dma = dma_map_single(jrdev, buf, buflen, DMA_TO_DEVICE);
+-	dma_sync_single_for_cpu(jrdev, buf_dma, buflen, DMA_TO_DEVICE);
++	dma_sync_single_for_device(jrdev, buf_dma, buflen, DMA_TO_DEVICE);
+ 	dma_to_sec4_sg_one(sec4_sg, buf_dma, buflen, 0);
+ 
+ 	return buf_dma;
+@@ -556,8 +556,8 @@ static int ahash_setkey(struct crypto_ahash *ahash,
+ 		return -ENOMEM;
+ 	}
+ 
+-	dma_sync_single_for_cpu(jrdev, ctx->key_dma, ctx->split_key_pad_len,
+-				DMA_TO_DEVICE);
++	dma_sync_single_for_device(jrdev, ctx->key_dma, ctx->split_key_pad_len,
++				   DMA_TO_DEVICE);
+ 
+ #ifdef DEBUG
+ 	print_hex_dump(KERN_ERR, "ctx.key@"xstr(__LINE__)": ",
+-- 
+1.7.7.4
+

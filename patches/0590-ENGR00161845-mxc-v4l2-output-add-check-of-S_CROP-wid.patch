@@ -1,0 +1,32 @@
+From f037cb9d7146ad24c74fde39b52435944f7b0ca5 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Thu, 10 Nov 2011 09:42:12 +0800
+Subject: [PATCH 0590/2463] ENGR00161845 mxc v4l2 output: add check of S_CROP
+ width and height
+
+To avoid CROP width=0 or height=0 case.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_vout.c |    5 +++++
+ 1 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_vout.c b/drivers/media/video/mxc/output/mxc_vout.c
+index 6c7e42f..b5f93da 100644
+--- a/drivers/media/video/mxc/output/mxc_vout.c
++++ b/drivers/media/video/mxc/output/mxc_vout.c
+@@ -910,6 +910,11 @@ static int mxc_vidioc_s_crop(struct file *file, void *fh, struct v4l2_crop *crop
+ 	if (vout->vbq.streaming)
+ 		return -EBUSY;
+ 
++	if (crop->c.width == 0)
++		crop->c.width = b->width - b->left;
++	if (crop->c.height == 0)
++		crop->c.height = b->height - b->top;
++
+ 	if (crop->c.top < b->top)
+ 		crop->c.top = b->top;
+ 	if (crop->c.top >= b->top + b->height)
+-- 
+1.7.7.4
+

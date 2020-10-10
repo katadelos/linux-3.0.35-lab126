@@ -1,0 +1,38 @@
+From c7e3b327e3fcad22f2f561062388e7be835c7600 Mon Sep 17 00:00:00 2001
+From: Dong Aisheng <b29396@freescale.com>
+Date: Wed, 16 Nov 2011 17:46:59 +0800
+Subject: [PATCH 0622/2463] ENGR00162364 flexcan: fix endless errors causing
+ system hang
+
+Clear state error to avoid ednless state error if error happens
+which will call napi_schedule() each time, seems a little high load,
+to cause system hang.
+
+Signed-off-by: Dong Aisheng <b29396@freescale.com>
+---
+ drivers/net/can/flexcan.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/net/can/flexcan.c b/drivers/net/can/flexcan.c
+index 83cbbee..b01e59b 100644
+--- a/drivers/net/can/flexcan.c
++++ b/drivers/net/can/flexcan.c
+@@ -435,11 +435,15 @@ static void do_state(struct net_device *dev,
+ static int flexcan_poll_state(struct net_device *dev, u32 reg_esr)
+ {
+ 	struct flexcan_priv *priv = netdev_priv(dev);
++	struct flexcan_regs __iomem *regs = priv->base;
+ 	struct sk_buff *skb;
+ 	struct can_frame *cf;
+ 	enum can_state new_state;
+ 	int flt;
+ 
++	/* clear state error if any (write 1 to clear)*/
++	writel(reg_esr, &regs->esr);
++
+ 	flt = reg_esr & FLEXCAN_ESR_FLT_CONF_MASK;
+ 	if (likely(flt == FLEXCAN_ESR_FLT_CONF_ACTIVE)) {
+ 		if (likely(!(reg_esr & (FLEXCAN_ESR_TX_WRN |
+-- 
+1.7.7.4
+

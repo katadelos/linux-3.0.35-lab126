@@ -1,0 +1,54 @@
+From ca422630f66743896a914a39b8f7fa0701cb027a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Arve=20Hj=C3=B8nnev=C3=A5g?= <arve@android.com>
+Date: Fri, 28 Jan 2011 23:12:32 -0800
+Subject: [PATCH 2066/2463] ARM: etm: Don't require clock control
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+If clk_get fail, assume the etb does not need a separate clock.
+
+Change-Id: Ia0bf3f5391e94a60ea45876aa7afc8a88a7ec3bf
+Signed-off-by: Arve Hjønnevåg <arve@android.com>
+---
+ arch/arm/kernel/etm.c |   15 ++++++++-------
+ 1 files changed, 8 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/kernel/etm.c b/arch/arm/kernel/etm.c
+index 1bec8b5..9c96b5f 100644
+--- a/arch/arm/kernel/etm.c
++++ b/arch/arm/kernel/etm.c
+@@ -361,13 +361,12 @@ static int __devinit etb_probe(struct amba_device *dev, const struct amba_id *id
+ 	if (ret)
+ 		goto out_unmap;
+ 
++	/* Get optional clock. Currently used to select clock source on omap3 */
+ 	t->emu_clk = clk_get(&dev->dev, "emu_src_ck");
+-	if (IS_ERR(t->emu_clk)) {
++	if (IS_ERR(t->emu_clk))
+ 		dev_dbg(&dev->dev, "Failed to obtain emu_src_ck.\n");
+-		return -EFAULT;
+-	}
+-
+-	clk_enable(t->emu_clk);
++	else
++		clk_enable(t->emu_clk);
+ 
+ 	etb_unlock(t);
+ 	t->etb_bufsz = etb_readl(t, ETBR_DEPTH);
+@@ -402,8 +401,10 @@ static int etb_remove(struct amba_device *dev)
+ 	iounmap(t->etb_regs);
+ 	t->etb_regs = NULL;
+ 
+-	clk_disable(t->emu_clk);
+-	clk_put(t->emu_clk);
++	if (!IS_ERR(t->emu_clk)) {
++		clk_disable(t->emu_clk);
++		clk_put(t->emu_clk);
++	}
+ 
+ 	amba_release_regions(dev);
+ 
+-- 
+1.7.7.4
+

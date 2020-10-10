@@ -1,0 +1,65 @@
+From cbda0ec2fd5e8f753c98de817771daae48c9a905 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Mon, 4 Mar 2013 17:30:08 +0800
+Subject: [PATCH 2416/2463] ENGR00251209-5 usb: fix the system hang when
+ unload gadget module
+
+- For gadget, the clock will be closed at platform code, so
+the driver should not be close clock beforehand.
+- For host, the PHY should not be low power mode when the host
+controller has still possibilities to use. Besides, the 5v should
+be off at last as some platform uses 5v for PHY's power.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    1 -
+ drivers/usb/host/ehci-arc.c     |    9 +++++----
+ 2 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index d1a2e27..9d9417f 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -3299,7 +3299,6 @@ static int  fsl_udc_remove(struct platform_device *pdev)
+ 	release_mem_region(res->start, resource_size(res));
+ }
+ #endif
+-	dr_clk_gate(false);
+ 	device_unregister(&udc_controller->gadget.dev);
+ 	/* free udc --wait for the release() finished */
+ 	wait_for_completion(&done);
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index 4a2768a..4a7c606 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -350,9 +350,6 @@ static void usb_hcd_fsl_remove(struct usb_hcd *hcd,
+ 		}
+ 	}
+ 
+-	/* DDD shouldn't we turn off the power here? */
+-	fsl_platform_set_vbus_power(pdata, 0);
+-
+ 	if (ehci->transceiver) {
+ 		(void)otg_set_host(ehci->transceiver, 0);
+ 		otg_put_transceiver(ehci->transceiver);
+@@ -361,12 +358,16 @@ static void usb_hcd_fsl_remove(struct usb_hcd *hcd,
+ 	}
+ 	/*disable the host wakeup and put phy to low power mode */
+ 	usb_host_set_wakeup(hcd->self.controller, false);
+-	fsl_usb_lowpower_mode(pdata, true);
+ 	/*free the ehci_fsl_pre_irq  */
+ 	free_irq(hcd->irq, (void *)pdev);
+ 	usb_remove_hcd(hcd);
+ 	usb_put_hcd(hcd);
+ 
++	fsl_usb_lowpower_mode(pdata, true);
++
++	/* DDD shouldn't we turn off the power here? */
++	fsl_platform_set_vbus_power(pdata, 0);
++
+ 	/*
+ 	 * do platform specific un-initialization:
+ 	 * release iomux pins clocks, etc.
+-- 
+1.7.7.4
+

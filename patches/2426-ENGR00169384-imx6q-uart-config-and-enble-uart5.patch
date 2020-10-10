@@ -1,0 +1,98 @@
+From 8c06604f1845028790e5da4474e4907b5f4b7504 Mon Sep 17 00:00:00 2001
+From: Jianzheng Zhou <jianzheng.zhou@freescale.com>
+Date: Mon, 11 Mar 2013 17:41:26 +0800
+Subject: [PATCH 2426/2463] ENGR00169384 imx6q: uart: config and enble uart5
+
+Config clock,irq,mux pad,data entry, etc to setup uart5.
+
+Signed-off-by: Jianzheng Zhou <jianzheng.zhou@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c                     |    3 ++-
+ arch/arm/plat-mxc/devices/platform-imx-uart.c |    1 +
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h   |    4 ++--
+ arch/arm/plat-mxc/include/mach/mx6.h          |    5 ++++-
+ 4 files changed, 9 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 0a8c880..8354428 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -1,6 +1,6 @@
+ 
+ /*
+- * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -5258,6 +5258,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK("imx-uart.1", NULL, uart_clk[0]),
+ 	_REGISTER_CLOCK("imx-uart.2", NULL, uart_clk[0]),
+ 	_REGISTER_CLOCK("imx-uart.3", NULL, uart_clk[0]),
++	_REGISTER_CLOCK("imx-uart.4", NULL, uart_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "hsi_tx", hsi_tx_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "caam_clk", caam_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "asrc_clk", asrc_clk[0]),
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-uart.c b/arch/arm/plat-mxc/devices/platform-imx-uart.c
+index 7f70dc9..e76b026 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-uart.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-uart.c
+@@ -134,6 +134,7 @@ const struct imx_imx_uart_1irq_data imx6q_imx_uart_data[] __initconst = {
+ 	imx6q_imx_uart_data_entry(1, 2),
+ 	imx6q_imx_uart_data_entry(2, 3),
+ 	imx6q_imx_uart_data_entry(3, 4),
++	imx6q_imx_uart_data_entry(4, 5),
+ };
+ #endif /* ifdef CONFIG_SOC_IMX6Q */
+ 
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index cdff320..c1acc24 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -2249,7 +2249,7 @@
+ #define _MX6Q_PAD_KEY_ROW4__KPP_ROW_4			\
+ 		IOMUX_PAD(0x05EC, 0x021C, 3, 0x0000, 0, 0)
+ #define _MX6Q_PAD_KEY_ROW4__UART5_CTS			\
+-		IOMUX_PAD(0x05EC, 0x021C, 4, 0x093C, 1, 0)
++		IOMUX_PAD(0x05EC, 0x021C, 4, 0x0000, 0, 0)
+ #define _MX6Q_PAD_KEY_ROW4__GPIO_4_15			\
+ 		IOMUX_PAD(0x05EC, 0x021C, 5, 0x0000, 0, 0)
+ #define _MX6Q_PAD_KEY_ROW4__MMDC_MMDC_DEBUG_50		\
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index bb22de0..ba38b8a 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -283,6 +283,8 @@
+ #define MX6Q_UART2_BASE_ADDR		UART2_BASE_ADDR
+ #define MX6Q_UART3_BASE_ADDR		UART3_BASE_ADDR
+ #define MX6Q_UART4_BASE_ADDR		UART4_BASE_ADDR
++#define MX6Q_UART5_BASE_ADDR		UART5_BASE_ADDR
++
+ #define MX6Q_FEC_BASE_ADDR		ENET_BASE_ADDR
+ #define MX6DL_FEC_BASE_ADDR		ENET_BASE_ADDR
+ #define MX6Q_MIPI_DSI_BASE_ADDR		MIPI_DSI_BASE_ADDR
+@@ -486,6 +488,7 @@
+ #define MX6Q_INT_UART2			MXC_INT_UART2_ANDED
+ #define MX6Q_INT_UART3			MXC_INT_UART3_ANDED
+ #define MX6Q_INT_UART4			MXC_INT_UART4_ANDED
++#define MX6Q_INT_UART5			MXC_INT_UART5_ANDED
+ #define MX6SL_INT_UART1			MXC_INT_UART1_ANDED
+ #define MX6SL_INT_UART2			MXC_INT_UART2_ANDED
+ #define MX6SL_INT_UART3			MXC_INT_UART3_ANDED
+-- 
+1.7.7.4
+

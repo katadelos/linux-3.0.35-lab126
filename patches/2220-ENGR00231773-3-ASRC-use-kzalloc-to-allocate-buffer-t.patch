@@ -1,0 +1,131 @@
+From 9e81e368be12a07cdff2b54ec7e7a13e82aa38ec Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Fri, 26 Oct 2012 15:10:09 +0800
+Subject: [PATCH 2220/2463] ENGR00231773-3 ASRC: use kzalloc to allocate
+ buffer to support scatterlist
+
+For ASRC's "memory -> ASRC -> memory" using, new driver would support
+model below: user input one buffer into ASRC and an corresponding output
+buffer would be poped out. There is no timing requirement between this
+input buffer and next input buffer. Thus driver would not use the cyclic
+way to config SDMA and scatterlist is used. buffer allocated by
+dma_alloc_coherent() can't support scatterlist well.
+
+In this patch, use kzalloc to allocate buffer to support scatterlist.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/mxc/asrc/mxc_asrc.c |   52 ++++++++++--------------------------------
+ include/linux/mxc_asrc.h    |    2 +
+ 2 files changed, 15 insertions(+), 39 deletions(-)
+
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index 8ce2197..f9a646a 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -873,22 +873,15 @@ static void asrc_output_task_worker(struct work_struct *w)
+ 	/* asrc output work struct */
+ }
+ 
+-
+ static void mxc_free_dma_buf(struct asrc_pair_params *params)
+ {
+ 	if (params->input_dma_total.dma_vaddr != NULL) {
+-		dma_free_coherent(g_asrc->dev,
+-			params->input_dma_total.length,
+-			params->input_dma_total.dma_vaddr,
+-			params->input_dma_total.dma_paddr);
++		kfree(params->input_dma_total.dma_vaddr);
+ 		params->input_dma_total.dma_vaddr = NULL;
+ 	}
+ 
+ 	if (params->output_dma_total.dma_vaddr != NULL) {
+-		dma_free_coherent(g_asrc->dev,
+-			params->output_dma_total.length,
+-			params->output_dma_total.dma_vaddr,
+-			params->output_dma_total.dma_paddr);
++		kfree(params->input_dma_total.dma_vaddr);
+ 		params->output_dma_total.dma_vaddr = NULL;
+ 	}
+ 
+@@ -897,42 +890,25 @@ static void mxc_free_dma_buf(struct asrc_pair_params *params)
+ 
+ static int mxc_allocate_dma_buf(struct asrc_pair_params *params)
+ {
+-	int i;
+ 	struct dma_block *input_a, *output_a;
+ 
+ 	input_a = &params->input_dma_total;
+ 	output_a = &params->output_dma_total;
+ 
+-	input_a->dma_vaddr =
+-		dma_alloc_coherent(g_asrc->dev,
+-			input_a->length, &input_a->dma_paddr,
+-			GFP_KERNEL | GFP_DMA);
+-	if (!input_a->dma_vaddr)
++	input_a->dma_vaddr = kzalloc(input_a->length, GFP_KERNEL);
++	if (!input_a->dma_vaddr) {
++		pr_err("fail to allocate input dma buffer!\n");
+ 		goto exit;
+-
+-	for (i = 0; i < params->buffer_num; i++) {
+-		params->input_dma[i].dma_vaddr =
+-			input_a->dma_vaddr + i * params->input_buffer_size;
+-		params->input_dma[i].dma_paddr =
+-			input_a->dma_paddr + i * params->input_buffer_size;
+-		if (params->input_dma[i].dma_vaddr == NULL)
+-			goto exit;
+ 	}
++	input_a->dma_paddr = virt_to_dma(NULL, input_a->dma_vaddr);
+ 
+-	output_a->dma_vaddr =
+-		dma_alloc_coherent(g_asrc->dev,
+-			output_a->length, &output_a->dma_paddr,
+-			GFP_KERNEL | GFP_DMA);
+-	if (!output_a->dma_vaddr)
++	output_a->dma_vaddr = kzalloc(output_a->length, GFP_KERNEL);
++	if (!output_a->dma_vaddr) {
++		pr_err("fail to allocate output dma buffer!\n");
+ 		goto exit;
+-	for (i = 0; i < params->buffer_num; i++) {
+-		params->output_dma[i].dma_vaddr =
+-			output_a->dma_vaddr + i * params->output_buffer_size;
+-		params->output_dma[i].dma_paddr =
+-			output_a->dma_paddr + i * params->output_buffer_size;
+-		if (params->output_dma[i].dma_vaddr == NULL)
+-			goto exit;
+ 	}
++	output_a->dma_paddr = virt_to_dma(NULL, output_a->dma_vaddr);
++
+ 	return 0;
+ 
+ exit:
+@@ -1079,10 +1055,8 @@ static long asrc_ioctl(struct file *file,
+ 			else
+ 				params->buffer_num = config.buffer_num;
+ 
+-			params->input_dma_total.length =
+-				params->input_buffer_size * params->buffer_num;
+-			params->output_dma_total.length =
+-				params->output_buffer_size * params->buffer_num;
++			params->input_dma_total.length = ASRC_DMA_BUFFER_SIZE;
++			params->output_dma_total.length = ASRC_DMA_BUFFER_SIZE;
+ 
+ 			err = mxc_allocate_dma_buf(params);
+ 			if (err < 0)
+diff --git a/include/linux/mxc_asrc.h b/include/linux/mxc_asrc.h
+index 4d6149a..a970fe6 100644
+--- a/include/linux/mxc_asrc.h
++++ b/include/linux/mxc_asrc.h
+@@ -138,6 +138,8 @@ enum asrc_error_status {
+ #define ASRC_DMA_BUFFER_NUM		2
+ #define ASRC_INPUTFIFO_THRESHOLD	32
+ #define ASRC_OUTPUTFIFO_THRESHOLD	32
++#define ASRC_DMA_BUFFER_SIZE	(1024 * 64 * 4)
++
+ 
+ #define ASRC_ASRCTR_REG 	0x00
+ #define ASRC_ASRIER_REG 	0x04
+-- 
+1.7.7.4
+

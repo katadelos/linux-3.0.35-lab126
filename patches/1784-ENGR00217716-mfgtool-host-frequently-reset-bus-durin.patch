@@ -1,0 +1,35 @@
+From 7788e54ceeaa638990b8ccb67cc5c5bd37a275d6 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Fri, 20 Jul 2012 09:28:27 +0800
+Subject: [PATCH 1784/2463] ENGR00217716 mfgtool host frequently reset bus
+ during transfer
+
+- the response in csw to request sense will be 1 due to UTP change
+  some storage information
+- host will reset the bus if response to request sense is 1
+- change the response to 0 if CONFIG_FSL_UTP is defined
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ drivers/usb/gadget/file_storage.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/gadget/file_storage.c b/drivers/usb/gadget/file_storage.c
+index 42ded43..9b4f105 100644
+--- a/drivers/usb/gadget/file_storage.c
++++ b/drivers/usb/gadget/file_storage.c
+@@ -2156,7 +2156,11 @@ static int send_status(struct fsg_dev *fsg)
+ 		sd = SS_INVALID_COMMAND;
+ 	} else if (sd != SS_NO_SENSE) {
+ 		DBG(fsg, "sending command-failure status\n");
++#ifdef CONFIG_FSL_UTP
++		status = USB_STATUS_PASS;
++#else
+ 		status = USB_STATUS_FAIL;
++#endif
+ 		VDBG(fsg, "  sense data: SK x%02x, ASC x%02x, ASCQ x%02x;"
+ 				"  info x%x\n",
+ 				SK(sd), ASC(sd), ASCQ(sd), sdinfo);
+-- 
+1.7.7.4
+

@@ -1,0 +1,39 @@
+From e7f49ba449205b3f8f3c0b050ab95863e23ef3fc Mon Sep 17 00:00:00 2001
+From: wu guoxing <b39297@freescale.com>
+Date: Mon, 14 Nov 2011 19:44:33 +0800
+Subject: [PATCH 0608/2463] ENGR00162114 mx6: OpenVG can not work with latest
+ kernel
+
+OpenVG can not work with latest kernel
+this is caused by some gpu2d clock changes.
+
+Signed-off-by: Wu Guoxing <b39297@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index a0db56d..d9d9ce9 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -1539,7 +1539,7 @@ static int _clk_gpu2d_axi_set_parent(struct clk *clk, struct clk *parent)
+ static struct clk gpu2d_axi_clk = {
+ 	__INIT_CLK_DEBUG(gpu2d_axi_clk)
+ 	.parent = &axi_clk,
+-	.secondary = &mmdc_ch0_axi_clk[0],
++	.secondary = &openvg_axi_clk,
+ 	.set_parent = _clk_gpu2d_axi_set_parent,
+ };
+ 
+@@ -4237,7 +4237,7 @@ static struct clk gpu2d_core_clk[] = {
+ 	.set_rate = _clk_gpu2d_core_set_rate,
+ 	.get_rate = _clk_gpu2d_core_get_rate,
+ 	.round_rate = _clk_gpu2d_core_round_rate,
+-	.secondary = &gpu2d_core_clk[0],
++	.secondary = &gpu2d_core_clk[1],
+ 	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ 	},
+ 	{
+-- 
+1.7.7.4
+

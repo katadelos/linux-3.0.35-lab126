@@ -1,0 +1,55 @@
+From da13fb3b02bf421d4ce92fe96a6329643dadf3b5 Mon Sep 17 00:00:00 2001
+From: Mahesh Mahadevan <r9aadq@freescale.com>
+Date: Thu, 10 Nov 2011 05:54:37 -0600
+Subject: [PATCH 0592/2463] ENGR00161926 Change the PAD settings on SD3 Write
+ Protect
+
+Update the PAD settings to lower pull-up resistor as this was
+causing WP to not be detected.
+
+Signed-off-by: Mahesh Mahadevan <r9aadq@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c  |    6 +++++-
+ arch/arm/plat-mxc/include/mach/iomux-v3.h |    2 ++
+ 2 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index 4d791f7..8fef605 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -80,6 +80,10 @@
+ #define MX6Q_SABRELITE_CAP_TCH_INT1	IMX_GPIO_NR(1, 9)
+ #define MX6Q_SABRELITE_USB_HUB_RESET	IMX_GPIO_NR(7, 12)
+ 
++#define MX6Q_SABRELITE_SD3_WP_PADCFG	(PAD_CTL_PKE | PAD_CTL_PUE |	\
++		PAD_CTL_PUS_22K_UP | PAD_CTL_SPEED_MED |	\
++		PAD_CTL_DSE_40ohm | PAD_CTL_HYS)
++
+ void __init early_console_setup(unsigned long base, struct clk *clk);
+ 
+ extern struct regulator *(*get_cpu_regulator)(void);
+@@ -288,7 +292,7 @@ static iomux_v3_cfg_t mx6q_sabrelite_pads[] = {
+ 	MX6Q_PAD_SD3_DAT2__USDHC3_DAT2_50MHZ,
+ 	MX6Q_PAD_SD3_DAT3__USDHC3_DAT3_50MHZ,
+ 	MX6Q_PAD_SD3_DAT5__GPIO_7_0,		/* J18 - SD3_CD */
+-	MX6Q_PAD_SD3_DAT4__GPIO_7_1,		/* J18 - SD3_WP */
++	NEW_PAD_CTRL(MX6Q_PAD_SD3_DAT4__GPIO_7_1, MX6Q_SABRELITE_SD3_WP_PADCFG),
+ 
+ 	/* USDHC4 */
+ 	MX6Q_PAD_SD4_CLK__USDHC4_CLK_50MHZ,
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-v3.h b/arch/arm/plat-mxc/include/mach/iomux-v3.h
+index 8d60bae..60fb82e 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-v3.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-v3.h
+@@ -80,6 +80,8 @@ typedef u64 iomux_v3_cfg_t;
+ 		((iomux_v3_cfg_t)(_sel_input_ofs) << MUX_SEL_INPUT_OFS_SHIFT) | \
+ 		((iomux_v3_cfg_t)(_sel_input) << MUX_SEL_INPUT_SHIFT))
+ 
++#define NEW_PAD_CTRL(cfg, pad)	(((cfg) & ~MUX_PAD_CTRL_MASK) | \
++		MUX_PAD_CTRL(pad))
+ /*
+  * Use to set PAD control
+  */
+-- 
+1.7.7.4
+

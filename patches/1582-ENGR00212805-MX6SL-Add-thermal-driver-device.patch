@@ -1,0 +1,52 @@
+From 723cf73455411dae1ec62cd49ee0737ee8a5d44e Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Fri, 8 Jun 2012 14:20:36 +0800
+Subject: [PATCH 1582/2463] ENGR00212805 [MX6SL]Add thermal driver device.
+
+Add thermal driver device to support thermal driver interface,
+but as this driver is dependent on OCOTP driver and need a
+calibrated part, so the temp read from the thermal sysfs
+interface maybe inaccurate on those uncalibrated parts.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_arm2.c |    9 ++++++++-
+ 1 files changed, 8 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 7429e97..6d5cdc1 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -267,6 +267,11 @@ static struct regulator_init_data max17135_init_data[] = {
+ 	},
+ };
+ 
++static const struct anatop_thermal_platform_data
++	mx6sl_anatop_thermal_data __initconst = {
++			.name = "anatop_thermal",
++	};
++
+ static struct platform_device max17135_sensor_device = {
+ 	.name = "max17135_sensor",
+ 	.id = 0,
+@@ -1016,6 +1021,8 @@ static void __init mx6_arm2_init(void)
+ 			ARRAY_SIZE(mxc_i2c2_board_info));
+ 	mx6sl_arm2_init_pfuze100(0);
+ 
++	imx6q_add_anatop_thermal_imx(1, &mx6sl_anatop_thermal_data);
++
+ 	mx6_arm2_init_uart();
+ 	/* get enet tx reference clk from FEC_REF_CLK pad.
+ 	 * GPR1[14] = 0, GPR1[18:17] = 00
+@@ -1037,7 +1044,7 @@ static void __init mx6_arm2_init(void)
+ 	imx6q_add_sdhci_usdhc_imx(2, &mx6_arm2_sd3_data);
+ 
+ 	mx6_arm2_init_usb();
+-
++	imx6q_add_otp();
+ 	imx6q_add_mxc_pwm(0);
+ 	imx6q_add_mxc_pwm_backlight(0, &mx6_arm2_pwm_backlight_data);
+ 	imx6dl_add_imx_elcdif(&fb_data[0]);
+-- 
+1.7.7.4
+

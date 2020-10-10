@@ -1,0 +1,31 @@
+From ef23a1e97cc8f48616533cac60d47e7e7dcd3bc4 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 6 Nov 2012 17:47:26 -0500
+Subject: [PATCH 2231/2463] ENGR00232586 mx6: increase PUPSCR to make sure LDO
+ is ready for resume
+
+Previous setting of PUPSCR is 0x202, which means there is only ~63us
+for LDO ramp up, sometimes, system fail to resume by USB remote wake up,
+increase this timing to fix USB remote wake up issue.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/system.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 6ecd51e..6d24f22 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -157,7 +157,7 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 		   * The PUPSCR should include the time it takes for the ARM LDO to
+ 		   * ramp up.
+ 		   */
+-		__raw_writel(0x202, gpc_base + GPC_PGC_CPU_PUPSCR_OFFSET);
++		__raw_writel(0xf0f, gpc_base + GPC_PGC_CPU_PUPSCR_OFFSET);
+ 		/* The PDNSCR is a counter that counts in IPG_CLK cycles. This counter
+ 		  * can be set to minimum values to power down faster.
+ 		  */
+-- 
+1.7.7.4
+

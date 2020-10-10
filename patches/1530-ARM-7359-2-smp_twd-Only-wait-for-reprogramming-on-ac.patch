@@ -1,0 +1,49 @@
+From 451f23dfe1f9ae4915b1c0286fd806f684028da7 Mon Sep 17 00:00:00 2001
+From: Linus Walleij <linus.walleij@linaro.org>
+Date: Tue, 10 Apr 2012 12:37:42 +0100
+Subject: [PATCH 1530/2463] ARM: 7359/2: smp_twd: Only wait for reprogramming
+ on active cpus
+
+During booting of cpu1, there is a short window where cpu1
+is online, but not active where cpu1 is occupied by waiting
+to become active. If cpu0 then decides to schedule something
+on cpu1 and wait for it to complete, before cpu0 has set
+cpu1 active, we have a deadlock.
+
+Typically it's this CPU frequency transition that happens at
+this time, so let's just not wait for it to happen, it will
+happen whenever the CPU eventually comes online instead.
+
+Cc: Peter Zijlstra <peterz@infradead.org>
+Cc: stable@kernel.org
+Signed-off-by: Jonas Aaberg <jonas.aberg@stericsson.com>
+Reviewed-by: Rickard Andersson <rickard.andersson@stericsson.com>
+Signed-off-by: Linus Walleij <linus.walleij@linaro.org>
+Signed-off-by: Russell King <rmk+kernel@arm.linux.org.uk>
+---
+ arch/arm/kernel/smp_twd.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/kernel/smp_twd.c b/arch/arm/kernel/smp_twd.c
+index a5a2f45..31deb5a 100644
+--- a/arch/arm/kernel/smp_twd.c
++++ b/arch/arm/kernel/smp_twd.c
+@@ -115,10 +115,14 @@ static int twd_cpufreq_transition(struct notifier_block *nb,
+ 	 * The twd clock events must be reprogrammed to account for the new
+ 	 * frequency.  The timer is local to a cpu, so cross-call to the
+ 	 * changing cpu.
++	 *
++	 * Only wait for it to finish, if the cpu is active to avoid
++	 * deadlock when cpu1 is spinning on while(!cpu_active(cpu1)) during
++	 * booting of that cpu.
+ 	 */
+ 	if (state == CPUFREQ_POSTCHANGE || state == CPUFREQ_RESUMECHANGE)
+ 		smp_call_function_single(freqs->cpu, twd_update_frequency,
+-			NULL, 1);
++					 NULL, cpu_active(freqs->cpu));
+ 
+ 	return NOTIFY_OK;
+ }
+-- 
+1.7.7.4
+

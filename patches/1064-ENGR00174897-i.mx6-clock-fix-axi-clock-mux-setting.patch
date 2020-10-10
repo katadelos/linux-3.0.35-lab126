@@ -1,0 +1,31 @@
+From 00d515d9b6e4c253a08f60e069a6bc60e5cd4feb Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Mon, 20 Feb 2012 11:18:40 +0800
+Subject: [PATCH 1064/2463] ENGR00174897 i.mx6: clock: fix axi clock mux
+ setting
+
+Fix the error in the axi clock mux setting,
+- reg = ((mux - 1) << MXC_CCM_CBCDR_AXI_ALT_SEL_OFFSET);
++ reg |= ((mux - 1) << MXC_CCM_CBCDR_AXI_ALT_SEL_OFFSET);
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 84e0176..26ced12 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -1257,7 +1257,7 @@ static int _clk_axi_set_parent(struct clk *clk, struct clk *parent)
+ 		/* Set the AXI_ALT_SEL mux. */
+ 		reg = __raw_readl(MXC_CCM_CBCDR)
+ 			& ~MXC_CCM_CBCDR_AXI_ALT_SEL_MASK;
+-		reg = ((mux - 1) << MXC_CCM_CBCDR_AXI_ALT_SEL_OFFSET);
++		reg |= ((mux - 1) << MXC_CCM_CBCDR_AXI_ALT_SEL_OFFSET);
+ 		__raw_writel(reg, MXC_CCM_CBCDR);
+ 
+ 		/* Set the AXI_SEL mux */
+-- 
+1.7.7.4
+

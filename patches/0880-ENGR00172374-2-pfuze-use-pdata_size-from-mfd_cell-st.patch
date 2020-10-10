@@ -1,0 +1,67 @@
+From 31fbaca19ede4ec61f0fb183c1140754407948c9 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Thu, 19 Jan 2012 13:52:13 +0800
+Subject: [PATCH 0880/2463] ENGR00172374-2: pfuze: use pdata_size from
+ mfd_cell struct
+
+fix the building errors when upgrade to v3.0
+
+we use data_size from mfd_cell struct on 2.6.38, but after that
+there are some changes for this field of mfd_cell struct, see:
+
+commit 40e03f571b2e63827f2afb90ea9aa459612c29e3
+Author: Andres Salomon <dilinger@queued.net>
+Date:   Thu Feb 17 19:07:24 2011 -0800
+
+    mfd: Drop data_size from mfd_cell struct
+
+    Now that there are no more users of this, drop it.
+
+    Signed-off-by: Andres Salomon <dilinger@queued.net>
+    Signed-off-by: Samuel Ortiz <sameo@linux.intel.com>
+
+and this:
+
+commit eb8956074e7652e802be5f078080c704c2c87104
+Author: Samuel Ortiz <sameo@linux.intel.com>
+Date:   Wed Apr 6 16:52:52 2011 +0200
+
+    mfd: Add platform data pointer back
+
+    Now that we have a way to pass MFD cells down to the sub drivers,
+    we can gradually get rid of mfd_data by putting the platform pointer
+    back in place.
+
+    Signed-off-by: Samuel Ortiz <sameo@linux.intel.com>
+
+But the above commit also change the name from data_size to pdata_size,
+This patch just give one fix for the pfuze driver to use pdata_size field.
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ drivers/mfd/pfuze-core.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mfd/pfuze-core.c b/drivers/mfd/pfuze-core.c
+index 5efc552..93d5e56 100644
+--- a/drivers/mfd/pfuze-core.c
++++ b/drivers/mfd/pfuze-core.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -398,7 +398,7 @@ static int pfuze_add_subdevice_pdata(struct mc_pfuze *mc_pfuze,
+ 	const char *name = pfuze_get_chipname(mc_pfuze);
+ 	struct mfd_cell cell = {
+ 		.platform_data = pdata,
+-		.data_size = pdata_size,
++		.pdata_size = pdata_size,
+ 	};
+ 	if (snprintf(buf, sizeof(buf), format, name) > sizeof(buf))
+ 		return -E2BIG;
+-- 
+1.7.7.4
+

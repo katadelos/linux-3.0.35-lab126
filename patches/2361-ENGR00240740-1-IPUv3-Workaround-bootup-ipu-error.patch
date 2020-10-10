@@ -1,0 +1,67 @@
+From 168f63d71434291847f1851340773686b2c00ebf Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.liu@freescale.com>
+Date: Fri, 18 Jan 2013 16:20:22 +0800
+Subject: [PATCH 2361/2463] ENGR00240740-1 IPUv3:Workaround bootup ipu error
+
+Enabling IPU hsp clock in mxcfb_probe() context by calling
+ipu_init_channel() can avoid the IPU display channel(setup
+in bootloader) from being damaged by some IPU common driver
+APIS which enable/disable IPU hsp clock when doing driver
+probe. However, somehow, after LDO bypass patch set is pushed
+to kernel, this clock enablement can trigger IPU errors
+(IPU_INT_STAT_5 - 0x00800000/IPU_INT_STAT_10 - 0x00100000) and
+a display flash. A workaround is to enable IPU hsp clock when
+we are at ipu_probe() context, which is earlier than mxcfb_probe()
+context, and then to disable(cleanup) the clock once more when
+fb_set_par() is triggered by the user for the first time. This
+patch exports an interface to disable ipu hsp clock so that
+fb_set_par() may call it, and enables ipu hsp clock in ipu_probe()
+context.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit 06e5772151c3b8e060110fbb2b1ce83ef6be70dd)
+---
+ drivers/mxc/ipu3/ipu_common.c |   20 ++++++++++++++++++--
+ 1 files changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 762aebc..5afb601 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -163,8 +163,18 @@ static int __devinit ipu_clk_setup_enable(struct ipu_soc *ipu,
+ 	clk_debug_register(&ipu->pixel_clk[0]);
+ 	clk_debug_register(&ipu->pixel_clk[1]);
+ 
+-	if (!plat_data->bypass_reset)
+-		clk_enable(ipu->ipu_clk);
++	/*
++	 * Enable ipu hsp clock anyway, so that we
++	 * may keep the clock on until user space
++	 * triggers frame buffer set_par(), i.e., any
++	 * ipu interface which enables/disables ipu
++	 * hsp clock with pair(called in IPUv3 fb
++	 * driver or mxc v4l2 driver<probed after fb
++	 * driver>) cannot eventually disables the
++	 * clock to damage the channel setup by
++	 * bootloader.
++	 */
++	clk_enable(ipu->ipu_clk);
+ 
+ 	ipu->pixel_clk[0].parent = ipu->ipu_clk;
+ 	ipu->pixel_clk[1].parent = ipu->ipu_clk;
+@@ -203,6 +213,12 @@ void _ipu_put(struct ipu_soc *ipu)
+ 	clk_disable(ipu->ipu_clk);
+ }
+ 
++void ipu_disable_hsp_clk(struct ipu_soc *ipu)
++{
++	_ipu_put(ipu);
++}
++EXPORT_SYMBOL(ipu_disable_hsp_clk);
++
+ /*!
+  * This function is called by the driver framework to initialize the IPU
+  * hardware.
+-- 
+1.7.7.4
+

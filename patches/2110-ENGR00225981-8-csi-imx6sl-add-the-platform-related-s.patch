@@ -1,0 +1,565 @@
+From 60dc693e6744258ba2b198ee339f5442cbf1b93d Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Thu, 27 Sep 2012 23:50:08 +0800
+Subject: [PATCH 2110/2463] ENGR00225981-8 csi/imx6sl: add the
+ platform-related setting
+
+- add platform data for csi driver
+- change the regulator name to reflect the voltage really used
+- select OSC as csi parent clock to get 24MHz
+- add an boot option to use csi feature while filter out the EPDC/SPDC, since
+  there are pin conflicts with xPDC.
+- both ov5640 and ov5642 are verified okay, ov5640 is used by default.
+- remove IPU from update_defconfig
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ arch/arm/configs/imx6s_defconfig                 |   10 +--
+ arch/arm/configs/imx6s_updater_defconfig         |   27 +++++---
+ arch/arm/mach-mx6/Kconfig                        |    1 +
+ arch/arm/mach-mx6/board-mx6sl_common.h           |   25 +++++++
+ arch/arm/mach-mx6/board-mx6sl_evk.c              |   74 +++++++++++++++++++---
+ arch/arm/mach-mx6/clock_mx6sl.c                  |    4 +-
+ arch/arm/mach-mx6/devices-imx6q.h                |    4 +
+ arch/arm/mach-mx6/mx6sl_evk_pmic_pfuze100.c      |    2 +-
+ arch/arm/plat-mxc/devices/Kconfig                |    3 +
+ arch/arm/plat-mxc/devices/Makefile               |    1 +
+ arch/arm/plat-mxc/devices/platform-imx-fsl-csi.c |   55 ++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h  |    8 +++
+ arch/arm/plat-mxc/include/mach/mx6.h             |    1 +
+ 13 files changed, 189 insertions(+), 26 deletions(-)
+
+diff --git a/arch/arm/configs/imx6s_defconfig b/arch/arm/configs/imx6s_defconfig
+index 7c47748..ac7afdf 100644
+--- a/arch/arm/configs/imx6s_defconfig
++++ b/arch/arm/configs/imx6s_defconfig
+@@ -294,6 +294,7 @@ CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_DSI=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_CSI2=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_VDOA=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_PCIE=y
++CONFIG_IMX_HAVE_PLATFORM_IMX_FSL_CSI=y
+ 
+ #
+ # Freescale MXC Implementations
+@@ -1612,12 +1613,12 @@ CONFIG_VIDEO_MXC_CSI_CAMERA=y
+ # CONFIG_MXC_CAMERA_MICRON111 is not set
+ # CONFIG_MXC_CAMERA_OV2640 is not set
+ # CONFIG_MXC_CAMERA_OV3640 is not set
+-# CONFIG_MXC_CAMERA_OV5640 is not set
++CONFIG_MXC_CAMERA_OV5640=y
+ # CONFIG_MXC_CAMERA_OV8820_MIPI is not set
+ # CONFIG_MXC_CAMERA_OV5642 is not set
+ # CONFIG_MXC_TVIN_ADV7180 is not set
+ # CONFIG_MXC_CAMERA_OV5640_MIPI is not set
+-# CONFIG_MXC_CAMERA_SENSOR_CLK is not set
++CONFIG_MXC_CAMERA_SENSOR_CLK=y
+ CONFIG_VIDEO_MXC_OUTPUT=y
+ # CONFIG_VIDEO_MXC_PXP_V4L2 is not set
+ # CONFIG_VIDEO_MXC_OPL is not set
+@@ -1739,9 +1740,6 @@ CONFIG_FB_MXC=y
+ CONFIG_FB_MXC_EDID=y
+ CONFIG_FB_MXC_SYNC_PANEL=y
+ # CONFIG_FB_MXC_EPSON_VGA_SYNC_PANEL is not set
+-CONFIG_FB_MXC_LDB=y
+-CONFIG_FB_MXC_MIPI_DSI=y
+-CONFIG_FB_MXC_TRULY_WVGA_SYNC_PANEL=y
+ # CONFIG_FB_MXC_CLAA_WVGA_SYNC_PANEL is not set
+ CONFIG_FB_MXC_SEIKO_WVGA_SYNC_PANEL=y
+ # CONFIG_FB_MXC_SII902X is not set
+@@ -1753,7 +1751,7 @@ CONFIG_FB_MXC_EINK_PANEL=y
+ # CONFIG_FB_MXC_EINK_AUTO_UPDATE_MODE is not set
+ # CONFIG_FB_MXC_SIPIX_PANEL is not set
+ CONFIG_FB_MXC_ELCDIF_FB=y
+-CONFIG_FB_MXC_HDMI=y
++# CONFIG_FB_MXC_HDMI is not set
+ 
+ #
+ # Console display driver support
+diff --git a/arch/arm/configs/imx6s_updater_defconfig b/arch/arm/configs/imx6s_updater_defconfig
+index 0bd3bca..bd227b3 100644
+--- a/arch/arm/configs/imx6s_updater_defconfig
++++ b/arch/arm/configs/imx6s_updater_defconfig
+@@ -299,6 +299,7 @@ CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_DSI=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_CSI2=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_VDOA=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_PCIE=y
++CONFIG_IMX_HAVE_PLATFORM_IMX_FSL_CSI=y
+ 
+ #
+ # Freescale MXC Implementations
+@@ -388,6 +389,7 @@ CONFIG_ARM_GIC=y
+ #
+ # Bus support
+ #
++CONFIG_ARM_AMBA=y
+ # CONFIG_PCI_SYSCALL is not set
+ # CONFIG_ARCH_SUPPORTS_MSI is not set
+ # CONFIG_PCCARD is not set
+@@ -1040,6 +1042,8 @@ CONFIG_DEVKMEM=y
+ #
+ # Non-8250 serial port support
+ #
++# CONFIG_SERIAL_AMBA_PL010 is not set
++# CONFIG_SERIAL_AMBA_PL011 is not set
+ # CONFIG_SERIAL_MAX3100 is not set
+ # CONFIG_SERIAL_MAX3107 is not set
+ CONFIG_SERIAL_IMX=y
+@@ -1113,6 +1117,7 @@ CONFIG_SPI_BITBANG=y
+ CONFIG_SPI_IMX_VER_2_3=y
+ CONFIG_SPI_IMX=y
+ # CONFIG_SPI_OC_TINY is not set
++# CONFIG_SPI_PL022 is not set
+ # CONFIG_SPI_PXA2XX_PCI is not set
+ # CONFIG_SPI_XILINX is not set
+ # CONFIG_SPI_DESIGNWARE is not set
+@@ -1148,6 +1153,7 @@ CONFIG_GPIOLIB=y
+ #
+ # CONFIG_GPIO_BASIC_MMIO is not set
+ # CONFIG_GPIO_IT8761E is not set
++# CONFIG_GPIO_PL061 is not set
+ 
+ #
+ # I2C GPIO expanders:
+@@ -1192,6 +1198,7 @@ CONFIG_POWER_SUPPLY=y
+ # CONFIG_BATTERY_MAX17042 is not set
+ # CONFIG_CHARGER_ISP1704 is not set
+ # CONFIG_CHARGER_MAX8903 is not set
++# CONFIG_SABRESD_MAX8903 is not set
+ # CONFIG_CHARGER_GPIO is not set
+ # CONFIG_HWMON is not set
+ CONFIG_THERMAL=y
+@@ -1202,6 +1209,7 @@ CONFIG_WATCHDOG_NOWAYOUT=y
+ # Watchdog Device Drivers
+ #
+ # CONFIG_SOFT_WATCHDOG is not set
++# CONFIG_ARM_SP805_WATCHDOG is not set
+ # CONFIG_MAX63XX_WATCHDOG is not set
+ CONFIG_IMX2_WDT=y
+ 
+@@ -1405,8 +1413,6 @@ CONFIG_VIDEO_CAPTURE_DRIVERS=y
+ # CONFIG_VIDEO_VIVI is not set
+ # CONFIG_VIDEO_MXC_CAMERA is not set
+ CONFIG_VIDEO_MXC_OUTPUT=y
+-CONFIG_VIDEO_MXC_IPU_OUTPUT=y
+-# CONFIG_VIDEO_MXC_IPUV1_WVGA_OUTPUT is not set
+ # CONFIG_VIDEO_MXC_PXP_V4L2 is not set
+ # CONFIG_VIDEO_MXC_OPL is not set
+ # CONFIG_VIDEO_CPIA2 is not set
+@@ -1447,6 +1453,7 @@ CONFIG_FB_MODE_HELPERS=y
+ #
+ # Frame buffer hardware drivers
+ #
++# CONFIG_FB_ARMCLCD is not set
+ # CONFIG_FB_UVESA is not set
+ # CONFIG_FB_S1D13XXX is not set
+ # CONFIG_FB_TMIO is not set
+@@ -1464,18 +1471,17 @@ CONFIG_FB_MXC=y
+ CONFIG_FB_MXC_EDID=y
+ CONFIG_FB_MXC_SYNC_PANEL=y
+ # CONFIG_FB_MXC_EPSON_VGA_SYNC_PANEL is not set
+-CONFIG_FB_MXC_LDB=y
+-# CONFIG_FB_MXC_MIPI_DSI is not set
+ # CONFIG_FB_MXC_CLAA_WVGA_SYNC_PANEL is not set
+ # CONFIG_FB_MXC_SEIKO_WVGA_SYNC_PANEL is not set
+ # CONFIG_FB_MXC_SII902X is not set
++# CONFIG_FB_MXC_SII902X_ELCDIF is not set
+ # CONFIG_FB_MXC_CH7026 is not set
+ # CONFIG_FB_MXC_TVOUT_CH7024 is not set
+ # CONFIG_FB_MXC_ASYNC_PANEL is not set
+ # CONFIG_FB_MXC_EINK_PANEL is not set
+ # CONFIG_FB_MXC_SIPIX_PANEL is not set
+ # CONFIG_FB_MXC_ELCDIF_FB is not set
+-CONFIG_FB_MXC_HDMI=y
++# CONFIG_FB_MXC_HDMI is not set
+ 
+ #
+ # Console display driver support
+@@ -1526,6 +1532,7 @@ CONFIG_SND_DRIVERS=y
+ # CONFIG_SND_SERIAL_U16550 is not set
+ # CONFIG_SND_MPU401 is not set
+ CONFIG_SND_ARM=y
++# CONFIG_SND_ARMAACI is not set
+ CONFIG_SND_SPI=y
+ CONFIG_SND_USB=y
+ # CONFIG_SND_USB_AUDIO is not set
+@@ -1774,6 +1781,7 @@ CONFIG_MMC_BLOCK_BOUNCE=y
+ #
+ # MMC/SD/SDIO Host Controller Drivers
+ #
++# CONFIG_MMC_ARMMMCI is not set
+ CONFIG_MMC_SDHCI=y
+ CONFIG_MMC_SDHCI_IO_ACCESSORS=y
+ CONFIG_MMC_SDHCI_PLTFM=y
+@@ -1859,12 +1867,15 @@ CONFIG_RTC_DRV_SNVS=y
+ #
+ # on-CPU RTC drivers
+ #
++# CONFIG_RTC_DRV_PL030 is not set
++# CONFIG_RTC_DRV_PL031 is not set
+ CONFIG_DMADEVICES=y
+ # CONFIG_DMADEVICES_DEBUG is not set
+ 
+ #
+ # DMA Devices
+ #
++# CONFIG_AMBA_PL08X is not set
+ # CONFIG_DW_DMAC is not set
+ # CONFIG_MXC_PXP_V2 is not set
+ # CONFIG_TIMB_DMA is not set
+@@ -1917,9 +1928,7 @@ CONFIG_CLKSRC_MMIO=y
+ #
+ # MXC support drivers
+ #
+-CONFIG_MXC_IPU=y
+-CONFIG_MXC_IPU_V3=y
+-CONFIG_MXC_IPU_V3H=y
++# CONFIG_MXC_IPU is not set
+ 
+ #
+ # MXC SSI support
+@@ -2234,7 +2243,7 @@ CONFIG_HAVE_ARCH_KGDB=y
+ # CONFIG_STRICT_DEVMEM is not set
+ CONFIG_ARM_UNWIND=y
+ # CONFIG_DEBUG_USER is not set
+-# CONFIG_OC_ETM is not set
++CONFIG_OC_ETM=y
+ 
+ #
+ # Security options
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index fc2190d..97262dc 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -137,6 +137,7 @@ config MACH_MX6SL_EVK
+ 	select IMX_HAVE_PLATFORM_IMX_EPDC
+ 	select IMX_HAVE_PLATFORM_IMX_SPDC
+ 	select IMX_HAVE_PLATFORM_IMX_PXP
++	select IMX_HAVE_PLATFORM_IMX_FSL_CSI
+ 	select IMX_HAVE_PLATFORM_IMX_KEYPAD
+ 	select IMX_HAVE_PLATFORM_IMX_DCP
+ 	select IMX_HAVE_PLATFORM_RANDOM_RNGC
+diff --git a/arch/arm/mach-mx6/board-mx6sl_common.h b/arch/arm/mach-mx6/board-mx6sl_common.h
+index def8dda..6ac5473 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_common.h
++++ b/arch/arm/mach-mx6/board-mx6sl_common.h
+@@ -82,6 +82,9 @@
+ #define MX6SL_BRD_ELAN_CE		IMX_GPIO_NR(2, 9)
+ #define MX6SL_BRD_ELAN_INT		IMX_GPIO_NR(2, 10)
+ #define MX6SL_BRD_ELAN_RST		IMX_GPIO_NR(4, 4)
++/* CSI */
++#define MX6SL_BRD_CSI_PWDN		IMX_GPIO_NR(1, 25)
++#define MX6SL_BRD_CSI_RST		IMX_GPIO_NR(1, 26)
+ 
+ static iomux_v3_cfg_t mx6sl_brd_pads[] = {
+ 
+@@ -386,6 +389,28 @@ static iomux_v3_cfg_t mx6sl_brd_spdc_disable_pads[] = {
+ 	MX6SL_PAD_EPDC_PWRWAKEUP__GPIO_2_14,
+ };
+ 
++static iomux_v3_cfg_t mx6sl_brd_csi_enable_pads[] = {
++	MX6SL_PAD_EPDC_GDRL__CSI_MCLK,
++	MX6SL_PAD_EPDC_SDCE3__I2C3_SDA,
++	MX6SL_PAD_EPDC_SDCE2__I2C3_SCL,
++	MX6SL_PAD_EPDC_GDCLK__CSI_PIXCLK,
++	MX6SL_PAD_EPDC_GDSP__CSI_VSYNC,
++	MX6SL_PAD_EPDC_GDOE__CSI_HSYNC,
++	MX6SL_PAD_EPDC_SDLE__CSI_D_9,
++	MX6SL_PAD_EPDC_SDCLK__CSI_D_8,
++	MX6SL_PAD_EPDC_D7__CSI_D_7,
++	MX6SL_PAD_EPDC_D6__CSI_D_6,
++	MX6SL_PAD_EPDC_D5__CSI_D_5,
++	MX6SL_PAD_EPDC_D4__CSI_D_4,
++	MX6SL_PAD_EPDC_D3__CSI_D_3,
++	MX6SL_PAD_EPDC_D2__CSI_D_2,
++	MX6SL_PAD_EPDC_D1__CSI_D_1,
++	MX6SL_PAD_EPDC_D0__CSI_D_0,
++
++	MX6SL_PAD_EPDC_SDSHR__GPIO_1_26,	/* CMOS_RESET_B GPIO */
++	MX6SL_PAD_EPDC_SDOE__GPIO_1_25,		/* CMOS_PWDN GPIO */
++};
++
+ static iomux_v3_cfg_t mx6sl_brd_elan_pads[] = {
+ 	MX6SL_PAD_EPDC_PWRCTRL3__GPIO_2_10,	/* INT */
+ 	MX6SL_PAD_EPDC_PWRCTRL2__GPIO_2_9,	/* CE */
+diff --git a/arch/arm/mach-mx6/board-mx6sl_evk.c b/arch/arm/mach-mx6/board-mx6sl_evk.c
+index c04141c..5be1922 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_evk.c
++++ b/arch/arm/mach-mx6/board-mx6sl_evk.c
+@@ -84,12 +84,21 @@ extern char *soc_reg_id;
+ extern char *pu_reg_id;
+ extern int __init mx6sl_evk_init_pfuze100(u32 int_gpio);
+ 
++static int csi_enabled;
++
+ enum sd_pad_mode {
+ 	SD_PAD_MODE_LOW_SPEED,
+ 	SD_PAD_MODE_MED_SPEED,
+ 	SD_PAD_MODE_HIGH_SPEED,
+ };
+ 
++static int __init csi_setup(char *__unused)
++{
++	csi_enabled = 1;
++	return 1;
++}
++__setup("csi", csi_setup);
++
+ static int plt_sd_pad_change(unsigned int index, int clock)
+ {
+ 	/* LOW speed is the default state of SD pads */
+@@ -626,6 +635,46 @@ static struct fsl_mxc_lcd_platform_data sii902x_hdmi_data = {
+        .put_pins = sii902x_put_pins,
+ };
+ 
++static void mx6sl_csi_io_init(void)
++{
++	mxc_iomux_v3_setup_multiple_pads(mx6sl_brd_csi_enable_pads,	\
++				ARRAY_SIZE(mx6sl_brd_csi_enable_pads));
++
++	/* Camera reset */
++	gpio_request(MX6SL_BRD_CSI_RST, "cam-reset");
++	gpio_direction_output(MX6SL_BRD_CSI_RST, 1);
++
++	/* Camera power down */
++	gpio_request(MX6SL_BRD_CSI_PWDN, "cam-pwdn");
++	gpio_direction_output(MX6SL_BRD_CSI_PWDN, 1);
++	msleep(5);
++	gpio_set_value(MX6SL_BRD_CSI_PWDN, 0);
++	msleep(5);
++	gpio_set_value(MX6SL_BRD_CSI_RST, 0);
++	msleep(1);
++	gpio_set_value(MX6SL_BRD_CSI_RST, 1);
++	msleep(5);
++	gpio_set_value(MX6SL_BRD_CSI_PWDN, 1);
++}
++
++static void mx6sl_csi_cam_powerdown(int powerdown)
++{
++	if (powerdown)
++		gpio_set_value(MX6SL_BRD_CSI_PWDN, 1);
++	else
++		gpio_set_value(MX6SL_BRD_CSI_PWDN, 0);
++
++	msleep(2);
++}
++
++static struct fsl_mxc_camera_platform_data camera_data = {
++	.mclk = 24000000,
++	.io_init = mx6sl_csi_io_init,
++	.pwdn = mx6sl_csi_cam_powerdown,
++	.core_regulator = "VGEN2_1V5",
++	.analog_regulator = "VGEN6_2V8",
++};
++
+ static struct imxi2c_platform_data mx6_evk_i2c0_data = {
+ 	.bitrate = 100000,
+ };
+@@ -635,7 +684,7 @@ static struct imxi2c_platform_data mx6_evk_i2c1_data = {
+ };
+ 
+ static struct imxi2c_platform_data mx6_evk_i2c2_data = {
+-	.bitrate = 400000,
++	.bitrate = 100000,
+ };
+ 
+ static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
+@@ -664,6 +713,8 @@ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+ 
+ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ 	{
++		I2C_BOARD_INFO("ov5640", 0x3c),
++		.platform_data = (void *)&camera_data,
+ 	},
+ };
+ 
+@@ -1346,9 +1397,12 @@ static void __init mx6_evk_init(void)
+ 
+ 	i2c_register_board_info(1, mxc_i2c1_board_info,
+ 			ARRAY_SIZE(mxc_i2c1_board_info));
+-	imx6q_add_imx_i2c(2, &mx6_evk_i2c2_data);
+-	i2c_register_board_info(2, mxc_i2c2_board_info,
+-			ARRAY_SIZE(mxc_i2c2_board_info));
++	/* only camera on I2C3, that's why we can do so */
++	if (csi_enabled == 1) {
++		imx6q_add_imx_i2c(2, &mx6_evk_i2c2_data);
++		i2c_register_board_info(2, mxc_i2c2_board_info,
++				ARRAY_SIZE(mxc_i2c2_board_info));
++	}
+ 
+ 	/* SPI */
+ 	imx6q_add_ecspi(0, &mx6_evk_spi_data);
+@@ -1391,10 +1445,14 @@ static void __init mx6_evk_init(void)
+ 	imx6dl_add_imx_pxp_client();
+ 	mxc_register_device(&max17135_sensor_device, NULL);
+ 	setup_spdc();
+-	if (!spdc_sel)
+-		imx6dl_add_imx_epdc(&epdc_data);
+-	else
+-		imx6sl_add_imx_spdc(&spdc_data);
++	if (csi_enabled) {
++		imx6sl_add_fsl_csi();
++	} else  {
++		if (!spdc_sel)
++			imx6dl_add_imx_epdc(&epdc_data);
++		else
++			imx6sl_add_imx_spdc(&spdc_data);
++	}
+ 	imx6q_add_dvfs_core(&mx6sl_evk_dvfscore_data);
+ 
+ 	imx6q_init_audio();
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index b340c9e..04ea66b 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -1945,8 +1945,8 @@ static unsigned long _clk_ipu_round_rate(struct clk *clk,
+ }
+ 
+ static struct clk ipu1_clk = {
+-	__INIT_CLK_DEBUG(ipu1_clk)
+-	.parent = &pll2_pfd2_400M,
++	__INIT_CLK_DEBUG(csi_clk)
++	.parent = &osc_clk,
+ 	.enable_reg = MXC_CCM_CCGR3,
+ 	.enable_shift = MXC_CCM_CCGRx_CG0_OFFSET,
+ 	.enable = _clk_enable,
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index ec724ff..73f7f7a 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -219,6 +219,10 @@ extern const struct imx_pxp_data imx6dl_pxp_data __initconst;
+ #define imx6sl_add_imx_pxp_v4l2()   \
+ 	imx_add_imx_pxp_v4l2()
+ 
++extern const struct imx_fsl_csi_data imx6sl_csi_data __initconst;
++#define imx6sl_add_fsl_csi()   \
++	imx_add_fsl_csi(&imx6sl_csi_data)
++
+ extern const struct imx_epdc_data imx6dl_epdc_data __initconst;
+ #define imx6dl_add_imx_epdc(pdata)	\
+ 	imx_add_imx_epdc(&imx6dl_epdc_data, pdata)
+diff --git a/arch/arm/mach-mx6/mx6sl_evk_pmic_pfuze100.c b/arch/arm/mach-mx6/mx6sl_evk_pmic_pfuze100.c
+index ee66541..875f08b 100644
+--- a/arch/arm/mach-mx6/mx6sl_evk_pmic_pfuze100.c
++++ b/arch/arm/mach-mx6/mx6sl_evk_pmic_pfuze100.c
+@@ -143,7 +143,7 @@ static struct regulator_consumer_supply vgen5_consumers[] = {
+ };
+ static struct regulator_consumer_supply vgen6_consumers[] = {
+        {
+-	.supply = "VGEN6_3V3",
++	.supply = "VGEN6_2V8",
+ 	}
+ };
+ 
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index bdea66b..2e666ba 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -185,3 +185,6 @@ config IMX_HAVE_PLATFORM_IMX_VDOA
+ 
+ config IMX_HAVE_PLATFORM_IMX_PCIE
+ 	bool
++
++config IMX_HAVE_PLATFORM_IMX_FSL_CSI
++	bool
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index 4128778..102eeaa 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -66,4 +66,5 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_DSI) += platform-imx-mipi_dsi.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_CSI2) += platform-imx-mipi_csi2.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_VDOA) += platform-imx-vdoa.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_PCIE) += platform-imx-pcie.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_FSL_CSI) += platform-imx-fsl-csi.o
+ obj-y += platform-imx-pmu.o
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-fsl-csi.c b/arch/arm/plat-mxc/devices/platform-imx-fsl-csi.c
+new file mode 100644
+index 0000000..8b6601c
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx-fsl-csi.c
+@@ -0,0 +1,55 @@
++/*
++ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <asm/sizes.h>
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++
++#define imx_fsl_csi_data_entry_single(soc, size)	\
++	{								\
++		.iobase = soc ## _CSI_BASE_ADDR,			\
++		.irq = soc ## _INT_CSI,					\
++		.iosize = size,						\
++	}
++
++#ifdef CONFIG_SOC_IMX6SL
++const struct imx_fsl_csi_data imx6sl_csi_data __initconst =
++			imx_fsl_csi_data_entry_single(MX6SL, SZ_16K);
++#endif
++
++struct platform_device *__init imx_add_fsl_csi(
++		const struct imx_fsl_csi_data *data)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + data->iosize - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.start = data->irq,
++			.end = data->irq,
++			.flags = IORESOURCE_IRQ,
++		},
++	};
++
++	return imx_add_platform_device("fsl_csi", -1,
++			res, ARRAY_SIZE(res), NULL, 0);
++}
++
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 99ef8ab..ae7f8cb 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -690,3 +690,11 @@ struct platform_device *__init imx_add_pcie(
+ 		const struct imx_pcie_platform_data *pdata);
+ 
+ void __init imx_add_imx_armpmu(void);
++
++struct imx_fsl_csi_data {
++    resource_size_t iobase;
++    resource_size_t iosize;
++    resource_size_t irq;
++};
++struct platform_device *__init imx_add_fsl_csi(
++		const struct imx_fsl_csi_data *data);
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 7d3fa84..ef41cad 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -335,6 +335,7 @@
+ #define MX6SL_INT_SPDC			38
+ #define MX6Q_INT_IPU2_ERR		39
+ #define MX6DL_INT_CSI			39
++#define MX6SL_INT_CSI			39
+ #define MX6Q_INT_IPU2_SYN		40
+ #define MXC_INT_GPU3D_IRQ		41
+ #define MXC_INT_GPU2D_IRQ		42
+-- 
+1.7.7.4
+

@@ -1,0 +1,202 @@
+From 89f647f937697cbff5f9e4dd76e715918dd07e92 Mon Sep 17 00:00:00 2001
+From: Frank Li <Frank.Li@freescale.com>
+Date: Wed, 26 Sep 2012 14:05:57 +0800
+Subject: [PATCH 2081/2463] ENGR00225912 ARM: etm: Add trace buffer support
+
+start trace:
+	echo 1 > echo 1 >/sys/devices/etm.0/trace_running
+
+Notes:	The other cores ptm also enabled by above command.
+
+dump trace buffer:
+	echo v >/proc/sysrq-trigger
+
+Decode trace buffer:
+	/unit_test/etm --pft-1.1 --sourceid-match 0 < /dev/tracebuf
+
+Notes: this version need connect JTAG to make etm work.
+
+Signed-off-by: Frank Li <Frank.Li@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig            |    1 +
+ arch/arm/mach-mx6/Makefile           |    2 +-
+ arch/arm/mach-mx6/clock.c            |    1 +
+ arch/arm/mach-mx6/etm.c              |  110 ++++++++++++++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/mx6.h |    8 +++
+ 5 files changed, 121 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 45ae9ea..c5d64a9 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -7,6 +7,7 @@ config ARCH_MX6Q
+ 	select ARCH_MXC_AUDMUX_V2
+ 	select ARM_GIC
+ 	select ARCH_HAS_CPUFREQ
++	select OC_ETM
+ 	select IMX_HAVE_PLATFORM_IMX_UART
+ 	select IMX_HAVE_PLATFORM_FEC
+ 	select IMX_HAVE_PLATFORM_IMX_ANATOP_THERMAL
+diff --git a/arch/arm/mach-mx6/Makefile b/arch/arm/mach-mx6/Makefile
+index 49b5f86..05dc62d 100644
+--- a/arch/arm/mach-mx6/Makefile
++++ b/arch/arm/mach-mx6/Makefile
+@@ -5,7 +5,7 @@
+ # Object file lists.
+ obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o usb_dr.o usb_h2.o usb_h3.o\
+ pm.o cpu_op-mx6.o mx6_wfi.o mx6_fec.o mx6_anatop_regulator.o cpu_regulator-mx6.o \
+-mx6_mmdc.o mx6_ddr_freq.o mx6sl_ddr.o mx6sl_wfi.o
++mx6_mmdc.o mx6_ddr_freq.o mx6sl_ddr.o mx6sl_wfi.o etm.o
+ 
+ obj-$(CONFIG_ARCH_MX6) += clock.o mx6_suspend.o clock_mx6sl.o
+ obj-$(CONFIG_MACH_MX6Q_ARM2) += board-mx6q_arm2.o
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index a3dc7e4..6bf6ef7 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5303,6 +5303,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "mlb150_clk", mlb150_clk),
+ 	_REGISTER_CLOCK(NULL, "anaclk_1", anaclk_1),
+ 	_REGISTER_CLOCK(NULL, "anaclk_2", anaclk_2),
++	_REGISTER_CLOCK(NULL, "apb_pclk", dummy_clk),
+ };
+ 
+ static void clk_tree_init(void)
+diff --git a/arch/arm/mach-mx6/etm.c b/arch/arm/mach-mx6/etm.c
+new file mode 100644
+index 0000000..8f32860
+--- /dev/null
++++ b/arch/arm/mach-mx6/etm.c
+@@ -0,0 +1,110 @@
++/*
++ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <linux/types.h>
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/clk.h>
++#include <linux/module.h>
++#include <linux/iram_alloc.h>
++#include <linux/delay.h>
++#include <linux/amba/bus.h>
++
++#include <mach/hardware.h>
++#include <asm/io.h>
++#include <asm/mach/map.h>
++#include <asm/hardware/coresight.h>
++
++static struct __init amba_device mx6_etb_device = {
++	.dev = {
++		.init_name = "etb",
++		},
++	.res = {
++		.start = MX6Q_ETB_BASE_ADDR,
++		.end = MX6Q_ETB_BASE_ADDR + SZ_4K - 1,
++		.flags = IORESOURCE_MEM,
++		},
++	.periphid = 0x3bb907,
++};
++
++static struct __init amba_device mx6_etm_device[] = {
++	{
++	 .dev = {
++		 .init_name = "etm.0",
++		 },
++	 .res = {
++		 .start = MX6Q_PTM0_BASE_ADDR,
++		 .end = MX6Q_PTM0_BASE_ADDR + SZ_4K - 1,
++		 },
++	 .periphid = 0x1bb950,
++	},
++	{
++	 .dev = {
++		 .init_name = "etm.1",
++		 },
++	 .res = {
++		 .start = MX6Q_PTM1_BASE_ADDR,
++		 .end = MX6Q_PTM1_BASE_ADDR + SZ_4K - 1,
++		 },
++	 .periphid = 0x1bb950,
++	},
++	{
++	 .dev = {
++		 .init_name = "etm.2",
++		 },
++	 .res = {
++		 .start = MX6Q_PTM2_BASE_ADDR,
++		 .end = MX6Q_PTM2_BASE_ADDR + SZ_4K - 1,
++		 },
++	 .periphid = 0x1bb950,
++	},
++	{
++	 .dev = {
++		 .init_name = "etm.3",
++		 },
++	 .res = {
++		 .start = MX6Q_PTM3_BASE_ADDR,
++		 .end = MX6Q_PTM3_BASE_ADDR + SZ_4K - 1,
++		 },
++	 .periphid = 0x1bb950,
++	},
++};
++
++#define FUNNEL_CTL 0
++static int __init etm_init(void)
++{
++	int i;
++	__iomem void *base;
++	base = ioremap(0x02144000, SZ_4K);
++	/*Unlock Funnel*/
++	__raw_writel(UNLOCK_MAGIC, base + CSMR_LOCKACCESS);
++	/*Enable all funnel port*/
++	__raw_writel(__raw_readl(base + FUNNEL_CTL) | 0xFF,
++		base + FUNNEL_CTL);
++	/*Lock Funnel*/
++	__raw_writel(0, base + CSMR_LOCKACCESS);
++		iounmap(base);
++
++	amba_device_register(&mx6_etb_device, &iomem_resource);
++	for (i = 0; i < num_possible_cpus(); i++)
++		amba_device_register(mx6_etm_device + i, &iomem_resource);
++
++	return 0;
++}
++
++subsys_initcall(etm_init);
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index aaf8b99..7d3fa84 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -215,6 +215,14 @@
+ /* ARM Cortex A9 MPCore Platform */
+ #define MX6Q_A9_PLATFRM_BASE		(ARM_BASE_ADDR + 0x20000)
+ 
++/* ARM Cortex A9 PTM */
++#define MX6Q_PTM0_BASE_ADDR		0x0215C000
++#define MX6Q_PTM1_BASE_ADDR		0x0215D000
++#define MX6Q_PTM2_BASE_ADDR		0x0215E000
++#define MX6Q_PTM3_BASE_ADDR		0x0215F000
++#define MX6Q_FUNNEL_BASE_ADDR		0x02144000
++#define MX6Q_ETB_BASE_ADDR		0x02141000
++
+ #define MX6Q_PL301_BASE_ADDR		(AIPS2_OFF_BASE_ADDR + 0x0000)
+ #define MX6Q_USB_OTG_BASE_ADDR		(AIPS2_OFF_BASE_ADDR + 0x4000)
+ #define MX6Q_USB_HS1_BASE_ADDR		(AIPS2_OFF_BASE_ADDR + 0x4200)
+-- 
+1.7.7.4
+

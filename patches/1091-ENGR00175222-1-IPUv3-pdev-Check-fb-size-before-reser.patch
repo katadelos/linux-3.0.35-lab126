@@ -1,0 +1,50 @@
+From 7dca1cc5be7a8b903a815e0ea9bc88146d458e92 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Thu, 23 Feb 2012 13:48:19 +0800
+Subject: [PATCH 1091/2463] ENGR00175222-1 IPUv3 pdev:Check fb size before
+ reserve ov fb
+
+This patch checks overlay fb size before reserve fb mem for
+it.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit b29df373e547c83f9b3bcfd9a98016f462fa9ec2)
+---
+ arch/arm/plat-mxc/devices/platform-imx_ipuv3.c |   12 +++++++++---
+ 1 files changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c b/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c
+index 0750265..c5b4d99 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c
++++ b/arch/arm/plat-mxc/devices/platform-imx_ipuv3.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -217,12 +217,18 @@ struct platform_device *__init imx_add_ipuv3_fb(
+ 				.end = pdata->res_base[0] + pdata->res_size[0] - 1,
+ 				.flags = IORESOURCE_MEM,
+ 			}, {
+-				.start = pdata->res_base[1],
+-				.end = pdata->res_base[1] + pdata->res_size[1] - 1,
++				.start = 0,
++				.end = 0,
+ 				.flags = IORESOURCE_MEM,
+ 			},
+ 		};
+ 
++		if (pdata->res_size[1] > 0) {
++			res[1].start = pdata->res_base[1];
++			res[1].end = pdata->res_base[1] +
++					pdata->res_size[1] - 1;
++		}
++
+ 		return imx_add_platform_device_dmamask("mxc_sdc_fb",
+ 				id, res, ARRAY_SIZE(res), pdata,
+ 				sizeof(*pdata), DMA_BIT_MASK(32));
+-- 
+1.7.7.4
+

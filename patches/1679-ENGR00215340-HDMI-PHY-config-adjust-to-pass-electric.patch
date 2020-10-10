@@ -1,0 +1,39 @@
+From 238266ea8df42e3527dc1d6e64c37df15166da36 Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Fri, 29 Jun 2012 18:18:55 +0800
+Subject: [PATCH 1679/2463] ENGR00215340 HDMI PHY config adjust to pass
+ electrical compliance test
+
+In the HDMI PHY internal, there are two register that can adjust
+waveform of eyediagram.
+0x0e -- voltage level control; it can adjust the single end data signals;
+0x09 -- define pre-emphasis factor;
+(it will affect the rise time and fall time of D0/D1/D2);
+
+Adjust HDMI PHY register 0x09 and 0xe for MX6DL SabreSD and MX6Q SabreSD
+waveform of eyediagram to pass HDMI compliance test electrical test case.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ drivers/video/mxc_hdmi.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index 21be0b7..48ff32f68 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -1043,9 +1043,9 @@ static int hdmi_phy_configure(struct mxc_hdmi *hdmi, unsigned char pRep,
+ 	/* RESISTANCE TERM 133Ohm Cfg */
+ 	hdmi_phy_i2c_write(hdmi, 0x0005, 0x19);  /* TXTERM */
+ 	/* PREEMP Cgf 0.00 */
+-	hdmi_phy_i2c_write(hdmi, 0x8009, 0x09);  /* CKSYMTXCTRL */
++	hdmi_phy_i2c_write(hdmi, 0x800d, 0x09);  /* CKSYMTXCTRL */
+ 	/* TX/CK LVL 10 */
+-	hdmi_phy_i2c_write(hdmi, 0x0210, 0x0E);  /* VLEVCTRL */
++	hdmi_phy_i2c_write(hdmi, 0x01ad, 0x0E);  /* VLEVCTRL */
+ 	/* REMOVE CLK TERM */
+ 	hdmi_phy_i2c_write(hdmi, 0x8000, 0x05);  /* CKCALCTRL */
+ 
+-- 
+1.7.7.4
+

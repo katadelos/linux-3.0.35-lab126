@@ -1,0 +1,212 @@
+From 3142c83d5a47e3fa8937c94962de21e7f075985e Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Wed, 8 Feb 2012 15:33:56 +0800
+Subject: [PATCH 0992/2463] ENGR00174037-1 Add HSIC suspend/resume feature
+
+MSL part
+
+- For HSIC, not connect nor disconnect, then WKCN,
+  WKDC must not be set during suspend
+- For HSIC, must set bit 21 in host control registry
+  after device connected to host controller
+- USB PHY 480M clock output must turn on to avoid about
+  10ms delay before sending out resume signal
+- HW_ANA_MISC clkgate delay must be set to 2 or 3 to
+  avoid 24M OSCI not stable issue
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ arch/arm/mach-mx6/usb_h2.c                       |   26 ++++++++++++++++++++-
+ arch/arm/mach-mx6/usb_h3.c                       |   26 ++++++++++++++++++++-
+ arch/arm/plat-mxc/include/mach/arc_otg.h         |    4 ++-
+ arch/arm/plat-mxc/include/mach/regs-usbphy-mx6.h |    3 +-
+ 4 files changed, 53 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_h2.c b/arch/arm/mach-mx6/usb_h2.c
+index edbad95..a1e32ef 100644
+--- a/arch/arm/mach-mx6/usb_h2.c
++++ b/arch/arm/mach-mx6/usb_h2.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -43,11 +43,17 @@ static struct fsl_usb2_platform_data usbh2_config;
+ static void usbh2_internal_phy_clock_gate(bool on)
+ {
+ 	if (on) {
++		/* must turn on the 480M clock, otherwise
++		 * there will be a 10ms delay before host
++		 * controller send out resume signal*/
+ 		USB_H2_CTRL |= UCTRL_UTMI_ON_CLOCK;
+ 		USB_UH2_HSIC_CTRL |= HSIC_CLK_ON;
+ 	} else {
+ 		USB_UH2_HSIC_CTRL &= ~HSIC_CLK_ON;
+-		USB_H2_CTRL &= ~UCTRL_UTMI_ON_CLOCK;
++		/* can't turn off this clock, otherwise
++		 * there will be a 10ms delay before host
++		 * controller send out resume signal*/
++		/*USB_H2_CTRL &= ~UCTRL_UTMI_ON_CLOCK*/;
+ 	}
+ }
+ 
+@@ -113,6 +119,10 @@ void mx6_set_host2_vbus_func(driver_vbus_func driver_vbus)
+ static void _wake_up_enable(struct fsl_usb2_platform_data *pdata, bool enable)
+ {
+ 	pr_debug("host2, %s, enable is %d\n", __func__, enable);
++	/* for HSIC, no disconnect nor connect
++	 * we need to disable the WKDS, WKCN */
++	UH2_PORTSC1 &= ~(PORTSC_WKDC | PORTSC_WKCN);
++
+ 	if (enable) {
+ 		USB_H2_CTRL |= (UCTRL_OWIE);
+ 	} else {
+@@ -172,6 +182,13 @@ static void hsic_start(void)
+ 	mxc_iomux_v3_setup_pad(MX6Q_PAD_RGMII_TX_CTL__USBOH3_H2_STROBE_START);
+ }
+ 
++static void hsic_device_connected(void)
++{
++	pr_debug("%s\n", __func__);
++	if (!(USB_UH2_HSIC_CTRL & HSIC_DEV_CONN))
++		USB_UH2_HSIC_CTRL |= HSIC_DEV_CONN;
++}
++
+ static struct fsl_usb2_platform_data usbh2_config = {
+ 	.name		= "Host 2",
+ 	.init		= fsl_usb_host_init_ext,
+@@ -186,6 +203,7 @@ static struct fsl_usb2_platform_data usbh2_config = {
+ 	.wakeup_handler = h2_wakeup_handler,
+ 	.transceiver = "hsic_xcvr",
+ 	.hsic_post_ops = hsic_start,
++	.hsic_device_connected = hsic_device_connected,
+ };
+ 
+ static struct fsl_usb2_wakeup_platform_data usbh2_wakeup_config = {
+@@ -211,4 +229,8 @@ void __init mx6_usb_h2_init(void)
+ 	 */
+ 	__raw_writel(BM_ANADIG_USB1_PLL_480_CTRL_EN_USB_CLKS,
+ 			anatop_base_addr + HW_ANADIG_USB1_PLL_480_CTRL_SET);
++	/* must change the clkgate delay to 2 or 3 to avoid
++	 * 24M OSCI clock not stable issue */
++	__raw_writel(BF_ANADIG_ANA_MISC0_CLKGATE_DELAY(3),
++			anatop_base_addr + HW_ANADIG_ANA_MISC0);
+ }
+diff --git a/arch/arm/mach-mx6/usb_h3.c b/arch/arm/mach-mx6/usb_h3.c
+index 43c2b12..93210b4 100644
+--- a/arch/arm/mach-mx6/usb_h3.c
++++ b/arch/arm/mach-mx6/usb_h3.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -43,11 +43,17 @@ static struct fsl_usb2_platform_data usbh3_config;
+ static void usbh3_internal_phy_clock_gate(bool on)
+ {
+ 	if (on) {
++		/* must turn on the 480M clock, otherwise
++		 * there will be a 10ms delay before host
++		 * controller send out resume signal*/
+ 		USB_H3_CTRL |= UCTRL_UTMI_ON_CLOCK;
+ 		USB_UH3_HSIC_CTRL |= HSIC_CLK_ON;
+ 	} else {
+ 		USB_UH3_HSIC_CTRL &= ~HSIC_CLK_ON;
+-		USB_H3_CTRL &= ~UCTRL_UTMI_ON_CLOCK;
++		/* can't turn off this clock, otherwise
++		 * there will be a 10ms delay before host
++		 * controller send out resume signal*/
++		/*USB_H3_CTRL &= ~UCTRL_UTMI_ON_CLOCK;*/
+ 	}
+ }
+ 
+@@ -114,6 +120,10 @@ void mx6_set_host3_vbus_func(driver_vbus_func driver_vbus)
+ static void _wake_up_enable(struct fsl_usb2_platform_data *pdata, bool enable)
+ {
+ 	pr_debug("host3, %s, enable is %d\n", __func__, enable);
++	/* for HSIC, no disconnect nor connect
++	 * we need to disable the WKDS, WKCN */
++	UH3_PORTSC1 &= ~(PORTSC_WKDC | PORTSC_WKCN);
++
+ 	if (enable) {
+ 		USB_H3_CTRL |= (UCTRL_OWIE);
+ 	} else {
+@@ -173,6 +183,13 @@ static void hsic_start(void)
+ 	mxc_iomux_v3_setup_pad(MX6Q_PAD_RGMII_RXC__USBOH3_H3_STROBE_START);
+ }
+ 
++static void hsic_device_connected(void)
++{
++	pr_debug("%s\n", __func__);
++	if (!(USB_UH3_HSIC_CTRL & HSIC_DEV_CONN))
++		USB_UH3_HSIC_CTRL |= HSIC_DEV_CONN;
++}
++
+ static struct fsl_usb2_platform_data usbh3_config = {
+ 	.name		= "Host 3",
+ 	.init		= fsl_usb_host_init_ext,
+@@ -187,6 +204,7 @@ static struct fsl_usb2_platform_data usbh3_config = {
+ 	.wakeup_handler = usbh3_wakeup_handler,
+ 	.transceiver = "hsic_xcvr",
+ 	.hsic_post_ops = hsic_start,
++	.hsic_device_connected = hsic_device_connected,
+ };
+ 
+ static struct fsl_usb2_wakeup_platform_data usbh3_wakeup_config = {
+@@ -213,4 +231,8 @@ void __init mx6_usb_h3_init(void)
+ 	 */
+ 	__raw_writel(BM_ANADIG_USB1_PLL_480_CTRL_EN_USB_CLKS,
+ 			anatop_base_addr + HW_ANADIG_USB1_PLL_480_CTRL_SET);
++	/* must change the clkgate delay to 2 or 3 to avoid
++	 * 24M OSCI clock not stable issue */
++	__raw_writel(BF_ANADIG_ANA_MISC0_CLKGATE_DELAY(3),
++			anatop_base_addr + HW_ANADIG_ANA_MISC0);
+ }
+diff --git a/arch/arm/plat-mxc/include/mach/arc_otg.h b/arch/arm/plat-mxc/include/mach/arc_otg.h
+index b5bd8c3..bdb6b25 100755
+--- a/arch/arm/plat-mxc/include/mach/arc_otg.h
++++ b/arch/arm/plat-mxc/include/mach/arc_otg.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2005-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2005-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -248,6 +248,8 @@ extern void __iomem *imx_otg_base;
+ #define PORTSC_PTW                      (1 << 28)       /* UTMI width */
+ #define PORTSC_HSIC_MODE                (1 << 25)       /* Only for HSIC */
+ #define PORTSC_PHCD                     (1 << 23)       /* Low Power Suspend */
++#define PORTSC_WKDC			(1 << 21)	/* wakeup on discnt*/
++#define PORTSC_WKCN			(1 << 20)	/* wakeup on connect*/
+ #define PORTSC_PORT_POWER		(1 << 12)	/* port power */
+ #define PORTSC_LS_MASK			(3 << 10)	/* Line State mask */
+ #define PORTSC_LS_SE0			(0 << 10)	/* SE0     */
+diff --git a/arch/arm/plat-mxc/include/mach/regs-usbphy-mx6.h b/arch/arm/plat-mxc/include/mach/regs-usbphy-mx6.h
+index 060b176..473d16c 100644
+--- a/arch/arm/plat-mxc/include/mach/regs-usbphy-mx6.h
++++ b/arch/arm/plat-mxc/include/mach/regs-usbphy-mx6.h
+@@ -1,7 +1,7 @@
+ /*
+  * Freescale USBPHY Register Definitions
+  *
+- * Copyright 2008-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2008-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -468,6 +468,7 @@
+ 
+ /* Host2/3 HSIC Ctrl */
+ #define CLK_VLD		(1 << 31)	/* Indicating whether HSIC clock is valid */
++#define HSIC_DEV_CONN		(1 << 21)	/* set after device connected */
+ #define HSIC_EN		(1 << 12)	/* HSIC enable */
+ #define HSIC_CLK_ON		(1 << 11)	/* Force HSIC module 480M clock on,
+ 						 * even when in Host is in suspend mode
+-- 
+1.7.7.4
+

@@ -1,0 +1,32 @@
+From 2d1f47ba38f409dc710529d32919dbbb02f3d24d Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Mon, 13 Feb 2012 09:38:16 +0800
+Subject: [PATCH 1016/2463] ENGR00174295-02:[MX6]USDHC: ddr mode is masked on
+ slots with no 1.8v support.
+
+- check ocr_avail_sd & MMC_VDD_165_195 before set S18R bit to check whether
+the host is support 1.8v support.
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/core/sd.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
+index 9dafabb..b7d8e36 100644
+--- a/drivers/mmc/core/sd.c
++++ b/drivers/mmc/core/sd.c
+@@ -733,8 +733,9 @@ int mmc_sd_get_cid(struct mmc_host *host, u32 ocr, u32 *cid, u32 *rocr)
+ 	 * If the host supports one of UHS-I modes, request the card
+ 	 * to switch to 1.8V signaling level.
+ 	 */
+-	if (host->caps & (MMC_CAP_UHS_SDR12 | MMC_CAP_UHS_SDR25 |
++	if ((host->caps & (MMC_CAP_UHS_SDR12 | MMC_CAP_UHS_SDR25 |
+ 	    MMC_CAP_UHS_SDR50 | MMC_CAP_UHS_SDR104 | MMC_CAP_UHS_DDR50))
++			&& (host->ocr_avail_sd & MMC_VDD_165_195))
+ 		ocr |= SD_OCR_S18R;
+ 
+ 	/* If the host can supply more than 150mA, XPC should be set to 1. */
+-- 
+1.7.7.4
+

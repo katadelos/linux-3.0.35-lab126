@@ -1,0 +1,77 @@
+From 1791823121d45dfba223c6b18dc3a1f64e384be4 Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Tue, 18 Oct 2011 16:20:51 +0800
+Subject: [PATCH 0458/2463] ENGR00160241 [mx6q]sdhci: kernel panic caused by
+ clock enable in interrupt
+
+cancel the timer even in interrupt context to fix following error log:
+
+clk_enable cannot be called in an interrupt context
+kernel BUG at arch/arm/plat-mxc/clock.c:104!
+Unable to handle kernel NULL pointer dereference at virtual address 00000000
+pgd = 80004000
+[00000000] *pgd=00000000
+Internal error: Oops: 805 [#1] PREEMPT SMP
+last sysfs file: /sys/devices/platform/fsl-ehci.1/usb2/2-0:1.0/uevent
+Modules linked in:
+CPU: 1    Tainted: G        W    (2.6.38-00559-g4938069-dirty #30)
+PC is at __bug+0x18/0x24
+LR is at __bug+0x14/0x24
+pc : [<80039eec>]    lr : [<80039ee8>]    psr: 20000193
+sp : e6067eb8  ip : ec91a000  fp : 00000000
+r10: 8002eacc  r9 : 805738e0  r8 : 00000023
+r7 : 60000113  r6 : e67c92a8  r5 : 00000001  r4 : 8054d8f8
+r3 : 00000000  r2 : 00000104  r1 : 60000193  r0 : 00000033
+Flags: nzCv  IRQs off  FIQs on  Mode SVC_32  ISA ARM  Segment kernel
+Control: 10c53c7d  Table: 7461804a  DAC: 00000015
+Process swapper (pid: 0, stack limit = 0xe60662f0)
+Stack: (0xe6067eb8 to 0xe6068000)
+7ea0:                                                       8054d8f8 8004914c
+7ec0: e67c9280 802fa9e4 e67c9280 00000100 e67c92a8 802f7754 e67c9280 e61ade14
+7ee0: e67c92a8 802f8f60 e67c9324 e67c9328 00000000 e6066000 80547c40 802ebe80
+7f00: e67c9324 8005d828 8005d71c 00000018 00000001 e6066000 80538040 80538040
+7f20: 805738e0 00000103 8002e9f4 8005dbf0 2faf2e40 0000030e 2faf2e40 00000006
+7f40: 00000009 00000001 00000000 80547c40 8002f380 00000000 80573900 00000001
+7f60: e6066000 00000000 00000000 8005dd30 80547c40 80030390 ffffffff f2a00100
+7f80: 0000001d 00000002 00000001 8003600c 00000020 80547a84 e6067fd8 00000000
+7fa0: e6066000 8056e1e4 803fdd54 8054ae9c 70000000 412fc09a 00000000 00000000
+7fc0: 00000000 e6067fd8 800372ac 800372b0 60000013 ffffffff e6066000 800378d8
+7fe0: 7606806a 00000015 10c03c7d 8056e36c 70000000 103f628c 78fffff6 debdbeb9
+(__bug+0x18/0x24) from [<8004914c>] (clk_enable+0x100/0x118)
+(clk_enable+0x100/0x118) from [<802fa9e4>] (plt_clk_ctrl+0x28/0x34)
+(plt_clk_ctrl+0x28/0x34) from [<802f7754>] (sdhci_enable_clk+0x5c/0x80)
+(sdhci_enable_clk+0x5c/0x80) from [<802f8f60>] (sdhci_request+0xac/0x188)
+(sdhci_request+0xac/0x188) from [<802ebe80>] (mmc_request_done+0x74/0x78)
+(mmc_request_done+0x74/0x78) from [<8005d828>] (tasklet_action+0x10c/0x15c)
+(tasklet_action+0x10c/0x15c) from [<8005dbf0>] (__do_softirq+0xa8/0x140)
+(__do_softirq+0xa8/0x140) from [<8005dd30>] (irq_exit+0xa8/0xb0)
+(irq_exit+0xa8/0xb0) from [<80030390>] (do_local_timer+0x54/0x7c)
+(do_local_timer+0x54/0x7c) from [<8003600c>] (__irq_svc+0x4c/0xe8)
+Exception stack(0xe6067f90 to 0xe6067fd8)
+7f80:                                     00000020 80547a84 e6067fd8 00000000
+7fa0: e6066000 8056e1e4 803fdd54 8054ae9c 70000000 412fc09a 00000000 00000000
+7fc0: 00000000 e6067fd8 800372ac 800372b0 60000013 ffffffff
+......
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ drivers/mmc/host/sdhci.c |    3 +++
+ 1 files changed, 3 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci.c b/drivers/mmc/host/sdhci.c
+index e423bb6..7ff336b 100755
+--- a/drivers/mmc/host/sdhci.c
++++ b/drivers/mmc/host/sdhci.c
+@@ -77,6 +77,9 @@ static void sdhci_enable_clk(struct sdhci_host *host)
+ 	if (host->clk_mgr_en) {
+ 		if (!in_interrupt())
+ 			cancel_delayed_work(&host->clk_worker);
++		else
++			__cancel_delayed_work(&host->clk_worker);
++
+ 		if (!host->clk_status && host->ops->platform_clk_ctrl)
+ 			host->ops->platform_clk_ctrl(host, true);
+ 	}
+-- 
+1.7.7.4
+

@@ -1,0 +1,419 @@
+From 36765cda34e98865c45a7da4ce4e20d861da6110 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Thu, 1 Sep 2011 10:04:06 -0500
+Subject: [PATCH 0450/2463] ENGR00155879: MX6: Enable ARM core to enter WAIT
+ mode when system is idle.
+
+Set the appropriate bit in CCM to allow ARM-CORE to enter WAIT
+mode when system is idle.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig      |    2 +-
+ arch/arm/mach-mx6/Makefile           |    5 ++-
+ arch/arm/mach-mx6/clock.c            |   61 +++++++++++++++++++++++++++++++++-
+ arch/arm/mach-mx6/cpu.c              |   35 +++++++++++++++++++
+ arch/arm/mach-mx6/crm_regs.h         |    1 +
+ arch/arm/mach-mx6/irq.c              |    5 +++
+ arch/arm/mach-mx6/mx6_wfi.S          |   56 +++++++++++++++++++++++++++++++
+ arch/arm/mach-mx6/system.c           |   33 +++++++++++-------
+ arch/arm/plat-mxc/include/mach/mx6.h |    3 ++
+ 9 files changed, 184 insertions(+), 17 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 18d4baa..891e0c1 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -384,7 +384,7 @@ CONFIG_VMSPLIT_2G=y
+ CONFIG_PAGE_OFFSET=0x80000000
+ CONFIG_NR_CPUS=4
+ CONFIG_HOTPLUG_CPU=y
+-CONFIG_LOCAL_TIMERS=y
++# CONFIG_LOCAL_TIMERS is not set
+ # CONFIG_PREEMPT_NONE is not set
+ # CONFIG_PREEMPT_VOLUNTARY is not set
+ CONFIG_PREEMPT=y
+diff --git a/arch/arm/mach-mx6/Makefile b/arch/arm/mach-mx6/Makefile
+index bf23b55..9a4c5af 100644
+--- a/arch/arm/mach-mx6/Makefile
++++ b/arch/arm/mach-mx6/Makefile
+@@ -3,8 +3,9 @@
+ #
+ 
+ # Object file lists.
+-obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o usb_dr.o usb_h1.o pm.o cpu_op-mx6.o
++obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o usb_dr.o usb_h1.o pm.o cpu_op-mx6.o mx6_wfi.o
+ 
+ obj-$(CONFIG_ARCH_MX6) += clock.o mx6q_suspend.o
+ obj-$(CONFIG_MACH_MX6Q_SABREAUTO) += board-mx6q_sabreauto.o
+-obj-$(CONFIG_SMP) += plat_hotplug.o platsmp.o headsmp.o localtimer.o
++obj-$(CONFIG_SMP) += plat_hotplug.o platsmp.o headsmp.o
++obj-$(CONFIG_LOCAL_TIMERS) += localtimer.o
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index dbb7dc8..7dce695 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -1320,9 +1320,63 @@ static struct clk mmdc_ch1_axi_clk[] = {
+ 	},
+ };
+ 
++static unsigned long _clk_ipg_perclk_get_rate(struct clk *clk)
++{
++	u32 reg, div;
++
++	reg = __raw_readl(MXC_CCM_CSCMR1);
++	div = ((reg & MXC_CCM_CSCMR1_PERCLK_PODF_MASK) >>
++			MXC_CCM_CSCMR1_PERCLK_PODF_OFFSET) + 1;
++
++	return clk_get_rate(clk->parent) / div;
++}
++
++static int _clk_ipg_perclk_set_rate(struct clk *clk, unsigned long rate)
++{
++	u32 reg, div;
++	u32 parent_rate = clk_get_rate(clk->parent);
++
++	div = parent_rate / rate;
++	if (div == 0)
++		div++;
++	if (((parent_rate / div) != rate) || (div > 64))
++		return -EINVAL;
++
++	reg = __raw_readl(MXC_CCM_CSCMR1);
++	reg &= ~MXC_CCM_CSCMR1_PERCLK_PODF_MASK;
++	reg |= (div - 1) << MXC_CCM_CSCMR1_PERCLK_PODF_OFFSET;
++	__raw_writel(reg, MXC_CCM_CSCMR1);
++
++	return 0;
++}
++
++
++static unsigned long _clk_ipg_perclk_round_rate(struct clk *clk,
++						unsigned long rate)
++{
++	u32 div;
++	u32 parent_rate = clk_get_rate(clk->parent);
++
++	div = parent_rate / rate;
++
++	/* Make sure rate is not greater than the maximum value for the clock.
++	 * Also prevent a div of 0.
++	 */
++	if (div == 0)
++		div++;
++
++	if (div > 64)
++		div = 64;
++
++	return parent_rate / div;
++}
++
+ static struct clk ipg_perclk = {
+ 	__INIT_CLK_DEBUG(ipg_perclk)
+ 	.parent = &ipg_clk,
++	.get_rate = _clk_ipg_perclk_get_rate,
++	.set_rate = _clk_ipg_perclk_set_rate,
++	.round_rate = _clk_ipg_perclk_round_rate,
+ };
+ 
+ static struct clk spba_clk = {
+@@ -4152,6 +4206,7 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	unsigned long ckih1, unsigned long ckih2)
+ {
+ 	__iomem void *base;
++	unsigned int reg;
+ 
+ 	int i;
+ 
+@@ -4208,7 +4263,8 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 			     3 << MXC_CCM_CCGRx_CG1_OFFSET |
+ 			     3 << MXC_CCM_CCGRx_CG0_OFFSET, MXC_CCM_CCGR0);
+ 	} else {
+-		__raw_writel(3 << MXC_CCM_CCGRx_CG2_OFFSET |
++		__raw_writel(1 << MXC_CCM_CCGRx_CG11_OFFSET |
++			     3 << MXC_CCM_CCGRx_CG2_OFFSET |
+ 			     3 << MXC_CCM_CCGRx_CG1_OFFSET |
+ 			     3 << MXC_CCM_CCGRx_CG0_OFFSET, MXC_CCM_CCGR0);
+ 	}
+@@ -4229,6 +4285,9 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 		     3 << MXC_CCM_CCGRx_CG0_OFFSET, MXC_CCM_CCGR5);
+ 	__raw_writel(0, MXC_CCM_CCGR6);
+ 
++	/* Lower the ipg_perclk frequency to 11MHz. */
++	clk_set_rate(&ipg_perclk, 11000000);
++
+ 	base = ioremap(GPT_BASE_ADDR, SZ_4K);
+ 	mxc_timer_init(&gpt_clk[0], base, MXC_INT_GPT);
+ 
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index dc3f1d1..ddc7b98 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -22,12 +22,22 @@
+ #include <linux/clk.h>
+ #include <linux/module.h>
+ #include <linux/iram_alloc.h>
++#include <linux/delay.h>
++
+ #include <mach/hardware.h>
+ #include <asm/io.h>
++#include <asm/mach/map.h>
+ 
+ #include "crm_regs.h"
+ 
++void *mx6_wait_in_iram_base;
++void (*mx6_wait_in_iram)(void *ccm_base);
++extern void mx6_wait(void);
++
++
+ struct cpu_op *(*get_cpu_op)(int *op);
++static void __iomem *arm_base = IO_ADDRESS(MX6Q_A9_PLATFRM_BASE);
++
+ 
+ int mx6_set_cpu_voltage(u32 cpu_volt)
+ {
+@@ -48,6 +58,8 @@ static int __init post_cpu_init(void)
+ {
+ 	unsigned int reg;
+ 	void __iomem *base;
++	unsigned long iram_paddr, cpaddr;
++
+ 
+ 	iram_init(MX6Q_IRAM_BASE_ADDR, MX6Q_IRAM_SIZE);
+ 
+@@ -69,6 +81,29 @@ static int __init post_cpu_init(void)
+ 	__raw_writel(reg, base + 0x50);
+ 	iounmap(base);
+ 
++	/* Allow SCU_CLK to be disabled when all cores are in WFI*/
++	base = IO_ADDRESS(SCU_BASE_ADDR);
++	reg = __raw_readl(base);
++	reg |= 0x20;
++	__raw_writel(reg, base);
++
++	/* Allocate IRAM for WAIT code. */
++	/* Move wait routine into iRAM */
++	cpaddr = (unsigned long)iram_alloc(SZ_4K, &iram_paddr);
++	/* Need to remap the area here since we want the memory region
++		 to be executable. */
++	mx6_wait_in_iram_base = __arm_ioremap(iram_paddr, SZ_4K,
++					  MT_MEMORY_NONCACHED);
++	pr_info("cpaddr = %x wait_iram_base=%x\n",
++		(unsigned int)cpaddr, (unsigned int)mx6_wait_in_iram_base);
++
++	/*
++	 * Need to run the suspend code from IRAM as the DDR needs
++	 * to be put into low power mode manually.
++	 */
++	memcpy((void *)cpaddr, mx6_wait, SZ_4K);
++	mx6_wait_in_iram = (void *)mx6_wait_in_iram_base;
++
+ 	return 0;
+ }
+ 
+diff --git a/arch/arm/mach-mx6/crm_regs.h b/arch/arm/mach-mx6/crm_regs.h
+index 211c4a3..c5eb8c7 100644
+--- a/arch/arm/mach-mx6/crm_regs.h
++++ b/arch/arm/mach-mx6/crm_regs.h
+@@ -269,6 +269,7 @@
+ #define MXC_CCM_CSCMR1_SSI1_CLK_SEL_MASK		(0x3 << 10)
+ #define MXC_CCM_CSCMR1_SSI1_CLK_SEL_OFFSET		(10)
+ #define MXC_CCM_CSCMR1_PERCLK_PODF_MASK			(0x3F)
++#define MXC_CCM_CSCMR1_PERCLK_PODF_OFFSET		(0)
+ 
+ /* Define the bits in register CSCMR2 */
+ #define MXC_CCM_CSCMR2_ESAI_CLK_SEL_MASK		(0x3 << 19)
+diff --git a/arch/arm/mach-mx6/irq.c b/arch/arm/mach-mx6/irq.c
+index cf7fdce..2c7fbf0 100644
+--- a/arch/arm/mach-mx6/irq.c
++++ b/arch/arm/mach-mx6/irq.c
+@@ -45,6 +45,7 @@ static int mx6_gic_irq_set_wake(struct irq_data *d, unsigned int enable)
+ }
+ void mx6_init_irq(void)
+ {
++	void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ 	struct irq_desc *desc;
+ 	unsigned int i;
+ 
+@@ -59,6 +60,10 @@ void mx6_init_irq(void)
+ 	gic_init(0, 29, IO_ADDRESS(IC_DISTRIBUTOR_BASE_ADDR),
+ 		IO_ADDRESS(IC_INTERFACES_BASE_ADDR));
+ 
++	/* Mask the always pending interrupts - HW bug. */
++	__raw_writel(0x00400000, gpc_base + 0x0c);
++	__raw_writel(0x20000000, gpc_base + 0x10);
++
+ 	for (i = MXC_INT_START; i <= MXC_INT_END; i++) {
+ 		desc = irq_to_desc(i);
+ 		desc->irq_data.chip->irq_set_wake = mx6_gic_irq_set_wake;
+diff --git a/arch/arm/mach-mx6/mx6_wfi.S b/arch/arm/mach-mx6/mx6_wfi.S
+new file mode 100644
+index 0000000..88993f0
+--- /dev/null
++++ b/arch/arm/mach-mx6/mx6_wfi.S
+@@ -0,0 +1,56 @@
++/*
++ * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <linux/linkage.h>
++
++/*
++ *  mx6_wait
++ *
++ *  Idle the processor (eg, wait for interrupt).
++ *  Make sure DDR is in self-refresh.
++ *  IRQs are already disabled.
++ */
++ENTRY(mx6_wait)
++
++	stmfd   sp!, {r3,r4,r5,r6,r7}     @ Save registers
++
++	wfi
++
++	/*Wait for 170ns due to L2 cache errata (TKT065875) */
++	/*System is more stable only if the wait is closer to ~380ns */
++	/* Each IO read takes about 76ns. */
++
++	ldr   r6, [r0]
++	ldr   r6, [r0, #4]
++	ldr   r6, [r0, #8]
++	ldr   r6, [r0, #0xc]
++	ldr   r6, [r0, #0x10]
++	ldr   r6, [r0, #0x14]
++	ldr   r6, [r0, #0x18]
++	ldr   r6, [r0, #0x1c]
++	ldr   r6, [r0, #0x20]
++	ldr   r6, [r0, #0x24]
++
++    /* Restore registers */
++    ldmfd sp!, {r3,r4,r5,r6,r7}
++    mov     pc, lr
++
++    .type   mx6_do_wait, #object
++ENTRY(mx6_do_wait)
++    .word   mx6_wait
++    .size    mx6_wait, . - mx6_wait
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 64a9311..243152e 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -39,28 +39,34 @@
+ 
+ #define MODULE_CLKGATE		(1 << 30)
+ #define MODULE_SFTRST		(1 << 31)
++static DEFINE_SPINLOCK(wfi_lock);
+ 
+ extern unsigned int gpc_wake_irq[4];
+ 
++static unsigned int cpu_idle_mask;
++
++static void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
++
++extern void (*mx6_wait_in_iram)(void *ccm_base);
++extern void mx6_wait(void);
++extern void *mx6_wait_in_iram_base;
++
+ void gpc_set_wakeup(unsigned int irq[4])
+ {
+-	void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ 	/* Mask all wake up source */
+ 	__raw_writel(~irq[0], gpc_base + 0x8);
+ 	__raw_writel(~irq[1], gpc_base + 0xc);
+ 	__raw_writel(~irq[2], gpc_base + 0x10);
+ 	__raw_writel(~irq[3], gpc_base + 0x14);
++
+ 	return;
+ }
+ /* set cpu low power mode before WFI instruction */
+ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ {
+-	void __iomem *scu_base = IO_ADDRESS(SCU_BASE_ADDR);
+-	void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+-	u32 scu_cr, ccm_clpcr;
++	u32 ccm_clpcr;
+ 	int stop_mode = 0;
+ 
+-	scu_cr = __raw_readl(scu_base + SCU_CTRL);
+ 	ccm_clpcr = __raw_readl(MXC_CCM_CLPCR) & ~(MXC_CCM_CLPCR_LPM_MASK);
+ 
+ 	switch (mode) {
+@@ -73,9 +79,10 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 	case STOP_POWER_OFF:
+ 	case ARM_POWER_OFF:
+ 		if (mode == WAIT_UNCLOCKED_POWER_OFF) {
+-			ccm_clpcr |= 0x1 << MXC_CCM_CLPCR_LPM_OFFSET;
+ 			ccm_clpcr &= ~MXC_CCM_CLPCR_VSTBY;
+ 			ccm_clpcr &= ~MXC_CCM_CLPCR_SBYOS;
++			ccm_clpcr |= 0x1 << MXC_CCM_CLPCR_LPM_OFFSET;
++			ccm_clpcr |= MXC_CCM_CLPCR_BYP_MMDC_CH1_LPM_HS;
+ 			stop_mode = 0;
+ 		} else if (mode == STOP_POWER_OFF) {
+ 			ccm_clpcr |= 0x2 << MXC_CCM_CLPCR_LPM_OFFSET;
+@@ -92,13 +99,10 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 			ccm_clpcr |= MXC_CCM_CLPCR_BYP_MMDC_CH1_LPM_HS;
+ 			stop_mode = 2;
+ 		}
+-
+-		/* scu standby enable, scu clk will be
+-		 * off after all cpu enter WFI */
+-		scu_cr |= 0x20;
+ 		break;
+ 	case STOP_POWER_ON:
+ 		ccm_clpcr |= 0x2 << MXC_CCM_CLPCR_LPM_OFFSET;
++
+ 		break;
+ 	default:
+ 		printk(KERN_WARNING "UNKNOWN cpu power mode: %d\n", mode);
+@@ -115,14 +119,17 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 		if (stop_mode == 2)
+ 			__raw_writel(0x1, gpc_base + GPC_PGC_CPU_PDN_OFFSET);
+ 	}
+-
+-	__raw_writel(scu_cr, scu_base + SCU_CTRL);
+ 	__raw_writel(ccm_clpcr, MXC_CCM_CLPCR);
+ }
+ 
+ void arch_idle(void)
+ {
+-	cpu_do_idle();
++	if ((num_online_cpus() == num_present_cpus())
++		&& mx6_wait_in_iram != NULL) {
++		mxc_cpu_lp_set(WAIT_UNCLOCKED_POWER_OFF);
++		mx6_wait_in_iram(MXC_CCM_BASE);
++	} else
++		cpu_do_idle();
+ }
+ 
+ static int __mxs_reset_block(void __iomem *hwreg, int just_enable)
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 7bcc04a..b3042cb 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -193,6 +193,9 @@
+ #define CAAM_BASE_ADDR              ATZ2_BASE_ADDR
+ #define ARM_BASE_ADDR		        (ATZ2_BASE_ADDR + 0x40000)
+ 
++/* ARM Cortex A9 MPCore Platform */
++#define MX6Q_A9_PLATFRM_BASE		(ARM_BASE_ADDR + 0x20000)
++
+ #define MX6Q_PL301_BASE_ADDR          (AIPS2_OFF_BASE_ADDR + 0x0000)
+ #define MX6Q_USB_OTG_BASE_ADDR            (AIPS2_OFF_BASE_ADDR + 0x4000)
+ #define MX6Q_USB_HS1_BASE_ADDR            (AIPS2_OFF_BASE_ADDR + 0x4200)
+-- 
+1.7.7.4
+

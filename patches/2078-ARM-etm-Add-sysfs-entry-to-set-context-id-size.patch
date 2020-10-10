@@ -1,0 +1,120 @@
+From 829c3284e802cd3100f5a28a59b41c3ed5f57463 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Arve=20Hj=C3=B8nnev=C3=A5g?= <arve@android.com>
+Date: Mon, 2 Apr 2012 17:20:32 -0700
+Subject: [PATCH 2078/2463] ARM: etm: Add sysfs entry to set context-id-size
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Change-Id: I520dfb6e593dac131de8b9b1db77f1c734f18c24
+Signed-off-by: Arve Hjønnevåg <arve@android.com>
+---
+ arch/arm/include/asm/hardware/coresight.h |    5 +--
+ arch/arm/kernel/etm.c                     |   40 +++++++++++++++++++++++++++++
+ 2 files changed, 42 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/include/asm/hardware/coresight.h b/arch/arm/include/asm/hardware/coresight.h
+index 42059d3..47b7696 100644
+--- a/arch/arm/include/asm/hardware/coresight.h
++++ b/arch/arm/include/asm/hardware/coresight.h
+@@ -47,7 +47,7 @@
+ #define ETMCTRL_POWERDOWN	1
+ #define ETMCTRL_PROGRAM		(1 << 10)
+ #define ETMCTRL_PORTSEL		(1 << 11)
+-#define ETMCTRL_DO_CONTEXTID	(3 << 14)
++#define ETMCTRL_CONTEXTIDSIZE(x) (((x) & 3) << 14)
+ #define ETMCTRL_PORTMASK1	(7 << 4)
+ #define ETMCTRL_PORTMASK2	(1 << 21)
+ #define ETMCTRL_PORTMASK	(ETMCTRL_PORTMASK1 | ETMCTRL_PORTMASK2)
+@@ -127,8 +127,7 @@
+ #define ETMVDC3_EXCLONLY	BIT(16)
+ 
+ #define ETMCTRL_OPTS		(ETMCTRL_DO_CPRT | \
+-				ETMCTRL_BRANCH_OUTPUT | \
+-				ETMCTRL_DO_CONTEXTID)
++				ETMCTRL_BRANCH_OUTPUT)
+ 
+ #define ETMR_ID			0x1e4
+ #define ETMIDR_VERSION(x)	(((x) >> 4) & 0xff)
+diff --git a/arch/arm/kernel/etm.c b/arch/arm/kernel/etm.c
+index d83ba79..9cba22d 100644
+--- a/arch/arm/kernel/etm.c
++++ b/arch/arm/kernel/etm.c
+@@ -42,6 +42,7 @@ struct tracectx {
+ 	unsigned long	flags;
+ 	int		ncmppairs;
+ 	int		etm_portsz;
++	int		etm_contextid_size;
+ 	u32		etb_fc;
+ 	unsigned long	range_start;
+ 	unsigned long	range_end;
+@@ -108,6 +109,7 @@ static int trace_start_etm(struct tracectx *t, int id)
+ 	unsigned long timeout = TRACER_TIMEOUT;
+ 
+ 	v = ETMCTRL_OPTS | ETMCTRL_PROGRAM | ETMCTRL_PORTSIZE(t->etm_portsz);
++	v |= ETMCTRL_CONTEXTIDSIZE(t->etm_contextid_size);
+ 
+ 	if (t->flags & TRACER_CYCLE_ACC)
+ 		v |= ETMCTRL_CYCLEACCURATE;
+@@ -649,6 +651,37 @@ static ssize_t trace_mode_store(struct kobject *kobj,
+ static struct kobj_attribute trace_mode_attr =
+ 	__ATTR(trace_mode, 0644, trace_mode_show, trace_mode_store);
+ 
++static ssize_t trace_contextid_size_show(struct kobject *kobj,
++					 struct kobj_attribute *attr,
++					 char *buf)
++{
++	/* 0: No context id tracing, 1: One byte, 2: Two bytes, 3: Four bytes */
++	return sprintf(buf, "%d\n", (1 << tracer.etm_contextid_size) >> 1);
++}
++
++static ssize_t trace_contextid_size_store(struct kobject *kobj,
++					  struct kobj_attribute *attr,
++					  const char *buf, size_t n)
++{
++	unsigned int contextid_size;
++
++	if (sscanf(buf, "%u", &contextid_size) != 1)
++		return -EINVAL;
++
++	if (contextid_size == 3 || contextid_size > 4)
++		return -EINVAL;
++
++	mutex_lock(&tracer.mutex);
++	tracer.etm_contextid_size = fls(contextid_size);
++	mutex_unlock(&tracer.mutex);
++
++	return n;
++}
++
++static struct kobj_attribute trace_contextid_size_attr =
++	__ATTR(trace_contextid_size, 0644,
++		trace_contextid_size_show, trace_contextid_size_store);
++
+ static ssize_t trace_timestamp_show(struct kobject *kobj,
+ 				  struct kobj_attribute *attr,
+ 				  char *buf)
+@@ -788,6 +821,7 @@ static int __devinit etm_probe(struct amba_device *dev, const struct amba_id *id
+ 
+ 	t->flags = TRACER_CYCLE_ACC | TRACER_TRACE_DATA;
+ 	t->etm_portsz = 1;
++	t->etm_contextid_size = 3;
+ 
+ 	etm_unlock(t, t->etm_regs_count);
+ 	(void)etm_readl(t, t->etm_regs_count, ETMMR_PDSR);
+@@ -820,6 +854,12 @@ static int __devinit etm_probe(struct amba_device *dev, const struct amba_id *id
+ 	if (ret)
+ 		dev_dbg(&dev->dev, "Failed to create trace_mode in sysfs\n");
+ 
++	ret = sysfs_create_file(&dev->dev.kobj,
++				&trace_contextid_size_attr.attr);
++	if (ret)
++		dev_dbg(&dev->dev,
++			"Failed to create trace_contextid_size in sysfs\n");
++
+ 	if (etmccer & ETMCCER_TIMESTAMPING_IMPLEMENTED) {
+ 		ret = sysfs_create_file(&dev->dev.kobj,
+ 					&trace_timestamp_attr.attr);
+-- 
+1.7.7.4
+

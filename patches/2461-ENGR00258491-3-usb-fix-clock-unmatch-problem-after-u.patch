@@ -1,0 +1,60 @@
+From 69a9d0b4f530d956557b5f459d6c7f146faa6ae9 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Tue, 16 Apr 2013 14:36:12 +0800
+Subject: [PATCH 2461/2463] ENGR00258491-3 usb: fix clock unmatch problem
+ after unload module
+
+Move clock disable from MSL to driver
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    6 ++++--
+ drivers/usb/host/ehci-arc.c     |    6 ++++--
+ 2 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index c97eac3a..7429d4b 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -3269,6 +3269,8 @@ static int  fsl_udc_remove(struct platform_device *pdev)
+ 	dr_wake_up_enable(udc_controller, false);
+ 
+ 	dr_discharge_line(pdata, true);
++
++	dr_clk_gate(false);
+ 	/* DR has been stopped in usb_gadget_unregister_driver() */
+ 	remove_proc_file();
+ 
+@@ -3303,9 +3305,9 @@ static int  fsl_udc_remove(struct platform_device *pdev)
+ 	device_unregister(&udc_controller->gadget.dev);
+ 	/* free udc --wait for the release() finished */
+ 	wait_for_completion(&done);
++
+ 	/*
+-	 * do platform specific un-initialization:
+-	 * release iomux pins, etc.
++	 * do platform specific un-initialization
+ 	 */
+ 	if (pdata->exit)
+ 		pdata->exit(pdata->pdev);
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index af894a3..f17f260 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -372,9 +372,11 @@ static void usb_hcd_fsl_remove(struct usb_hcd *hcd,
+ 	if (pdata->xcvr_ops && pdata->xcvr_ops->set_vbus_power)
+ 		pdata->xcvr_ops->set_vbus_power(pdata->xcvr_ops, pdata, 0);
+ 
++	if (pdata->usb_clock_for_pm)
++		pdata->usb_clock_for_pm(false);
++
+ 	/*
+-	 * do platform specific un-initialization:
+-	 * release iomux pins clocks, etc.
++	 * do platform specific un-initialization
+ 	 */
+ 	if (pdata->exit)
+ 		pdata->exit(pdata->pdev);
+-- 
+1.7.7.4
+

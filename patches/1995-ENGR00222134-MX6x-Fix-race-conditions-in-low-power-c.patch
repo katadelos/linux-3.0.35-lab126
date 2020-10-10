@@ -1,0 +1,134 @@
+From 1be7ed5bf221da9e795354675092d7d148f5008a Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Thu, 30 Aug 2012 15:02:32 -0500
+Subject: [PATCH 1995/2463] ENGR00222134 MX6x - Fix race-conditions in low
+ power code.
+
+Fix couple of race-conditions associated with low power IDLE code:
+1. Ensure that bus freq mutex is used in the suspend/resume function
+2. Ensure that the usecount of pll2 is incremented/decremented when
+ARM is switched to run from PLL2_PFD_400. And PLL2 is enabled/disabled
+when necessary.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/bus_freq.c    |    4 ++++
+ arch/arm/mach-mx6/clock.c       |   25 +++++++++++++++++++++----
+ arch/arm/mach-mx6/clock_mx6sl.c |   25 +++++++++++++++++++++----
+ 3 files changed, 46 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index 23f56d5..151b4ee 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -501,6 +501,8 @@ static int busfreq_suspend(struct platform_device *pdev, pm_message_t message)
+ static int bus_freq_pm_notify(struct notifier_block *nb, unsigned long event,
+ 	void *dummy)
+ {
++	mutex_lock(&bus_freq_mutex);
++
+ 	if (event == PM_SUSPEND_PREPARE) {
+ 		set_high_bus_freq(1);
+ 		busfreq_suspended = 1;
+@@ -508,6 +510,8 @@ static int bus_freq_pm_notify(struct notifier_block *nb, unsigned long event,
+ 		busfreq_suspended = 0;
+ 	}
+ 
++	mutex_unlock(&bus_freq_mutex);
++
+ 	return NOTIFY_OK;
+ }
+ static int busfreq_resume(struct platform_device *pdev)
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index c2bf201..8b75aee 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -1261,7 +1261,16 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		  * PLL2_PFD_400M.
+ 		  */
+ 		if (pll1_sw_clk.parent != &pll2_pfd_400M) {
+-			pll2_pfd_400M.enable(&pll2_pfd_400M);
++			if (pll2_pfd_400M.usecount == 0) {
++				/* Check if PLL2 needs to be enabled also. */
++				if (pll2_528_bus_main_clk.usecount == 0)
++					pll2_528_bus_main_clk.enable(&pll2_528_bus_main_clk);
++				/* Ensure parent usecount is
++				  * also incremented.
++				  */
++				pll2_528_bus_main_clk.usecount++;
++				pll2_pfd_400M.enable(&pll2_pfd_400M);
++			}
+ 			pll2_pfd_400M.usecount++;
+ 			arm_needs_pll2_400 = true;
+ 			pll1_sw_clk.set_parent(&pll1_sw_clk, &pll2_pfd_400M);
+@@ -1288,11 +1297,19 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		/* Make sure pll1_sw_clk is from pll1_sys_main_clk */
+ 		pll1_sw_clk.set_parent(&pll1_sw_clk, &pll1_sys_main_clk);
+ 		pll1_sw_clk.parent = &pll1_sys_main_clk;
+-		if (arm_needs_pll2_400)
++		if (arm_needs_pll2_400) {
+ 			pll2_pfd_400M.usecount--;
++			if (pll2_pfd_400M.usecount == 0) {
++				pll2_pfd_400M.disable(&pll2_pfd_400M);
++				/* Ensure parent usecount is
++				  * also decremented.
++				  */
++				pll2_528_bus_main_clk.usecount--;
++				if (pll2_528_bus_main_clk.usecount == 0)
++					pll2_528_bus_main_clk.disable(&pll2_528_bus_main_clk);
++			}
++		}
+ 		arm_needs_pll2_400 = false;
+-		if (pll2_pfd_400M.usecount == 0)
+-			pll2_pfd_400M.disable(&pll2_pfd_400M);
+ 	}
+ 	parent_rate = clk_get_rate(clk->parent);
+ 	div = parent_rate / rate;
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 43b2bd1..6bd818a 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -1167,7 +1167,16 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		  * PLL2_PFD2_400M.
+ 		  */
+ 		if (pll1_sw_clk.parent != &pll2_pfd2_400M) {
+-			pll2_pfd2_400M.enable(&pll2_pfd2_400M);
++			if (pll2_pfd2_400M.usecount == 0) {
++				/* Check if PLL2 needs to be enabled also. */
++				if (pll2_528_bus_main_clk.usecount == 0)
++					pll2_528_bus_main_clk.enable(&pll2_528_bus_main_clk);
++				/* Ensure parent usecount is
++				  * also incremented.
++				  */
++				pll2_528_bus_main_clk.usecount++;
++				pll2_pfd2_400M.enable(&pll2_pfd2_400M);
++			}
+ 			arm_needs_pll2_400 = true;
+ 			pll2_pfd2_400M.usecount++;
+ 			pll1_sw_clk.set_parent(&pll1_sw_clk, &pll2_pfd2_400M);
+@@ -1192,11 +1201,19 @@ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ 		pll1_sw_clk.set_parent(&pll1_sw_clk, &pll1_sys_main_clk);
+ 		pll1_sw_clk.parent = &pll1_sys_main_clk;
+ 
+-		if (arm_needs_pll2_400)
++		if (arm_needs_pll2_400) {
+ 			pll2_pfd2_400M.usecount--;
++			if (pll2_pfd2_400M.usecount == 0) {
++				pll2_pfd2_400M.disable(&pll2_pfd2_400M);
++				/* Ensure parent usecount is
++				  * also decremented.
++				  */
++				pll2_528_bus_main_clk.usecount--;
++				if (pll2_528_bus_main_clk.usecount == 0)
++					pll2_528_bus_main_clk.disable(&pll2_528_bus_main_clk);
++			}
++		}
+ 		arm_needs_pll2_400 = false;
+-		if (pll2_pfd2_400M.usecount == 0)
+-			pll2_pfd2_400M.disable(&pll2_pfd2_400M);
+ 	}
+ 	parent_rate = clk_get_rate(clk->parent);
+ 	div = parent_rate / rate;
+-- 
+1.7.7.4
+

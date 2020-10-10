@@ -1,0 +1,3007 @@
+From 14ad613f8244794135f508a06c6d33e13dc3db47 Mon Sep 17 00:00:00 2001
+From: Loren Huang <b02279@freescale.com>
+Date: Wed, 4 Jan 2012 18:47:33 +0800
+Subject: [PATCH 0836/2463] ENGR0017124 Merge vivante 4.6.4 kernel driver
+
+Signed-off-by: Loren Huang <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../GC350/hal/kernel/gc_hal_kernel_hardware_vg.c   |   25 +-
+ .../GC350/hal/kernel/gc_hal_kernel_hardware_vg.h   |    2 +-
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c  |  121 ++++-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h     |   36 +
+ .../gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c  |   41 ++-
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c   |   12 +-
+ .../hal/kernel/gc_hal_kernel_interrupt_vg.c        |   19 +
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c |   28 +-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c  |   15 +
+ .../hal/kernel/gc_hal_kernel_video_memory.c        |  239 ++++++-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h        |    3 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h   |   38 ++
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h   |  238 ++++++-
+ .../gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h    |  257 ++++++++
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h |    7 -
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h    |   28 +
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h    |    4 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h     |   48 ++
+ .../hal/os/linux/kernel/gc_hal_kernel_device.c     |   25 +-
+ .../hal/os/linux/kernel/gc_hal_kernel_driver.c     |    2 +-
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |  669 +++++++++++++++++---
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.h |    9 +
+ 22 files changed, 1652 insertions(+), 214 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+index 296b333..a9aec14 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+@@ -139,16 +139,21 @@ _TimeIdleThread(
+     /* Cast the object. */
+     gckVGHARDWARE hardware = (gckVGHARDWARE) ThreadParameter;
+ 
++    gcmkVERIFY_OK(gckOS_AcquireSemaphore(
++        hardware->os,
++        hardware->idleSemaphore));
++
+     while(gcvTRUE)
+     {
+-        gcmkVERIFY_OK(gckOS_WaitSignal(hardware->os,
+-            hardware->idleSignal, gcvINFINITE));
+-
+         if (hardware->killThread)
+         {
+             break;
+         }
+ 
++        gcmkVERIFY_OK(gckOS_AcquireSemaphore(
++            hardware->os,
++            hardware->idleSemaphore));
++
+         do
+         {
+             gcmkVERIFY_OK(gckOS_GetTicks(&currentTime));
+@@ -240,7 +245,7 @@ gckVGHARDWARE_Construct(
+         hardware->chipMinorFeatures2 = chipMinorFeatures2;
+ 
+         hardware->powerMutex            = gcvNULL;
+-        hardware->idleSignal            = gcvNULL;
++        hardware->idleSemaphore         = gcvNULL;
+         hardware->chipPowerState        = gcvPOWER_OFF;
+         hardware->chipPowerStateGlobal  = gcvPOWER_ON;
+         hardware->clockState            = gcvTRUE;
+@@ -265,7 +270,8 @@ gckVGHARDWARE_Construct(
+         gcmkVERIFY_OK(gckVGHARDWARE_SetFastClear(hardware, -1));
+ 
+         gcmkERR_BREAK(gckOS_CreateMutex(Os, &hardware->powerMutex));
+-        gcmkERR_BREAK(gckOS_CreateSignal(Os, gcvTRUE, &hardware->idleSignal));
++
++        gcmkERR_BREAK(gckOS_CreateSemaphore(Os, &hardware->idleSemaphore));
+ #if gcdPOWER_MANAGEMENT
+         gcmkERR_BREAK(gckOS_StartThread(
+             hardware->os,
+@@ -320,7 +326,6 @@ gckVGHARDWARE_Destroy(
+ 
+ #if gcdPOWER_MANAGEMENT
+     Hardware->killThread  = gcvTRUE;
+-    gcmkVERIFY_OK(gckOS_Signal(Hardware->os, Hardware->idleSignal, gcvTRUE));
+     gcmkVERIFY_OK(gckOS_StopThread(Hardware->os, Hardware->timeIdleThread));
+ #endif
+     /* Mark the object as unknown. */
+@@ -332,10 +337,10 @@ gckVGHARDWARE_Destroy(
+             Hardware->os, Hardware->powerMutex));
+     }
+ 
+-    if (Hardware->idleSignal != gcvNULL)
++    if (Hardware->idleSemaphore != gcvNULL)
+     {
+-        gcmkVERIFY_OK(gckOS_DestroySignal(
+-            Hardware->os, Hardware->idleSignal));
++        gcmkVERIFY_OK(gckOS_DestroySemaphore(
++            Hardware->os, Hardware->idleSemaphore));
+     }
+ 
+     /* Free the object. */
+@@ -1785,7 +1790,7 @@ gckVGHARDWARE_SetPowerManagementState(
+ 
+     if (State == gcvPOWER_IDLE)
+     {
+-        gcmkVERIFY_OK(gckOS_Signal(os, Hardware->idleSignal, gcvTRUE));
++        gcmkONERROR(gckOS_ReleaseSemaphore(os, Hardware->idleSemaphore));
+     }
+         /* Reset power off time */
+     gcmkVERIFY_OK(gckOS_GetTicks(&currentTime));
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
+index cff634f..a4ec3eb 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
+@@ -57,7 +57,7 @@ struct _gckVGHARDWARE
+     gctBOOL                     clockState;
+     gctBOOL                     powerState;
+     gctPOINTER                  powerMutex;
+-    gctSIGNAL                   idleSignal;
++    gctSEMAPHORE                idleSemaphore;
+     gctUINT32                   powerProcess;
+     gctUINT32                   powerThread;
+     gceCHIPPOWERSTATE           chipPowerState;
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+index 5321a2d..edf4354 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+@@ -720,7 +720,6 @@ gckHARDWARE_InitializeHardware(
+                                       0x00428,
+                                       baseAddress));
+ 
+-#ifndef VIVANTE_NO_3D
+     gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os,
+                                       Hardware->core,
+                                       0x00420,
+@@ -730,7 +729,6 @@ gckHARDWARE_InitializeHardware(
+                                       Hardware->core,
+                                       0x00424,
+                                       baseAddress));
+-#endif
+ 
+ #if !VIVANTE_PROFILER && 1
+     {
+@@ -785,19 +783,83 @@ gckHARDWARE_InitializeHardware(
+                                       + 0x00104,
+                                       data));
+         }
++
++        /* Disable SE clock gating on imx6 (bug #3383). */
++        if ((Hardware->identity.chipModel == gcv2000)
++        &&  (Hardware->identity.chipRevision  == 0x5108))
++        {
++            gcmkONERROR(
++                gckOS_ReadRegisterEx(Hardware->os,
++                                     Hardware->core,
++                                     Hardware->powerBaseAddress
++                                     + 0x00104,
++                                     &data));
++
++            /* Disable RA clock gating. */
++            data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 6:6) - (0 ? 6:6) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 6:6) - (0 ? 6:6) + 1))))))) << (0 ? 6:6))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 6:6) - (0 ? 6:6) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 6:6) - (0 ? 6:6) + 1))))))) << (0 ? 6:6)));
++
++            /* Disable PE clock gating. */
++           data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 2:2) - (0 ? 2:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 2:2) - (0 ? 2:2) + 1))))))) << (0 ? 2:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 2:2) - (0 ? 2:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 2:2) - (0 ? 2:2) + 1))))))) << (0 ? 2:2)));
++
++            /* Disable TX clock gating. */
++            data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 7:7) - (0 ? 7:7) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 7:7) - (0 ? 7:7) + 1))))))) << (0 ? 7:7))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 7:7) - (0 ? 7:7) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 7:7) - (0 ? 7:7) + 1))))))) << (0 ? 7:7)));
++
++            gcmkONERROR(
++                gckOS_WriteRegisterEx(Hardware->os,
++                                      Hardware->core,
++                                      Hardware->powerBaseAddress
++                                      + 0x00104,
++                                      data));
++
++            gcmkONERROR(
++                gckOS_ReadRegisterEx(Hardware->os,
++                                     Hardware->core,
++                                     Hardware->powerBaseAddress
++                                     + 0x00100,
++                                     &data));
++
++            /* change turnon counter value to 1. */
++            data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 7:4) - (0 ? 7:4) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 7:4) - (0 ? 7:4) + 1))))))) << (0 ? 7:4))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 7:4) - (0 ? 7:4) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 7:4) - (0 ? 7:4) + 1))))))) << (0 ? 7:4)));
++
++            /* change turnoff counter value to 1. */
++            data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:16) - (0 ? 31:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:16) - (0 ? 31:16) + 1))))))) << (0 ? 31:16))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 31:16) - (0 ? 31:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:16) - (0 ? 31:16) + 1))))))) << (0 ? 31:16)));
++
++            gcmkONERROR(
++                gckOS_WriteRegisterEx(Hardware->os,
++                                      Hardware->core,
++                                      Hardware->powerBaseAddress
++                                      + 0x00100,
++                                      data));
++
++        }
+ #endif
+     }
+ #endif
+ 
++    /* Special workaround for HiSi
++    ** Make sure pulse eater kicks in only when SH is idle */
++    if (Hardware->identity.chipModel == gcv4000 &&
++        Hardware->identity.chipRevision == 0x5208)
++    {
++		gcmkONERROR(
++            gckOS_WriteRegisterEx(Hardware->os,
++                                  Hardware->core,
++                                  0x0010C,
++                                  ((((gctUINT32) (0x01590880)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 23:23) - (0 ? 23:23) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 23:23) - (0 ? 23:23) + 1))))))) << (0 ? 23:23))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 23:23) - (0 ? 23:23) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 23:23) - (0 ? 23:23) + 1))))))) << (0 ? 23:23)))));
++    }
++
+     /* Test if MMU is initialized. */
+     if ((Hardware->kernel      != gcvNULL)
+     &&  (Hardware->kernel->mmu != gcvNULL)
+     )
+     {
+         /* Reset MMU. */
+-        gcmkONERROR(
+-            gckHARDWARE_SetMMU(Hardware,
+-                               Hardware->kernel->mmu->pageTableLogical));
++        if (Hardware->mmuVersion == 0)
++        {
++            gcmkONERROR(
++                    gckHARDWARE_SetMMU(Hardware,
++                        Hardware->kernel->mmu->pageTableLogical));
++        }
+     }
+ 
+     /* Success. */
+@@ -2744,14 +2806,13 @@ gckHARDWARE_SetMMU(
+                               0x00410,
+                               address + baseAddress));
+ 
+-#ifndef VIVANTE_NO_3D
+     /* Write the AQMemoryTxPageTable register. */
+     gcmkONERROR(
+         gckOS_WriteRegisterEx(Hardware->os,
+                               Hardware->core,
+                               0x00404,
+                               address + baseAddress));
+-#endif
++
+ 
+     /* Write the AQMemoryPePageTable register. */
+     gcmkONERROR(
+@@ -2760,14 +2821,12 @@ gckHARDWARE_SetMMU(
+                               0x00408,
+                               address + baseAddress));
+ 
+-#ifndef VIVANTE_NO_3D
+     /* Write the AQMemoryPezPageTable register. */
+     gcmkONERROR(
+         gckOS_WriteRegisterEx(Hardware->os,
+                               Hardware->core,
+                               0x0040C,
+                               address + baseAddress));
+-#endif
+ 
+     /* Return the status. */
+     gcmkFOOTER_NO();
+@@ -2897,7 +2956,8 @@ gckHARDWARE_SetMMUv2(
+     IN gctBOOL Enable,
+     IN gctPOINTER MtlbAddress,
+     IN gceMMU_MODE Mode,
+-    IN gctPOINTER SafeAddress
++    IN gctPOINTER SafeAddress,
++    IN gctBOOL FromPower
+     )
+ {
+     gceSTATUS status;
+@@ -2955,7 +3015,7 @@ gckHARDWARE_SetMMUv2(
+     command = Hardware->kernel->command;
+ 
+     /* Acquire the command queue. */
+-    gcmkONERROR(gckCOMMAND_EnterCommit(command, gcvFALSE));
++    gcmkONERROR(gckCOMMAND_EnterCommit(command, FromPower));
+     commitEntered = gcvTRUE;
+ 
+     gcmkONERROR(gckCOMMAND_Reserve(
+@@ -2984,13 +3044,13 @@ gckHARDWARE_SetMMUv2(
+     gcmkONERROR(gckCOMMAND_Execute(command, 16));
+ 
+     /* Release the command queue. */
+-    gcmkONERROR(gckCOMMAND_ExitCommit(command, gcvFALSE));
++    gcmkONERROR(gckCOMMAND_ExitCommit(command, FromPower));
+     commitEntered = gcvFALSE;
+ 
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+         "call gckCOMMAND_Stall to make sure the config is done.\n ");
+ 
+-    gcmkONERROR(gckCOMMAND_Stall(command, gcvFALSE));
++    gcmkONERROR(gckCOMMAND_Stall(command, FromPower));
+ 
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+         "Enable MMU through GCREG_MMU_CONTROL.");
+@@ -3005,7 +3065,7 @@ gckHARDWARE_SetMMUv2(
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+         "call gckCOMMAND_Stall to check MMU available.\n");
+ 
+-    gcmkONERROR(gckCOMMAND_Stall(command, gcvFALSE));
++    gcmkONERROR(gckCOMMAND_Stall(command, FromPower));
+ 
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+         "The MMU is available.\n");
+@@ -3293,6 +3353,25 @@ gckHARDWARE_SetFastClear(
+                        "FastClear=%d Compression=%d", Enable, Compression);
+     }
+ 
++    /* Special patch for 0x320 0x5220. */
++    if (Hardware->identity.chipRevision == 0x5220 && Hardware->identity.chipModel == gcv320)
++    {
++        gctUINT32 debug;
++
++        /* Read AQMemoryDebug register. */
++        gcmkONERROR(
++                gckOS_ReadRegisterEx(Hardware->os, Hardware->core, 0x00414, &debug));
++
++        debug |= 8;
++
++        /* Write back AQMemoryDebug register. */
++        gcmkONERROR(
++                gckOS_WriteRegisterEx(Hardware->os,
++                    Hardware->core,
++                    0x00414,
++                    debug));
++    }
++
+     /* Success. */
+     gcmkFOOTER_NO();
+     return gcvSTATUS_OK;
+@@ -3919,6 +3998,20 @@ gckHARDWARE_SetPowerManagementState(
+ 
+         /* Start the Isr. */
+         gcmkONERROR(Hardware->startIsr(Hardware->isrContext));
++
++        /* Set NEW MMU. */
++        if (Hardware->mmuVersion != 0)
++        {
++            gcmkONERROR(
++                    gckHARDWARE_SetMMUv2(
++                        Hardware,
++                        gcvTRUE,
++                        Hardware->kernel->mmu->pageTableLogical,
++                        gcvMMU_MODE_4K,
++                        (gctUINT8_PTR)Hardware->kernel->mmu->pageTableLogical + gcdMMU_MTLB_SIZE,
++                        gcvTRUE
++                        ));
++        }
+     }
+ 
+     /* Get time until started. */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
+index 8dac7a6..b3228d7 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
+@@ -36,6 +36,34 @@
+ extern "C" {
+ #endif
+ 
++
++/*******************************************************************************
++***** New MMU Defination *******************************************************/
++#define gcdMMU_MTLB_SHIFT           22
++#define gcdMMU_STLB_4K_SHIFT        12
++#define gcdMMU_STLB_64K_SHIFT       16
++
++#define gcdMMU_MTLB_BITS            (32 - gcdMMU_MTLB_SHIFT)
++#define gcdMMU_PAGE_4K_BITS         gcdMMU_STLB_4K_SHIFT
++#define gcdMMU_STLB_4K_BITS         (32 - gcdMMU_MTLB_BITS - gcdMMU_PAGE_4K_BITS)
++#define gcdMMU_PAGE_64K_BITS        gcdMMU_STLB_64K_SHIFT
++#define gcdMMU_STLB_64K_BITS        (32 - gcdMMU_MTLB_BITS - gcdMMU_PAGE_64K_BITS)
++
++#define gcdMMU_MTLB_ENTRY_NUM       (1 << gcdMMU_MTLB_BITS)
++#define gcdMMU_MTLB_SIZE            (gcdMMU_MTLB_ENTRY_NUM << 2)
++#define gcdMMU_STLB_4K_ENTRY_NUM    (1 << gcdMMU_STLB_4K_BITS)
++#define gcdMMU_STLB_4K_SIZE         (gcdMMU_STLB_4K_ENTRY_NUM << 2)
++#define gcdMMU_PAGE_4K_SIZE         (1 << gcdMMU_STLB_4K_SHIFT)
++#define gcdMMU_STLB_64K_ENTRY_NUM   (1 << gcdMMU_STLB_64K_BITS)
++#define gcdMMU_STLB_64K_SIZE        (gcdMMU_STLB_64K_ENTRY_NUM << 2)
++#define gcdMMU_PAGE_64K_SIZE        (1 << gcdMMU_STLB_64K_SHIFT)
++
++#define gcdMMU_MTLB_MASK            (~((1U << gcdMMU_MTLB_SHIFT)-1))
++#define gcdMMU_STLB_4K_MASK         ((~0U << gcdMMU_STLB_4K_SHIFT) ^ gcdMMU_MTLB_MASK)
++#define gcdMMU_PAGE_4K_MASK         (gcdMMU_PAGE_4K_SIZE - 1)
++#define gcdMMU_STLB_64K_MASK        ((~((1U << gcdMMU_STLB_64K_SHIFT)-1)) ^ gcdMMU_MTLB_MASK)
++#define gcdMMU_PAGE_64K_MASK        (gcdMMU_PAGE_64K_SIZE - 1)
++
+ /*******************************************************************************
+ ***** Process Secure Cache ****************************************************/
+ 
+@@ -311,6 +339,10 @@ struct _gckKERNEL
+ #if gcdENABLE_VG
+     gckVGKERNEL                 vg;
+ #endif
++
++#if gcdMULTICORE_MAPPING
++    gckKERNEL                   anotherKernel;
++#endif
+ };
+ 
+ /* gckCOMMAND object. */
+@@ -552,6 +584,10 @@ typedef union _gcuVIDMEM_NODE
+ 
+         /* */
+         gcsVIDMEM_NODE_SHARED_INFO sharedInfo;
++
++#if gcdDYNAMIC_MAP_RESERVED_MEMORY && gcdENABLE_VG
++        gctPOINTER              kernelVirtual;
++#endif
+     }
+     VidMem;
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c
+index d9398ff..7f5cd46 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c
+@@ -697,6 +697,8 @@ _ScheduleTasks(
+                 /* Copy tasks. */
+                 do
+                 {
++                    gcsTASK_HEADER_PTR taskHeader = (gcsTASK_HEADER_PTR) (userTask + 1);
++
+                     gcmkTRACE_ZONE(
+                         gcvLEVEL_VERBOSE, gcvZONE_COMMAND,
+                         "    task ID = %d, size = %d\n",
+@@ -704,9 +706,16 @@ _ScheduleTasks(
+                         userTask->size
+                         );
+ 
++#ifdef __QNXNTO__
++                    if (taskHeader->id == gcvTASK_SIGNAL)
++                    {
++                        ((gcsTASK_SIGNAL_PTR)taskHeader)->coid  = TaskTable->coid;
++                        ((gcsTASK_SIGNAL_PTR)taskHeader)->rcvid = TaskTable->rcvid;
++                    }
++#endif /* __QNXNTO__ */
+                     /* Copy the task data. */
+                     gcmkVERIFY_OK(gckOS_MemCopy(
+-                        kernelTask, userTask + 1, userTask->size
++                        kernelTask, taskHeader, userTask->size
+                         ));
+ 
+                     /* Advance to the next task. */
+@@ -791,10 +800,34 @@ _HardwareToKernel(
+     gceSTATUS status;
+     gckVIDMEM memory;
+     gctUINT32 offset;
++#if gcdDYNAMIC_MAP_RESERVED_MEMORY
++    gctUINT32 nodePhysical;
++#endif
+ 
+     /* Assume a non-virtual node and get the pool manager object. */
+     memory = Node->VidMem.memory;
+ 
++#if gcdDYNAMIC_MAP_RESERVED_MEMORY
++    nodePhysical = memory->baseAddress
++                 + Node->VidMem.offset
++                 + Node->VidMem.alignment;
++
++    if (Node->VidMem.kernelVirtual == gcvNULL)
++    {
++        status = gckOS_MapReservedMemoryToKernel(Os,
++                        nodePhysical,
++                        Node->VidMem.bytes,
++                        (gctPOINTER *)&Node->VidMem.kernelVirtual);
++
++        if (gcmkIS_ERROR(status))
++        {
++            return status;
++        }
++    }
++
++    offset = Address - nodePhysical;
++    *KernelPointer = Node->VidMem.kernelVirtual + offset;
++#else
+     /* Determine the header offset within the pool it is allocated in. */
+     offset = Address - memory->baseAddress;
+ 
+@@ -805,6 +838,7 @@ _HardwareToKernel(
+         offset,
+         KernelPointer
+         );
++#endif
+ 
+     /* Return status. */
+     return status;
+@@ -3307,6 +3341,11 @@ gckVGCOMMAND_Commit(
+     gcmkVERIFY_ARGUMENT(Queue != gcvNULL);
+     gcmkVERIFY_ARGUMENT(EntryCount > 1);
+ 
++#ifdef __QNXNTO__
++    TaskTable->coid     = Context->coid;
++    TaskTable->rcvid    = Context->rcvid;
++#endif /* __QNXNTO__ */
++
+     do
+     {
+         gctBOOL haveFETasks;
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
+index 1efdc5f..052be7d 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
+@@ -828,8 +828,12 @@ gckEVENT_AddList(
+     gcsEVENT_PTR record = gcvNULL;
+     gcsEVENT_QUEUE_PTR queue;
+ 
+-    gcmkHEADER_ARG("Event=0x%x Interface=0x%x FromWhere=%d AllocateAllowed=%d",
+-                   Event, Interface, FromWhere, AllocateAllowed);
++    gcmkHEADER_ARG("Event=0x%x Interface=0x%x",
++                   Event, Interface);
++
++    gcmkTRACE_ZONE(gcvLEVEL_VERBOSE, _GC_OBJ_ZONE,
++                    "FromWhere=%d AllocateAllowed=%d",
++                    FromWhere, AllocateAllowed);
+ 
+     /* Verify the arguments. */
+     gcmkVERIFY_OBJECT(Event, gcvOBJ_EVENT);
+@@ -1799,7 +1803,7 @@ gckEVENT_Notify(
+ 
+         /* Get current interrupts. */
+ #if gcdSMP
+-        gckOS_AtomGet(Event->os, Event->pending, &pending);
++        gckOS_AtomGet(Event->os, Event->pending, (gctINT32_PTR)&pending);
+ #else
+         pending = Event->pending;
+ #endif
+@@ -1877,7 +1881,7 @@ gckEVENT_Notify(
+ #if gcdSMP
+             gckOS_AtomClearMask(Event->pending, pending);
+ #elif defined(__QNXNTO__)
+-            atomic_set(&Event->pending, pending);
++            atomic_clr((gctUINT32_PTR)&Event->pending, pending);
+ #else
+             Event->pending &= ~pending;
+ #endif
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_interrupt_vg.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_interrupt_vg.c
+index cbc921a..ec5dd4c 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_interrupt_vg.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_interrupt_vg.c
+@@ -759,10 +759,19 @@ gckVGINTERRUPT_Disable(
+ **      Nothing.
+ */
+ 
++#ifndef __QNXNTO__
+ gceSTATUS
+ gckVGINTERRUPT_Enque(
+     IN gckVGINTERRUPT Interrupt
+     )
++#else
++gceSTATUS
++gckVGINTERRUPT_Enque(
++    IN gckVGINTERRUPT Interrupt,
++    OUT gckOS *Os,
++    OUT gctSEMAPHORE *Semaphore
++    )
++#endif
+ {
+     gceSTATUS status;
+     gctUINT32 triggered;
+@@ -772,6 +781,11 @@ gckVGINTERRUPT_Enque(
+     /* Verify the arguments. */
+     gcmkVERIFY_OBJECT(Interrupt, gcvOBJ_INTERRUPT);
+ 
++#ifdef __QNXNTO__
++    *Os = gcvNULL;
++    *Semaphore = gcvNULL;
++#endif
++
+     do
+     {
+         /* Read interrupt status register. */
+@@ -815,10 +829,15 @@ gckVGINTERRUPT_Enque(
+             /* Set the new value. */
+             Interrupt->fifo[Interrupt->head] = triggered;
+ 
++#ifndef __QNXNTO__
+             /* Increment the FIFO semaphore. */
+             gcmkERR_BREAK(gckOS_IncrementSemaphore(
+                 Interrupt->os, Interrupt->fifoValid
+                 ));
++#else
++            *Os = Interrupt->os;
++            *Semaphore = Interrupt->fifoValid;
++#endif
+ 
+             /* Windows kills our threads prematurely when the application
+                exists. Verify here that the thread is still alive. */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
+index 7ef8835..2f16004 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
+@@ -35,31 +35,6 @@ gceMMU_TYPE;
+ 
+ #define gcdMMU_TABLE_DUMP       0
+ 
+-#define gcdMMU_MTLB_SHIFT           22
+-#define gcdMMU_STLB_4K_SHIFT        12
+-#define gcdMMU_STLB_64K_SHIFT       16
+-
+-#define gcdMMU_MTLB_BITS            (32 - gcdMMU_MTLB_SHIFT)
+-#define gcdMMU_PAGE_4K_BITS         gcdMMU_STLB_4K_SHIFT
+-#define gcdMMU_STLB_4K_BITS         (32 - gcdMMU_MTLB_BITS - gcdMMU_PAGE_4K_BITS)
+-#define gcdMMU_PAGE_64K_BITS        gcdMMU_STLB_64K_SHIFT
+-#define gcdMMU_STLB_64K_BITS        (32 - gcdMMU_MTLB_BITS - gcdMMU_PAGE_64K_BITS)
+-
+-#define gcdMMU_MTLB_ENTRY_NUM       (1 << gcdMMU_MTLB_BITS)
+-#define gcdMMU_MTLB_SIZE            (gcdMMU_MTLB_ENTRY_NUM << 2)
+-#define gcdMMU_STLB_4K_ENTRY_NUM    (1 << gcdMMU_STLB_4K_BITS)
+-#define gcdMMU_STLB_4K_SIZE         (gcdMMU_STLB_4K_ENTRY_NUM << 2)
+-#define gcdMMU_PAGE_4K_SIZE         (1 << gcdMMU_STLB_4K_SHIFT)
+-#define gcdMMU_STLB_64K_ENTRY_NUM   (1 << gcdMMU_STLB_64K_BITS)
+-#define gcdMMU_STLB_64K_SIZE        (gcdMMU_STLB_64K_ENTRY_NUM << 2)
+-#define gcdMMU_PAGE_64K_SIZE        (1 << gcdMMU_STLB_64K_SHIFT)
+-
+-#define gcdMMU_MTLB_MASK            (~((1U << gcdMMU_MTLB_SHIFT)-1))
+-#define gcdMMU_STLB_4K_MASK         ((~0U << gcdMMU_STLB_4K_SHIFT) ^ gcdMMU_MTLB_MASK)
+-#define gcdMMU_PAGE_4K_MASK         (gcdMMU_PAGE_4K_SIZE - 1)
+-#define gcdMMU_STLB_64K_MASK        ((~((1U << gcdMMU_STLB_64K_SHIFT)-1)) ^ gcdMMU_MTLB_MASK)
+-#define gcdMMU_PAGE_64K_MASK        (gcdMMU_PAGE_64K_SIZE - 1)
+-
+ typedef struct _gcsMMU_STLB *gcsMMU_STLB_PTR;
+ 
+ typedef struct _gcsMMU_STLB
+@@ -1190,7 +1165,8 @@ gckMMU_Enable(
+                 gcvTRUE,
+                 Mmu->pageTableLogical,
+                 gcvMMU_MODE_4K,
+-                (gctUINT8_PTR)Mmu->pageTableLogical + gcdMMU_MTLB_SIZE
++                (gctUINT8_PTR)Mmu->pageTableLogical + gcdMMU_MTLB_SIZE,
++                gcvFALSE
+                 ));
+ 
+         Mmu->enabled = gcvTRUE;
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c
+index dd3c662..29d28e8 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.c
+@@ -523,6 +523,21 @@ gceSTATUS gckVGKERNEL_Dispatch(
+         break;
+ 
+     case gcvHAL_FREE_VIDEO_MEMORY:
++#ifdef __QNXNTO__
++        /* Unmap the video memory */
++        node = Interface->u.FreeVideoMemory.node;
++
++        if ((node->VidMem.memory->object.type == gcvOBJ_VIDMEM) &&
++            (node->VidMem.logical != gcvNULL))
++        {
++            gckKERNEL_UnmapVideoMemory(Kernel,
++                                       node->VidMem.logical,
++                                       processID,
++                                       node->VidMem.bytes);
++            node->VidMem.logical = gcvNULL;
++        }
++#endif /* __QNXNTO__ */
++
+         /* Free video memory. */
+         gcmkERR_BREAK(gckVIDMEM_Free(
+             Interface->u.FreeVideoMemory.node
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
+index f3fdc75..33438b6 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
+@@ -788,7 +788,15 @@ _FindNode(
+ #if gcdENABLE_BANK_ALIGNMENT
+     gctUINT32 bankAlignment;
+     gceSTATUS status;
++#endif
++
++    if (Memory->sentinel[Bank].VidMem.nextFree == gcvNULL)
++    {
++        /* No free nodes left. */
++        return gcvNULL;
++    }
+ 
++#if gcdENABLE_BANK_ALIGNMENT
+     /* Walk all free nodes until we have one that is big enough or we have
+     ** reached the sentinel. */
+     for (node = Memory->sentinel[Bank].VidMem.nextFree;
+@@ -1077,6 +1085,10 @@ gckVIDMEM_AllocateLinear(
+ 
+     node->VidMem.freePending = gcvFALSE;
+ 
++#if gcdDYNAMIC_MAP_RESERVED_MEMORY && gcdENABLE_VG
++    node->VidMem.kernelVirtual = gcvNULL;
++#endif
++
+     /* Release the mutex. */
+     gcmkVERIFY_OK(gckOS_ReleaseMutex(Memory->os, Memory->mutex));
+ 
+@@ -1182,6 +1194,18 @@ gckVIDMEM_Free(
+         )
+ #endif
+         {
++#if gcdDYNAMIC_MAP_RESERVED_MEMORY && gcdENABLE_VG
++            if (Node->VidMem.kernelVirtual)
++            {
++                gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_VIDMEM,
++                        "%s(%d) Unmap %x from kernel space.",
++                        __FUNCTION__, __LINE__,
++                        Node->VidMem.kernelVirtual);
++
++                gckOS_UnmapReservedMemoryFromKernel(Node->VidMem.kernelVirtual);
++                Node->VidMem.kernelVirtual = gcvNULL;
++            }
++#endif
+             /* Update the number of free bytes. */
+             memory->freeBytes += Node->VidMem.bytes;
+ 
+@@ -1410,6 +1434,87 @@ OnError:
+ 
+ /*******************************************************************************
+ **
++** _NeedVirtualMapping
++**
++**  Whether setup GPU page table for video node.
++**
++**  INPUT:
++**      gckKERNEL Kernel
++**          Pointer to an gckKERNEL object.
++**
++**      gcuVIDMEM_NODE_PTR Node
++**          Pointer to a gcuVIDMEM_NODE union.
++**
++**      gceCORE  Core
++**          Id of current GPU.
++**
++**  OUTPUT:
++**      gctBOOL * NeedMapping
++**          A pointer hold the result whether Node should be mapping.
++*/
++static gceSTATUS
++_NeedVirtualMapping(
++    IN gckKERNEL Kernel,
++    IN gceCORE  Core,
++    IN gcuVIDMEM_NODE_PTR Node,
++    OUT gctBOOL * NeedMapping
++)
++{
++    gceSTATUS status;
++    gctUINT32 phys;
++    gctUINT32 end;
++    gcePOOL pool;
++    gctUINT32 offset;
++
++    gcmkHEADER_ARG("Node=0x%X", Node);
++
++    /* Verify the arguments. */
++    gcmkVERIFY_ARGUMENT(Kernel != gcvNULL);
++    gcmkVERIFY_ARGUMENT(Node != gcvNULL);
++    gcmkVERIFY_ARGUMENT(NeedMapping != gcvNULL);
++    gcmkVERIFY_ARGUMENT(Core < gcdCORE_COUNT);
++
++    if (Node->Virtual.contiguous)
++    {
++#if gcdENABLE_VG
++        if (Core == gcvCORE_VG)
++        {
++            *NeedMapping = gcvFALSE;
++        }
++        else
++#endif
++        {
++            /* For cores which can't access all physical address. */
++            gcmkONERROR(gckOS_GetPhysicalAddress(Kernel->os,
++                        Node->Virtual.logical,
++                        &phys));
++
++            /* If part of region is belong to gcvPOOL_VIRTUAL,
++            ** whole region has to be mapped. */
++            end = phys + Node->Virtual.bytes - 1;
++
++            gcmkONERROR(gckHARDWARE_SplitMemory(
++                        Kernel->hardware, end, &pool, &offset
++                        ));
++
++            *NeedMapping = (pool == gcvPOOL_VIRTUAL);
++        }
++    }
++    else
++    {
++        *NeedMapping = gcvTRUE;
++    }
++
++    gcmkFOOTER_ARG("*NeedMapping=%d", *NeedMapping);
++    return gcvSTATUS_OK;
++
++OnError:
++    gcmkFOOTER();
++    return status;
++}
++
++/*******************************************************************************
++**
+ **  gckVIDMEM_Lock
+ **
+ **  Lock a video memory node and return its hardware specific address.
+@@ -1439,6 +1544,7 @@ gckVIDMEM_Lock(
+     gctBOOL acquired = gcvFALSE;
+     gctBOOL locked = gcvFALSE;
+     gckOS os = gcvNULL;
++    gctBOOL needMapping;
+ 
+     gcmkHEADER_ARG("Node=0x%x", Node);
+ 
+@@ -1527,7 +1633,9 @@ gckVIDMEM_Lock(
+ 
+             locked = gcvTRUE;
+ 
+-            if (Node->Virtual.contiguous)
++            gcmkONERROR(_NeedVirtualMapping(Kernel, Kernel->core, Node, &needMapping));
++
++            if (needMapping == gcvFALSE)
+             {
+                 /* Get physical address directly */
+                  gcmkONERROR(gckOS_GetPhysicalAddress(os,
+@@ -1549,33 +1657,66 @@ gckVIDMEM_Lock(
+                 else
+ #endif
+                 {
+-                    /* Allocate pages inside the MMU. */
+-                    gcmkONERROR(
+-                        gckMMU_AllocatePages(Kernel->mmu,
+-                                             Node->Virtual.pageCount,
+-                                             &Node->Virtual.pageTables[Kernel->core],
+-                                             &Node->Virtual.addresses[Kernel->core]));
+-                }
++                    if (Node->Virtual.pageTables[Kernel->core] == gcvNULL)
++                    {
++#if gcdMULTICORE_MAPPING
++                        gckKERNEL anotherKernel = Kernel->anotherKernel;
++#endif
+ 
+-                Node->Virtual.lockKernels[Kernel->core] = Kernel;
++                        /* Allocate pages inside the MMU. */
++                        gcmkONERROR(
++                                gckMMU_AllocatePages(Kernel->mmu,
++                                    Node->Virtual.pageCount,
++                                    &Node->Virtual.pageTables[Kernel->core],
++                                    &Node->Virtual.addresses[Kernel->core]));
++
++                        Node->Virtual.lockKernels[Kernel->core] = Kernel;
++
++#if gcdMULTICORE_MAPPING
++                        if (anotherKernel)
++                        {
++                            gcmkONERROR(
++                                    gckMMU_AllocatePages(anotherKernel->mmu,
++                                        Node->Virtual.pageCount,
++                                        &Node->Virtual.pageTables[anotherKernel->core],
++                                        &Node->Virtual.addresses[anotherKernel->core]));
++
++                            Node->Virtual.lockKernels[anotherKernel->core] = Kernel;
++                        }
++#endif
+ 
+-                /* Map the pages. */
++                        /* Map the pages. */
+ #ifdef __QNXNTO__
+-                gcmkONERROR(
+-                    gckOS_MapPagesEx(os,
++                        gcmkONERROR(
++                                gckOS_MapPagesEx(os,
+                                      Kernel->core,
+                                      Node->Virtual.physical,
+                                      Node->Virtual.logical,
+                                      Node->Virtual.pageCount,
+                                      Node->Virtual.pageTables[Kernel->core]));
+ #else
+-                gcmkONERROR(
+-                    gckOS_MapPagesEx(os,
+-                                     Kernel->core,
+-                                     Node->Virtual.physical,
+-                                     Node->Virtual.pageCount,
+-                                     Node->Virtual.pageTables[Kernel->core]));
++
++                        gcmkONERROR(
++                                gckOS_MapPagesEx(os,
++                                    Kernel->core,
++                                    Node->Virtual.physical,
++                                    Node->Virtual.pageCount,
++                                    Node->Virtual.pageTables[Kernel->core]));
++
++#if gcdMULTICORE_MAPPING
++                        if (anotherKernel)
++                        {
++                            gcmkONERROR(
++                                    gckOS_MapPagesEx(os,
++                                        anotherKernel->core,
++                                        Node->Virtual.physical,
++                                        Node->Virtual.pageCount,
++                                        Node->Virtual.pageTables[anotherKernel->core]));
++                        }
++#endif
+ #endif
++                    }
++                }
+             }
+ 
+             gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_VIDMEM,
+@@ -1728,6 +1869,21 @@ gckVIDMEM_Unlock(
+                       Node,
+                       Node->VidMem.locked);
+ 
++#ifdef __QNXNTO__
++        /* Unmap the video memory */
++        if ((Node->VidMem.locked == 0) && (Node->VidMem.logical != gcvNULL))
++        {
++            if (Kernel->core == gcvCORE_VG)
++            {
++                gckKERNEL_UnmapVideoMemory(Kernel,
++                                           Node->VidMem.logical,
++                                           Node->VidMem.processID,
++                                           Node->VidMem.bytes);
++                Node->VidMem.logical = gcvNULL;
++            }
++        }
++#endif /* __QNXNTO__ */
++
+         if (Node->VidMem.freePending && (Node->VidMem.locked == 0))
+         {
+             /* Client has unlocked node previously attempted to be freed by compositor. Free now. */
+@@ -1785,18 +1941,12 @@ gckVIDMEM_Unlock(
+                             gckVGMMU_FreePages(Kernel->vg->mmu,
+                                              Node->Virtual.pageTables[Kernel->core],
+                                              Node->Virtual.pageCount));
++
++                        /* Mark page table as freed. */
++                        Node->Virtual.pageTables[Kernel->core] = gcvNULL;
++                        Node->Virtual.lockKernels[Kernel->core] = gcvNULL;
+                     }
+-                    else
+ #endif
+-                    {
+-                        gcmkONERROR(
+-                            gckMMU_FreePages(Kernel->mmu,
+-                                             Node->Virtual.pageTables[Kernel->core],
+-                                             Node->Virtual.pageCount));
+-                    }
+-                    /* Mark page table as freed. */
+-                    Node->Virtual.pageTables[Kernel->core] = gcvNULL;
+-                    Node->Virtual.lockKernels[Kernel->core] = gcvNULL;
+                 }
+ 
+ #ifdef __QNXNTO__
+@@ -1812,6 +1962,39 @@ gckVIDMEM_Unlock(
+ 
+             if (totalLocked == 0)
+             {
++                if (Node->Virtual.pageTables[Kernel->core] != gcvNULL)
++                {
++#if gcdMULTICORE_MAPPING
++                    gckKERNEL anotherKernel = Kernel->anotherKernel;
++#endif
++                    gcmkONERROR(
++                        gckMMU_FreePages(Kernel->mmu,
++                                         Node->Virtual.pageTables[Kernel->core],
++                                         Node->Virtual.pageCount));
++
++#if gcdMULTICORE_MAPPING
++                    if (anotherKernel)
++                    {
++                        gcmkONERROR(
++                                gckMMU_FreePages(anotherKernel->mmu,
++                                    Node->Virtual.pageTables[anotherKernel->core],
++                                    Node->Virtual.pageCount));
++                    }
++#endif
++
++                    /* Mark page table as freed. */
++                    Node->Virtual.pageTables[Kernel->core] = gcvNULL;
++                    Node->Virtual.lockKernels[Kernel->core] = gcvNULL;
++
++#if gcdMULTICORE_MAPPING
++                    if (anotherKernel)
++                    {
++                        Node->Virtual.pageTables[anotherKernel->core] = gcvNULL;
++                        Node->Virtual.lockKernels[anotherKernel->core] = gcvNULL;
++                    }
++#endif
++                }
++
+                 /* Owner have already freed this node
+                 ** and we are the last one to unlock, do
+                 ** real free */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
+index e2a6b66..0b14176 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
+@@ -1895,7 +1895,8 @@ gckHARDWARE_SetMMUv2(
+     IN gctBOOL Enable,
+     IN gctPOINTER MtlbAddress,
+     IN gceMMU_MODE Mode,
+-    IN gctPOINTER SafeAddress
++    IN gctPOINTER SafeAddress,
++    IN gctBOOL FromPower
+     );
+ 
+ /* Get idle register. */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
+index 03631fe..6137f5f 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
+@@ -123,6 +123,11 @@ typedef struct _gcsTLS
+     gctPOINTER                  context;
+     gctTLS_DESTRUCTOR           destructor;
+     gctBOOL                     ProcessExiting;
++
++#ifndef VIVANTE_NO_3D
++	gco3D						engine3D;
++#endif
++	gco2D						engine2D;
+ }
+ gcsTLS;
+ 
+@@ -337,6 +342,32 @@ gcoHAL_Get3DEngine(
+     IN gcoHAL Hal,
+     OUT gco3D * Engine
+     );
++
++gceSTATUS
++gcoHAL_Query3DEngine(
++    IN gcoHAL Hal,
++    OUT gco3D * Engine
++    );
++
++gceSTATUS
++gcoHAL_Set3DEngine(
++    IN gcoHAL Hal,
++    IN gco3D Engine
++    );
++
++gceSTATUS
++gcoHAL_Get3DHardware(
++    IN gcoHAL Hal,
++    OUT gcoHARDWARE * Hardware
++    );
++
++gceSTATUS
++gcoHAL_Set3DHardware(
++    IN gcoHAL Hal,
++    IN gcoHARDWARE Hardware
++    );
++
++
+ #endif /* VIVANTE_NO_3D */
+ 
+ /* Verify whether the specified feature is available in hardware. */
+@@ -1855,6 +1886,13 @@ gcoSURF_NODE_Cache(
+     IN gceCACHEOPERATION Operation
+     );
+ 
++/* Perform CPU cache operation on surface */
++gceSTATUS
++gcoSURF_CPUCacheOperation(
++    IN gcoSURF Surface,
++    IN gceCACHEOPERATION Operation
++    );
++
+ /******************************************************************************\
+ ********************************* gcoDUMP Object ********************************
+ \******************************************************************************/
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h
+index 37715ff..7c2c346 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h
+@@ -37,6 +37,10 @@
+ extern "C" {
+ #endif
+ 
++#ifndef GC_ENABLE_LOADTIME_OPT
++#define GC_ENABLE_LOADTIME_OPT      0
++#endif
++
+ /******************************* IR VERSION ******************/
+ #define gcdSL_IR_VERSION gcmCC('\0','\0','\0','\1')
+ 
+@@ -104,33 +108,33 @@ typedef enum _gcSL_OPCODE
+ 	gcSL_LOAD,							/* 0x36 */
+ 	gcSL_STORE,							/* 0x37 */
+ 	gcSL_BARRIER,						/* 0x38 */
+-	gcSL_SIN_CL,						/* 0x39 */
+-	gcSL_COS_CL,						/* 0x3A */
+-	gcSL_TAN_CL,						/* 0x3B */
+-	gcSL_ACOS_CL,						/* 0x3C */
+-	gcSL_ASIN_CL,						/* 0x3D */
+-	gcSL_ATAN_CL,						/* 0x3E */
+-	gcSL_SINH_CL,						/* 0x3F */
+-	gcSL_COSH_CL,						/* 0x40 */
+-	gcSL_TANH_CL,						/* 0x41 */
+-	gcSL_ASINH_CL,						/* 0x42 */
+-	gcSL_ACOSH_CL,						/* 0x43 */
+-	gcSL_ATANH_CL,						/* 0x44 */
+-	gcSL_SINPI_CL,						/* 0x45 */
+-	gcSL_COSPI_CL,						/* 0x46 */
+-	gcSL_TANPI_CL,						/* 0x47 */
+-	gcSL_ASINPI_CL,						/* 0x48 */
+-	gcSL_ACOSPI_CL,						/* 0x49 */
+-	gcSL_ATANPI_CL,						/* 0x4A */
+-	gcSL_ATAN2_CL,						/* 0x4B */
+-	gcSL_ATAN2PI_CL,					/* 0x4C */
+-	gcSL_POW_CL,						/* 0x4D */
+-	gcSL_RSQ_CL,						/* 0x4E */
+-	gcSL_LOG_CL,						/* 0x4F */
+-	gcSL_EXP_CL,						/* 0x50 */
+-	gcSL_SQRT_CL,						/* 0x51 */
+-	gcSL_CBRT_CL,						/* 0x52 */
+-	gcSL_ADDLO,							/* 0x53 */  /* Float only. */
++	gcSL_STORE1,						/* 0x39 */
++	/*gcSL_COS_CL,						 0x3A */
++	/*gcSL_TAN_CL,						 0x3B */
++	/*gcSL_ACOS_CL,						 0x3C */
++	/*gcSL_ASIN_CL,						 0x3D */
++	/*gcSL_ATAN_CL,						 0x3E */
++	/*gcSL_SINH_CL,						 0x3F */
++	/*gcSL_COSH_CL,						 0x40 */
++	/*gcSL_TANH_CL,						 0x41 */
++	/*gcSL_ASINH_CL,						 0x42 */
++	/*gcSL_ACOSH_CL,						 0x43 */
++	/*gcSL_ATANH_CL,						 0x44 */
++	/*gcSL_SINPI_CL,						 0x45 */
++	/*gcSL_COSPI_CL,						 0x46 */
++	/*gcSL_TANPI_CL,						 0x47 */
++	/*gcSL_ASINPI_CL,						 0x48 */
++	/*gcSL_ACOSPI_CL,						 0x49 */
++	/*gcSL_ATANPI_CL,						 0x4A */
++	/*gcSL_ATAN2_CL,						 0x4B */
++	/*gcSL_ATAN2PI_CL,					 0x4C */
++	/*gcSL_POW_CL,						 0x4D */
++	/*gcSL_RSQ_CL,						 0x4E */
++	/*gcSL_LOG_CL,						 0x4F */
++	/*gcSL_EXP_CL,						 0x50 */
++	/*gcSL_SQRT_CL,						 0x51 */
++	/*gcSL_CBRT_CL,						 0x52 */
++	gcSL_ADDLO = 0x53,							/* 0x53 */  /* Float only. */
+ 	gcSL_MULLO,							/* 0x54 */  /* Float only. */
+ 	gcSL_CONV,							/* 0x55 */
+ 	gcSL_GETEXP,						/* 0x56 */
+@@ -169,6 +173,7 @@ gcSL_FORMAT;
+ /* Destination write enable bits. */
+ typedef enum _gcSL_ENABLE
+ {
++    gcSL_ENABLE_NONE                    = 0x0,     /* none is enabled, error/uninitialized state */
+ 	gcSL_ENABLE_X						= 0x1,
+ 	gcSL_ENABLE_Y						= 0x2,
+ 	gcSL_ENABLE_Z						= 0x4,
+@@ -264,22 +269,40 @@ typedef enum _gcSL_SWIZZLE
+ 	gcSL_SWIZZLE_XXYZ = gcmSWIZZLE(X, X, Y, Z),
+ 	gcSL_SWIZZLE_XYZW = gcmSWIZZLE(X, Y, Z, W),
+ 	gcSL_SWIZZLE_XYXY = gcmSWIZZLE(X, Y, X, Y),
++	gcSL_SWIZZLE_YYZZ = gcmSWIZZLE(Y, Y, Z, Z),
++	gcSL_SWIZZLE_YYWW = gcmSWIZZLE(Y, Y, W, W),
++	gcSL_SWIZZLE_ZZZW = gcmSWIZZLE(Z, Z, Z, W),
++	gcSL_SWIZZLE_XZZW = gcmSWIZZLE(X, Z, Z, W),
++	gcSL_SWIZZLE_YYZW = gcmSWIZZLE(Y, Y, Z, W),
+ 
+     gcSL_SWIZZLE_INVALID = 0x7FFFFFFF
+ }
+ gcSL_SWIZZLE;
+ 
++typedef enum _gcSL_COMPONENT
++{
++	gcSL_COMPONENT_X,               /* 0x0 */
++	gcSL_COMPONENT_Y,               /* 0x1 */
++	gcSL_COMPONENT_Z,               /* 0x2 */
++	gcSL_COMPONENT_W,               /* 0x3 */
++    gcSL_COMPONENT_COUNT            /* 0x4 */
++} gcSL_COMPONENT;
++
++#define gcmIsComponentEnabled(Enable, Component) (((Enable) & (1 << (Component))) != 0)
+ 
+ /******************************************************************************\
+ |*********************************** SHADERS **********************************|
+ \******************************************************************************/
+ 
+ /* Shader types. */
+-#define gcSHADER_TYPE_UNKNOWN			0
+-#define gcSHADER_TYPE_VERTEX			1
+-#define gcSHADER_TYPE_FRAGMENT			2
+-#define gcSHADER_TYPE_CL			3
+-#define gcSHADER_TYPE_PRECOMPILED		4
++typedef enum _gcSHADER_KIND {
++    gcSHADER_TYPE_UNKNOWN = 0,
++    gcSHADER_TYPE_VERTEX,
++    gcSHADER_TYPE_FRAGMENT,
++    gcSHADER_TYPE_CL,
++    gcSHADER_TYPE_PRECOMPILED,
++    gcSHADER_KIND_COUNT
++} gcSHADER_KIND;
+ 
+ #define gcm
+ /* gcSHADER objects. */
+@@ -372,10 +395,49 @@ typedef enum _gcSHADER_TYPE
+ 	gcSHADER_USAMPLER_3D,			/* 0x24 */
+ 	gcSHADER_USAMPLER_CUBIC,		/* 0x25 */
+ 	gcSHADER_SAMPLER_EXTERNAL_OES,		/* 0x26 */
+-
++    gcSHADER_TYPE_COUNT
+ }
+ gcSHADER_TYPE;
+ 
++#if GC_ENABLE_LOADTIME_OPT
++
++typedef struct _gcSHADER_TYPE_INFO
++{
++    gcSHADER_TYPE    type;        /* eg. gcSHADER_FLOAT_2X3 is the type */
++    gctCONST_STRING  name;        /* the name of the type: "gcSHADER_FLOAT_2X3" */
++    gcSHADER_TYPE    baseType;    /* its base type is gcSHADER_FLOAT_2 */
++    gctINT           components;  /* it has 2 components */
++    gctINT           rows;        /* and 3 rows */
++    gctINT           size;        /* the size in byte */
++} gcSHADER_TYPE_INFO;
++
++enum gceLTCDumpOption {
++    gceLTC_DUMP_UNIFORM      = 0x0001,
++    gceLTC_DUMP_EVALUATION   = 0x0002,
++    gceLTC_DUMP_EXPESSION    = 0x0004,
++};
++
++gctBOOL _dumpOption(gctINT Opt);
++
++extern gcSHADER_TYPE_INFO shader_type_info[];
++
++#endif /* GC_ENABLE_LOADTIME_OPT */
++
++
++#define IS_MATRIX_TYPE(type) \
++    (((type >= gcSHADER_FLOAT_2X2) && (type <= gcSHADER_FLOAT_4X4)) || \
++     ((type >= gcSHADER_FLOAT_2X3) && (type <= gcSHADER_FLOAT_4X3)))
++
++/* gcSHADER_PRECISION enumeration. */
++typedef enum _gcSHADER_PRECISION
++{
++	gcSHADER_PRECISION_DEFAULT,				/* 0x00 */
++	gcSHADER_PRECISION_HIGH,				/* 0x01 */
++	gcSHADER_PRECISION_MEDIUM,				/* 0x02 */
++	gcSHADER_PRECISION_LOW,				    /* 0x03 */
++}
++gcSHADER_PRECISION;
++
+ /* Shader flags. */
+ typedef enum _gceSHADER_FLAGS
+ {
+@@ -386,6 +448,7 @@ typedef enum _gceSHADER_FLAGS
+ 	gcvSHADER_USE_GL_POSITION			= 0x10,
+ 	gcvSHADER_USE_GL_FACE				= 0x20,
+ 	gcvSHADER_USE_GL_POINT_COORD		= 0x40,
++	gcvSHADER_LOADTIME_OPTIMIZER		= 0x80,
+ }
+ gceSHADER_FLAGS;
+ 
+@@ -420,8 +483,9 @@ typedef enum _gceUNIFORM_FLAGS
+ 	gcvUNIFORM_GLOBAL_OFFSET		= 0x200,
+ 	gcvUNIFORM_WORK_DIM			= 0x400,
+ 	gcvUNIFORM_KERNEL_ARG_CONSTANT		= 0x800,
+- 	gcvUNIFORM_KERNEL_ARG_LOCAL_MEM_SIZE	= 0x1000,
++	gcvUNIFORM_KERNEL_ARG_LOCAL_MEM_SIZE	= 0x1000,
+ 	gcvUNIFORM_KERNEL_ARG_PRIVATE		= 0x2000,
++	gcvUNIFORM_LOADTIME_CONSTANT		= 0x4000,
+ }
+ gceUNIFORM_FLAGS;
+ 
+@@ -906,6 +970,45 @@ gcSHADER_AddUniform(
+ 	OUT gcUNIFORM * Uniform
+ 	);
+ 
++
++/*******************************************************************************
++**							   gcSHADER_AddUniformEx
++********************************************************************************
++**
++**	Add an uniform to a gcSHADER object.
++**
++**	INPUT:
++**
++**		gcSHADER Shader
++**			Pointer to a gcSHADER object.
++**
++**		gctCONST_STRING Name
++**			Name of the uniform to add.
++**
++**		gcSHADER_TYPE Type
++**			Type of the uniform to add.
++**
++**      gcSHADER_PRECISION precision
++**          Precision of the uniform to add.
++**
++**		gctSIZE_T Length
++**			Array length of the uniform to add.  'Length' must be at least 1.
++**
++**	OUTPUT:
++**
++**		gcUNIFORM * Uniform
++**			Pointer to a variable receiving the gcUNIFORM object pointer.
++*/
++gceSTATUS
++gcSHADER_AddUniformEx(
++	IN gcSHADER Shader,
++	IN gctCONST_STRING Name,
++	IN gcSHADER_TYPE Type,
++    IN gcSHADER_PRECISION precision,
++	IN gctSIZE_T Length,
++	OUT gcUNIFORM * Uniform
++	);
++
+ /*******************************************************************************
+ **                          gcSHADER_GetUniformCount
+ ********************************************************************************
+@@ -1117,6 +1220,37 @@ gcSHADER_GetOutput(
+ 	OUT gcOUTPUT * Output
+ 	);
+ 
++
++/*******************************************************************************
++**							   gcSHADER_GetOutputByName
++********************************************************************************
++**
++**	Get the gcOUTPUT object pointer for this shader by output name.
++**
++**	INPUT:
++**
++**		gcSHADER Shader
++**			Pointer to a gcSHADER object.
++**
++**		gctSTRING name
++**			Name of output to retrieve.
++**
++**      gctSIZE_T nameLength
++**          Length of name to retrieve
++**
++**	OUTPUT:
++**
++**		gcOUTPUT * Output
++**			Pointer to a variable receiving the gcOUTPUT object pointer.
++*/
++gceSTATUS
++gcSHADER_GetOutputByName(
++	IN gcSHADER Shader,
++	IN gctSTRING name,
++    IN gctSIZE_T nameLength,
++	OUT gcOUTPUT * Output
++	);
++
+ /*******************************************************************************
+ **  gcSHADER_ReallocateVariables
+ **
+@@ -2160,6 +2294,41 @@ gcUNIFORM_GetType(
+ 	);
+ 
+ /*******************************************************************************
++**                              gcUNIFORM_GetTypeEx
++********************************************************************************
++**
++**	Get the type and array length of a gcUNIFORM object.
++**
++**	INPUT:
++**
++**		gcUNIFORM Uniform
++**			Pointer to a gcUNIFORM object.
++**
++**	OUTPUT:
++**
++**		gcSHADER_TYPE * Type
++**			Pointer to a variable receiving the type of the uniform.  'Type' can
++**			be gcvNULL, in which case no type will be returned.
++**
++**		gcSHADER_PRECISION * Precision
++**			Pointer to a variable receiving the precision of the uniform.  'Precision' can
++**			be gcvNULL, in which case no type will be returned.
++**
++**		gctSIZE_T * ArrayLength
++**			Pointer to a variable receiving the length of the array if the
++**			uniform was declared as an array.  If the uniform was not declared
++**			as an array, the array length will be 1.  'ArrayLength' can be gcvNULL,
++**			in which case no array length will be returned.
++*/
++gceSTATUS
++gcUNIFORM_GetTypeEx(
++	IN gcUNIFORM Uniform,
++	OUT gcSHADER_TYPE * Type,
++    OUT gcSHADER_PRECISION * Precision,
++	OUT gctSIZE_T * ArrayLength
++	);
++
++/*******************************************************************************
+ **                              gcUNIFORM_GetFlags
+ ********************************************************************************
+ **
+@@ -3034,6 +3203,7 @@ gcInvokeThreadWalker(
+     IN gcsTHREAD_WALKER_INFO_PTR Info
+     );
+ 
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h
+new file mode 100644
+index 0000000..6b3a6e5
+--- /dev/null
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h
+@@ -0,0 +1,257 @@
++/****************************************************************************
++*
++*    Copyright (C) 2005 - 2011 by Vivante Corp.
++*
++*    This program is free software; you can redistribute it and/or modify
++*    it under the terms of the GNU General Public License as published by
++*    the Free Software Foundation; either version 2 of the license, or
++*    (at your option) any later version.
++*
++*    This program is distributed in the hope that it will be useful,
++*    but WITHOUT ANY WARRANTY; without even the implied warranty of
++*    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++*    GNU General Public License for more details.
++*
++*    You should have received a copy of the GNU General Public License
++*    along with this program; if not write to the Free Software
++*    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++*
++*****************************************************************************/
++
++
++
++
++#ifndef __gc_hal_eglplatform_h_
++#define __gc_hal_eglplatform_h_
++
++/* Include VDK types. */
++#include <EGL/egl.h>
++#include "gc_hal_types.h"
++#include "gc_hal_base.h"
++#ifdef __cplusplus
++extern "C" {
++#endif
++
++
++/*******************************************************************************
++** Display. ********************************************************************
++*/
++
++EGLNativeDisplayType
++gcoOS_GetDisplay(
++	void
++    );
++
++EGLNativeDisplayType
++gcoOS_GetDisplayByIndex(
++    int DisplayIndex
++    );
++
++int
++gcoOS_GetDisplayInfo(
++    EGLNativeDisplayType Display,
++    int * Width,
++    int * Height,
++    unsigned long * Physical,
++    int * Stride,
++    int * BitsPerPixel
++    );
++
++/* VFK_DISPLAY_INFO structure defining information returned by
++   vdkGetDisplayInfoEx. */
++typedef struct _halDISPLAY_INFO
++{
++    /* The size of the display in pixels. */
++    int                         width;
++    int                         height;
++
++    /* The stride of the dispay. -1 is returned if the stride is not known
++    ** for the specified display.*/
++    int                         stride;
++
++    /* The color depth of the display in bits per pixel. */
++    int                         bitsPerPixel;
++
++    /* The logical pointer to the display memory buffer. NULL is returned
++    ** if the pointer is not known for the specified display. */
++    void *                      logical;
++
++    /* The physical address of the display memory buffer. ~0 is returned
++    ** if the address is not known for the specified display. */
++    unsigned long               physical;
++
++    /* The color info of the display. */
++    unsigned int                alphaLength;
++    unsigned int                alphaOffset;
++    unsigned int                redLength;
++    unsigned int                redOffset;
++    unsigned int                greenLength;
++    unsigned int                greenOffset;
++    unsigned int                blueLength;
++    unsigned int                blueOffset;
++
++    /* Display flip support. */
++    int                         flip;
++}
++halDISPLAY_INFO;
++
++int
++gcoOS_GetDisplayInfoEx(
++    EGLNativeDisplayType Display,
++#ifdef __QNXNTO__
++    EGLNativeWindowType Window,
++#endif
++    unsigned int DisplayInfoSize,
++    halDISPLAY_INFO * DisplayInfo
++    );
++
++int
++gcoOS_GetDisplayVirtual(
++    EGLNativeDisplayType Display,
++    int * Width,
++    int * Height
++    );
++
++int
++gcoOS_GetDisplayBackbuffer(
++    EGLNativeDisplayType Display,
++    NativeWindowType Window,
++    gctPOINTER    context,
++    gcoSURF       surface,
++    unsigned int * Offset,
++    int * X,
++    int * Y
++    );
++
++int
++gcoOS_SetDisplayVirtual(
++    EGLNativeDisplayType Display,
++#ifdef __QNXNTO__
++    EGLNativeWindowType Window,
++#endif
++    unsigned int Offset,
++    int X,
++    int Y
++    );
++
++void
++gcoOS_DestroyDisplay(
++    EGLNativeDisplayType Display
++    );
++
++/*******************************************************************************
++** Windows. ********************************************************************
++*/
++
++EGLNativeWindowType
++gcoOS_CreateWindow(
++    EGLNativeDisplayType Display,
++    int X,
++    int Y,
++    int Width,
++    int Height
++    );
++
++int
++gcoOS_GetWindowInfo(
++#if (defined(LINUX) || defined(__APPLE__)) && !defined(EGL_API_FB)
++    EGLNativeDisplayType Display,
++#endif
++    EGLNativeWindowType Window,
++    int * X,
++    int * Y,
++    int * Width,
++    int * Height,
++    int * BitsPerPixel,
++    unsigned int * Offset
++    );
++
++void
++gcoOS_DestroyWindow(
++#if (defined(LINUX) || defined(__APPLE__)) && !defined(EGL_API_FB)
++    EGLNativeDisplayType Display,
++#endif
++    EGLNativeWindowType Window
++    );
++
++int
++gcoOS_DrawImage(
++#if (defined(LINUX) || defined(__APPLE__)) && !defined(EGL_API_FB)
++    EGLNativeDisplayType Display,
++#endif
++    EGLNativeWindowType Window,
++    int Left,
++    int Top,
++    int Right,
++    int Bottom,
++    int Width,
++    int Height,
++    int BitsPerPixel,
++    void * Bits
++    );
++
++int
++gcoOS_GetImage(
++    EGLNativeWindowType Window,
++    int Left,
++    int Top,
++    int Right,
++    int Bottom,
++    int * BitsPerPixel,
++    void ** Bits
++    );
++
++/*******************************************************************************
++** Pixmaps. ********************************************************************
++*/
++
++EGLNativePixmapType
++gcoOS_CreatePixmap(
++    EGLNativeDisplayType Display,
++    int Width,
++    int Height,
++    int BitsPerPixel
++    );
++
++int
++gcoOS_GetPixmapInfo(
++#if (defined(LINUX) || defined(__APPLE__)) && !defined(EGL_API_FB)
++    EGLNativeDisplayType Display,
++#endif
++    EGLNativePixmapType Pixmap,
++    int * Width,
++    int * Height,
++    int * BitsPerPixel,
++    int * Stride,
++    void ** Bits
++    );
++
++int
++gcoOS_DrawPixmap(
++#if (defined(LINUX) || defined(__APPLE__)) && !defined(EGL_API_FB)
++    EGLNativeDisplayType Display,
++#endif
++    EGLNativePixmapType Pixmap,
++    int Left,
++    int Top,
++    int Right,
++    int Bottom,
++    int Width,
++    int Height,
++    int BitsPerPixel,
++    void * Bits
++    );
++
++void
++gcoOS_DestroyPixmap(
++#if (defined(LINUX) || defined(__APPLE__)) && !defined(EGL_API_FB)
++    EGLNativeDisplayType Display,
++#endif
++    EGLNativePixmapType Pixmap
++    );
++
++#ifdef __cplusplus
++}
++#endif
++
++#endif /* __gc_hal_eglplatform_h_ */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
+index 165234a..86852a2 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
+@@ -385,13 +385,6 @@ gcoSURF_SetResolvability(
+     IN gctBOOL Resolvable
+     );
+ 
+-/* Perform CPU cache operation on surface */
+-gceSTATUS
+-gcoSURF_CPUCacheOperation(
+-    IN gcoSURF Surface,
+-    IN gceCACHEOPERATION Operation
+-    );
+-
+ /******************************************************************************\
+ ******************************** gcoINDEX Object *******************************
+ \******************************************************************************/
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+index fc97c78..adc020a 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+@@ -468,6 +468,25 @@
+ #endif
+ 
+ /*
++    gcdDYNAMIC_MAP_RESERVED_MEMORY
++
++        When gcvPOOL_SYSTEM is constructed from RESERVED memory,
++        driver can map the whole reserved memory to kernel space
++        at the beginning, or just map a piece of memory when need
++        to access.
++
++        Notice:
++        -  It's only for the 2D openVG. For other cores, there is
++           _NO_ need to map reserved memory to kernel.
++        -  It's meaningless when memory is allocated by
++           gckOS_AllocateContiguous, in that case, memory is always
++           mapped by system when allocated.
++*/
++#ifndef gcdDYNAMIC_MAP_RESERVED_MEMORY
++#   define gcdDYNAMIC_MAP_RESERVED_MEMORY      0
++#endif
++
++/*
+    gcdPAGED_MEMORY_CACHEABLE
+ 
+         When non-zero, paged memory will be cacheable.
+@@ -655,4 +674,13 @@
+ #   define gcdENABLE_OUTER_CACHE_PATCH          0
+ #endif
+ 
++/*
++    gcdMULTICORE_MAPPING
++
++        Make different cores own same VA
++*/
++#ifndef gcdMULTICORE_MAPPING
++#   define gcdMULTICORE_MAPPING                 1
++#endif
++
+ #endif /* __gc_hal_options_h_ */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
+index 6213ffa..9771993 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
+@@ -28,9 +28,9 @@
+ 
+ #define gcvVERSION_MINOR        6
+ 
+-#define gcvVERSION_PATCH        3
++#define gcvVERSION_PATCH        4
+ 
+-#define gcvVERSION_BUILD        1280
++#define gcvVERSION_BUILD        1311
+ 
+ #define gcvVERSION_DATE      __DATE__
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h
+index b61964d..60c497d 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h
+@@ -249,10 +249,22 @@ typedef gctTHREADFUNCRESULT (gctTHREADFUNCTYPE * gctTHREADFUNC) (
+ )
+ 
+ /* some platforms need to fix the physical address for HW to access*/
++#if (defined(__QNXNTO__) && defined(IMX6X))
++
++#define gcmFIXADDRESS(address) \
++(\
++    ((address) + 0x10000000)\
++)
++
++#else
++
+ #define gcmFIXADDRESS(address) \
+ (\
+     (address)\
+ )
++
++#endif
++
+ /******************************************************************************\
+ ****************************** Kernel Debug Macro ******************************
+ \******************************************************************************/
+@@ -377,6 +389,21 @@ gckKERNEL_QueryCommandBuffer(
+     OUT gcsCOMMAND_BUFFER_INFO_PTR Information
+     );
+ 
++#if gcdDYNAMIC_MAP_RESERVED_MEMORY
++gceSTATUS
++gckOS_MapReservedMemoryToKernel(
++    IN gckOS Os,
++    IN gctUINT32 Physical,
++    IN gctINT Bytes,
++    IN OUT gctPOINTER *Virtual
++    );
++
++gceSTATUS
++gckOS_UnmapReservedMemoryFromKernel(
++    IN gctPOINTER Virtual
++    );
++#endif
++
+ /******************************************************************************\
+ ******************************* gckVGHARDWARE Object ******************************
+ \******************************************************************************/
+@@ -643,6 +670,9 @@ typedef struct _gcsVGCONTEXT
+     /* State map/mod buffer. */
+     gctSIZE_T                   mapFirst;
+     gctSIZE_T                   mapLast;
++#ifdef __QNXNTO__
++    gctSIZE_T                   mapContainerSize;
++#endif
+     gcsVGCONTEXT_MAP_PTR            mapContainer;
+     gcsVGCONTEXT_MAP_PTR            mapPrev;
+     gcsVGCONTEXT_MAP_PTR            mapCurr;
+@@ -700,6 +730,11 @@ typedef struct _gcsTASK_MASTER_TABLE
+ 
+     /* The total size of event data in bytes. */
+     gctUINT                     size;
++
++#if defined(__QNXNTO__)
++    gctINT32                    coid;
++    gctINT32                    rcvid;
++#endif
+ }
+ gcsTASK_MASTER_TABLE;
+ 
+@@ -737,11 +772,24 @@ gckVGINTERRUPT_Disable(
+     IN gctINT32 Id
+     );
+ 
++#ifndef __QNXNTO__
++
+ gceSTATUS
+ gckVGINTERRUPT_Enque(
+     IN gckVGINTERRUPT Interrupt
+     );
+ 
++#else
++
++gceSTATUS
++gckVGINTERRUPT_Enque(
++    IN gckVGINTERRUPT Interrupt,
++    OUT gckOS *Os,
++    OUT gctSEMAPHORE *Semaphore
++    );
++
++#endif
++
+ gceSTATUS
+ gckVGINTERRUPT_DumpState(
+     IN gckVGINTERRUPT Interrupt
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+index 02f2ff7..d619b79 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+@@ -367,7 +367,7 @@ gckGALDEVICE_Construct(
+                    PhysBaseAddr, PhysSize, Signal);
+ 
+     /* Allocate device structure. */
+-    device = kmalloc(sizeof(struct _gckGALDEVICE), GFP_KERNEL);
++    device = kmalloc(sizeof(struct _gckGALDEVICE), GFP_KERNEL | __GFP_NOWARN);
+ 
+     if (!device)
+     {
+@@ -564,12 +564,20 @@ gckGALDEVICE_Construct(
+         /* Start the command queue. */
+         gcmkONERROR(gckCOMMAND_Start(device->kernels[gcvCORE_2D]->command));
+ #endif
++
++#if gcdMULTICORE_MAPPING
++        device->kernels[gcvCORE_2D]->anotherKernel = device->kernels[gcvCORE_MAJOR];
++#endif
+     }
+     else
+     {
+         device->kernels[gcvCORE_2D] = gcvNULL;
+     }
+ 
++#if gcdMULTICORE_MAPPING
++    device->kernels[gcvCORE_MAJOR]->anotherKernel = device->kernels[gcvCORE_2D];
++#endif
++
+     if (IrqLineVG != -1)
+     {
+ #if gcdENABLE_VG
+@@ -807,6 +815,7 @@ gckGALDEVICE_Construct(
+                 device->requestedContiguousBase  = ContiguousBase;
+                 device->requestedContiguousSize  = ContiguousSize;
+ 
++#if !gcdDYNAMIC_MAP_RESERVED_MEMORY && gcdENABLE_VG
+                 if (gcmIS_CORE_PRESENT(device, gcvCORE_VG))
+                 {
+                     device->contiguousBase
+@@ -823,6 +832,7 @@ gckGALDEVICE_Construct(
+                         gcmkONERROR(gcvSTATUS_OUT_OF_RESOURCES);
+                     }
+                 }
++#endif
+ 
+                 device->contiguousPhysical = (gctPHYS_ADDR) ContiguousBase;
+                 device->contiguousSize     = ContiguousSize;
+@@ -921,8 +931,13 @@ gckGALDEVICE_Destroy(
+             {
+                 if (Device->contiguousMapped)
+                 {
+-                    /* Unmap the contiguous memory. */
+-                    iounmap(Device->contiguousBase);
++#if !gcdDYNAMIC_MAP_RESERVED_MEMORY && gcdENABLE_VG
++                    if (Device->contiguousBase)
++                    {
++                        /* Unmap the contiguous memory. */
++                        iounmap(Device->contiguousBase);
++                    }
++#endif
+                 }
+                 else
+                 {
+@@ -1524,7 +1539,7 @@ gckGALDEVICE_Start(
+ 
+         /* Switch to SUSPEND power state. */
+         gcmkONERROR(gckHARDWARE_SetPowerManagementState(
+-            Device->kernels[gcvCORE_MAJOR]->hardware, gcvPOWER_SUSPEND_ATPOWERON
++            Device->kernels[gcvCORE_MAJOR]->hardware, gcvPOWER_OFF_BROADCAST
+             ));
+     }
+ 
+@@ -1535,7 +1550,7 @@ gckGALDEVICE_Start(
+ 
+         /* Switch to SUSPEND power state. */
+         gcmkONERROR(gckHARDWARE_SetPowerManagementState(
+-            Device->kernels[gcvCORE_2D]->hardware, gcvPOWER_SUSPEND_ATPOWERON
++            Device->kernels[gcvCORE_2D]->hardware, gcvPOWER_OFF_BROADCAST
+             ));
+     }
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+index 86ef0c6..b1c82e0 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+@@ -163,7 +163,7 @@ int drv_open(
+         gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
+     }
+ 
+-    data = kmalloc(sizeof(gcsHAL_PRIVATE_DATA), GFP_KERNEL);
++    data = kmalloc(sizeof(gcsHAL_PRIVATE_DATA), GFP_KERNEL | __GFP_NOWARN);
+ 
+     if (data == gcvNULL)
+     {
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index 619cd76..9a6376e 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -67,17 +67,43 @@ const char * _PLATFORM = "\n\0$PLATFORM$Linux$\n";
+     gcmkVERIFY_OK(gckOS_ReleaseMutex((os), (os)->memoryMapLock))
+ 
+ /* Protection bit when mapping memroy to user sapce */
+-#define gcmkPAGED_MEMROY_PROT(x) pgprot_noncached(x)
++#define gcmkPAGED_MEMROY_PROT(x)    pgprot_noncached(x)
++
++#if gcdNONPAGED_MEMORY_BUFFERABLE
++#define gcmkIOREMAP                 ioremap_wc
+ #define gcmkNONPAGED_MEMROY_PROT(x) pgprot_writecombine(x)
++#elif !gcdNONPAGED_MEMORY_CACHEABLE
++#define gcmkIOREMAP                 ioremap_nocache
++#define gcmkNONPAGED_MEMROY_PROT(x) pgprot_noncached(x)
++#endif
+ 
+ #define gcdINFINITE_TIMEOUT     (60 * 1000)
+ #define gcdDETECT_TIMEOUT       0
+ #define gcdDETECT_DMA_ADDRESS   1
+ #define gcdDETECT_DMA_STATE     1
+ 
++#define gcdUSE_NON_PAGED_MEMORY_CACHE 10
++
+ /******************************************************************************\
+ ********************************** Structures **********************************
+ \******************************************************************************/
++#if gcdUSE_NON_PAGED_MEMORY_CACHE
++typedef struct _gcsNonPagedMemoryCache
++{
++#ifndef NO_DMA_COHERENT
++    gctINT                           size;
++    gctSTRING                        addr;
++    dma_addr_t                       dmaHandle;
++#else
++    long                             order;
++    struct page *                    page;
++#endif
++
++    struct _gcsNonPagedMemoryCache * prev;
++    struct _gcsNonPagedMemoryCache * next;
++}
++gcsNonPagedMemoryCache;
++#endif /* gcdUSE_NON_PAGED_MEMORY_CACHE */
+ 
+ typedef struct _gcsUSER_MAPPING * gcsUSER_MAPPING_PTR;
+ typedef struct _gcsUSER_MAPPING
+@@ -145,6 +171,12 @@ struct _gckOS
+ 
+     gcsUSER_MAPPING_PTR         userMap;
+     gctPOINTER                  debugLock;
++
++#if gcdUSE_NON_PAGED_MEMORY_CACHE
++    gctUINT                      cacheSize;
++    gcsNonPagedMemoryCache *     cacheHead;
++    gcsNonPagedMemoryCache *     cacheTail;
++#endif
+ };
+ 
+ typedef struct _gcsSIGNAL * gcsSIGNAL_PTR;
+@@ -507,7 +539,7 @@ _CreateMdl(
+ 
+     gcmkHEADER_ARG("ProcessID=%d", ProcessID);
+ 
+-    mdl = (PLINUX_MDL)kmalloc(sizeof(struct _LINUX_MDL), GFP_KERNEL);
++    mdl = (PLINUX_MDL)kmalloc(sizeof(struct _LINUX_MDL), GFP_KERNEL | __GFP_NOWARN);
+     if (mdl == gcvNULL)
+     {
+         gcmkFOOTER_NO();
+@@ -568,7 +600,7 @@ _CreateMdlMap(
+ 
+     gcmkHEADER_ARG("Mdl=0x%X ProcessID=%d", Mdl, ProcessID);
+ 
+-    mdlMap = (PLINUX_MDL_MAP)kmalloc(sizeof(struct _LINUX_MDL_MAP), GFP_KERNEL);
++    mdlMap = (PLINUX_MDL_MAP)kmalloc(sizeof(struct _LINUX_MDL_MAP), GFP_KERNEL | __GFP_NOWARN);
+     if (mdlMap == gcvNULL)
+     {
+         gcmkFOOTER_NO();
+@@ -662,6 +694,328 @@ OnProcessExit(
+ {
+ }
+ 
++#if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,25)
++static inline int
++is_vmalloc_addr(
++    void *Addr
++    )
++{
++    unsigned long addr = (unsigned long)Addr;
++
++    return addr >= VMALLOC_START && addr < VMALLOC_END;
++}
++#endif
++
++static void
++_NonContiguousFree(
++    IN struct page ** Pages,
++    IN gctUINT32 NumPages
++    )
++{
++    gctINT i;
++
++    gcmkHEADER_ARG("Pages=0x%X, NumPages=%d", Pages, NumPages);
++
++    gcmkASSERT(Pages != gcvNULL);
++
++    for (i = 0; i < NumPages; i++)
++    {
++        __free_page(Pages[i]);
++    }
++
++    if (is_vmalloc_addr(Pages))
++    {
++        vfree(Pages);
++    }
++    else
++    {
++        kfree(Pages);
++    }
++
++    gcmkFOOTER_NO();
++}
++
++static struct page **
++_NonContiguousAlloc(
++    IN gctUINT32 NumPages
++    )
++{
++    struct page ** pages;
++    struct page *p;
++    gctINT i, size;
++
++    gcmkHEADER_ARG("NumPages=%lu", NumPages);
++
++    size = NumPages * sizeof(struct page *);
++
++    pages = kmalloc(size, GFP_KERNEL | __GFP_NOWARN);
++
++    if (!pages)
++    {
++        pages = vmalloc(size);
++
++        if (!pages)
++        {
++            gcmkFOOTER_NO();
++            return 0;
++        }
++    }
++
++    for (i = 0; i < NumPages; i++)
++    {
++        p = alloc_page(GFP_KERNEL | __GFP_HIGHMEM | __GFP_NOWARN);
++
++        if (!p)
++        {
++            _NonContiguousFree(pages, i);
++            gcmkFOOTER_NO();
++            return 0;
++        }
++
++        pages[i] = p;
++    }
++
++    gcmkFOOTER_ARG("pages=0x%X", pages);
++    return pages;
++}
++
++static inline struct page *
++_NonContiguousToPage(
++    IN struct page ** Pages,
++    IN gctUINT32 Index
++    )
++{
++    gcmkASSERT(Pages != gcvNULL);
++    return Pages[Index];
++}
++
++static inline unsigned long
++_NonContiguousToPfn(
++    IN struct page ** Pages,
++    IN gctUINT32 Index
++    )
++{
++    gcmkASSERT(Pages != gcvNULL);
++    return page_to_pfn(_NonContiguousToPage(Pages, Index));
++}
++
++static inline unsigned long
++_NonContiguousToPhys(
++    IN struct page ** Pages,
++    IN gctUINT32 Index
++    )
++{
++    gcmkASSERT(Pages != gcvNULL);
++    return page_to_phys(_NonContiguousToPage(Pages, Index));
++}
++
++
++#if gcdUSE_NON_PAGED_MEMORY_CACHE
++
++static gctBOOL
++_AddNonPagedMemoryCache(
++    gckOS Os,
++#ifndef NO_DMA_COHERENT
++    gctINT Size,
++    gctSTRING Addr,
++    dma_addr_t DmaHandle
++#else
++    long Order,
++    struct page * Page
++#endif
++    )
++{
++    gcsNonPagedMemoryCache *cache;
++
++    if (Os->cacheSize >= gcdUSE_NON_PAGED_MEMORY_CACHE)
++    {
++        return gcvFALSE;
++    }
++
++    /* Allocate the cache record */
++    cache = (gcsNonPagedMemoryCache *)kmalloc(sizeof(gcsNonPagedMemoryCache), GFP_ATOMIC);
++
++    if (cache == gcvNULL) return gcvFALSE;
++
++#ifndef NO_DMA_COHERENT
++    cache->size  = Size;
++    cache->addr  = Addr;
++    cache->dmaHandle = DmaHandle;
++#else
++    cache->order = Order;
++    cache->page  = Page;
++#endif
++
++    /* Add to list */
++    if (Os->cacheHead == gcvNULL)
++    {
++        cache->prev   = gcvNULL;
++        cache->next   = gcvNULL;
++        Os->cacheHead =
++        Os->cacheTail = cache;
++    }
++    else
++    {
++        /* Add to the tail. */
++        cache->prev         = Os->cacheTail;
++        cache->next         = gcvNULL;
++        Os->cacheTail->next = cache;
++        Os->cacheTail       = cache;
++    }
++
++    Os->cacheSize++;
++
++    return gcvTRUE;
++}
++
++#ifndef NO_DMA_COHERENT
++static gctSTRING
++_GetNonPagedMemoryCache(
++    gckOS Os,
++    gctINT Size,
++    dma_addr_t * DmaHandle
++    )
++#else
++static struct page *
++_GetNonPagedMemoryCache(
++    gckOS Os,
++    long Order
++    )
++#endif
++{
++    gcsNonPagedMemoryCache *cache;
++#ifndef NO_DMA_COHERENT
++    gctSTRING addr;
++#else
++    struct page * page;
++#endif
++
++    if (Os->cacheHead == gcvNULL) return gcvNULL;
++
++    /* Find the right cache */
++    cache = Os->cacheHead;
++
++    while (cache != gcvNULL)
++    {
++#ifndef NO_DMA_COHERENT
++        if (cache->size == Size) break;
++#else
++        if (cache->order == Order) break;
++#endif
++
++        cache = cache->next;
++    }
++
++    if (cache == gcvNULL) return gcvNULL;
++
++    /* Remove the cache from list */
++    if (cache == Os->cacheHead)
++    {
++        Os->cacheHead = cache->next;
++
++        if (Os->cacheHead == gcvNULL)
++        {
++            Os->cacheTail = gcvNULL;
++        }
++    }
++    else
++    {
++        cache->prev->next = cache->next;
++
++        if (cache == Os->cacheTail)
++        {
++            Os->cacheTail = cache->prev;
++        }
++        else
++        {
++            cache->next->prev = cache->prev;
++        }
++    }
++
++    /* Destroy cache */
++#ifndef NO_DMA_COHERENT
++    addr       = cache->addr;
++    *DmaHandle = cache->dmaHandle;
++#else
++    page       = cache->page;
++#endif
++
++    kfree(cache);
++
++    Os->cacheSize--;
++
++#ifndef NO_DMA_COHERENT
++    return addr;
++#else
++    return page;
++#endif
++}
++
++static void
++_FreeAllNonPagedMemoryCache(
++    gckOS Os
++    )
++{
++    gcsNonPagedMemoryCache *cache, *nextCache;
++
++    MEMORY_LOCK(Os);
++
++    cache = Os->cacheHead;
++
++    while (cache != gcvNULL)
++    {
++        if (cache != Os->cacheTail)
++        {
++            nextCache = cache->next;
++        }
++        else
++        {
++            nextCache = gcvNULL;
++        }
++
++        /* Remove the cache from list */
++        if (cache == Os->cacheHead)
++        {
++            Os->cacheHead = cache->next;
++
++            if (Os->cacheHead == gcvNULL)
++            {
++                Os->cacheTail = gcvNULL;
++            }
++        }
++        else
++        {
++            cache->prev->next = cache->next;
++
++            if (cache == Os->cacheTail)
++            {
++                Os->cacheTail = cache->prev;
++            }
++            else
++            {
++                cache->next->prev = cache->prev;
++            }
++        }
++
++#ifndef NO_DMA_COHERENT
++    dma_free_coherent(gcvNULL,
++                    cache->size,
++                    cache->addr,
++                    cache->dmaHandle);
++#else
++    free_pages((unsigned long)page_address(cache->page), cache->order);
++#endif
++
++        kfree(cache);
++
++        cache = nextCache;
++    }
++
++    MEMORY_UNLOCK(Os);
++}
++
++#endif /* gcdUSE_NON_PAGED_MEMORY_CACHE */
++
+ /*******************************************************************************
+ **
+ **  gckOS_Construct
+@@ -693,7 +1047,7 @@ gckOS_Construct(
+     gcmkVERIFY_ARGUMENT(Os != gcvNULL);
+ 
+     /* Allocate the gckOS object. */
+-    os = (gckOS) kmalloc(gcmSIZEOF(struct _gckOS), GFP_KERNEL);
++    os = (gckOS) kmalloc(gcmSIZEOF(struct _gckOS), GFP_KERNEL | __GFP_NOWARN);
+ 
+     if (os == gcvNULL)
+     {
+@@ -741,7 +1095,7 @@ gckOS_Construct(
+ 
+     /* Initialize the signal table. */
+     os->signal.table =
+-        kmalloc(gcmSIZEOF(gctPOINTER) * USER_SIGNAL_TABLE_LEN_INIT, GFP_KERNEL);
++        kmalloc(gcmSIZEOF(gctPOINTER) * USER_SIGNAL_TABLE_LEN_INIT, GFP_KERNEL | __GFP_NOWARN);
+ 
+     if (os->signal.table == gcvNULL)
+     {
+@@ -761,6 +1115,12 @@ gckOS_Construct(
+     /* Initial signal ID. */
+     os->signal.currentID = 0;
+ 
++#if gcdUSE_NON_PAGED_MEMORY_CACHE
++    os->cacheSize = 0;
++    os->cacheHead = gcvNULL;
++    os->cacheTail = gcvNULL;
++#endif
++
+     /* Return pointer to the gckOS object. */
+     *Os = os;
+ 
+@@ -839,6 +1199,10 @@ gckOS_Destroy(
+     /* Verify the arguments. */
+     gcmkVERIFY_OBJECT(Os, gcvOBJ_OS);
+ 
++#if gcdUSE_NON_PAGED_MEMORY_CACHE
++    _FreeAllNonPagedMemoryCache(Os);
++#endif
++
+     /*
+      * Destroy the signal manager.
+      */
+@@ -880,6 +1244,59 @@ gckOS_Destroy(
+     return gcvSTATUS_OK;
+ }
+ 
++#ifdef NO_DMA_COHERENT
++static gctSTRING
++_CreateKernelVirtualMapping(
++    IN struct page * Page,
++    IN gctINT NumPages
++    )
++{
++    gctSTRING addr = 0;
++
++#if gcdNONPAGED_MEMORY_CACHEABLE
++    addr = page_address(Page);
++#elif LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 38)
++    struct page ** pages;
++    gctINT i;
++
++    pages = kmalloc(sizeof(struct page *) * NumPages, GFP_KERNEL | __GFP_NOWARN);
++
++    if (!pages)
++    {
++        return gcvNULL;
++    }
++
++    for (i = 0; i < NumPages; i++)
++    {
++        pages[i] = nth_page(Page, i);
++    }
++
++    /* ioremap() can't work on system memory since 2.6.38. */
++    addr = vmap(pages, NumPages, 0, gcmkNONPAGED_MEMROY_PROT(PAGE_KERNEL));
++
++    kfree(pages);
++#else
++    addr = gcmkIOREMAP(page_to_phys(Page), NumPages * PAGE_SIZE);
++#endif
++
++    return addr;
++}
++
++static void
++_DestoryKernelVirtualMapping(
++    IN gctSTRING Addr
++    )
++{
++#if !gcdNONPAGED_MEMORY_CACHEABLE
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 38)
++    vunmap(Addr);
++#   else
++    iounmap(Addr);
++#   endif
++#endif
++}
++#endif
++
+ /*******************************************************************************
+ **
+ **  gckOS_Allocate
+@@ -1021,7 +1438,14 @@ gckOS_AllocateMemory(
+     gcmkVERIFY_ARGUMENT(Bytes > 0);
+     gcmkVERIFY_ARGUMENT(Memory != gcvNULL);
+ 
+-    memory = (gctPOINTER) kmalloc(Bytes, GFP_KERNEL);
++    if (Bytes > PAGE_SIZE)
++    {
++        memory = (gctPOINTER) vmalloc(Bytes);
++    }
++    else
++    {
++        memory = (gctPOINTER) kmalloc(Bytes, GFP_KERNEL);
++    }
+ 
+     if (memory == gcvNULL)
+     {
+@@ -1069,7 +1493,14 @@ gckOS_FreeMemory(
+     gcmkVERIFY_ARGUMENT(Memory != gcvNULL);
+ 
+     /* Free the memory from the OS pool. */
+-    kfree(Memory);
++    if (is_vmalloc_addr(Memory))
++    {
++        vfree(Memory);
++    }
++    else
++    {
++        kfree(Memory);
++    }
+ 
+     /* Success. */
+     gcmkFOOTER_NO();
+@@ -1479,14 +1910,30 @@ gckOS_AllocateNonPagedMemory(
+     locked = gcvTRUE;
+ 
+ #ifndef NO_DMA_COHERENT
+-    addr = dma_alloc_coherent(gcvNULL,
++#if gcdUSE_NON_PAGED_MEMORY_CACHE
++    addr = _GetNonPagedMemoryCache(Os,
++                mdl->numPages * PAGE_SIZE,
++                &mdl->dmaHandle);
++
++    if (addr == gcvNULL)
++#endif
++    {
++        addr = dma_alloc_coherent(gcvNULL,
+                 mdl->numPages * PAGE_SIZE,
+                 &mdl->dmaHandle,
+-                GFP_KERNEL);
++                GFP_KERNEL | __GFP_NOWARN);
++    }
+ #else
+     size    = mdl->numPages * PAGE_SIZE;
+     order   = get_order(size);
+-    page    = alloc_pages(GFP_KERNEL, order);
++#if gcdUSE_NON_PAGED_MEMORY_CACHE
++    page = _GetNonPagedMemoryCache(Os, order);
++
++    if (page == gcvNULL)
++#endif
++    {
++        page = alloc_pages(GFP_KERNEL | __GFP_NOWARN, order);
++    }
+ 
+     if (page == gcvNULL)
+     {
+@@ -1494,17 +1941,10 @@ gckOS_AllocateNonPagedMemory(
+     }
+ 
+     vaddr           = (gctPOINTER)page_address(page);
+-
+-#if gcdNONPAGED_MEMORY_CACHEABLE
+-    addr            = vaddr;
+-#   elif gcdNONPAGED_MEMORY_BUFFERABLE
+-    addr            = ioremap_wc(virt_to_phys(vaddr), size);
+-#   else
+-    addr            = ioremap_nocache(virt_to_phys(vaddr), size);
+-#   endif
+-
++    addr            = _CreateKernelVirtualMapping(page, mdl->numPages);
+     mdl->dmaHandle  = virt_to_phys(vaddr);
+     mdl->kaddr      = vaddr;
++    mdl->u.contiguousPages = page;
+ 
+     /* Cache invalidate. */
+     dma_sync_single_for_device(
+@@ -1749,10 +2189,18 @@ gceSTATUS gckOS_FreeNonPagedMemory(
+     MEMORY_LOCK(Os);
+ 
+ #ifndef NO_DMA_COHERENT
+-    dma_free_coherent(gcvNULL,
+-                    mdl->numPages * PAGE_SIZE,
+-                    mdl->addr,
+-                    mdl->dmaHandle);
++#if gcdUSE_NON_PAGED_MEMORY_CACHE
++    if (!_AddNonPagedMemoryCache(Os,
++                                 mdl->numPages * PAGE_SIZE,
++                                 mdl->addr,
++                                 mdl->dmaHandle))
++#endif
++    {
++        dma_free_coherent(gcvNULL,
++                mdl->numPages * PAGE_SIZE,
++                mdl->addr,
++                mdl->dmaHandle);
++    }
+ #else
+     size    = mdl->numPages * PAGE_SIZE;
+     vaddr   = mdl->kaddr;
+@@ -1765,12 +2213,16 @@ gceSTATUS gckOS_FreeNonPagedMemory(
+         size    -= PAGE_SIZE;
+     }
+ 
+-    free_pages((unsigned long)mdl->kaddr, get_order(mdl->numPages * PAGE_SIZE));
+-
+-#if !gcdNONPAGED_MEMORY_CACHEABLE
+-    iounmap(mdl->addr);
++#if gcdUSE_NON_PAGED_MEMORY_CACHE
++    if (!_AddNonPagedMemoryCache(Os,
++                                 get_order(mdl->numPages * PAGE_SIZE),
++                                 virt_to_page(mdl->kaddr)))
+ #endif
++    {
++        free_pages((unsigned long)mdl->kaddr, get_order(mdl->numPages * PAGE_SIZE));
++    }
+ 
++    _DestoryKernelVirtualMapping(mdl->addr);
+ #endif /* NO_DMA_COHERENT */
+ 
+     mdlMap = mdl->maps;
+@@ -2137,7 +2589,8 @@ _ConvertLogical2Physical(
+         }
+         else if (Mdl->pagedMem && !Mdl->contiguous)
+         {
+-            *Physical = page_to_phys(vmalloc_to_page(base + offset));
++            /* paged memory is not mapped to kernel space. */
++            return gcvSTATUS_INVALID_ADDRESS;
+         }
+         else
+         {
+@@ -2181,12 +2634,11 @@ _ConvertLogical2Physical(
+             }
+             else if (Mdl->pagedMem && !Mdl->contiguous)
+             {
+-                *Physical = page_to_phys(vmalloc_to_page(base + offset));
++                *Physical = _NonContiguousToPhys(Mdl->u.nonContiguousPages, offset/PAGE_SIZE);
+             }
+             else
+             {
+-                /* Return the kernel virtual pointer based on this. */
+-                *Physical = gcmPTR2INT(virt_to_phys(base)) + offset;
++                *Physical = page_to_phys(Mdl->u.contiguousPages) + offset;
+             }
+ 
+             return gcvSTATUS_OK;
+@@ -2500,7 +2952,7 @@ gckOS_CreateMutex(
+     gcmkVERIFY_ARGUMENT(Mutex != gcvNULL);
+ 
+     /* Allocate a FAST_MUTEX structure. */
+-    *Mutex = (gctPOINTER)kmalloc(sizeof(struct semaphore), GFP_KERNEL);
++    *Mutex = (gctPOINTER)kmalloc(sizeof(struct semaphore), GFP_KERNEL | __GFP_NOWARN);
+ 
+     if (*Mutex == gcvNULL)
+     {
+@@ -3418,7 +3870,6 @@ gckOS_AllocatePagedMemoryEx(
+     gctINT numPages;
+     gctINT i;
+     PLINUX_MDL mdl = gcvNULL;
+-    gctSTRING addr;
+     gctSIZE_T bytes;
+     gctBOOL locked = gcvFALSE;
+     gceSTATUS status;
+@@ -3445,22 +3896,29 @@ gckOS_AllocatePagedMemoryEx(
+ 
+     if (Contiguous)
+     {
+-        /* Get free pages, and suppress warning (stack dump) from kernel when
++        /* Get contiguous pages, and suppress warning (stack dump) from kernel when
+            we run out of memory. */
+-        addr = (char *)__get_free_pages(GFP_KERNEL | __GFP_NOWARN, GetOrder(numPages));
++        mdl->u.contiguousPages =
++            alloc_pages(GFP_KERNEL | __GFP_NOWARN, GetOrder(numPages));
++
++        if (mdl->u.contiguousPages == gcvNULL)
++        {
++            mdl->u.contiguousPages =
++                alloc_pages(GFP_KERNEL | __GFP_HIGHMEM | __GFP_NOWARN, GetOrder(numPages));
++        }
+     }
+     else
+     {
+-        addr = vmalloc(bytes);
++        mdl->u.nonContiguousPages = _NonContiguousAlloc(numPages);
+     }
+ 
+-    if (addr == gcvNULL)
++    if (mdl->u.contiguousPages == gcvNULL && mdl->u.nonContiguousPages == gcvNULL)
+     {
+         gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
+     }
+ 
+     mdl->dmaHandle  = 0;
+-    mdl->addr       = addr;
++    mdl->addr       = 0;
+     mdl->numPages   = numPages;
+     mdl->pagedMem   = 1;
+     mdl->contiguous = Contiguous;
+@@ -3471,21 +3929,21 @@ gckOS_AllocatePagedMemoryEx(
+ 
+         if (mdl->contiguous)
+         {
+-            page = virt_to_page(addr + i * PAGE_SIZE);
++            page = nth_page(mdl->u.contiguousPages, i);
+         }
+         else
+         {
+-            page = vmalloc_to_page(addr + i * PAGE_SIZE);
++            page = _NonContiguousToPage(mdl->u.nonContiguousPages, i);
+         }
+ 
+         SetPageReserved(page);
+ 
+-        if (page_to_phys(page))
++        if (!PageHighMem(page) && page_to_phys(page))
+         {
+             gcmkVERIFY_OK(
+                 gckOS_CacheFlush(Os, _GetProcessID(), gcvNULL,
+-                                (gctPOINTER)page_to_phys(page),
+-                                 addr + i * PAGE_SIZE,
++                                 (gctPOINTER)page_to_phys(page),
++                                 page_address(page),
+                                  PAGE_SIZE));
+         }
+     }
+@@ -3582,21 +4040,21 @@ gckOS_FreePagedMemory(
+     {
+         if (mdl->contiguous)
+         {
+-            ClearPageReserved(virt_to_page((gctPOINTER)(((unsigned long)addr) + i * PAGE_SIZE)));
++            ClearPageReserved(nth_page(mdl->u.contiguousPages, i));
+         }
+         else
+         {
+-            ClearPageReserved(vmalloc_to_page((gctPOINTER)(((unsigned long)addr) + i * PAGE_SIZE)));
++            ClearPageReserved(_NonContiguousToPage(mdl->u.nonContiguousPages, i));
+         }
+     }
+ 
+     if (mdl->contiguous)
+     {
+-        free_pages((unsigned long)mdl->addr, GetOrder(mdl->numPages));
++        __free_pages(mdl->u.contiguousPages, GetOrder(mdl->numPages));
+     }
+     else
+     {
+-        vfree(mdl->addr);
++        _NonContiguousFree(mdl->u.nonContiguousPages, mdl->numPages);
+     }
+ 
+     /* Remove the node from global list. */
+@@ -3778,7 +4236,7 @@ gckOS_LockPages(
+             /* map kernel memory to user space.. */
+             if (remap_pfn_range(mdlMap->vma,
+                                 mdlMap->vma->vm_start,
+-                                virt_to_phys((gctPOINTER)mdl->addr) >> PAGE_SHIFT,
++                                page_to_pfn(mdl->u.contiguousPages),
+                                 mdlMap->vma->vm_end - mdlMap->vma->vm_start,
+                                 mdlMap->vma->vm_page_prot) < 0)
+             {
+@@ -3804,7 +4262,7 @@ gckOS_LockPages(
+ 
+             for (i = 0; i < mdl->numPages; i++)
+             {
+-                pfn = vmalloc_to_pfn(addr);
++                pfn = _NonContiguousToPfn(mdl->u.nonContiguousPages, i);
+ 
+                 if (remap_pfn_range(mdlMap->vma,
+                                     start,
+@@ -3915,8 +4373,8 @@ gckOS_MapPagesEx(
+     gceSTATUS status = gcvSTATUS_OK;
+     PLINUX_MDL  mdl;
+     gctUINT32*  table;
+-    gctSTRING   addr;
+     gctUINT32   bytes;
++    gctUINT32   offset;
+     gckMMU      mmu;
+     PLINUX_MDL  mmuMdl;
+     gctPHYS_ADDR pageTablePhysical;
+@@ -3951,7 +4409,7 @@ gckOS_MapPagesEx(
+ 
+      /* Get all the physical addresses and store them in the page table. */
+ 
+-    addr = mdl->addr;
++    offset = 0;
+ 
+     if (mdl->pagedMem)
+     {
+@@ -3965,15 +4423,15 @@ gckOS_MapPagesEx(
+                 {
+                     gcmkONERROR(
+                         gckVGMMU_SetPage(Os->device->kernels[Core]->vg->mmu,
+-                                             virt_to_phys(addr),
+-                                             table));
++                             page_to_phys(nth_page(mdl->u.contiguousPages, offset)),
++                             table));
+                 }
+                 else
+                 {
+                     gcmkONERROR(
+                         gckVGMMU_SetPage(Os->device->kernels[Core]->vg->mmu,
+-                                             page_to_phys(vmalloc_to_page(addr)),
+-                                             table));
++                             _NonContiguousToPhys(mdl->u.nonContiguousPages, offset),
++                             table));
+                 }
+             }
+             else
+@@ -3983,20 +4441,20 @@ gckOS_MapPagesEx(
+                 {
+                     gcmkONERROR(
+                         gckMMU_SetPage(Os->device->kernels[Core]->mmu,
+-                                             virt_to_phys(addr),
+-                                             table));
++                             page_to_phys(nth_page(mdl->u.contiguousPages, offset)),
++                             table));
+                 }
+                 else
+                 {
+                     gcmkONERROR(
+                         gckMMU_SetPage(Os->device->kernels[Core]->mmu,
+-                                             page_to_phys(vmalloc_to_page(addr)),
+-                                             table));
++                             _NonContiguousToPhys(mdl->u.nonContiguousPages, offset),
++                             table));
+                 }
+             }
+ 
+             table++;
+-            addr += 4096;
++            offset += 1;
+         }
+     }
+     else
+@@ -4014,7 +4472,7 @@ gckOS_MapPagesEx(
+             {
+                 gcmkONERROR(
+                         gckVGMMU_SetPage(Os->device->kernels[Core]->vg->mmu,
+-                                         (gctUINT32)virt_to_phys(addr),
++                                         page_to_phys(nth_page(mdl->u.contiguousPages, offset)),
+                                          table));
+             }
+             else
+@@ -4022,11 +4480,11 @@ gckOS_MapPagesEx(
+             {
+                 gcmkONERROR(
+                         gckMMU_SetPage(Os->device->kernels[Core]->mmu,
+-                                         (gctUINT32)virt_to_phys(addr),
++                                         page_to_phys(nth_page(mdl->u.contiguousPages, offset)),
+                                          table));
+             }
+             table++;
+-            addr += 4096;
++            offset += 1;
+         }
+     }
+ 
+@@ -4100,7 +4558,8 @@ gckOS_UnlockPages(
+     gcmkVERIFY_ARGUMENT(Logical != gcvNULL);
+ 
+     /* Make sure there is already a mapping...*/
+-    gcmkVERIFY_ARGUMENT(mdl->addr != gcvNULL);
++    gcmkVERIFY_ARGUMENT(mdl->u.nonContiguousPages != gcvNULL
++                       || mdl->u.contiguousPages != gcvNULL);
+ 
+     MEMORY_LOCK(Os);
+ 
+@@ -4413,7 +4872,7 @@ gckOS_MapUserPointer(
+     gcmkVERIFY_ARGUMENT(Size > 0);
+     gcmkVERIFY_ARGUMENT(KernelPointer != gcvNULL);
+ 
+-    buf = kmalloc(Size, GFP_KERNEL);
++    buf = kmalloc(Size, GFP_KERNEL | __GFP_NOWARN);
+     if (buf == gcvNULL)
+     {
+         gcmkTRACE(
+@@ -4840,7 +5299,7 @@ OnError:
+         MEMORY_MAP_LOCK(Os);
+ 
+         /* Allocate the Info struct. */
+-        info = (gcsPageInfo_PTR)kmalloc(sizeof(gcsPageInfo), GFP_KERNEL);
++        info = (gcsPageInfo_PTR)kmalloc(sizeof(gcsPageInfo), GFP_KERNEL | __GFP_NOWARN);
+ 
+         if (info == gcvNULL)
+         {
+@@ -4849,7 +5308,7 @@ OnError:
+         }
+ 
+         /* Allocate the array of page addresses. */
+-        pages = (struct page **)kmalloc(pageCount * sizeof(struct page *), GFP_KERNEL);
++        pages = (struct page **)kmalloc(pageCount * sizeof(struct page *), GFP_KERNEL | __GFP_NOWARN);
+ 
+         if (pages == gcvNULL)
+         {
+@@ -4957,8 +5416,11 @@ OnError:
+ 
+         for (i = 0; i < pageCount; i++)
+         {
+-            unsigned long paddr = page_to_phys(pages[i]);
+-            outer_clean_range(paddr, paddr + PAGE_SIZE);
++            /* Flush(clean) the data cache. */
++            gcmkONERROR(gckOS_CacheFlush(Os, _GetProcessID(), gcvNULL,
++                             (gctPOINTER)page_to_phys(pages[i]),
++                             (gctPOINTER)(memory & PAGE_MASK) + i*PAGE_SIZE,
++                             PAGE_SIZE));
+         }
+ 
+ #if gcdENABLE_VG
+@@ -5259,8 +5721,6 @@ OnError:
+         /* Release the page cache. */
+         for (i = 0; i < pageCount; i++)
+         {
+-            unsigned long paddr = page_to_phys(pages[i]);
+-
+             gcmkTRACE_ZONE(
+                 gcvLEVEL_INFO, gcvZONE_OS,
+                 "%s(%d): pages[%d]: 0x%X.",
+@@ -5273,10 +5733,6 @@ OnError:
+                 SetPageDirty(pages[i]);
+             }
+ 
+-            flush_dcache_page(pages[i]);
+-
+-            outer_inv_range(paddr, paddr + PAGE_SIZE);
+-
+             page_cache_release(pages[i]);
+         }
+ 
+@@ -5896,7 +6352,7 @@ gckOS_Broadcast(
+     case gcvBROADCAST_AXI_BUS_ERROR:
+         gcmkTRACE_N(gcvLEVEL_ERROR, 0, "gcvBROADCAST_AXI_BUS_ERROR\n");
+         gcmkONERROR(_DumpGPUState(Os));
+-        /*gcmkONERROR(gckKERNEL_Recovery(Hardware->kernel));*/
++        gcmkONERROR(gckKERNEL_Recovery(Hardware->kernel));
+         break;
+     }
+ 
+@@ -6024,7 +6480,7 @@ gckOS_CreateSemaphore(
+     gcmkVERIFY_ARGUMENT(Semaphore != gcvNULL);
+ 
+     /* Allocate the semaphore structure. */
+-    sem = (struct semaphore *)kmalloc(gcmSIZEOF(struct semaphore), GFP_KERNEL);
++    sem = (struct semaphore *)kmalloc(gcmSIZEOF(struct semaphore), GFP_KERNEL | __GFP_NOWARN);
+     if (sem == gcvNULL)
+     {
+         gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
+@@ -6558,7 +7014,7 @@ gckOS_CreateSignal(
+     gcmkVERIFY_ARGUMENT(Signal != gcvNULL);
+ 
+     /* Create an event structure. */
+-    signal = (gcsSIGNAL_PTR) kmalloc(sizeof(gcsSIGNAL), GFP_KERNEL);
++    signal = (gcsSIGNAL_PTR) kmalloc(sizeof(gcsSIGNAL), GFP_KERNEL | __GFP_NOWARN);
+ 
+     if (signal == gcvNULL)
+     {
+@@ -7184,7 +7640,7 @@ gckOS_CreateUserSignal(
+         /* Enlarge the table. */
+         table = (gctPOINTER *) kmalloc(
+                     sizeof(gctPOINTER) * (Os->signal.tableLen + USER_SIGNAL_TABLE_LEN_INIT),
+-                    GFP_KERNEL);
++                    GFP_KERNEL | __GFP_NOWARN);
+ 
+         if (table == gcvNULL)
+         {
+@@ -7616,7 +8072,7 @@ gckOS_CreateSemaphoreVG(
+     do
+     {
+         /* Allocate the semaphore structure. */
+-    	newSemaphore = (struct semaphore *)kmalloc(gcmSIZEOF(struct semaphore), GFP_KERNEL);
++    	newSemaphore = (struct semaphore *)kmalloc(gcmSIZEOF(struct semaphore), GFP_KERNEL | __GFP_NOWARN);
+     	if (newSemaphore == gcvNULL)
+     	{
+         	gcmkERR_BREAK(gcvSTATUS_OUT_OF_MEMORY);
+@@ -7860,5 +8316,58 @@ gckOS_VerifyThread(
+     /* Success. */
+     return gcvSTATUS_OK;
+ }
++
++#if gcdDYNAMIC_MAP_RESERVED_MEMORY
++gceSTATUS
++gckOS_MapReservedMemoryToKernel(
++    IN gckOS Os,
++    IN gctUINT32 Physical,
++    IN gctINT Bytes,
++    IN OUT gctPOINTER *Virtual
++    )
++{
++    gceSTATUS status;
++    gckGALDEVICE device;
++
++    gcmkHEADER_ARG("Os=0x%X Physical=0x%x Bytes=0x%d", Os, Physical, Bytes);
++
++    gcmkVERIFY_OBJECT(Os, gcvOBJ_OS);
++    gcmkVERIFY_ARGUMENT(Physical != 0);
++    gcmkVERIFY_ARGUMENT(Bytes != 0);
++    gcmkVERIFY_ARGUMENT(Virtual != gcvNULL);
++
++    device = (gckGALDEVICE) Os->device;
++
++    /* Reserved memory should not be mapped yet. */
++    gcmkASSERT(device->contiguousBase == gcvNULL);
++
++    *Virtual = ioremap_nocache(Physical, Bytes);
++
++    if(*Virtual == gcvNULL)
++    {
++        gcmkONERROR(gcvSTATUS_OUT_OF_MEMORY);
++    }
++
++    gcmkFOOTER_NO();
++    return gcvSTATUS_OK;
++
++OnError:
++    gcmkFOOTER();
++    return status;
++}
++
++gceSTATUS
++gckOS_UnmapReservedMemoryFromKernel(
++    IN gctPOINTER Virtual
++    )
++{
++    gcmkHEADER_ARG("Virtual=0x%X", Virtual);
++
++    iounmap((void *)Virtual);
++
++    gcmkFOOTER_NO();
++    return gcvSTATUS_OK;
++}
++#endif
+ #endif
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.h b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.h
+index f155f10..ae94fcf 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.h
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.h
+@@ -40,6 +40,15 @@ typedef struct _LINUX_MDL
+     gctINT                  pid;
+     char *                  addr;
+ 
++    union _pages
++    {
++        /* Pointer to a array of pages. */
++        struct page *       contiguousPages;
++        /* Pointer to a array of pointers to page. */
++        struct page **      nonContiguousPages;
++    }
++    u;
++
+ #ifdef NO_DMA_COHERENT
+     gctPOINTER              kaddr;
+ #endif /* NO_DMA_COHERENT */
+-- 
+1.7.7.4
+

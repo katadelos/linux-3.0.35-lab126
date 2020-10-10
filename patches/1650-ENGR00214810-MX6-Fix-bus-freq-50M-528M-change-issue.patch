@@ -1,0 +1,244 @@
+From 14885ebdfe0245f1d3b81b36053caf285186460b Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 26 Jun 2012 02:18:47 +0800
+Subject: [PATCH 1650/2463] ENGR00214810 [MX6]Fix bus freq 50M->528M change
+ issue
+
+50M -> 528M bus freq change will cause system hang, root
+cause is that we didn't set 50M as DLL off mode, it should
+be DLL off mode.
+
+And make sure bus, axi, ahb, ipg and ipg_perclk are at right
+freq during all setpoints.
+
+Can't disable PU LDO again if it is not enabled.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/bus_freq.c     |   71 ++++++++++++++++++++------------------
+ arch/arm/mach-mx6/mx6_ddr_freq.S |   39 ++++++++++-----------
+ arch/arm/mach-mx6/mx6_mmdc.c     |    3 +-
+ 3 files changed, 58 insertions(+), 55 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index 85f23c7..cd53fde 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -175,40 +175,43 @@ static void reduce_bus_freq_handler(struct work_struct *work)
+ 	high_bus_freq_mode = 0;
+ 	med_bus_freq_mode = 0;
+ 
+-	/* Disable the brown out detection since we are going to be
+-	  * disabling the LDO.
+-	  */
+-	reg = __raw_readl(ANA_MISC2_BASE_ADDR);
+-	reg &= ~ANADIG_ANA_MISC2_REG1_BO_EN;
+-	__raw_writel(reg, ANA_MISC2_BASE_ADDR);
+-
+-	/* Power gate the PU LDO. */
+-	/* Power gate the PU domain first. */
+-	/* enable power down request */
+-	reg = __raw_readl(gpc_base + GPC_PGC_GPU_PGCR_OFFSET);
+-	__raw_writel(reg | 0x1, gpc_base + GPC_PGC_GPU_PGCR_OFFSET);
+-	/* power down request */
+-	reg = __raw_readl(gpc_base + GPC_CNTR_OFFSET);
+-	__raw_writel(reg | 0x1, gpc_base + GPC_CNTR_OFFSET);
+-	/* Wait for power down to complete. */
+-	while (__raw_readl(gpc_base + GPC_CNTR_OFFSET) & 0x1)
+-		;
+-
+-	/* Mask the ANATOP brown out interrupt in the GPC. */
+-	reg = __raw_readl(gpc_base + 0x14);
+-	reg |= 0x80000000;
+-	__raw_writel(reg, gpc_base + 0x14);
+-
+-	/* PU power gating. */
+-	org_ldo = reg = __raw_readl(ANADIG_REG_CORE);
+-	reg &= ~(ANADIG_REG_TARGET_MASK << ANADIG_REG1_PU_TARGET_OFFSET);
+-	__raw_writel(reg, ANADIG_REG_CORE);
+-
+-	/* Clear the BO interrupt in the ANATOP. */
+-	reg = __raw_readl(ANADIG_MISC1_REG);
+-	reg |= 0x80000000;
+-	__raw_writel(reg, ANADIG_MISC1_REG);
++	/* Do not disable PU LDO if it is not enabled */
++	reg = __raw_readl(ANADIG_REG_CORE) & (ANADIG_REG_TARGET_MASK << ANADIG_REG1_PU_TARGET_OFFSET);
++	if ((low_bus_freq_mode || audio_bus_freq_mode) && reg != 0) {
++		/* Disable the brown out detection since we are going to be
++		  * disabling the LDO.
++		  */
++		reg = __raw_readl(ANA_MISC2_BASE_ADDR);
++		reg &= ~ANADIG_ANA_MISC2_REG1_BO_EN;
++		__raw_writel(reg, ANA_MISC2_BASE_ADDR);
+ 
++		/* Power gate the PU LDO. */
++		/* Power gate the PU domain first. */
++		/* enable power down request */
++		reg = __raw_readl(gpc_base + GPC_PGC_GPU_PGCR_OFFSET);
++		__raw_writel(reg | 0x1, gpc_base + GPC_PGC_GPU_PGCR_OFFSET);
++		/* power down request */
++		reg = __raw_readl(gpc_base + GPC_CNTR_OFFSET);
++		__raw_writel(reg | 0x1, gpc_base + GPC_CNTR_OFFSET);
++		/* Wait for power down to complete. */
++		while (__raw_readl(gpc_base + GPC_CNTR_OFFSET) & 0x1)
++			;
++
++		/* Mask the ANATOP brown out interrupt in the GPC. */
++		reg = __raw_readl(gpc_base + 0x14);
++		reg |= 0x80000000;
++		__raw_writel(reg, gpc_base + 0x14);
++
++		/* PU power gating. */
++		org_ldo = reg = __raw_readl(ANADIG_REG_CORE);
++		reg &= ~(ANADIG_REG_TARGET_MASK << ANADIG_REG1_PU_TARGET_OFFSET);
++		__raw_writel(reg, ANADIG_REG_CORE);
++
++		/* Clear the BO interrupt in the ANATOP. */
++		reg = __raw_readl(ANADIG_MISC1_REG);
++		reg |= 0x80000000;
++		__raw_writel(reg, ANADIG_MISC1_REG);
++	}
+ 	mutex_unlock(&bus_freq_mutex);
+ }
+ 
+@@ -261,7 +264,7 @@ int set_high_bus_freq(int high_bus_freq)
+ 	}
+ 
+ 	/* Enable the PU LDO */
+-	if (low_bus_freq_mode) {
++	if (low_bus_freq_mode || audio_bus_freq_mode) {
+ 		/* Set the voltage of VDDSOC as in normal mode. */
+ 		__raw_writel(org_ldo, ANADIG_REG_CORE);
+ 
+diff --git a/arch/arm/mach-mx6/mx6_ddr_freq.S b/arch/arm/mach-mx6/mx6_ddr_freq.S
+index 770b9cf..19fb491 100644
+--- a/arch/arm/mach-mx6/mx6_ddr_freq.S
++++ b/arch/arm/mach-mx6/mx6_ddr_freq.S
+@@ -41,11 +41,12 @@
+ 
+ 	/* Set the AHB dividers before the switch. */
+ 	/* Don't change AXI clock divider. */
+-	/* Set the MMDC_DIV=1, AHB_DIV=4 (need to maintain GPT divider). */
++	/* Set the MMDC_DIV=1, AXI_DIV = 2, AHB_DIV=4 (need to maintain GPT divider). */
+ 	ldr     r0, [r6, #0x14]
+-	ldr     r2, =0x381D00
++	ldr     r2, =0x3f1f00
+ 	bic     r0, r0, r2
+-	orr     r0, r0, #0xD00
++	orr     r0, r0, #0xd00
++	orr     r0, r0, #0x10000
+ 	str     r0, [r6, #0x14]
+ 
+ wait_div_update528:
+@@ -72,13 +73,11 @@ set_ahb_podf_before_switch:
+ 	  * would be too fast when switching to PLL3.
+ 	  */
+ 	/* Don't change AXI clock divider. */
+-	/* Set the MMDC_DIV=1, AHB_DIV=4 (need to maintain GPT divider). */
++	/* Set the MMDC_DIV=1, AXI_DIV = 2, AHB_DIV=4 (need to maintain GPT divider). */
+ 	ldr     r0, [r6, #0x14]
+-	ldr     r2, =0x381D00
++	ldr     r2, =0x3f1f00
+ 	bic     r0, r0, r2
+-	orr     r0, r0, #0xD00
+-	/* Make sure AXI clock divider is 1 */
+-	bic     r0, r0, #0x70000
++	orr     r0, r0, #0xd00
+ 	orr     r0, r0, #0x10000
+ 	str     r0, [r6, #0x14]
+ 
+@@ -148,11 +147,12 @@ set_ahb_podf_before_switch1:
+ 	  * would be too fast when switching to PLL3.
+ 	  */
+ 	/* Don't change AXI clock divider. */
+-	/* Set the MMDC_DIV=1, AHB_DIV=4 (need to maintain GPT divider). */
++	/* Set the MMDC_DIV=1, AXI_DIV = 2, AHB_DIV=4 (need to maintain GPT divider). */
+ 	ldr     r0, [r6, #0x14]
+-	ldr     r2, =0x381D00
++	ldr     r2, =0x3f1f00
+ 	bic     r0, r0, r2
+-	orr     r0, r0, #0xD00
++	orr     r0, r0, #0x900
++	orr     r0, r0, #0x10000
+ 	str     r0, [r6, #0x14]
+ 
+ wait_div_update400_1:
+@@ -180,13 +180,11 @@ periph_clk_switch6:
+ 
+ 	/* Change AHB divider so that we are at 400/3=133MHz. */
+ 	/* Don't change AXI clock divider. */
+-	/* Set the MMDC_DIV=1, AHB_DIV=3 (need to maintain GPT divider). */
++	/* Set the MMDC_DIV=1, AXI_DIV=2, AHB_DIV=3 (need to maintain GPT divider). */
+ 	ldr     r0, [r6, #0x14]
+-	ldr     r2, =0x381D00
++	ldr     r2, =0x3f1f00
+ 	bic     r0, r0, r2
+ 	orr     r0, r0, #0x900
+-	/* Make sure AXI clock divider is 1 */
+-	bic     r0, r0, #0x70000
+ 	orr     r0, r0, #0x10000
+ 	str     r0, [r6, #0x14]
+ 
+@@ -242,15 +240,15 @@ switch_pre_periph_clk_50:
+ 
+ 	/* Set the MMDC_DIV=4, AXI_DIV = 4, AHB_DIV=8 (need to maintain GPT divider). */
+ 	ldr     r0, [r6, #0x14]
+-	ldr     r2, =0x3F1C00
++	ldr     r2, =0x3f1f00
+ 	bic     r0, r0, r2
+ 
+ 	orr     r0, r0, #0x180000
+ 	orr     r0, r0, #0x30000
+ 
+ 	/* If changing AHB divider remember to change the IPGPER divider too below. */
+-	 orr     r0, r0, #0x1C00
+-	 str     r0, [r6, #0x14]
++	orr     r0, r0, #0x1d00
++	str     r0, [r6, #0x14]
+ 
+ wait_div_update_50:
+ 	ldr      r0, [r6, #0x48]
+@@ -270,7 +268,7 @@ periph_clk_switch2:
+ 	/* Change the GPT divider so that its at 6MHz. */
+ 	ldr     r0, [r6, #0x1C]
+ 	bic     r0, r0, #0x3F
+-	orr     r0, r0, #0x3
++	orr     r0, r0, #0x1
+ 	str     r0, [r6, #0x1C]
+ 
+ 	.endm
+@@ -302,8 +300,9 @@ periph_clk_switch1:
+ 
+ 	/* Change all the dividers to 1. */
+ 	ldr     r0, [r6, #0x14]
+-	ldr     r2, =0x3F1C00
++	ldr     r2, =0x3f1f00
+ 	bic     r0, r0, r2
++	orr	r0, r0, #0x100
+ 	str     r0, [r6, #0x14]
+ 
+ 	/* Wait for the divider to change. */
+diff --git a/arch/arm/mach-mx6/mx6_mmdc.c b/arch/arm/mach-mx6/mx6_mmdc.c
+index c4f232f..f0771b6 100644
+--- a/arch/arm/mach-mx6/mx6_mmdc.c
++++ b/arch/arm/mach-mx6/mx6_mmdc.c
+@@ -55,6 +55,7 @@ extern unsigned int ddr_low_rate;
+ extern unsigned int ddr_med_rate;
+ extern unsigned int ddr_normal_rate;
+ extern int low_bus_freq_mode;
++extern int audio_bus_freq_mode;
+ extern int mmdc_med_rate;
+ extern void __iomem *ccm_base;
+ extern void mx6_ddr_freq_change(u32 freq, void *ddr_settings, bool dll_mode, void *iomux_offsets);
+@@ -187,7 +188,7 @@ int update_ddr_freq(int ddr_rate)
+ 	if (ddr_rate == curr_ddr_rate)
+ 		return 0;
+ 
+-	if (low_bus_freq_mode)
++	if (low_bus_freq_mode || audio_bus_freq_mode)
+ 		dll_off = true;
+ 
+ 	iram_ddr_settings[0][0] = ddr_settings_size;
+-- 
+1.7.7.4
+

@@ -1,0 +1,45 @@
+From 26fdaae5e7112550f5ca75c5e4ee19b66f89ae82 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Tue, 21 Aug 2012 17:26:24 +0800
+Subject: [PATCH 1981/2463] ENGR00182456-2 HDMI AUDIO: register/unregister
+ when audio pcm open/close
+
+In this patch:
+
+1. Register substream into HDMI core driver when HDMI audio PCM is open.
+2. Unregister substream out of HDMI core driver when HDMI audio PCM is
+close.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ sound/soc/imx/imx-hdmi-dma.c |    7 +++++++
+ 1 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/imx/imx-hdmi-dma.c b/sound/soc/imx/imx-hdmi-dma.c
+index f0afcf1..70c8cb1 100644
+--- a/sound/soc/imx/imx-hdmi-dma.c
++++ b/sound/soc/imx/imx-hdmi-dma.c
+@@ -1195,6 +1195,12 @@ static int hdmi_dma_open(struct snd_pcm_substream *substream)
+ 		(int)clk_get_rate(hdmi_dma_priv->isfr_clk),
+ 		(int)clk_get_rate(hdmi_dma_priv->iahb_clk));
+ 
++	ret = mxc_hdmi_register_audio(substream);
++	if (ret < 0) {
++		pr_err("ERROR: HDMI is not ready!\n");
++		return ret;
++	}
++
+ 	hdmi_fifo_reset();
+ 
+ 	ret = snd_pcm_hw_constraint_integer(substream->runtime,
+@@ -1215,6 +1221,7 @@ static int hdmi_dma_close(struct snd_pcm_substream *substream)
+ 	struct imx_hdmi_dma_runtime_data *rtd = runtime->private_data;
+ 
+ 	hdmi_dma_irq_disable(rtd);
++	mxc_hdmi_unregister_audio(substream);
+ 
+ 	clk_disable(rtd->iahb_clk);
+ 	clk_disable(rtd->isfr_clk);
+-- 
+1.7.7.4
+

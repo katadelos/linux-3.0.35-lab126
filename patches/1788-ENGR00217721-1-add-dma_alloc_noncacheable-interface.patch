@@ -1,0 +1,57 @@
+From 9a1645d6af7305800f4de919669a6a94b7907ac7 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Fri, 20 Jul 2012 17:49:47 +0800
+Subject: [PATCH 1788/2463] ENGR00217721-1 add dma_alloc_noncacheable
+ interface
+
+arch/arm/include part
+
+- After USB driver prime a bulk transfer(whatever IN or OUT, take
+  OUT for example) on ep1, only one dTD is primed, an USB Interrupt
+  (bit 0 of USBSTS) will be issued, and find that endptcomplete
+  register is 0x2 which means an OUT transfer on ep1 is completed,
+  at this time the ep1 out queue head status is 0x1e18000, and next
+  dtd pointer is 0x1 which means transfer is done and everything is
+  OK, while the dTD token status is 0x2008080 which means this dTD
+  is still active, not completed yet.
+- Audio SDMA and Ethernet have the similar issue
+- root cause is not found yet
+- work around:
+  change the non-cacheable bufferable memory to non-cacheable
+  non-bufferable memory to make this issue disappear.
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ arch/arm/include/asm/dma-mapping.h |   16 ++++++++++++++++
+ 1 files changed, 16 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/include/asm/dma-mapping.h b/arch/arm/include/asm/dma-mapping.h
+index d9b4bad..b52c063 100644
+--- a/arch/arm/include/asm/dma-mapping.h
++++ b/arch/arm/include/asm/dma-mapping.h
+@@ -198,6 +198,22 @@ extern void *dma_alloc_coherent(struct device *, size_t, dma_addr_t *, gfp_t);
+  */
+ extern void *dma_alloc_writethrough(struct device *, size_t, dma_addr_t *, gfp_t);
+ 
++
++#ifdef CONFIG_FSL_UTP
++/**
++ * dma_alloc_noncacheable - allocate consistent memory for DMA
++ * @dev: valid struct device pointer, or NULL for ISA and EISA-like devices
++ * @size: required memory size
++ * @handle: bus-specific DMA address
++ *
++ * Allocate some noncacheable memory,  for a device for
++ * performing DMA.  This function allocates pages, and will
++ * return the CPU-viewed address, and sets @handle to be the
++ * device-viewed address.
++ */
++extern void *dma_alloc_noncacheable(struct device *, size_t, dma_addr_t *, gfp_t);
++#endif
++
+ /**
+  * dma_free_coherent - free memory allocated by dma_alloc_coherent
+  * @dev: valid struct device pointer, or NULL for ISA and EISA-like devices
+-- 
+1.7.7.4
+

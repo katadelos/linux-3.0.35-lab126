@@ -1,0 +1,56 @@
+From 2a3185e5a0baef71e82acbfda420502b0073f2b0 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.liu@freescale.com>
+Date: Wed, 30 Jan 2013 12:31:55 +0800
+Subject: [PATCH 2378/2463] ENGR00242214 IMX PWM:Correct duty cycle
+ calculation
+
+Since we've already reduced 2 cycles before writing PWMPR
+register, the real period cycle on PWMO is the value of
+period_cycles (before reducing 2). So, the following commit
+message of ENGR00170342, which changes the duty cycle
+calculation wrongly, is not reasonable:
+===================================================
+The chip document says the counter counts up to period_cycles + 1
+and then is reset to 0, so the actual period of the PWM wave is
+period_cycles + 2
+===================================================
+
+Revert "ENGR00170342 PWM: fix pwm output can't be set to 100% full duty"
+
+This reverts commit ac3711f7f24b94db9f78fd7e9bf134c2ecd025ab.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit b42be77aa7842834f0fb50924546701b668d7ab9)
+---
+ arch/arm/plat-mxc/pwm.c |    8 ++------
+ 1 files changed, 2 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/pwm.c b/arch/arm/plat-mxc/pwm.c
+index b683d2e..eb49057 100755
+--- a/arch/arm/plat-mxc/pwm.c
++++ b/arch/arm/plat-mxc/pwm.c
+@@ -6,7 +6,7 @@
+  * published by the Free Software Foundation.
+  *
+  * Derived from pxa PWM driver by eric miao <eric.miao@marvell.com>
+- * Copyright 2009-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2009-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ #include <linux/module.h>
+@@ -87,11 +87,7 @@ int pwm_config(struct pwm_device *pwm, int duty_ns, int period_ns)
+ 		prescale = period_cycles / 0x10000 + 1;
+ 
+ 		period_cycles /= prescale;
+-		/* the chip document says the counter counts up to
+-		 * period_cycles + 1 and then is reset to 0, so the
+-		 *  actual period of the PWM wave is period_cycles + 2
+-		 */
+-		c = (unsigned long long)(period_cycles + 2) * duty_ns;
++		c = (unsigned long long)period_cycles * duty_ns;
+ 		do_div(c, period_ns);
+ 		duty_cycles = c;
+ 
+-- 
+1.7.7.4
+

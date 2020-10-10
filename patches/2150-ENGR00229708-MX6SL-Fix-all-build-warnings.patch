@@ -1,0 +1,198 @@
+From e04ee6190b8e2344b59f9b14b9b4012cd0f52ebf Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Mon, 15 Oct 2012 10:52:08 -0500
+Subject: [PATCH 2150/2463] ENGR00229708 [MX6SL] Fix all build warnings.
+
+Fix all build warnings in files:
+arch/arm/mach-mx6/board-mx6sl_common.h
+arch/arm/mach-mx6/board-mx6sl_evk.c
+arch/arm/mach-mx6/clock_mx6sl.c
+arch/arm/mach-mx6/cpu_regulator-mx6.c
+arch/arm/mach-mx6/pm.c
+arch/arm/mach-mx6/system.c
+arch/arm/plat-mxc/dvfs_core.c
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_common.h |   29 -----------------------------
+ arch/arm/mach-mx6/board-mx6sl_evk.c    |   30 ++++++++++++++++++++++++++++++
+ arch/arm/mach-mx6/clock_mx6sl.c        |    1 -
+ arch/arm/mach-mx6/cpu_regulator-mx6.c  |    6 ++++--
+ arch/arm/mach-mx6/pm.c                 |    1 -
+ arch/arm/mach-mx6/system.c             |    2 +-
+ arch/arm/plat-mxc/dvfs_core.c          |    5 ++++-
+ 7 files changed, 39 insertions(+), 35 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_common.h b/arch/arm/mach-mx6/board-mx6sl_common.h
+index 4a04cbe..c432e0a 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_common.h
++++ b/arch/arm/mach-mx6/board-mx6sl_common.h
+@@ -389,40 +389,11 @@ static iomux_v3_cfg_t mx6sl_brd_spdc_disable_pads[] = {
+ 	MX6SL_PAD_EPDC_PWRWAKEUP__GPIO_2_14,
+ };
+ 
+-static iomux_v3_cfg_t mx6sl_brd_csi_enable_pads[] = {
+-	MX6SL_PAD_EPDC_GDRL__CSI_MCLK,
+-	MX6SL_PAD_EPDC_SDCE3__I2C3_SDA,
+-	MX6SL_PAD_EPDC_SDCE2__I2C3_SCL,
+-	MX6SL_PAD_EPDC_GDCLK__CSI_PIXCLK,
+-	MX6SL_PAD_EPDC_GDSP__CSI_VSYNC,
+-	MX6SL_PAD_EPDC_GDOE__CSI_HSYNC,
+-	MX6SL_PAD_EPDC_SDLE__CSI_D_9,
+-	MX6SL_PAD_EPDC_SDCLK__CSI_D_8,
+-	MX6SL_PAD_EPDC_D7__CSI_D_7,
+-	MX6SL_PAD_EPDC_D6__CSI_D_6,
+-	MX6SL_PAD_EPDC_D5__CSI_D_5,
+-	MX6SL_PAD_EPDC_D4__CSI_D_4,
+-	MX6SL_PAD_EPDC_D3__CSI_D_3,
+-	MX6SL_PAD_EPDC_D2__CSI_D_2,
+-	MX6SL_PAD_EPDC_D1__CSI_D_1,
+-	MX6SL_PAD_EPDC_D0__CSI_D_0,
+-
+-	MX6SL_PAD_EPDC_SDSHR__GPIO_1_26,	/* CMOS_RESET_B GPIO */
+-	MX6SL_PAD_EPDC_SDOE__GPIO_1_25,		/* CMOS_PWDN GPIO */
+-};
+-
+ static iomux_v3_cfg_t mx6sl_brd_elan_pads[] = {
+ 	MX6SL_PAD_EPDC_PWRCTRL3__GPIO_2_10,	/* INT */
+ 	MX6SL_PAD_EPDC_PWRCTRL2__GPIO_2_9,	/* CE */
+ 	MX6SL_PAD_KEY_COL6__GPIO_4_4,		/* RST */
+ };
+-	/* uart2 pins */
+-static iomux_v3_cfg_t mx6sl_uart2_pads[] = {
+-	MX6SL_PAD_SD2_DAT5__UART2_TXD,
+-	MX6SL_PAD_SD2_DAT4__UART2_RXD,
+-	MX6SL_PAD_SD2_DAT6__UART2_RTS,
+-	MX6SL_PAD_SD2_DAT7__UART2_CTS,
+-};
+ 
+ #define MX6SL_USDHC_8BIT_PAD_SETTING(id, speed)	\
+ mx6sl_sd##id##_##speed##mhz[] = {		\
+diff --git a/arch/arm/mach-mx6/board-mx6sl_evk.c b/arch/arm/mach-mx6/board-mx6sl_evk.c
+index 9bdd6c1..4c9c4d3 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_evk.c
++++ b/arch/arm/mach-mx6/board-mx6sl_evk.c
+@@ -86,6 +86,36 @@ extern int __init mx6sl_evk_init_pfuze100(u32 int_gpio);
+ 
+ static int csi_enabled;
+ 
++static iomux_v3_cfg_t mx6sl_brd_csi_enable_pads[] = {
++	MX6SL_PAD_EPDC_GDRL__CSI_MCLK,
++	MX6SL_PAD_EPDC_SDCE3__I2C3_SDA,
++	MX6SL_PAD_EPDC_SDCE2__I2C3_SCL,
++	MX6SL_PAD_EPDC_GDCLK__CSI_PIXCLK,
++	MX6SL_PAD_EPDC_GDSP__CSI_VSYNC,
++	MX6SL_PAD_EPDC_GDOE__CSI_HSYNC,
++	MX6SL_PAD_EPDC_SDLE__CSI_D_9,
++	MX6SL_PAD_EPDC_SDCLK__CSI_D_8,
++	MX6SL_PAD_EPDC_D7__CSI_D_7,
++	MX6SL_PAD_EPDC_D6__CSI_D_6,
++	MX6SL_PAD_EPDC_D5__CSI_D_5,
++	MX6SL_PAD_EPDC_D4__CSI_D_4,
++	MX6SL_PAD_EPDC_D3__CSI_D_3,
++	MX6SL_PAD_EPDC_D2__CSI_D_2,
++	MX6SL_PAD_EPDC_D1__CSI_D_1,
++	MX6SL_PAD_EPDC_D0__CSI_D_0,
++
++	MX6SL_PAD_EPDC_SDSHR__GPIO_1_26,	/* CMOS_RESET_B GPIO */
++	MX6SL_PAD_EPDC_SDOE__GPIO_1_25,		/* CMOS_PWDN GPIO */
++};
++
++/* uart2 pins */
++static iomux_v3_cfg_t mx6sl_uart2_pads[] = {
++	MX6SL_PAD_SD2_DAT5__UART2_TXD,
++	MX6SL_PAD_SD2_DAT4__UART2_RXD,
++	MX6SL_PAD_SD2_DAT6__UART2_RTS,
++	MX6SL_PAD_SD2_DAT7__UART2_CTS,
++};
++
+ enum sd_pad_mode {
+ 	SD_PAD_MODE_LOW_SPEED,
+ 	SD_PAD_MODE_MED_SPEED,
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index a18427c..544b995 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -101,7 +101,6 @@ DEFINE_SPINLOCK(mx6sl_clk_lock);
+ 	u32 gpt_ticks; \
+ 	u32 gpt_cnt; \
+ 	u32 reg; \
+-	unsigned long flags; \
+ 	int result = 1; \
+ 	gpt_rate = clk_get_rate(&gpt_clk[0]); \
+ 	gpt_ticks = timeout / (1000000000 / gpt_rate); \
+diff --git a/arch/arm/mach-mx6/cpu_regulator-mx6.c b/arch/arm/mach-mx6/cpu_regulator-mx6.c
+index 5019f8b..8eb976d 100644
+--- a/arch/arm/mach-mx6/cpu_regulator-mx6.c
++++ b/arch/arm/mach-mx6/cpu_regulator-mx6.c
+@@ -62,7 +62,9 @@ void mx6_cpu_regulator_init(void)
+ {
+ 	int cpu;
+ 	u32 curr_cpu = 0;
+-
++#ifndef CONFIG_SMP
++	unsigned long old_loops_per_jiffy;
++#endif
+ 	external_pureg = 0;
+ 	cpu_regulator = regulator_get(NULL, gp_reg_id);
+ 	if (IS_ERR(cpu_regulator))
+@@ -90,7 +92,7 @@ void mx6_cpu_regulator_init(void)
+ 					curr_cpu / 1000,
+ 					clk_get_rate(cpu_clk) / 1000);
+ #else
+-			u32 old_loops_per_jiffy = loops_per_jiffy;
++			old_loops_per_jiffy = loops_per_jiffy;
+ 
+ 			loops_per_jiffy =
+ 				mx6_cpu_jiffies(old_loops_per_jiffy,
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index 2308e33..d788931 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -72,7 +72,6 @@
+ static struct clk *cpu_clk;
+ static struct clk *axi_clk;
+ static struct clk *periph_clk;
+-static struct clk *axi_org_parent;
+ static struct clk *pll3_usb_otg_main_clk;
+ 
+ static struct pm_platform_data *pm_data;
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 0e4b534..1c37bac 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -86,7 +86,7 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 
+ 	int stop_mode = 0;
+ 	void __iomem *anatop_base = IO_ADDRESS(ANATOP_BASE_ADDR);
+-	u32 ccm_clpcr, anatop_val, reg;
++	u32 ccm_clpcr, anatop_val;
+ 
+ 	ccm_clpcr = __raw_readl(MXC_CCM_CLPCR) & ~(MXC_CCM_CLPCR_LPM_MASK);
+ 
+diff --git a/arch/arm/plat-mxc/dvfs_core.c b/arch/arm/plat-mxc/dvfs_core.c
+index a4a15482..b5cfba1 100755
+--- a/arch/arm/plat-mxc/dvfs_core.c
++++ b/arch/arm/plat-mxc/dvfs_core.c
+@@ -722,6 +722,9 @@ void stop_dvfs(void)
+ 	unsigned long flags;
+ 	u32 curr_cpu;
+ 	int cpu;
++#ifndef CONFIG_SMP
++	unsigned long old_loops_per_jiffy;
++#endif
+ 
+ 	if (dvfs_core_is_active) {
+ 
+@@ -752,7 +755,7 @@ void stop_dvfs(void)
+ 				dvfs_cpu_jiffies(per_cpu(cpu_data, cpu).loops_per_jiffy,
+ 					curr_cpu/1000, clk_get_rate(cpu_clk) / 1000);
+ #else
+-		u32 old_loops_per_jiffy = loops_per_jiffy;
++		old_loops_per_jiffy = loops_per_jiffy;
+ 
+ 		loops_per_jiffy =
+ 			dvfs_cpu_jiffies(old_loops_per_jiffy,
+-- 
+1.7.7.4
+

@@ -1,0 +1,44 @@
+From fb4b5a097f844905ec703d48fb4fc337df7eb9a0 Mon Sep 17 00:00:00 2001
+From: Sheng Nan <b38800@freescale.com>
+Date: Mon, 15 Oct 2012 18:00:10 +0800
+Subject: [PATCH 2152/2463] ENGR00224964-2 IPU: Capture: change csi disable
+ sequence
+
+The recommended sequence for disable csi is,
+disable csi as soon as we get IDMAC eof interrupt.
+
+- add wait for eof when disable csi.
+- don't wait for eof when disable CSI-->MEM channel.
+
+Signed-off-by: Sheng Nan <b38800@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c |    6 ++----
+ 1 files changed, 2 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 877f2e5..92703f3 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -2179,10 +2179,7 @@ int32_t ipu_disable_channel(struct ipu_soc *ipu, ipu_channel_t channel, bool wai
+ 				}
+ 			}
+ 		}
+-	} else if ((channel == CSI_MEM0) || (channel == CSI_MEM1) ||
+-			(channel == CSI_MEM2) || (channel == CSI_MEM3))
+-		_ipu_csi_wait4eof(ipu, channel);
+-	else if (wait_for_stop) {
++	} else if (wait_for_stop && !_ipu_is_smfc_chan(out_dma)) {
+ 		while (idma_is_set(ipu, IDMAC_CHA_BUSY, in_dma) ||
+ 		       idma_is_set(ipu, IDMAC_CHA_BUSY, out_dma) ||
+ 			(ipu->sec_chan_en[IPU_CHAN_ID(channel)] &&
+@@ -2361,6 +2358,7 @@ int32_t ipu_disable_csi(struct ipu_soc *ipu, uint32_t csi)
+ 	mutex_lock(&ipu->mutex_lock);
+ 	ipu->csi_use_count[csi]--;
+ 	if (ipu->csi_use_count[csi] == 0) {
++		_ipu_csi_wait4eof(ipu, ipu->csi_channel[csi]);
+ 		reg = ipu_cm_read(ipu, IPU_CONF);
+ 		if (csi == 0)
+ 			ipu_cm_write(ipu, reg & ~IPU_CONF_CSI0_EN, IPU_CONF);
+-- 
+1.7.7.4
+

@@ -1,0 +1,540 @@
+From 61ecafced91c3840df8bb31ca37f0f0d56a6da44 Mon Sep 17 00:00:00 2001
+From: Catalin Marinas <catalin.marinas@arm.com>
+Date: Wed, 25 Jan 2012 11:38:13 +0100
+Subject: [PATCH 1275/2463] ARM: 7301/1: Rename the T() macro to TUSER() to
+ avoid namespace conflicts
+
+This macro is used to generate unprivileged accesses (LDRT/STRT) to user
+space.
+
+Signed-off-by: Catalin Marinas <catalin.marinas@arm.com>
+Acked-by: Nicolas Pitre <nico@linaro.org>
+Signed-off-by: Russell King <rmk+kernel@arm.linux.org.uk>
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/include/asm/assembler.h |    4 +-
+ arch/arm/include/asm/domain.h    |    8 ++--
+ arch/arm/include/asm/futex.h     |    8 ++--
+ arch/arm/include/asm/uaccess.h   |   16 ++++----
+ arch/arm/lib/getuser.S           |   12 +++---
+ arch/arm/lib/putuser.S           |   28 ++++++------
+ arch/arm/lib/uaccess.S           |   82 +++++++++++++++++++-------------------
+ 7 files changed, 79 insertions(+), 79 deletions(-)
+
+diff --git a/arch/arm/include/asm/assembler.h b/arch/arm/include/asm/assembler.h
+index 4e25f18..d42a18b 100644
+--- a/arch/arm/include/asm/assembler.h
++++ b/arch/arm/include/asm/assembler.h
+@@ -231,7 +231,7 @@
+  */
+ #ifdef CONFIG_THUMB2_KERNEL
+ 
+-	.macro	usraccoff, instr, reg, ptr, inc, off, cond, abort, t=T()
++	.macro	usraccoff, instr, reg, ptr, inc, off, cond, abort, t=TUSER()
+ 9999:
+ 	.if	\inc == 1
+ 	\instr\cond\()b\()\t\().w \reg, [\ptr, #\off]
+@@ -271,7 +271,7 @@
+ 
+ #else	/* !CONFIG_THUMB2_KERNEL */
+ 
+-	.macro	usracc, instr, reg, ptr, inc, cond, rept, abort, t=T()
++	.macro	usracc, instr, reg, ptr, inc, cond, rept, abort, t=TUSER()
+ 	.rept	\rept
+ 9999:
+ 	.if	\inc == 1
+diff --git a/arch/arm/include/asm/domain.h b/arch/arm/include/asm/domain.h
+index af18cea..b5dc173 100644
+--- a/arch/arm/include/asm/domain.h
++++ b/arch/arm/include/asm/domain.h
+@@ -83,9 +83,9 @@
+  * instructions (inline assembly)
+  */
+ #ifdef CONFIG_CPU_USE_DOMAINS
+-#define T(instr)	#instr "t"
++#define TUSER(instr)	#instr "t"
+ #else
+-#define T(instr)	#instr
++#define TUSER(instr)	#instr
+ #endif
+ 
+ #else /* __ASSEMBLY__ */
+@@ -95,9 +95,9 @@
+  * instructions
+  */
+ #ifdef CONFIG_CPU_USE_DOMAINS
+-#define T(instr)	instr ## t
++#define TUSER(instr)	instr ## t
+ #else
+-#define T(instr)	instr
++#define TUSER(instr)	instr
+ #endif
+ 
+ #endif /* __ASSEMBLY__ */
+diff --git a/arch/arm/include/asm/futex.h b/arch/arm/include/asm/futex.h
+index 253cc86..7be5469 100644
+--- a/arch/arm/include/asm/futex.h
++++ b/arch/arm/include/asm/futex.h
+@@ -75,9 +75,9 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
+ 
+ #define __futex_atomic_op(insn, ret, oldval, tmp, uaddr, oparg)	\
+ 	__asm__ __volatile__(					\
+-	"1:	" T(ldr) "	%1, [%3]\n"			\
++	"1:	" TUSER(ldr) "	%1, [%3]\n"			\
+ 	"	" insn "\n"					\
+-	"2:	" T(str) "	%0, [%3]\n"			\
++	"2:	" TUSER(str) "	%0, [%3]\n"			\
+ 	"	mov	%0, #0\n"				\
+ 	__futex_atomic_ex_table("%5")				\
+ 	: "=&r" (ret), "=&r" (oldval), "=&r" (tmp)		\
+@@ -95,10 +95,10 @@ futex_atomic_cmpxchg_inatomic(u32 *uval, u32 __user *uaddr,
+ 		return -EFAULT;
+ 
+ 	__asm__ __volatile__("@futex_atomic_cmpxchg_inatomic\n"
+-	"1:	" T(ldr) "	%1, [%4]\n"
++	"1:	" TUSER(ldr) "	%1, [%4]\n"
+ 	"	teq	%1, %2\n"
+ 	"	it	eq	@ explicit IT needed for the 2b label\n"
+-	"2:	" T(streq) "	%3, [%4]\n"
++	"2:	" TUSER(streq) "	%3, [%4]\n"
+ 	__futex_atomic_ex_table("%5")
+ 	: "+r" (ret), "=&r" (val)
+ 	: "r" (oldval), "r" (newval), "r" (uaddr), "Ir" (-EFAULT)
+diff --git a/arch/arm/include/asm/uaccess.h b/arch/arm/include/asm/uaccess.h
+index b293616..2958976 100644
+--- a/arch/arm/include/asm/uaccess.h
++++ b/arch/arm/include/asm/uaccess.h
+@@ -227,7 +227,7 @@ do {									\
+ 
+ #define __get_user_asm_byte(x,addr,err)				\
+ 	__asm__ __volatile__(					\
+-	"1:	" T(ldrb) "	%1,[%2],#0\n"			\
++	"1:	" TUSER(ldrb) "	%1,[%2],#0\n"			\
+ 	"2:\n"							\
+ 	"	.pushsection .fixup,\"ax\"\n"			\
+ 	"	.align	2\n"					\
+@@ -263,7 +263,7 @@ do {									\
+ 
+ #define __get_user_asm_word(x,addr,err)				\
+ 	__asm__ __volatile__(					\
+-	"1:	" T(ldr) "	%1,[%2],#0\n"			\
++	"1:	" TUSER(ldr) "	%1,[%2],#0\n"			\
+ 	"2:\n"							\
+ 	"	.pushsection .fixup,\"ax\"\n"			\
+ 	"	.align	2\n"					\
+@@ -308,7 +308,7 @@ do {									\
+ 
+ #define __put_user_asm_byte(x,__pu_addr,err)			\
+ 	__asm__ __volatile__(					\
+-	"1:	" T(strb) "	%1,[%2],#0\n"			\
++	"1:	" TUSER(strb) "	%1,[%2],#0\n"			\
+ 	"2:\n"							\
+ 	"	.pushsection .fixup,\"ax\"\n"			\
+ 	"	.align	2\n"					\
+@@ -341,7 +341,7 @@ do {									\
+ 
+ #define __put_user_asm_word(x,__pu_addr,err)			\
+ 	__asm__ __volatile__(					\
+-	"1:	" T(str) "	%1,[%2],#0\n"			\
++	"1:	" TUSER(str) "	%1,[%2],#0\n"			\
+ 	"2:\n"							\
+ 	"	.pushsection .fixup,\"ax\"\n"			\
+ 	"	.align	2\n"					\
+@@ -366,10 +366,10 @@ do {									\
+ 
+ #define __put_user_asm_dword(x,__pu_addr,err)			\
+ 	__asm__ __volatile__(					\
+- ARM(	"1:	" T(str) "	" __reg_oper1 ", [%1], #4\n"	)	\
+- ARM(	"2:	" T(str) "	" __reg_oper0 ", [%1]\n"	)	\
+- THUMB(	"1:	" T(str) "	" __reg_oper1 ", [%1]\n"	)	\
+- THUMB(	"2:	" T(str) "	" __reg_oper0 ", [%1, #4]\n"	)	\
++ ARM(	"1:	" TUSER(str) "	" __reg_oper1 ", [%1], #4\n"	) \
++ ARM(	"2:	" TUSER(str) "	" __reg_oper0 ", [%1]\n"	) \
++ THUMB(	"1:	" TUSER(str) "	" __reg_oper1 ", [%1]\n"	) \
++ THUMB(	"2:	" TUSER(str) "	" __reg_oper0 ", [%1, #4]\n"	) \
+ 	"3:\n"							\
+ 	"	.pushsection .fixup,\"ax\"\n"			\
+ 	"	.align	2\n"					\
+diff --git a/arch/arm/lib/getuser.S b/arch/arm/lib/getuser.S
+index 1b049cd..11093a7 100644
+--- a/arch/arm/lib/getuser.S
++++ b/arch/arm/lib/getuser.S
+@@ -31,18 +31,18 @@
+ #include <asm/domain.h>
+ 
+ ENTRY(__get_user_1)
+-1:	T(ldrb)	r2, [r0]
++1: TUSER(ldrb)	r2, [r0]
+ 	mov	r0, #0
+ 	mov	pc, lr
+ ENDPROC(__get_user_1)
+ 
+ ENTRY(__get_user_2)
+ #ifdef CONFIG_THUMB2_KERNEL
+-2:	T(ldrb)	r2, [r0]
+-3:	T(ldrb)	r3, [r0, #1]
++2: TUSER(ldrb)	r2, [r0]
++3: TUSER(ldrb)	r3, [r0, #1]
+ #else
+-2:	T(ldrb)	r2, [r0], #1
+-3:	T(ldrb)	r3, [r0]
++2: TUSER(ldrb)	r2, [r0], #1
++3: TUSER(ldrb)	r3, [r0]
+ #endif
+ #ifndef __ARMEB__
+ 	orr	r2, r2, r3, lsl #8
+@@ -54,7 +54,7 @@ ENTRY(__get_user_2)
+ ENDPROC(__get_user_2)
+ 
+ ENTRY(__get_user_4)
+-4:	T(ldr)	r2, [r0]
++4: TUSER(ldr)	r2, [r0]
+ 	mov	r0, #0
+ 	mov	pc, lr
+ ENDPROC(__get_user_4)
+diff --git a/arch/arm/lib/putuser.S b/arch/arm/lib/putuser.S
+index c023fc1..7db2599 100644
+--- a/arch/arm/lib/putuser.S
++++ b/arch/arm/lib/putuser.S
+@@ -31,7 +31,7 @@
+ #include <asm/domain.h>
+ 
+ ENTRY(__put_user_1)
+-1:	T(strb)	r2, [r0]
++1: TUSER(strb)	r2, [r0]
+ 	mov	r0, #0
+ 	mov	pc, lr
+ ENDPROC(__put_user_1)
+@@ -40,19 +40,19 @@ ENTRY(__put_user_2)
+ 	mov	ip, r2, lsr #8
+ #ifdef CONFIG_THUMB2_KERNEL
+ #ifndef __ARMEB__
+-2:	T(strb)	r2, [r0]
+-3:	T(strb)	ip, [r0, #1]
++2: TUSER(strb)	r2, [r0]
++3: TUSER(strb)	ip, [r0, #1]
+ #else
+-2:	T(strb)	ip, [r0]
+-3:	T(strb)	r2, [r0, #1]
++2: TUSER(strb)	ip, [r0]
++3: TUSER(strb)	r2, [r0, #1]
+ #endif
+ #else	/* !CONFIG_THUMB2_KERNEL */
+ #ifndef __ARMEB__
+-2:	T(strb)	r2, [r0], #1
+-3:	T(strb)	ip, [r0]
++2: TUSER(strb)	r2, [r0], #1
++3: TUSER(strb)	ip, [r0]
+ #else
+-2:	T(strb)	ip, [r0], #1
+-3:	T(strb)	r2, [r0]
++2: TUSER(strb)	ip, [r0], #1
++3: TUSER(strb)	r2, [r0]
+ #endif
+ #endif	/* CONFIG_THUMB2_KERNEL */
+ 	mov	r0, #0
+@@ -60,18 +60,18 @@ ENTRY(__put_user_2)
+ ENDPROC(__put_user_2)
+ 
+ ENTRY(__put_user_4)
+-4:	T(str)	r2, [r0]
++4: TUSER(str)	r2, [r0]
+ 	mov	r0, #0
+ 	mov	pc, lr
+ ENDPROC(__put_user_4)
+ 
+ ENTRY(__put_user_8)
+ #ifdef CONFIG_THUMB2_KERNEL
+-5:	T(str)	r2, [r0]
+-6:	T(str)	r3, [r0, #4]
++5: TUSER(str)	r2, [r0]
++6: TUSER(str)	r3, [r0, #4]
+ #else
+-5:	T(str)	r2, [r0], #4
+-6:	T(str)	r3, [r0]
++5: TUSER(str)	r2, [r0], #4
++6: TUSER(str)	r3, [r0]
+ #endif
+ 	mov	r0, #0
+ 	mov	pc, lr
+diff --git a/arch/arm/lib/uaccess.S b/arch/arm/lib/uaccess.S
+index d0ece2a..5c908b1 100644
+--- a/arch/arm/lib/uaccess.S
++++ b/arch/arm/lib/uaccess.S
+@@ -32,11 +32,11 @@
+ 		rsb	ip, ip, #4
+ 		cmp	ip, #2
+ 		ldrb	r3, [r1], #1
+-USER(		T(strb)	r3, [r0], #1)			@ May fault
++USER(	TUSER(	strb)	r3, [r0], #1)			@ May fault
+ 		ldrgeb	r3, [r1], #1
+-USER(		T(strgeb) r3, [r0], #1)			@ May fault
++USER(	TUSER(	strgeb) r3, [r0], #1)			@ May fault
+ 		ldrgtb	r3, [r1], #1
+-USER(		T(strgtb) r3, [r0], #1)			@ May fault
++USER(	TUSER(	strgtb) r3, [r0], #1)			@ May fault
+ 		sub	r2, r2, ip
+ 		b	.Lc2u_dest_aligned
+ 
+@@ -59,7 +59,7 @@ ENTRY(__copy_to_user)
+ 		addmi	ip, r2, #4
+ 		bmi	.Lc2u_0nowords
+ 		ldr	r3, [r1], #4
+-USER(		T(str)	r3, [r0], #4)			@ May fault
++USER(	TUSER(	str)	r3, [r0], #4)			@ May fault
+ 		mov	ip, r0, lsl #32 - PAGE_SHIFT	@ On each page, use a ld/st??t instruction
+ 		rsb	ip, ip, #0
+ 		movs	ip, ip, lsr #32 - PAGE_SHIFT
+@@ -88,18 +88,18 @@ USER(		T(str)	r3, [r0], #4)			@ May fault
+ 		stmneia	r0!, {r3 - r4}			@ Shouldnt fault
+ 		tst	ip, #4
+ 		ldrne	r3, [r1], #4
+-		T(strne) r3, [r0], #4			@ Shouldnt fault
++	TUSER(	strne) r3, [r0], #4			@ Shouldnt fault
+ 		ands	ip, ip, #3
+ 		beq	.Lc2u_0fupi
+ .Lc2u_0nowords:	teq	ip, #0
+ 		beq	.Lc2u_finished
+ .Lc2u_nowords:	cmp	ip, #2
+ 		ldrb	r3, [r1], #1
+-USER(		T(strb)	r3, [r0], #1)			@ May fault
++USER(	TUSER(	strb)	r3, [r0], #1)			@ May fault
+ 		ldrgeb	r3, [r1], #1
+-USER(		T(strgeb) r3, [r0], #1)			@ May fault
++USER(	TUSER(	strgeb) r3, [r0], #1)			@ May fault
+ 		ldrgtb	r3, [r1], #1
+-USER(		T(strgtb) r3, [r0], #1)			@ May fault
++USER(	TUSER(	strgtb) r3, [r0], #1)			@ May fault
+ 		b	.Lc2u_finished
+ 
+ .Lc2u_not_enough:
+@@ -120,7 +120,7 @@ USER(		T(strgtb) r3, [r0], #1)			@ May fault
+ 		mov	r3, r7, pull #8
+ 		ldr	r7, [r1], #4
+ 		orr	r3, r3, r7, push #24
+-USER(		T(str)	r3, [r0], #4)			@ May fault
++USER(	TUSER(	str)	r3, [r0], #4)			@ May fault
+ 		mov	ip, r0, lsl #32 - PAGE_SHIFT
+ 		rsb	ip, ip, #0
+ 		movs	ip, ip, lsr #32 - PAGE_SHIFT
+@@ -155,18 +155,18 @@ USER(		T(str)	r3, [r0], #4)			@ May fault
+ 		movne	r3, r7, pull #8
+ 		ldrne	r7, [r1], #4
+ 		orrne	r3, r3, r7, push #24
+-		T(strne) r3, [r0], #4			@ Shouldnt fault
++	TUSER(	strne) r3, [r0], #4			@ Shouldnt fault
+ 		ands	ip, ip, #3
+ 		beq	.Lc2u_1fupi
+ .Lc2u_1nowords:	mov	r3, r7, get_byte_1
+ 		teq	ip, #0
+ 		beq	.Lc2u_finished
+ 		cmp	ip, #2
+-USER(		T(strb)	r3, [r0], #1)			@ May fault
++USER(	TUSER(	strb)	r3, [r0], #1)			@ May fault
+ 		movge	r3, r7, get_byte_2
+-USER(		T(strgeb) r3, [r0], #1)			@ May fault
++USER(	TUSER(	strgeb) r3, [r0], #1)			@ May fault
+ 		movgt	r3, r7, get_byte_3
+-USER(		T(strgtb) r3, [r0], #1)			@ May fault
++USER(	TUSER(	strgtb) r3, [r0], #1)			@ May fault
+ 		b	.Lc2u_finished
+ 
+ .Lc2u_2fupi:	subs	r2, r2, #4
+@@ -175,7 +175,7 @@ USER(		T(strgtb) r3, [r0], #1)			@ May fault
+ 		mov	r3, r7, pull #16
+ 		ldr	r7, [r1], #4
+ 		orr	r3, r3, r7, push #16
+-USER(		T(str)	r3, [r0], #4)			@ May fault
++USER(	TUSER(	str)	r3, [r0], #4)			@ May fault
+ 		mov	ip, r0, lsl #32 - PAGE_SHIFT
+ 		rsb	ip, ip, #0
+ 		movs	ip, ip, lsr #32 - PAGE_SHIFT
+@@ -210,18 +210,18 @@ USER(		T(str)	r3, [r0], #4)			@ May fault
+ 		movne	r3, r7, pull #16
+ 		ldrne	r7, [r1], #4
+ 		orrne	r3, r3, r7, push #16
+-		T(strne) r3, [r0], #4			@ Shouldnt fault
++	TUSER(	strne) r3, [r0], #4			@ Shouldnt fault
+ 		ands	ip, ip, #3
+ 		beq	.Lc2u_2fupi
+ .Lc2u_2nowords:	mov	r3, r7, get_byte_2
+ 		teq	ip, #0
+ 		beq	.Lc2u_finished
+ 		cmp	ip, #2
+-USER(		T(strb)	r3, [r0], #1)			@ May fault
++USER(	TUSER(	strb)	r3, [r0], #1)			@ May fault
+ 		movge	r3, r7, get_byte_3
+-USER(		T(strgeb) r3, [r0], #1)			@ May fault
++USER(	TUSER(	strgeb) r3, [r0], #1)			@ May fault
+ 		ldrgtb	r3, [r1], #0
+-USER(		T(strgtb) r3, [r0], #1)			@ May fault
++USER(	TUSER(	strgtb) r3, [r0], #1)			@ May fault
+ 		b	.Lc2u_finished
+ 
+ .Lc2u_3fupi:	subs	r2, r2, #4
+@@ -230,7 +230,7 @@ USER(		T(strgtb) r3, [r0], #1)			@ May fault
+ 		mov	r3, r7, pull #24
+ 		ldr	r7, [r1], #4
+ 		orr	r3, r3, r7, push #8
+-USER(		T(str)	r3, [r0], #4)			@ May fault
++USER(	TUSER(	str)	r3, [r0], #4)			@ May fault
+ 		mov	ip, r0, lsl #32 - PAGE_SHIFT
+ 		rsb	ip, ip, #0
+ 		movs	ip, ip, lsr #32 - PAGE_SHIFT
+@@ -265,18 +265,18 @@ USER(		T(str)	r3, [r0], #4)			@ May fault
+ 		movne	r3, r7, pull #24
+ 		ldrne	r7, [r1], #4
+ 		orrne	r3, r3, r7, push #8
+-		T(strne) r3, [r0], #4			@ Shouldnt fault
++	TUSER(	strne) r3, [r0], #4			@ Shouldnt fault
+ 		ands	ip, ip, #3
+ 		beq	.Lc2u_3fupi
+ .Lc2u_3nowords:	mov	r3, r7, get_byte_3
+ 		teq	ip, #0
+ 		beq	.Lc2u_finished
+ 		cmp	ip, #2
+-USER(		T(strb)	r3, [r0], #1)			@ May fault
++USER(	TUSER(	strb)	r3, [r0], #1)			@ May fault
+ 		ldrgeb	r3, [r1], #1
+-USER(		T(strgeb) r3, [r0], #1)			@ May fault
++USER(	TUSER(	strgeb) r3, [r0], #1)			@ May fault
+ 		ldrgtb	r3, [r1], #0
+-USER(		T(strgtb) r3, [r0], #1)			@ May fault
++USER(	TUSER(	strgtb) r3, [r0], #1)			@ May fault
+ 		b	.Lc2u_finished
+ ENDPROC(__copy_to_user)
+ 
+@@ -295,11 +295,11 @@ ENDPROC(__copy_to_user)
+ .Lcfu_dest_not_aligned:
+ 		rsb	ip, ip, #4
+ 		cmp	ip, #2
+-USER(		T(ldrb)	r3, [r1], #1)			@ May fault
++USER(	TUSER(	ldrb)	r3, [r1], #1)			@ May fault
+ 		strb	r3, [r0], #1
+-USER(		T(ldrgeb) r3, [r1], #1)			@ May fault
++USER(	TUSER(	ldrgeb) r3, [r1], #1)			@ May fault
+ 		strgeb	r3, [r0], #1
+-USER(		T(ldrgtb) r3, [r1], #1)			@ May fault
++USER(	TUSER(	ldrgtb) r3, [r1], #1)			@ May fault
+ 		strgtb	r3, [r0], #1
+ 		sub	r2, r2, ip
+ 		b	.Lcfu_dest_aligned
+@@ -322,7 +322,7 @@ ENTRY(__copy_from_user)
+ .Lcfu_0fupi:	subs	r2, r2, #4
+ 		addmi	ip, r2, #4
+ 		bmi	.Lcfu_0nowords
+-USER(		T(ldr)	r3, [r1], #4)
++USER(	TUSER(	ldr)	r3, [r1], #4)
+ 		str	r3, [r0], #4
+ 		mov	ip, r1, lsl #32 - PAGE_SHIFT	@ On each page, use a ld/st??t instruction
+ 		rsb	ip, ip, #0
+@@ -351,18 +351,18 @@ USER(		T(ldr)	r3, [r1], #4)
+ 		ldmneia	r1!, {r3 - r4}			@ Shouldnt fault
+ 		stmneia	r0!, {r3 - r4}
+ 		tst	ip, #4
+-		T(ldrne) r3, [r1], #4			@ Shouldnt fault
++	TUSER(	ldrne) r3, [r1], #4			@ Shouldnt fault
+ 		strne	r3, [r0], #4
+ 		ands	ip, ip, #3
+ 		beq	.Lcfu_0fupi
+ .Lcfu_0nowords:	teq	ip, #0
+ 		beq	.Lcfu_finished
+ .Lcfu_nowords:	cmp	ip, #2
+-USER(		T(ldrb)	r3, [r1], #1)			@ May fault
++USER(	TUSER(	ldrb)	r3, [r1], #1)			@ May fault
+ 		strb	r3, [r0], #1
+-USER(		T(ldrgeb) r3, [r1], #1)			@ May fault
++USER(	TUSER(	ldrgeb) r3, [r1], #1)			@ May fault
+ 		strgeb	r3, [r0], #1
+-USER(		T(ldrgtb) r3, [r1], #1)			@ May fault
++USER(	TUSER(	ldrgtb) r3, [r1], #1)			@ May fault
+ 		strgtb	r3, [r0], #1
+ 		b	.Lcfu_finished
+ 
+@@ -375,7 +375,7 @@ USER(		T(ldrgtb) r3, [r1], #1)			@ May fault
+ 
+ .Lcfu_src_not_aligned:
+ 		bic	r1, r1, #3
+-USER(		T(ldr)	r7, [r1], #4)			@ May fault
++USER(	TUSER(	ldr)	r7, [r1], #4)			@ May fault
+ 		cmp	ip, #2
+ 		bgt	.Lcfu_3fupi
+ 		beq	.Lcfu_2fupi
+@@ -383,7 +383,7 @@ USER(		T(ldr)	r7, [r1], #4)			@ May fault
+ 		addmi	ip, r2, #4
+ 		bmi	.Lcfu_1nowords
+ 		mov	r3, r7, pull #8
+-USER(		T(ldr)	r7, [r1], #4)			@ May fault
++USER(	TUSER(	ldr)	r7, [r1], #4)			@ May fault
+ 		orr	r3, r3, r7, push #24
+ 		str	r3, [r0], #4
+ 		mov	ip, r1, lsl #32 - PAGE_SHIFT
+@@ -418,7 +418,7 @@ USER(		T(ldr)	r7, [r1], #4)			@ May fault
+ 		stmneia	r0!, {r3 - r4}
+ 		tst	ip, #4
+ 		movne	r3, r7, pull #8
+-USER(		T(ldrne) r7, [r1], #4)			@ May fault
++USER(	TUSER(	ldrne) r7, [r1], #4)			@ May fault
+ 		orrne	r3, r3, r7, push #24
+ 		strne	r3, [r0], #4
+ 		ands	ip, ip, #3
+@@ -438,7 +438,7 @@ USER(		T(ldrne) r7, [r1], #4)			@ May fault
+ 		addmi	ip, r2, #4
+ 		bmi	.Lcfu_2nowords
+ 		mov	r3, r7, pull #16
+-USER(		T(ldr)	r7, [r1], #4)			@ May fault
++USER(	TUSER(	ldr)	r7, [r1], #4)			@ May fault
+ 		orr	r3, r3, r7, push #16
+ 		str	r3, [r0], #4
+ 		mov	ip, r1, lsl #32 - PAGE_SHIFT
+@@ -474,7 +474,7 @@ USER(		T(ldr)	r7, [r1], #4)			@ May fault
+ 		stmneia	r0!, {r3 - r4}
+ 		tst	ip, #4
+ 		movne	r3, r7, pull #16
+-USER(		T(ldrne) r7, [r1], #4)			@ May fault
++USER(	TUSER(	ldrne) r7, [r1], #4)			@ May fault
+ 		orrne	r3, r3, r7, push #16
+ 		strne	r3, [r0], #4
+ 		ands	ip, ip, #3
+@@ -486,7 +486,7 @@ USER(		T(ldrne) r7, [r1], #4)			@ May fault
+ 		strb	r3, [r0], #1
+ 		movge	r3, r7, get_byte_3
+ 		strgeb	r3, [r0], #1
+-USER(		T(ldrgtb) r3, [r1], #0)			@ May fault
++USER(	TUSER(	ldrgtb) r3, [r1], #0)			@ May fault
+ 		strgtb	r3, [r0], #1
+ 		b	.Lcfu_finished
+ 
+@@ -494,7 +494,7 @@ USER(		T(ldrgtb) r3, [r1], #0)			@ May fault
+ 		addmi	ip, r2, #4
+ 		bmi	.Lcfu_3nowords
+ 		mov	r3, r7, pull #24
+-USER(		T(ldr)	r7, [r1], #4)			@ May fault
++USER(	TUSER(	ldr)	r7, [r1], #4)			@ May fault
+ 		orr	r3, r3, r7, push #8
+ 		str	r3, [r0], #4
+ 		mov	ip, r1, lsl #32 - PAGE_SHIFT
+@@ -529,7 +529,7 @@ USER(		T(ldr)	r7, [r1], #4)			@ May fault
+ 		stmneia	r0!, {r3 - r4}
+ 		tst	ip, #4
+ 		movne	r3, r7, pull #24
+-USER(		T(ldrne) r7, [r1], #4)			@ May fault
++USER(	TUSER(	ldrne) r7, [r1], #4)			@ May fault
+ 		orrne	r3, r3, r7, push #8
+ 		strne	r3, [r0], #4
+ 		ands	ip, ip, #3
+@@ -539,9 +539,9 @@ USER(		T(ldrne) r7, [r1], #4)			@ May fault
+ 		beq	.Lcfu_finished
+ 		cmp	ip, #2
+ 		strb	r3, [r0], #1
+-USER(		T(ldrgeb) r3, [r1], #1)			@ May fault
++USER(	TUSER(	ldrgeb) r3, [r1], #1)			@ May fault
+ 		strgeb	r3, [r0], #1
+-USER(		T(ldrgtb) r3, [r1], #1)			@ May fault
++USER(	TUSER(	ldrgtb) r3, [r1], #1)			@ May fault
+ 		strgtb	r3, [r0], #1
+ 		b	.Lcfu_finished
+ ENDPROC(__copy_from_user)
+-- 
+1.7.7.4
+

@@ -1,0 +1,45 @@
+From ae5710406b986812e55b8b07759881d4a4340528 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Fri, 24 Feb 2012 16:48:53 +0800
+Subject: [PATCH 1094/2463] ENGR00175321 [MX6]MMCSD: eMMC4.4 failed to work
+ after resume
+
+- clear ddr_en bit on non ddr timing mode in platform code.
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/host/sdhci-esdhc-imx.c |   11 +++++++----
+ 1 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index dd2c8cc..95b416b 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -324,8 +324,13 @@ static void esdhc_writew_le(struct sdhci_host *host, u16 val, int reg)
+ 		orig_reg |= (val & SDHCI_CTRL_TUNED_CLK)
+ 			? 0 : SDHCI_MIX_CTRL_SMPCLK_SEL;
+ 
+-		orig_reg |= (val & SDHCI_CTRL_UHS_DDR50)
+-			? SDHCI_MIX_CTRL_DDREN : 0;
++		if (val & SDHCI_CTRL_UHS_DDR50) {
++			orig_reg |= SDHCI_MIX_CTRL_DDREN;
++			imx_data->scratchpad |= SDHCI_MIX_CTRL_DDREN;
++		} else {
++			orig_reg &= ~SDHCI_MIX_CTRL_DDREN;
++			imx_data->scratchpad &= ~SDHCI_MIX_CTRL_DDREN;
++		}
+ 		writel(orig_reg, host->ioaddr + SDHCI_MIX_CTRL);
+ 
+ 		/* set clock frequency again */
+@@ -537,8 +542,6 @@ static int plt_8bit_width(struct sdhci_host *host, int width)
+ 		reg |= SDHCI_PROT_CTRL_8BIT;
+ 	else if (width == MMC_BUS_WIDTH_4)
+ 		reg |= SDHCI_PROT_CTRL_4BIT;
+-	else if (width == MMC_BUS_WIDTH_1)
+-		host->mmc->ios.ddr = 0;
+ 
+ 	writel(reg, host->ioaddr + SDHCI_HOST_CONTROL);
+ 	return 0;
+-- 
+1.7.7.4
+

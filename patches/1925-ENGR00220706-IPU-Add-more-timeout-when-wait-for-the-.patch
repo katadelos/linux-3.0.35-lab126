@@ -1,0 +1,31 @@
+From eb28a8e1be66436b2628e1b7c647685b6868eebe Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Sat, 18 Aug 2012 14:43:26 +0800
+Subject: [PATCH 1925/2463] ENGR00220706 IPU Add more timeout when wait for
+ the csi end of frame
+
+If this timeout is too small, it can't meet the require of some large
+frame such as 2592x1944 and 1080p, and the IDMAC maybe in a chaotic
+state, so at last access some invalid space caused the system hang.
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_capture.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_capture.c b/drivers/mxc/ipu3/ipu_capture.c
+index c4eac45..029ab5e 100644
+--- a/drivers/mxc/ipu3/ipu_capture.c
++++ b/drivers/mxc/ipu3/ipu_capture.c
+@@ -803,7 +803,7 @@ void _ipu_csi_wait4eof(struct ipu_soc *ipu, ipu_channel_t channel)
+ 		dev_err(ipu->dev, "CSI irq %d in use\n", irq);
+ 		return;
+ 	}
+-	ret = wait_for_completion_timeout(&ipu->csi_comp, msecs_to_jiffies(50));
++	ret = wait_for_completion_timeout(&ipu->csi_comp, msecs_to_jiffies(500));
+ 	ipu_free_irq(ipu, irq, ipu);
+ 	dev_dbg(ipu->dev, "CSI stop timeout - %d * 10ms\n", 5 - ret);
+ }
+-- 
+1.7.7.4
+

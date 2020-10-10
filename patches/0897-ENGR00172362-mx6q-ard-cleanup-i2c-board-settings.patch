@@ -1,0 +1,109 @@
+From 28058d680a98f8ad9f05d7b4e093e283064b733d Mon Sep 17 00:00:00 2001
+From: Adrian Alonso <aalonso@freescale.com>
+Date: Wed, 18 Jan 2012 14:56:32 -0600
+Subject: [PATCH 0897/2463] ENGR00172362 mx6q-ard cleanup i2c board settings
+
+* Clean i2c board settings for sabreauto platform
+* Remove and unregister i2c0 device not used in this board
+* Move i2c3 pads to general mx6q_sabreauto_pads[]
+* [v2] add camera module ov3640 module to i2c2 bus
+
+Signed-off-by: Adrian Alonso <aalonso@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   33 ++++++++---------------------
+ 1 files changed, 9 insertions(+), 24 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 1000e12..5938b9a 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -181,6 +181,7 @@ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 	MX6Q_PAD_GPIO_0__CCM_CLKO,
+ 	/*MX6Q_PAD_GPIO_3__CCM_CLKO2,i*/
+ 	MX6Q_PAD_GPIO_3__I2C3_SCL,
++	MX6Q_PAD_GPIO_16__I2C3_SDA,
+ 
+ 	/* Android GPIO keys */
+ 	MX6Q_PAD_SD2_CMD__GPIO_1_11, /* home */
+@@ -342,12 +343,6 @@ static int __init uart2_enable(char *p)
+ }
+ early_param("uart2", uart2_enable);
+ 
+-
+-static iomux_v3_cfg_t mx6q_sabreauto_i2c3_pads[] = {
+-	MX6Q_PAD_GPIO_3__I2C3_SCL,
+-	MX6Q_PAD_GPIO_16__I2C3_SDA,
+-};
+-
+ static iomux_v3_cfg_t mx6q_sabreauto_can0_pads[] = {
+ 	/* CAN1 */
+ 	MX6Q_PAD_KEY_COL2__CAN1_TXCAN,
+@@ -705,7 +700,6 @@ static int max7310_u43_setup(struct i2c_client *client,
+ 	return 0;
+ }
+ 
+-
+ static struct pca953x_platform_data max7310_u39_platdata = {
+ 	.gpio_base	= MX6Q_SABREAUTO_MAX7310_2_BASE_ADDR,
+ 	.invert		= 0,
+@@ -754,18 +748,11 @@ static struct fsl_mxc_tvin_platform_data adv7180_data = {
+ 	.cvbs = true,
+ };
+ 
+-static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
+-	{
+-		I2C_BOARD_INFO("ov3640", 0x3c),
+-		.platform_data = (void *)&camera_data,
+-	},
+-};
+-
+-static struct imxi2c_platform_data mx6q_sabreauto_i2c_data = {
++static struct imxi2c_platform_data mx6q_sabreauto_i2c2_data = {
+ 	.bitrate = 400000,
+ };
+ 
+-static struct imxi2c_platform_data mx6q_sabreauto_i2c0_data = {
++static struct imxi2c_platform_data mx6q_sabreauto_i2c1_data = {
+ 	.bitrate = 100000,
+ };
+ 
+@@ -786,6 +773,10 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ 		I2C_BOARD_INFO("adv7180", 0x21),
+ 		.platform_data = (void *)&adv7180_data,
+ 	},
++	{
++		I2C_BOARD_INFO("ov3640", 0x3c),
++		.platform_data = (void *)&camera_data,
++	},
+ };
+ 
+ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+@@ -1400,9 +1391,6 @@ static void __init mx6_board_init(void)
+ 	if (esai_record)
+ 	    mxc_iomux_v3_setup_multiple_pads(mx6q_sabreauto_esai_record_pads,
+ 			ARRAY_SIZE(mx6q_sabreauto_esai_record_pads));
+-
+-	mxc_iomux_v3_setup_multiple_pads(mx6q_sabreauto_i2c3_pads,
+-			ARRAY_SIZE(mx6q_sabreauto_i2c3_pads));
+ 	if (!uart2_en) {
+ 		if (can0_enable) {
+ 			mxc_iomux_v3_setup_multiple_pads(
+@@ -1442,13 +1430,10 @@ static void __init mx6_board_init(void)
+ 
+ 	imx6q_add_imx_snvs_rtc();
+ 
+-	imx6q_add_imx_i2c(0, &mx6q_sabreauto_i2c0_data);
+-	imx6q_add_imx_i2c(1, &mx6q_sabreauto_i2c_data);
+-	i2c_register_board_info(0, mxc_i2c0_board_info,
+-			ARRAY_SIZE(mxc_i2c0_board_info));
++	imx6q_add_imx_i2c(1, &mx6q_sabreauto_i2c1_data);
+ 	i2c_register_board_info(1, mxc_i2c1_board_info,
+ 			ARRAY_SIZE(mxc_i2c1_board_info));
+-	imx6q_add_imx_i2c(2, &mx6q_sabreauto_i2c_data);
++	imx6q_add_imx_i2c(2, &mx6q_sabreauto_i2c2_data);
+ 	i2c_register_board_info(2, mxc_i2c2_board_info,
+ 			ARRAY_SIZE(mxc_i2c2_board_info));
+ 
+-- 
+1.7.7.4
+

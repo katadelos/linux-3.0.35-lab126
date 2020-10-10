@@ -1,0 +1,36 @@
+From af18f304312dda70826b5ca956e2bd971d580d85 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Tue, 27 Nov 2012 17:44:19 +0800
+Subject: [PATCH 2292/2463] ENGR00235090 FEC: Workaround for FEC RX hang with
+ stress test
+
+When do Ethernet UDP stress overnight test with abundance of
+data transmission, RX path may hang-on.
+Dump the RX BD, found all BD "Empty" bit is cleared, which means
+CPU read BD status is not right and waiting here.
+
+Change BD memroy attribute from Normal to strongly ordered:
+changes the memory attribute of C=0, B=0 instead of C=0, B=1.
+Apply the change, the issue cannot be reproduced.
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ drivers/net/fec.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index db48dfd..6fafd91 100755
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -1503,7 +1503,7 @@ static int fec_enet_init(struct net_device *ndev)
+ 	int i;
+ 
+ 	/* Allocate memory for buffer descriptors. */
+-	cbd_base = dma_alloc_coherent(NULL, BUFDES_SIZE, &fep->bd_dma,
++	cbd_base = dma_alloc_noncacheable(NULL, BUFDES_SIZE, &fep->bd_dma,
+ 			GFP_KERNEL);
+ 	if (!cbd_base) {
+ 		printk("FEC: allocate descriptor memory failed?\n");
+-- 
+1.7.7.4
+

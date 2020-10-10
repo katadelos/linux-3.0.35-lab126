@@ -1,0 +1,1403 @@
+From 8adab5acb3c8295e76f6e18a3834fc1e9ca38424 Mon Sep 17 00:00:00 2001
+From: Danny Nold <dannynold@freescale.com>
+Date: Tue, 3 May 2011 12:58:07 -0500
+Subject: [PATCH 0157/2463] ENGR00142950-2 - MAX17135 EPD PMIC: Ported to
+ 2.6.38 kernel
+
+- Ported MAX17135 MFD core driver to 2.6.38
+- Ported MAX17135 HWMON temperature sensor driver to 2.6.38
+- Ported MAX17135 regulator driver to 2.6.38
+
+Signed-off-by: Danny Nold <dannynold@freescale.com>
+---
+ drivers/hwmon/Kconfig                  |    9 +
+ drivers/hwmon/Makefile                 |    1 +
+ drivers/hwmon/max17135-hwmon.c         |  170 +++++++++
+ drivers/mfd/Kconfig                    |    7 +
+ drivers/mfd/Makefile                   |    1 +
+ drivers/mfd/max17135-core.c            |  232 ++++++++++++
+ drivers/regulator/Kconfig              |    5 +
+ drivers/regulator/Makefile             |    2 +-
+ drivers/regulator/max17135-regulator.c |  642 ++++++++++++++++++++++++++++++++
+ include/linux/mfd/max17135.h           |  217 +++++++++++
+ 10 files changed, 1285 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/hwmon/Kconfig b/drivers/hwmon/Kconfig
+index f307b4d..10d3207 100755
+--- a/drivers/hwmon/Kconfig
++++ b/drivers/hwmon/Kconfig
+@@ -765,6 +765,15 @@ config SENSORS_MAX6642
+ 	  This driver can also be built as a module.  If so, the module
+ 	  will be called max6642.
+ 
++config SENSORS_MAX17135
++	tristate "Maxim MAX17135"
++	depends on I2C
++	help
++	  If you say yes here you get support for MAX17135 PMIC sensor.
++
++	  This driver can also be built as a module.  If so, the module
++	  will be called max17135_sensor.
++
+ config SENSORS_MAX6650
+ 	tristate "Maxim MAX6650 sensor chip"
+ 	depends on I2C && EXPERIMENTAL
+diff --git a/drivers/hwmon/Makefile b/drivers/hwmon/Makefile
+index 33d968a..d2291c1 100755
+--- a/drivers/hwmon/Makefile
++++ b/drivers/hwmon/Makefile
+@@ -84,6 +84,7 @@ obj-$(CONFIG_SENSORS_LTC4151)	+= ltc4151.o
+ obj-$(CONFIG_SENSORS_LTC4215)	+= ltc4215.o
+ obj-$(CONFIG_SENSORS_LTC4245)	+= ltc4245.o
+ obj-$(CONFIG_SENSORS_LTC4261)	+= ltc4261.o
++obj-$(CONFIG_SENSORS_MAX17135)	+= max17135-hwmon.o
+ obj-$(CONFIG_SENSORS_MAX1111)	+= max1111.o
+ obj-$(CONFIG_SENSORS_MAX16065)	+= max16065.o
+ obj-$(CONFIG_SENSORS_MAX1619)	+= max1619.o
+diff --git a/drivers/hwmon/max17135-hwmon.c b/drivers/hwmon/max17135-hwmon.c
+new file mode 100644
+index 0000000..528a76c
+--- /dev/null
++++ b/drivers/hwmon/max17135-hwmon.c
+@@ -0,0 +1,170 @@
++/*
++ * Copyright (C) 2010-2011 Freescale Semiconductor, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
++ *
++ */
++/*
++ * max17135.c
++ *
++ * Based on the MAX1619 driver.
++ * Copyright (C) 2003-2004 Alexey Fisher <fishor@mail.ru>
++ *                         Jean Delvare <khali@linux-fr.org>
++ *
++ * The MAX17135 is a sensor chip made by Maxim.
++ * It reports up to two temperatures (its own plus up to
++ * one external one).
++ */
++
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/jiffies.h>
++#include <linux/hwmon.h>
++#include <linux/hwmon-sysfs.h>
++#include <linux/err.h>
++#include <linux/sysfs.h>
++#include <linux/platform_device.h>
++#include <linux/mfd/max17135.h>
++
++/*
++ * Conversions
++ */
++static int temp_from_reg(int val)
++{
++	return val >> 8;
++}
++
++/*
++ * Functions declaration
++ */
++static int max17135_sensor_probe(struct platform_device *pdev);
++static int max17135_sensor_remove(struct platform_device *pdev);
++
++/*
++ * Driver data (common to all clients)
++ */
++static struct platform_driver max17135_sensor_driver = {
++	.probe = max17135_sensor_probe,
++	.remove = max17135_sensor_remove,
++	.driver = {
++		.name = "max17135_sensor",
++	},
++};
++
++
++/*
++ * Client data (each client gets its own)
++ */
++struct max17135_data {
++	struct device *hwmon_dev;
++};
++
++/*
++ * Sysfs stuff
++ */
++static ssize_t show_temp_input1(struct device *dev,
++	struct device_attribute *attr, char *buf)
++{
++	unsigned int reg_val;
++	max17135_reg_read(REG_MAX17135_INT_TEMP, &reg_val);
++	return snprintf(buf, PAGE_SIZE, "%d\n", temp_from_reg(reg_val));
++}
++
++static ssize_t show_temp_input2(struct device *dev,
++	struct device_attribute *attr, char *buf)
++{
++	unsigned int reg_val;
++	max17135_reg_read(REG_MAX17135_EXT_TEMP, &reg_val);
++	return snprintf(buf, PAGE_SIZE, "%d\n", temp_from_reg(reg_val));
++}
++
++static DEVICE_ATTR(temp1_input, S_IRUGO, show_temp_input1, NULL);
++static DEVICE_ATTR(temp2_input, S_IRUGO, show_temp_input2, NULL);
++
++static struct attribute *max17135_attributes[] = {
++	&dev_attr_temp1_input.attr,
++	&dev_attr_temp2_input.attr,
++	NULL
++};
++
++static const struct attribute_group max17135_group = {
++	.attrs = max17135_attributes,
++};
++
++/*
++ * Real code
++ */
++static int max17135_sensor_probe(struct platform_device *pdev)
++{
++	struct max17135_data *data;
++	int err;
++
++	data = kzalloc(sizeof(struct max17135_data), GFP_KERNEL);
++	if (!data) {
++		err = -ENOMEM;
++		goto exit;
++	}
++
++	/* Register sysfs hooks */
++	err = sysfs_create_group(&pdev->dev.kobj, &max17135_group);
++	if (err)
++		goto exit_free;
++
++	data->hwmon_dev = hwmon_device_register(&pdev->dev);
++	if (IS_ERR(data->hwmon_dev)) {
++		err = PTR_ERR(data->hwmon_dev);
++		goto exit_remove_files;
++	}
++
++	platform_set_drvdata(pdev, data);
++
++	return 0;
++
++exit_remove_files:
++	sysfs_remove_group(&pdev->dev.kobj, &max17135_group);
++exit_free:
++	kfree(data);
++exit:
++	return err;
++}
++
++static int max17135_sensor_remove(struct platform_device *pdev)
++{
++	struct max17135_data *data = platform_get_drvdata(pdev);
++
++	hwmon_device_unregister(data->hwmon_dev);
++	sysfs_remove_group(&pdev->dev.kobj, &max17135_group);
++
++	kfree(data);
++	return 0;
++}
++
++static int __init sensors_max17135_init(void)
++{
++	return platform_driver_register(&max17135_sensor_driver);
++}
++module_init(sensors_max17135_init);
++
++static void __exit sensors_max17135_exit(void)
++{
++	platform_driver_unregister(&max17135_sensor_driver);
++}
++module_exit(sensors_max17135_exit);
++
++MODULE_DESCRIPTION("MAX17135 sensor driver");
++MODULE_LICENSE("GPL");
++
+diff --git a/drivers/mfd/Kconfig b/drivers/mfd/Kconfig
+index b012f6d..9721a2d 100755
+--- a/drivers/mfd/Kconfig
++++ b/drivers/mfd/Kconfig
+@@ -769,6 +769,13 @@ config MFD_TPS65910
+ config TPS65911_COMPARATOR
+ 	tristate
+ 
++config MFD_MAX17135
++    tristate "MAX17135 PMIC core"
++	depends on I2C
++    help
++      This is the MAX17135 PMIC support. It includes
++      core support for communication with the MAX17135 chip.
++
+ endif # MFD_SUPPORT
+ 
+ menu "Multimedia Capabilities Port drivers"
+diff --git a/drivers/mfd/Makefile b/drivers/mfd/Makefile
+index a394ae11..74dd652 100755
+--- a/drivers/mfd/Makefile
++++ b/drivers/mfd/Makefile
+@@ -90,6 +90,7 @@ obj-$(CONFIG_MFD_TPS6586X)	+= tps6586x.o
+ obj-$(CONFIG_MFD_VX855)		+= vx855.o
+ obj-$(CONFIG_MFD_WL1273_CORE)	+= wl1273-core.o
+ obj-$(CONFIG_MFD_CS5535)	+= cs5535-mfd.o
++obj-$(CONFIG_MFD_MAX17135)  += max17135-core.o
+ 
+ #ifeq ($(CONFIG_PMIC_DIALOG),y)
+ da9052-objs			:= da9052-spi.o da9052-i2c.o da9052-core.o
+diff --git a/drivers/mfd/max17135-core.c b/drivers/mfd/max17135-core.c
+new file mode 100644
+index 0000000..7629cc5
+--- /dev/null
++++ b/drivers/mfd/max17135-core.c
+@@ -0,0 +1,232 @@
++/*
++ * Copyright (C) 2010-2011 Freescale Semiconductor, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
++ *
++ */
++
++/*!
++ * @file pmic/core/max17135.c
++ * @brief This file contains MAX17135 specific PMIC code. This implementaion
++ * may differ for each PMIC chip.
++ *
++ * @ingroup PMIC_CORE
++ */
++
++/*
++ * Includes
++ */
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/device.h>
++#include <linux/i2c.h>
++#include <linux/delay.h>
++#include <linux/err.h>
++#include <linux/uaccess.h>
++
++#include <linux/platform_device.h>
++#include <linux/regulator/machine.h>
++#include <linux/pmic_status.h>
++#include <linux/mfd/max17135.h>
++#include <asm/mach-types.h>
++
++struct i2c_client *max17135_client;
++
++static const unsigned short normal_i2c[] = {0x48, I2C_CLIENT_END};
++
++int max17135_reg_read(int reg_num, unsigned int *reg_val)
++{
++	int result;
++
++	if (max17135_client == NULL)
++		return PMIC_ERROR;
++
++	if ((reg_num == REG_MAX17135_EXT_TEMP) ||
++		(reg_num == REG_MAX17135_INT_TEMP)) {
++		result = i2c_smbus_read_word_data(max17135_client, reg_num);
++		if (result < 0) {
++			dev_err(&max17135_client->dev,
++				"Unable to read MAX17135 register via I2C\n");
++			return PMIC_ERROR;
++		}
++		/* Swap bytes for dword read */
++		result = (result >> 8) | ((result & 0xFF) << 8);
++	} else {
++		result = i2c_smbus_read_byte_data(max17135_client, reg_num);
++		if (result < 0) {
++			dev_err(&max17135_client->dev,
++				"Unable to read MAX17135 register via I2C\n");
++			return PMIC_ERROR;
++		}
++	}
++
++	*reg_val = result;
++	return PMIC_SUCCESS;
++}
++
++int max17135_reg_write(int reg_num, const unsigned int reg_val)
++{
++	int result;
++
++	if (max17135_client == NULL)
++		return PMIC_ERROR;
++
++	result = i2c_smbus_write_byte_data(max17135_client, reg_num, reg_val);
++	if (result < 0) {
++		dev_err(&max17135_client->dev,
++			"Unable to write MAX17135 register via I2C\n");
++		return PMIC_ERROR;
++	}
++
++	return PMIC_SUCCESS;
++}
++
++static int max17135_probe(struct i2c_client *client,
++			    const struct i2c_device_id *id)
++{
++	struct max17135 *max17135;
++	struct max17135_platform_data *pdata = client->dev.platform_data;
++	int ret = 0;
++
++	if (!pdata || !pdata->init)
++		return -ENODEV;
++
++	/* Create the PMIC data structure */
++	max17135 = kzalloc(sizeof(struct max17135), GFP_KERNEL);
++	if (max17135 == NULL) {
++		kfree(client);
++		return -ENOMEM;
++	}
++
++	/* Initialize the PMIC data structure */
++	i2c_set_clientdata(client, max17135);
++	max17135->dev = &client->dev;
++	max17135->i2c_client = client;
++
++	max17135_client = client;
++
++	if (pdata && pdata->init) {
++		ret = pdata->init(max17135);
++		if (ret != 0)
++			goto err;
++	}
++
++	dev_info(&client->dev, "PMIC MAX17135 for eInk display\n");
++
++	return ret;
++err:
++	kfree(max17135);
++
++	return ret;
++}
++
++
++static int max17135_remove(struct i2c_client *i2c)
++{
++	struct max17135 *max17135 = i2c_get_clientdata(i2c);
++	int i;
++
++	for (i = 0; i < ARRAY_SIZE(max17135->pdev); i++)
++		platform_device_unregister(max17135->pdev[i]);
++
++	kfree(max17135);
++
++	return 0;
++}
++
++static int max17135_suspend(struct i2c_client *client, pm_message_t state)
++{
++	return 0;
++}
++
++static int max17135_resume(struct i2c_client *client)
++{
++	return 0;
++}
++
++/* Return 0 if detection is successful, -ENODEV otherwise */
++static int max17135_detect(struct i2c_client *client,
++			  struct i2c_board_info *info)
++{
++	struct i2c_adapter *adapter = client->adapter;
++	u8 chip_rev, chip_id;
++
++	if (!i2c_check_functionality(adapter, I2C_FUNC_SMBUS_BYTE_DATA))
++		return -ENODEV;
++
++	/* detection */
++	if (i2c_smbus_read_byte_data(client,
++		REG_MAX17135_PRODUCT_REV) != 0) {
++		dev_err(&adapter->dev,
++			"Max17135 PMIC not found!\n");
++		return -ENODEV;
++	}
++
++	/* identification */
++	chip_rev = i2c_smbus_read_byte_data(client,
++		 REG_MAX17135_PRODUCT_REV);
++	chip_id = i2c_smbus_read_byte_data(client,
++		  REG_MAX17135_PRODUCT_ID);
++
++	if (chip_rev != 0x00 || chip_id != 0x4D) { /* identification failed */
++		dev_info(&adapter->dev,
++		    "Unsupported chip (man_id=0x%02X, "
++		    "chip_id=0x%02X).\n", chip_rev, chip_id);
++		return -ENODEV;
++	}
++
++	strlcpy(info->type, "max17135_sensor", I2C_NAME_SIZE);
++
++	return 0;
++}
++
++static const struct i2c_device_id max17135_id[] = {
++       { "max17135", 0 },
++       { }
++};
++MODULE_DEVICE_TABLE(i2c, max17135_id);
++
++
++static struct i2c_driver max17135_driver = {
++	.driver = {
++		   .name = "max17135",
++		   .owner = THIS_MODULE,
++	},
++	.probe = max17135_probe,
++	.remove = max17135_remove,
++	.suspend = max17135_suspend,
++	.resume = max17135_resume,
++	.id_table = max17135_id,
++	.detect = max17135_detect,
++	.address_list = &normal_i2c[0],
++};
++
++static int __init max17135_init(void)
++{
++	return i2c_add_driver(&max17135_driver);
++}
++
++static void __exit max17135_exit(void)
++{
++	i2c_del_driver(&max17135_driver);
++}
++
++/*
++ * Module entry points
++ */
++subsys_initcall_sync(max17135_init);
++module_exit(max17135_exit);
+diff --git a/drivers/regulator/Kconfig b/drivers/regulator/Kconfig
+index 9856cc3..18a1fd2 100755
+--- a/drivers/regulator/Kconfig
++++ b/drivers/regulator/Kconfig
+@@ -297,6 +297,11 @@ config REGULATOR_TPS6524X
+ 	  serial interface currently supported on the sequencer serial
+ 	  port controller.
+ 
++config REGULATOR_MAX17135
++	tristate "Maxim MAX17135 Regulator Support"
++	depends on MFD_MAX17135
++	default n
++
+ config REGULATOR_DA9052
+ 	tristate "Dialog DA9052 regulators"
+ 	depends on PMIC_DIALOG
+diff --git a/drivers/regulator/Makefile b/drivers/regulator/Makefile
+index 53e0f09..ee84398 100755
+--- a/drivers/regulator/Makefile
++++ b/drivers/regulator/Makefile
+@@ -44,7 +44,7 @@ obj-$(CONFIG_REGULATOR_ISL6271A) += isl6271a-regulator.o
+ obj-$(CONFIG_REGULATOR_AB8500)	+= ab8500.o
+ obj-$(CONFIG_REGULATOR_DB8500_PRCMU) += db8500-prcmu.o
+ obj-$(CONFIG_REGULATOR_TPS65910) += tps65910-regulator.o
+-
++obj-$(CONFIG_REGULATOR_MAX17135) += max17135-regulator.o
+ obj-$(CONFIG_REGULATOR_DA9052)  += da9052-regulator.o
+ 
+ ccflags-$(CONFIG_REGULATOR_DEBUG) += -DDEBUG
+diff --git a/drivers/regulator/max17135-regulator.c b/drivers/regulator/max17135-regulator.c
+new file mode 100644
+index 0000000..97bf2af
+--- /dev/null
++++ b/drivers/regulator/max17135-regulator.c
+@@ -0,0 +1,642 @@
++/*
++ * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/i2c.h>
++#include <linux/mutex.h>
++#include <linux/delay.h>
++#include <linux/err.h>
++#include <linux/platform_device.h>
++#include <linux/regulator/machine.h>
++#include <linux/regulator/driver.h>
++#include <linux/mfd/max17135.h>
++#include <linux/gpio.h>
++
++/*
++ * Regulator definitions
++ *   *_MIN_uV  - minimum microvolt for regulator
++ *   *_MAX_uV  - maximum microvolt for regulator
++ *   *_STEP_uV - microvolts between regulator output levels
++ *   *_MIN_VAL - minimum register field value for regulator
++ *   *_MAX_VAL - maximum register field value for regulator
++ */
++#define MAX17135_HVINP_MIN_uV    5000000
++#define MAX17135_HVINP_MAX_uV   20000000
++#define MAX17135_HVINP_STEP_uV   1000000
++#define MAX17135_HVINP_MIN_VAL         0
++#define MAX17135_HVINP_MAX_VAL         1
++
++#define MAX17135_HVINN_MIN_uV    5000000
++#define MAX17135_HVINN_MAX_uV   20000000
++#define MAX17135_HVINN_STEP_uV   1000000
++#define MAX17135_HVINN_MIN_VAL         0
++#define MAX17135_HVINN_MAX_VAL         1
++
++#define MAX17135_GVDD_MIN_uV    5000000
++#define MAX17135_GVDD_MAX_uV   20000000
++#define MAX17135_GVDD_STEP_uV   1000000
++#define MAX17135_GVDD_MIN_VAL         0
++#define MAX17135_GVDD_MAX_VAL         1
++
++#define MAX17135_GVEE_MIN_uV    5000000
++#define MAX17135_GVEE_MAX_uV   20000000
++#define MAX17135_GVEE_STEP_uV   1000000
++#define MAX17135_GVEE_MIN_VAL         0
++#define MAX17135_GVEE_MAX_VAL         1
++
++#define MAX17135_VCOM_MIN_VAL         0
++#define MAX17135_VCOM_MAX_VAL       255
++
++#define MAX17135_VNEG_MIN_uV    5000000
++#define MAX17135_VNEG_MAX_uV   20000000
++#define MAX17135_VNEG_STEP_uV   1000000
++#define MAX17135_VNEG_MIN_VAL         0
++#define MAX17135_VNEG_MAX_VAL         1
++
++#define MAX17135_VPOS_MIN_uV    5000000
++#define MAX17135_VPOS_MAX_uV   20000000
++#define MAX17135_VPOS_STEP_uV   1000000
++#define MAX17135_VPOS_MIN_VAL         0
++#define MAX17135_VPOS_MAX_VAL         1
++
++struct max17135_vcom_programming_data {
++	int vcom_min_uV;
++	int vcom_max_uV;
++	int vcom_step_uV;
++};
++
++static long unsigned int max17135_pass_num = { 1 };
++static int max17135_vcom = { -1250000 };
++
++struct max17135_vcom_programming_data vcom_data[2] = {
++	{
++		-4325000,
++		-500000,
++		15000,
++	},
++	{
++		-3050000,
++		-500000,
++		10000,
++	},
++};
++
++static int max17135_is_power_good(struct max17135 *max17135);
++
++/*
++ * Regulator operations
++ */
++static int max17135_hvinp_set_voltage(struct regulator_dev *reg,
++					int minuV, int uV, unsigned *selector)
++{
++	unsigned int reg_val;
++	unsigned int fld_val;
++
++	if ((uV >= MAX17135_HVINP_MIN_uV) &&
++	    (uV <= MAX17135_HVINP_MAX_uV))
++		fld_val = (uV - MAX17135_HVINP_MIN_uV) /
++			MAX17135_HVINP_STEP_uV;
++	else
++		return -EINVAL;
++
++	max17135_reg_read(REG_MAX17135_HVINP, &reg_val);
++
++	reg_val &= ~BITFMASK(HVINP);
++	reg_val |= BITFVAL(HVINP, fld_val); /* shift to correct bit */
++
++	return max17135_reg_write(REG_MAX17135_HVINP, reg_val);
++}
++
++static int max17135_hvinp_get_voltage(struct regulator_dev *reg)
++{
++	unsigned int reg_val;
++	unsigned int fld_val;
++	int volt;
++
++	max17135_reg_read(REG_MAX17135_HVINP, &reg_val);
++
++	fld_val = (reg_val & BITFMASK(HVINP)) >> HVINP_LSH;
++
++	if ((fld_val >= MAX17135_HVINP_MIN_VAL) &&
++		(fld_val <= MAX17135_HVINP_MAX_VAL)) {
++		volt = (fld_val * MAX17135_HVINP_STEP_uV) +
++			MAX17135_HVINP_MIN_uV;
++	} else {
++		printk(KERN_ERR "MAX17135: HVINP voltage is out of range\n");
++		volt = 0;
++	}
++	return volt;
++}
++
++static int max17135_hvinp_enable(struct regulator_dev *reg)
++{
++	return 0;
++}
++
++static int max17135_hvinp_disable(struct regulator_dev *reg)
++{
++	return 0;
++}
++
++/* Convert uV to the VCOM register bitfield setting */
++static inline int vcom_uV_to_rs(int uV, int pass_num)
++{
++	return (vcom_data[pass_num].vcom_max_uV - uV)
++		/ vcom_data[pass_num].vcom_step_uV;
++}
++
++/* Convert the VCOM register bitfield setting to uV */
++static inline int vcom_rs_to_uV(int rs, int pass_num)
++{
++	return vcom_data[pass_num].vcom_max_uV
++		- (vcom_data[pass_num].vcom_step_uV * rs);
++}
++
++static int max17135_vcom_set_voltage(struct regulator_dev *reg,
++					int minuV, int uV, unsigned *selector)
++{
++	struct max17135 *max17135 = rdev_get_drvdata(reg);
++	unsigned int reg_val;
++	int vcom_read;
++
++	if ((uV < vcom_data[max17135->pass_num-1].vcom_min_uV)
++		|| (uV > vcom_data[max17135->pass_num-1].vcom_max_uV))
++		return -EINVAL;
++
++	max17135_reg_read(REG_MAX17135_DVR, &reg_val);
++
++	/*
++	 * Only program VCOM if it is not set to the desired value.
++	 * Programming VCOM excessively degrades ability to keep
++	 * DVR register value persistent.
++	 */
++	vcom_read = vcom_rs_to_uV(reg_val, max17135->pass_num-1);
++	if (vcom_read != max17135->vcom_uV) {
++		reg_val &= ~BITFMASK(DVR);
++		reg_val |= BITFVAL(DVR, vcom_uV_to_rs(uV,
++			max17135->pass_num-1));
++		max17135_reg_write(REG_MAX17135_DVR, reg_val);
++
++		reg_val = BITFVAL(CTRL_DVR, true); /* shift to correct bit */
++		return max17135_reg_write(REG_MAX17135_PRGM_CTRL, reg_val);
++	}
++
++	return 0;
++}
++
++static int max17135_vcom_get_voltage(struct regulator_dev *reg)
++{
++	struct max17135 *max17135 = rdev_get_drvdata(reg);
++	unsigned int reg_val;
++
++	max17135_reg_read(REG_MAX17135_DVR, &reg_val);
++	return vcom_rs_to_uV(BITFEXT(reg_val, DVR), max17135->pass_num-1);
++}
++
++static int max17135_vcom_enable(struct regulator_dev *reg)
++{
++	struct max17135 *max17135 = rdev_get_drvdata(reg);
++
++	/*
++	 * Check to see if we need to set the VCOM voltage.
++	 * Should only be done one time. And, we can
++	 * only change vcom voltage if we have been enabled.
++	 */
++	if (!max17135->vcom_setup && max17135_is_power_good(max17135)) {
++		max17135_vcom_set_voltage(reg,
++			max17135->vcom_uV,
++			max17135->vcom_uV,
++			NULL);
++		max17135->vcom_setup = true;
++	}
++
++	/* enable VCOM regulator output */
++	if (max17135->pass_num == 1)
++		gpio_set_value(max17135->gpio_pmic_vcom_ctrl, 1);
++	else {
++		unsigned int reg_val;
++
++		max17135_reg_read(REG_MAX17135_ENABLE, &reg_val);
++		reg_val &= ~BITFMASK(VCOM_ENABLE);
++		reg_val |= BITFVAL(VCOM_ENABLE, 1); /* shift to correct bit */
++		max17135_reg_write(REG_MAX17135_ENABLE, reg_val);
++	}
++
++	return 0;
++}
++
++static int max17135_vcom_disable(struct regulator_dev *reg)
++{
++	struct max17135 *max17135 = rdev_get_drvdata(reg);
++
++	if (max17135->pass_num == 1)
++		gpio_set_value(max17135->gpio_pmic_vcom_ctrl, 0);
++	else {
++		unsigned int reg_val;
++
++		max17135_reg_read(REG_MAX17135_ENABLE, &reg_val);
++		reg_val &= ~BITFMASK(VCOM_ENABLE);
++		max17135_reg_write(REG_MAX17135_ENABLE, reg_val);
++	}
++
++	return 0;
++}
++
++static int max17135_vcom_is_enabled(struct regulator_dev *reg)
++{
++	struct max17135 *max17135 = rdev_get_drvdata(reg);
++
++	/* read VCOM regulator enable setting */
++	if (max17135->pass_num == 1) {
++		int gpio = gpio_get_value(max17135->gpio_pmic_vcom_ctrl);
++		if (gpio == 0)
++			return 0;
++		else
++			return 1;
++	} else {
++		unsigned int reg_val;
++
++		max17135_reg_read(REG_MAX17135_ENABLE, &reg_val);
++		reg_val &= BITFMASK(VCOM_ENABLE);
++		if (reg_val != 0)
++			return 1;
++		else
++			return 0;
++	}
++}
++
++static int max17135_is_power_good(struct max17135 *max17135)
++{
++	/*
++	 * XOR of polarity (starting value) and current
++	 * value yields whether power is good.
++	 */
++	return gpio_get_value(max17135->gpio_pmic_pwrgood) ^
++		max17135->pwrgood_polarity;
++}
++
++static int max17135_wait_power_good(struct max17135 *max17135)
++{
++	int i;
++
++	for (i = 0; i < max17135->max_wait * 3; i++) {
++		if (max17135_is_power_good(max17135))
++			return 0;
++
++		msleep(1);
++	}
++	return -ETIMEDOUT;
++}
++
++static int max17135_display_enable(struct regulator_dev *reg)
++{
++	struct max17135 *max17135 = rdev_get_drvdata(reg);
++
++	/* The Pass 1 parts cannot turn on the PMIC via I2C. */
++	if (max17135->pass_num == 1)
++		gpio_set_value(max17135->gpio_pmic_wakeup, 1);
++	else {
++		unsigned int reg_val;
++
++		max17135_reg_read(REG_MAX17135_ENABLE, &reg_val);
++		reg_val &= ~BITFMASK(ENABLE);
++		reg_val |= BITFVAL(ENABLE, 1);
++		max17135_reg_write(REG_MAX17135_ENABLE, reg_val);
++	}
++
++	return max17135_wait_power_good(max17135);
++}
++
++static int max17135_display_disable(struct regulator_dev *reg)
++{
++	struct max17135 *max17135 = rdev_get_drvdata(reg);
++
++	if (max17135->pass_num == 1)
++		gpio_set_value(max17135->gpio_pmic_wakeup, 0);
++	else {
++		unsigned int reg_val;
++
++		max17135_reg_read(REG_MAX17135_ENABLE, &reg_val);
++		reg_val &= ~BITFMASK(ENABLE);
++		max17135_reg_write(REG_MAX17135_ENABLE, reg_val);
++	}
++
++	msleep(max17135->max_wait);
++
++	return 0;
++}
++
++static int max17135_display_is_enabled(struct regulator_dev *reg)
++{
++	struct max17135 *max17135 = rdev_get_drvdata(reg);
++	int gpio = gpio_get_value(max17135->gpio_pmic_wakeup);
++
++	if (gpio == 0)
++		return 0;
++	else
++		return 1;
++}
++
++/*
++ * Regulator operations
++ */
++
++static struct regulator_ops max17135_display_ops = {
++	.enable = max17135_display_enable,
++	.disable = max17135_display_disable,
++	.is_enabled = max17135_display_is_enabled,
++};
++
++static struct regulator_ops max17135_gvdd_ops = {
++};
++
++static struct regulator_ops max17135_gvee_ops = {
++};
++
++static struct regulator_ops max17135_hvinn_ops = {
++};
++
++static struct regulator_ops max17135_hvinp_ops = {
++	.enable = max17135_hvinp_enable,
++	.disable = max17135_hvinp_disable,
++	.get_voltage = max17135_hvinp_get_voltage,
++	.set_voltage = max17135_hvinp_set_voltage,
++};
++
++static struct regulator_ops max17135_vcom_ops = {
++	.enable = max17135_vcom_enable,
++	.disable = max17135_vcom_disable,
++	.get_voltage = max17135_vcom_get_voltage,
++	.set_voltage = max17135_vcom_set_voltage,
++	.is_enabled = max17135_vcom_is_enabled,
++};
++
++static struct regulator_ops max17135_vneg_ops = {
++};
++
++static struct regulator_ops max17135_vpos_ops = {
++};
++
++/*
++ * Regulator descriptors
++ */
++static struct regulator_desc max17135_reg[MAX17135_NUM_REGULATORS] = {
++{
++	.name = "DISPLAY",
++	.id = MAX17135_DISPLAY,
++	.ops = &max17135_display_ops,
++	.type = REGULATOR_VOLTAGE,
++	.owner = THIS_MODULE,
++},
++{
++	.name = "GVDD",
++	.id = MAX17135_GVDD,
++	.ops = &max17135_gvdd_ops,
++	.type = REGULATOR_VOLTAGE,
++	.owner = THIS_MODULE,
++},
++{
++	.name = "GVEE",
++	.id = MAX17135_GVEE,
++	.ops = &max17135_gvee_ops,
++	.type = REGULATOR_VOLTAGE,
++	.owner = THIS_MODULE,
++},
++{
++	.name = "HVINN",
++	.id = MAX17135_HVINN,
++	.ops = &max17135_hvinn_ops,
++	.type = REGULATOR_VOLTAGE,
++	.owner = THIS_MODULE,
++},
++{
++	.name = "HVINP",
++	.id = MAX17135_HVINP,
++	.ops = &max17135_hvinp_ops,
++	.type = REGULATOR_VOLTAGE,
++	.owner = THIS_MODULE,
++},
++{
++	.name = "VCOM",
++	.id = MAX17135_VCOM,
++	.ops = &max17135_vcom_ops,
++	.type = REGULATOR_VOLTAGE,
++	.owner = THIS_MODULE,
++},
++{
++	.name = "VNEG",
++	.id = MAX17135_VNEG,
++	.ops = &max17135_vneg_ops,
++	.type = REGULATOR_VOLTAGE,
++	.owner = THIS_MODULE,
++},
++{
++	.name = "VPOS",
++	.id = MAX17135_VPOS,
++	.ops = &max17135_vpos_ops,
++	.type = REGULATOR_VOLTAGE,
++	.owner = THIS_MODULE,
++},
++};
++
++static void max17135_setup_timings(struct max17135 *max17135)
++{
++	unsigned int reg_val;
++
++	int timing1, timing2, timing3, timing4,
++		timing5, timing6, timing7, timing8;
++
++	max17135_reg_read(REG_MAX17135_TIMING1, &timing1);
++	max17135_reg_read(REG_MAX17135_TIMING2, &timing2);
++	max17135_reg_read(REG_MAX17135_TIMING3, &timing3);
++	max17135_reg_read(REG_MAX17135_TIMING4, &timing4);
++	max17135_reg_read(REG_MAX17135_TIMING5, &timing5);
++	max17135_reg_read(REG_MAX17135_TIMING6, &timing6);
++	max17135_reg_read(REG_MAX17135_TIMING7, &timing7);
++	max17135_reg_read(REG_MAX17135_TIMING8, &timing8);
++
++	if ((timing1 != max17135->gvee_pwrup) ||
++		(timing2 != max17135->vneg_pwrup) ||
++		(timing3 != max17135->vpos_pwrup) ||
++		(timing4 != max17135->gvdd_pwrup) ||
++		(timing5 != max17135->gvdd_pwrdn) ||
++		(timing6 != max17135->vpos_pwrdn) ||
++		(timing7 != max17135->vneg_pwrdn) ||
++		(timing8 != max17135->gvee_pwrdn)) {
++		max17135_reg_write(REG_MAX17135_TIMING1, max17135->gvee_pwrup);
++		max17135_reg_write(REG_MAX17135_TIMING2, max17135->vneg_pwrup);
++		max17135_reg_write(REG_MAX17135_TIMING3, max17135->vpos_pwrup);
++		max17135_reg_write(REG_MAX17135_TIMING4, max17135->gvdd_pwrup);
++		max17135_reg_write(REG_MAX17135_TIMING5, max17135->gvdd_pwrdn);
++		max17135_reg_write(REG_MAX17135_TIMING6, max17135->vpos_pwrdn);
++		max17135_reg_write(REG_MAX17135_TIMING7, max17135->vneg_pwrdn);
++		max17135_reg_write(REG_MAX17135_TIMING8, max17135->gvee_pwrdn);
++
++		reg_val = BITFVAL(CTRL_TIMING, true); /* shift to correct bit */
++		max17135_reg_write(REG_MAX17135_PRGM_CTRL, reg_val);
++	}
++}
++
++
++/*
++ * Regulator init/probing/exit functions
++ */
++static int max17135_regulator_probe(struct platform_device *pdev)
++{
++	struct regulator_dev *rdev;
++
++	rdev = regulator_register(&max17135_reg[pdev->id], &pdev->dev,
++				  pdev->dev.platform_data,
++				  dev_get_drvdata(&pdev->dev));
++
++	if (IS_ERR(rdev)) {
++		dev_err(&pdev->dev, "failed to register %s\n",
++			max17135_reg[pdev->id].name);
++		return PTR_ERR(rdev);
++	}
++
++	return 0;
++}
++
++static int max17135_regulator_remove(struct platform_device *pdev)
++{
++	struct regulator_dev *rdev = platform_get_drvdata(pdev);
++	regulator_unregister(rdev);
++	return 0;
++}
++
++static struct platform_driver max17135_regulator_driver = {
++	.probe = max17135_regulator_probe,
++	.remove = max17135_regulator_remove,
++	.driver = {
++		.name = "max17135-reg",
++	},
++};
++
++int max17135_register_regulator(struct max17135 *max17135, int reg,
++				     struct regulator_init_data *initdata)
++{
++	struct platform_device *pdev;
++	int ret;
++
++	struct i2c_client *client = max17135->i2c_client;
++	/* If we can't find PMIC via I2C, we should not register regulators */
++	if (i2c_smbus_read_byte_data(client,
++		REG_MAX17135_PRODUCT_REV) != 0) {
++		dev_err(max17135->dev,
++			"Max17135 PMIC not found!\n");
++		return -ENXIO;
++	}
++
++	if (max17135->pdev[reg])
++		return -EBUSY;
++
++	pdev = platform_device_alloc("max17135-reg", reg);
++	if (!pdev)
++		return -ENOMEM;
++
++	max17135->pdev[reg] = pdev;
++
++	initdata->driver_data = max17135;
++
++	pdev->dev.platform_data = initdata;
++	pdev->dev.parent = max17135->dev;
++	platform_set_drvdata(pdev, max17135);
++
++	ret = platform_device_add(pdev);
++
++	if (ret != 0) {
++		dev_err(max17135->dev,
++		       "Failed to register regulator %d: %d\n",
++			reg, ret);
++		platform_device_del(pdev);
++		max17135->pdev[reg] = NULL;
++	}
++
++	if (!max17135->init_done) {
++		max17135->pass_num = max17135_pass_num;
++		max17135->vcom_uV = max17135_vcom;
++
++		/*
++		 * Set up PMIC timing values.
++		 * Should only be done one time!  Timing values may only be
++		 * changed a limited number of times according to spec.
++		 */
++		max17135_setup_timings(max17135);
++
++		max17135->pwrgood_polarity =
++			gpio_get_value(max17135->gpio_pmic_pwrgood);
++
++		max17135->init_done = true;
++	}
++
++	return ret;
++}
++
++static int __init max17135_regulator_init(void)
++{
++	return platform_driver_register(&max17135_regulator_driver);
++}
++subsys_initcall(max17135_regulator_init);
++
++static void __exit max17135_regulator_exit(void)
++{
++	platform_driver_unregister(&max17135_regulator_driver);
++}
++module_exit(max17135_regulator_exit);
++
++
++/*
++ * Parse user specified options (`max17135:')
++ * example:
++ *   max17135:pass=2,vcom=-1250000
++ */
++static int __init max17135_setup(char *options)
++{
++	int ret;
++	char *opt;
++	while ((opt = strsep(&options, ",")) != NULL) {
++		if (!*opt)
++			continue;
++		if (!strncmp(opt, "pass=", 5)) {
++			ret = strict_strtoul(opt + 5, 0, &max17135_pass_num);
++			if (ret < 0)
++				return ret;
++		}
++		if (!strncmp(opt, "vcom=", 5)) {
++			int offs = 5;
++			if (opt[5] == '-')
++				offs = 6;
++			ret = strict_strtoul(opt + offs, 0,
++				(long *)&max17135_vcom);
++			if (ret < 0)
++				return ret;
++			max17135_vcom = -max17135_vcom;
++		}
++	}
++
++	return 1;
++}
++
++__setup("max17135:", max17135_setup);
++
++/* Module information */
++MODULE_DESCRIPTION("MAX17135 regulator driver");
++MODULE_LICENSE("GPL");
+diff --git a/include/linux/mfd/max17135.h b/include/linux/mfd/max17135.h
+new file mode 100644
+index 0000000..0a8af30
+--- /dev/null
++++ b/include/linux/mfd/max17135.h
+@@ -0,0 +1,217 @@
++/*
++ * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
++ *
++ */
++#ifndef __LINUX_REGULATOR_MAX17135_H_
++#define __LINUX_REGULATOR_MAX17135_H_
++
++/*
++ * PMIC Register Addresses
++ */
++enum {
++    REG_MAX17135_EXT_TEMP = 0x0,
++    REG_MAX17135_CONFIG,
++    REG_MAX17135_INT_TEMP = 0x4,
++    REG_MAX17135_STATUS,
++    REG_MAX17135_PRODUCT_REV,
++    REG_MAX17135_PRODUCT_ID,
++    REG_MAX17135_DVR,
++    REG_MAX17135_ENABLE,
++    REG_MAX17135_FAULT,  /*0x0A*/
++    REG_MAX17135_HVINP,
++    REG_MAX17135_PRGM_CTRL,
++    REG_MAX17135_TIMING1 = 0x10,    /* Timing regs base address is 0x10 */
++    REG_MAX17135_TIMING2,
++    REG_MAX17135_TIMING3,
++    REG_MAX17135_TIMING4,
++    REG_MAX17135_TIMING5,
++    REG_MAX17135_TIMING6,
++    REG_MAX17135_TIMING7,
++    REG_MAX17135_TIMING8,
++};
++#define MAX17135_REG_NUM        21
++#define MAX17135_MAX_REGISTER   0xFF
++
++/*
++ * Bitfield macros that use rely on bitfield width/shift information.
++ */
++#define BITFMASK(field) (((1U << (field ## _WID)) - 1) << (field ## _LSH))
++#define BITFVAL(field, val) ((val) << (field ## _LSH))
++#define BITFEXT(var, bit) ((var & BITFMASK(bit)) >> (bit ## _LSH))
++
++/*
++ * Shift and width values for each register bitfield
++ */
++#define EXT_TEMP_LSH    7
++#define EXT_TEMP_WID    9
++
++#define THERMAL_SHUTDOWN_LSH    0
++#define THERMAL_SHUTDOWN_WID    1
++
++#define INT_TEMP_LSH    7
++#define INT_TEMP_WID    9
++
++#define STAT_BUSY_LSH   0
++#define STAT_BUSY_WID   1
++#define STAT_OPEN_LSH   1
++#define STAT_OPEN_WID   1
++#define STAT_SHRT_LSH   2
++#define STAT_SHRT_WID   1
++
++#define PROD_REV_LSH    0
++#define PROD_REV_WID    8
++
++#define PROD_ID_LSH     0
++#define PROD_ID_WID     8
++
++#define DVR_LSH         0
++#define DVR_WID         8
++
++#define ENABLE_LSH      0
++#define ENABLE_WID      1
++#define VCOM_ENABLE_LSH 1
++#define VCOM_ENABLE_WID 1
++
++#define FAULT_FBPG_LSH      0
++#define FAULT_FBPG_WID      1
++#define FAULT_HVINP_LSH     1
++#define FAULT_HVINP_WID     1
++#define FAULT_HVINN_LSH     2
++#define FAULT_HVINN_WID     1
++#define FAULT_FBNG_LSH      3
++#define FAULT_FBNG_WID      1
++#define FAULT_HVINPSC_LSH   4
++#define FAULT_HVINPSC_WID   1
++#define FAULT_HVINNSC_LSH   5
++#define FAULT_HVINNSC_WID   1
++#define FAULT_OT_LSH        6
++#define FAULT_OT_WID        1
++#define FAULT_POK_LSH       7
++#define FAULT_POK_WID       1
++
++#define HVINP_LSH           0
++#define HVINP_WID           4
++
++#define CTRL_DVR_LSH        0
++#define CTRL_DVR_WID        1
++#define CTRL_TIMING_LSH     1
++#define CTRL_TIMING_WID     1
++
++#define TIMING1_LSH         0
++#define TIMING1_WID         8
++#define TIMING2_LSH         0
++#define TIMING2_WID         8
++#define TIMING3_LSH         0
++#define TIMING3_WID         8
++#define TIMING4_LSH         0
++#define TIMING4_WID         8
++#define TIMING5_LSH         0
++#define TIMING5_WID         8
++#define TIMING6_LSH         0
++#define TIMING6_WID         8
++#define TIMING7_LSH         0
++#define TIMING7_WID         8
++#define TIMING8_LSH         0
++#define TIMING8_WID         8
++
++struct max17135 {
++	/* chip revision */
++	int rev;
++
++	struct device *dev;
++
++	/* Platform connection */
++	struct i2c_client *i2c_client;
++
++	/* Client devices */
++	struct platform_device *pdev[MAX17135_REG_NUM];
++
++	/* Timings */
++	unsigned int gvee_pwrup;
++	unsigned int vneg_pwrup;
++	unsigned int vpos_pwrup;
++	unsigned int gvdd_pwrup;
++	unsigned int gvdd_pwrdn;
++	unsigned int vpos_pwrdn;
++	unsigned int vneg_pwrdn;
++	unsigned int gvee_pwrdn;
++
++	/* GPIOs */
++	int gpio_pmic_pwrgood;
++	int gpio_pmic_vcom_ctrl;
++	int gpio_pmic_wakeup;
++	int gpio_pmic_intr;
++
++	/* MAX17135 part variables */
++	int pass_num;
++	int vcom_uV;
++
++	/* One-time VCOM setup marker */
++	bool vcom_setup;
++	bool init_done;
++
++	/* powerup/powerdown wait time */
++	int max_wait;
++
++	/* Dynamically determined polarity for PWRGOOD */
++	int pwrgood_polarity;
++};
++
++enum {
++    /* In alphabetical order */
++    MAX17135_DISPLAY, /* virtual master enable */
++    MAX17135_GVDD,
++    MAX17135_GVEE,
++    MAX17135_HVINN,
++    MAX17135_HVINP,
++    MAX17135_VCOM,
++    MAX17135_VNEG,
++    MAX17135_VPOS,
++    MAX17135_NUM_REGULATORS,
++};
++
++/*
++ * Declarations
++ */
++struct regulator_init_data;
++
++struct max17135_platform_data {
++	unsigned int gvee_pwrup;
++	unsigned int vneg_pwrup;
++	unsigned int vpos_pwrup;
++	unsigned int gvdd_pwrup;
++	unsigned int gvdd_pwrdn;
++	unsigned int vpos_pwrdn;
++	unsigned int vneg_pwrdn;
++	unsigned int gvee_pwrdn;
++	int gpio_pmic_pwrgood;
++	int gpio_pmic_vcom_ctrl;
++	int gpio_pmic_wakeup;
++	int gpio_pmic_intr;
++	int pass_num;
++	int vcom_uV;
++	struct regulator_init_data *regulator_init;
++	int (*init)(struct max17135 *);
++};
++
++int max17135_register_regulator(struct max17135 *max17135, int reg,
++				     struct regulator_init_data *initdata);
++
++int max17135_reg_read(int reg_num, unsigned int *reg_val);
++int max17135_reg_write(int reg_num, const unsigned int reg_val);
++
++#endif
+-- 
+1.7.7.4
+

@@ -1,0 +1,132 @@
+From 57e36de548ff4f11e719cf3f61e9553f93652804 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Wed, 13 Jul 2011 13:52:41 +0800
+Subject: [PATCH 0233/2463] ENGR00152668 [MX6]Enable arch_reset
+
+--OCRAM size is 256KB, confirmed by IC owner, the
+  OCRAM_Aliasd 0.75MB is mapped to the same 256KB
+  OCRAM.That means there is only 256KB physical
+  OCRAM.
+
+--Enable arch_reset function on MX6Q, For SMP, we
+  need to clear the SRC_GPRx after the secondary
+  cores brought up, or the wdog reset will fail;
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/headsmp.S          |    8 ++++++++
+ arch/arm/mach-mx6/mm.c               |    2 +-
+ arch/arm/plat-mxc/include/mach/mx6.h |    9 +++++++--
+ arch/arm/plat-mxc/system.c           |   19 +++++++++++++++++--
+ 4 files changed, 33 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/headsmp.S b/arch/arm/mach-mx6/headsmp.S
+index c972d73..331e844 100644
+--- a/arch/arm/mach-mx6/headsmp.S
++++ b/arch/arm/mach-mx6/headsmp.S
+@@ -58,6 +58,14 @@ ENTRY(mx6_secondary_startup)
+ 
+ 	/* invalidate l1-cache first */
+ 	bl      v7_invalidate_l1
++	mrc	p15, 0, r0, c0, c0, 5
++	and r0, r0, #15
++	ldr r1, = 0x020d8020
++	add r1, r0, LSL#3
++
++	mov r0, #0
++	str r0, [r1]
++	str r0, [r1, #0x4]
+ 
+ 	/* jump to secondary_startup */
+ 	b secondary_startup
+diff --git a/arch/arm/mach-mx6/mm.c b/arch/arm/mach-mx6/mm.c
+index 124144d..ab91c38 100644
+--- a/arch/arm/mach-mx6/mm.c
++++ b/arch/arm/mach-mx6/mm.c
+@@ -61,7 +61,7 @@ void __init mx6_map_io(void)
+ {
+ 	iotable_init(mx6_io_desc, ARRAY_SIZE(mx6_io_desc));
+ 	mxc_iomux_v3_init(IO_ADDRESS(MX6Q_IOMUXC_BASE_ADDR));
+-	mxc_arch_reset_init(IO_ADDRESS(WDOG1_BASE_ADDR));
++	mxc_arch_reset_init(IO_ADDRESS(MX6Q_WDOG1_BASE_ADDR));
+ }
+ #ifdef CONFIG_CACHE_L2X0
+ static int mxc_init_l2x0(void)
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 35aa726..dabb463 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -71,6 +71,11 @@
+ #define PCIE_ARB_BASE_ADDR              0x01000000
+ #define PCIE_ARB_END_ADDR               0x01FFFFFF
+ 
++/* IRAM
++ */
++#define MX6Q_IRAM_BASE_ADDR		IRAM_BASE_ADDR
++#define MX6Q_IRAM_SIZE			SZ_256K
++
+ /* Blocks connected via pl301periph */
+ #define ROMCP_ARB_BASE_ADDR             0x00000000
+ #define ROMCP_ARB_END_ADDR              0x000FFFFF
+@@ -160,8 +165,8 @@
+ #define GPIO6_BASE_ADDR             (AIPS1_OFF_BASE_ADDR + 0x30000)
+ #define GPIO7_BASE_ADDR             (AIPS1_OFF_BASE_ADDR + 0x34000)
+ #define KPP_BASE_ADDR               (AIPS1_OFF_BASE_ADDR + 0x38000)
+-#define WDOG1_BASE_ADDR             (AIPS1_OFF_BASE_ADDR + 0x3C000)
+-#define WDOG2_BASE_ADDR             (AIPS1_OFF_BASE_ADDR + 0x40000)
++#define MX6Q_WDOG1_BASE_ADDR        (AIPS1_OFF_BASE_ADDR + 0x3C000)
++#define MX6Q_WDOG2_BASE_ADDR        (AIPS1_OFF_BASE_ADDR + 0x40000)
+ #define CCM_BASE_ADDR               (AIPS1_OFF_BASE_ADDR + 0x44000)
+ #define ANATOP_BASE_ADDR            (AIPS1_OFF_BASE_ADDR + 0x48000)
+ #define USB_PHY0_BASE_ADDR          (AIPS1_OFF_BASE_ADDR + 0x49000)
+diff --git a/arch/arm/plat-mxc/system.c b/arch/arm/plat-mxc/system.c
+index 8024f2a..383013c 100644
+--- a/arch/arm/plat-mxc/system.c
++++ b/arch/arm/plat-mxc/system.c
+@@ -1,7 +1,7 @@
+ /*
+  * Copyright (C) 1999 ARM Limited
+  * Copyright (C) 2000 Deep Blue Solutions Ltd
+- * Copyright 2006-2007 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2006-2011 Freescale Semiconductor, Inc.
+  * Copyright 2008 Juergen Beisert, kernel@pengutronix.de
+  * Copyright 2009 Ilya Yanok, Emcraft Systems Ltd, yanok@emcraft.com
+  *
+@@ -21,11 +21,13 @@
+ #include <linux/io.h>
+ #include <linux/err.h>
+ #include <linux/delay.h>
+-
+ #include <mach/hardware.h>
+ #include <mach/common.h>
+ #include <asm/proc-fns.h>
+ #include <asm/system.h>
++#ifdef CONFIG_SMP
++#include <linux/smp.h>
++#endif
+ #include <asm/mach-types.h>
+ 
+ static void __iomem *wdog_base;
+@@ -37,6 +39,19 @@ void arch_reset(char mode, const char *cmd)
+ {
+ 	unsigned int wcr_enable;
+ 
++#ifdef CONFIG_ARCH_MX6
++	/* wait for reset to assert... */
++	wcr_enable = (1 << 2);
++	__raw_writew(wcr_enable, wdog_base);
++
++	/* wait for reset to assert... */
++	mdelay(500);
++
++	printk(KERN_ERR "Watchdog reset failed to assert reset\n");
++
++	return;
++#endif
++
+ #ifdef CONFIG_MACH_MX51_EFIKAMX
+ 	if (machine_is_mx51_efikamx()) {
+ 		mx51_efikamx_reset();
+-- 
+1.7.7.4
+

@@ -1,0 +1,139 @@
+From 2e3a80b7be1c8a4f73c6479697b9e58674f4fcaf Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Thu, 12 May 2011 17:59:34 +0800
+Subject: [PATCH 0164/2463] ENGR00142683 IPUv3:Increase IDMAC BS for RGBP and
+ DMFC BS
+
+This patch increases IDMAC burst size from 16 pixels to
+32 pixels for RGBP pixel format and increases DMFC burst
+size to 128 pixels to workaround 1080P60 display video
+black flash issue.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit c9fbed971c5a1adf7c727a6b1eba67e179bd1502)
+---
+ drivers/mxc/ipu3/ipu_common.c    |   47 --------------------------------------
+ drivers/mxc/ipu3/ipu_disp.c      |   14 +++++-----
+ drivers/mxc/ipu3/ipu_param_mem.h |    2 +-
+ 3 files changed, 8 insertions(+), 55 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index f19be46..218f008 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -1107,53 +1107,6 @@ int32_t ipu_init_channel_buffer(ipu_channel_t channel, ipu_buffer_t type,
+ 		_ipu_ch_param_set_burst_size(dma_chan, 8);
+ 		_ipu_ch_param_set_block_mode(dma_chan);
+ 	} else if (_ipu_is_dmfc_chan(dma_chan)) {
+-		u32 dmfc_dp_chan, dmfc_wr_chan;
+-		/*
+-		 * non-interleaving format need enlarge burst size
+-		 * to work-around black flash issue.
+-		 */
+-		if (((dma_chan == 23) || (dma_chan == 27) || (dma_chan == 28))
+-			&& ((pixel_fmt == IPU_PIX_FMT_YUV420P) ||
+-			(pixel_fmt == IPU_PIX_FMT_YVU420P) ||
+-			(pixel_fmt == IPU_PIX_FMT_YUV420P2) ||
+-			(pixel_fmt == IPU_PIX_FMT_YVU422P) ||
+-			(pixel_fmt == IPU_PIX_FMT_YUV422P) ||
+-			(pixel_fmt == IPU_PIX_FMT_NV12))) {
+-			if (dma_chan == 23) {
+-				dmfc_dp_chan = __raw_readl(DMFC_DP_CHAN);
+-				dmfc_dp_chan &= ~(0xc0);
+-				dmfc_dp_chan |= 0x40;
+-				__raw_writel(dmfc_dp_chan, DMFC_DP_CHAN);
+-			} else if (dma_chan == 27) {
+-				dmfc_dp_chan = __raw_readl(DMFC_DP_CHAN);
+-				dmfc_dp_chan &= ~(0xc000);
+-				dmfc_dp_chan |= 0x4000;
+-				__raw_writel(dmfc_dp_chan, DMFC_DP_CHAN);
+-			} else if (dma_chan == 28) {
+-				dmfc_wr_chan = __raw_readl(DMFC_WR_CHAN);
+-				dmfc_wr_chan &= ~(0xc0);
+-				dmfc_wr_chan |= 0x40;
+-				__raw_writel(dmfc_wr_chan, DMFC_WR_CHAN);
+-			}
+-			_ipu_ch_param_set_burst_size(dma_chan, 64);
+-		} else {
+-			if (dma_chan == 23) {
+-				dmfc_dp_chan = __raw_readl(DMFC_DP_CHAN);
+-				dmfc_dp_chan &= ~(0xc0);
+-				dmfc_dp_chan |= 0x80;
+-				__raw_writel(dmfc_dp_chan, DMFC_DP_CHAN);
+-			} else if (dma_chan == 27) {
+-				dmfc_dp_chan = __raw_readl(DMFC_DP_CHAN);
+-				dmfc_dp_chan &= ~(0xc000);
+-				dmfc_dp_chan |= 0x8000;
+-				__raw_writel(dmfc_dp_chan, DMFC_DP_CHAN);
+-			} else {
+-				dmfc_wr_chan = __raw_readl(DMFC_WR_CHAN);
+-				dmfc_wr_chan &= ~(0xc0);
+-				dmfc_wr_chan |= 0x80;
+-				__raw_writel(dmfc_wr_chan, DMFC_WR_CHAN);
+-			}
+-		}
+ 		spin_lock_irqsave(&ipu_lock, lock_flags);
+ 		_ipu_dmfc_set_wait4eot(dma_chan, width);
+ 		spin_unlock_irqrestore(&ipu_lock, lock_flags);
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index 9e8d703..ca42bc5 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -81,8 +81,8 @@ void _ipu_dmfc_init(int dmfc_type, int first)
+ 		 * 1C, 2C and 6B, 6F unused;
+ 		 */
+ 		printk(KERN_INFO "IPU DMFC DC HIGH RESOLUTION: 1(0~3), 5B(4,5), 5F(6,7)\n");
+-		dmfc_wr_chan = 0x00000088;
+-		dmfc_dp_chan = 0x00009694;
++		dmfc_wr_chan = 0x00000008;
++		dmfc_dp_chan = 0x00001614;
+ 		dmfc_size_28 = 256*4;
+ 		dmfc_size_29 = 0;
+ 		dmfc_size_24 = 0;
+@@ -95,8 +95,8 @@ void _ipu_dmfc_init(int dmfc_type, int first)
+ 		 * 1C, 2C and 6B, 6F unused;
+ 		 */
+ 		printk(KERN_INFO "IPU DMFC DP HIGH RESOLUTION: 1(0,1), 5B(2~5), 5F(6,7)\n");
+-		dmfc_wr_chan = 0x00000090;
+-		dmfc_dp_chan = 0x0000968a;
++		dmfc_wr_chan = 0x00000010;
++		dmfc_dp_chan = 0x0000160a;
+ 		dmfc_size_28 = 128*4;
+ 		dmfc_size_29 = 0;
+ 		dmfc_size_24 = 0;
+@@ -109,7 +109,7 @@ void _ipu_dmfc_init(int dmfc_type, int first)
+ 		 */
+ 		printk(KERN_INFO "IPU DMFC ONLY-DP HIGH RESOLUTION: 5B(0~3), 5F(4~7)\n");
+ 		dmfc_wr_chan = 0x00000000;
+-		dmfc_dp_chan = 0x00008c88;
++		dmfc_dp_chan = 0x00000c08;
+ 		dmfc_size_28 = 0;
+ 		dmfc_size_29 = 0;
+ 		dmfc_size_24 = 0;
+@@ -122,8 +122,8 @@ void _ipu_dmfc_init(int dmfc_type, int first)
+ 		 * 1C, 2C and 6B, 6F unused;
+ 		 */
+ 		printk(KERN_INFO "IPU DMFC NORMAL mode: 1(0~1), 5B(4,5), 5F(6,7)\n");
+-		dmfc_wr_chan = 0x00000090;
+-		dmfc_dp_chan = 0x00009694;
++		dmfc_wr_chan = 0x00000010;
++		dmfc_dp_chan = 0x00001614;
+ 		dmfc_size_28 = 128*4;
+ 		dmfc_size_29 = 0;
+ 		dmfc_size_24 = 0;
+diff --git a/drivers/mxc/ipu3/ipu_param_mem.h b/drivers/mxc/ipu3/ipu_param_mem.h
+index 00ce4ea..b2049de 100644
+--- a/drivers/mxc/ipu3/ipu_param_mem.h
++++ b/drivers/mxc/ipu3/ipu_param_mem.h
+@@ -179,7 +179,7 @@ static inline void _ipu_ch_param_init(int ch,
+ 	case IPU_PIX_FMT_RGB565:
+ 		ipu_ch_param_set_field(&params, 0, 107, 3, 3);	/* bits/pixel */
+ 		ipu_ch_param_set_field(&params, 1, 85, 4, 7);	/* pix format */
+-		ipu_ch_param_set_field(&params, 1, 78, 7, 15);	/* burst size */
++		ipu_ch_param_set_field(&params, 1, 78, 7, 31);	/* burst size */
+ 
+ 		_ipu_ch_params_set_packing(&params, 5, 0, 6, 5, 5, 11, 8, 16);
+ 		break;
+-- 
+1.7.7.4
+

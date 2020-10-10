@@ -1,0 +1,42 @@
+From 5abc4236a031a2084f273237ed1a082400a7a201 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 19 Jun 2012 18:23:10 +0800
+Subject: [PATCH 1622/2463] ENGR00214199 [MX6]Need to lower ipg_perclk to 6M
+ before init GPT
+
+As Arik TO1.0 GPT use ipg_perclk as clock source, we need to
+lower it to 6M before init GPT, or the clock source freq will
+be wrong if we lower the ipg_perclk after GPT time already init.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 975f22c..8145665 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5275,6 +5275,9 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 		clk_debug_register(lookups[i].clk);
+ 	}
+ 
++	/* Lower the ipg_perclk frequency to 6MHz. */
++	clk_set_rate(&ipg_perclk, 6000000);
++
+ 	/* Timer needs to be initialized first as the
+ 	  * the WAIT routines use GPT counter as
+ 	  * a delay.
+@@ -5421,9 +5424,6 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 
+ 	__raw_writel(0, MXC_CCM_CCGR6);
+ 
+-	/* Lower the ipg_perclk frequency to 6MHz. */
+-	clk_set_rate(&ipg_perclk, 6000000);
+-
+ 	/* S/PDIF */
+ 	clk_set_parent(&spdif0_clk[0], &pll3_pfd_454M);
+ 
+-- 
+1.7.7.4
+

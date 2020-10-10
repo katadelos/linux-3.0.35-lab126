@@ -1,0 +1,54 @@
+From d53c7d0707ffc5b594b725e5140c880fc409f20e Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Thu, 12 Jul 2012 17:58:11 +0800
+Subject: [PATCH 1741/2463] ENGR00217018 [Mx6 ]Need to set 1.1V as  PU default
+ voltage
+
+1. Need to set 1.1V as default PU value, as when first time VPU
+or GPU try to enable PU regulator, it will use this default
+value as PU voltage setting.
+2. For DL, as its default setpoint is set to middle point,
+we need to add a usecount for 400M PFD, because when system
+enter 24M, it will disable 400M PFD if its previous setpoint
+is middle, if not add this usecount when we init the bus freq
+setpoint, then the usecount will be wrong when first time system
+enter 24M bus mode.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/bus_freq.c             |    3 +++
+ arch/arm/mach-mx6/mx6_anatop_regulator.c |    4 ++--
+ 2 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index 26002b1..ca8e313 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -449,6 +449,9 @@ static int __devinit busfreq_probe(struct platform_device *pdev)
+ 	if (cpu_is_mx6dl()) {
+ 		high_bus_freq_mode = 0;
+ 		med_bus_freq_mode = 1;
++		/* To make pll2_400 use count right, as when
++		system enter 24M, it will disable pll2_400 */
++		clk_enable(pll2_400);
+ 	} else {
+ 		high_bus_freq_mode = 1;
+ 		med_bus_freq_mode = 0;
+diff --git a/arch/arm/mach-mx6/mx6_anatop_regulator.c b/arch/arm/mach-mx6/mx6_anatop_regulator.c
+index 09229e4..e9b2ea7 100644
+--- a/arch/arm/mach-mx6/mx6_anatop_regulator.c
++++ b/arch/arm/mach-mx6/mx6_anatop_regulator.c
+@@ -41,8 +41,8 @@ extern struct platform_device sgtl5000_vdda_reg_devices;
+ extern struct platform_device sgtl5000_vddio_reg_devices;
+ extern struct platform_device sgtl5000_vddd_reg_devices;
+ extern void __iomem *gpc_base;
+-
+-static unsigned int org_ldo;
++/* Default PU voltage value set to 1.1V */
++static unsigned int org_ldo = 0x2000;
+ 
+ static int get_voltage(struct anatop_regulator *sreg)
+ {
+-- 
+1.7.7.4
+

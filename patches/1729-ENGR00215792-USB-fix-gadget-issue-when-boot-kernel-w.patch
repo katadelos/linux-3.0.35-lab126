@@ -1,0 +1,78 @@
+From d2779d0ae97a63e0ca8d7001163fd29e183582bf Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Thu, 5 Jul 2012 13:57:59 +0800
+Subject: [PATCH 1729/2463] ENGR00215792 USB:fix gadget issue when boot kernel
+ with USB connected
+
+- USB gadget disconnected when system boot kernel with USB connected. Commit
+68b1c60f7f6c436340206679a18d61d9 induce the issue, call dr_discharge_line(1)
+to ensure no abnormal usb wakeup interrupt happen after plug out the cable.
+There are two cases cause dr_discharge_line(1) of fsl_otg_event() be called.
+One case is switch the otg mode form Host mode to Device mode. Another case is
+boot kernel with USB connected. The host_first_call is true when system boot
+kernel with USB connected, otherwise it is false. So dr_discharge_line(true)
+should not be called in fsl_otg_event() if host_first_call is true.
+
+- USBOH3 clock is still on after plug out the cable when boot kernel with USB
+connected, If the suspended bit is 0x1 and stopped is 0x0,the case is regarded
+as suspend connected to usb charger. USB clock will be turn on, otherwise the
+second suspend is processed without USB clock and it causes system hang. But
+system boot kernel with cable connected, suspended is 0x1 and stopped is 0x0.
+USB clock will be on by mistake. And stopped is cleared in dr_controller_run()
+when system boot kernel with USB connected. We should check the suspended and
+stopped bit before call dr_controller_run() to fix the issue.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |   14 ++++++++++----
+ drivers/usb/otg/fsl_otg.c       |    2 +-
+ 2 files changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 90eb986..a7bc480 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -3453,6 +3453,15 @@ static int fsl_udc_resume(struct platform_device *pdev)
+ 		goto end;
+ 	}
+ 
++	/*
++	 * To fix suspend issue connected to usb charger,if stopped is 0
++	 * suspended is 1,clock on and out of low power mode to avoid
++	 * next system suspend no clock to cause system hang.
++	 */
++	if (udc_controller->suspended && !udc_controller->stopped) {
++		dr_clk_gate(true);
++		dr_phy_low_power_mode(udc_controller, false);
++	}
+ 	/* Enable DR irq reg and set controller Run */
+ 	if (udc_controller->stopped) {
+ 		/* the clock is already on at usb wakeup routine */
+@@ -3491,10 +3500,7 @@ end:
+ 		dr_clk_gate(false);
+ 	}
+ 
+-	if (!(--udc_controller->suspended) && !udc_controller->stopped) {
+-		dr_clk_gate(true);
+-		dr_phy_low_power_mode(udc_controller, false);
+-	}
++	--udc_controller->suspended;
+ 	enable_irq(udc_controller->irq);
+ 	mutex_unlock(&udc_resume_mutex);
+ 	printk(KERN_DEBUG "USB Gadget resume ends\n");
+diff --git a/drivers/usb/otg/fsl_otg.c b/drivers/usb/otg/fsl_otg.c
+index 186fdaf..4205ed9 100755
+--- a/drivers/usb/otg/fsl_otg.c
++++ b/drivers/usb/otg/fsl_otg.c
+@@ -747,7 +747,7 @@ static void fsl_otg_event(struct work_struct *work)
+ 		fsm->a_conn = 0;
+ 
+ 	if (fsm->id) {		/* switch to gadget */
+-		if (pdata->dr_discharge_line)
++		if ((og->host_first_call == false) && pdata->dr_discharge_line)
+ 			pdata->dr_discharge_line(true);
+ 		fsl_otg_start_host(fsm, 0);
+ 		if (pdata->wake_up_enable)
+-- 
+1.7.7.4
+

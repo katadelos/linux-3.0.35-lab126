@@ -1,0 +1,169 @@
+From 5165102fd3131376c5527344c47e4946d91bf0bb Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Mon, 4 Jun 2012 16:28:33 +0800
+Subject: [PATCH 1590/2463] ENGR00212232-02 USB:fix otg can not work without
+ phy power if VBUS removed
+
+- There is no VBUS supply or not supply for USBPHY power 3p0,the USB mouse
+  enumeration fail during the board booting with a USB mouse connected to
+  otg port.During system booting ,some error message appear like below :
+  "usb 1-1: device not accepting address 5, error -71
+  hub 1-0:1.0: unable to enumerate USB device on port 1"
+  The otg phy power is needed during normal USB transmitting ,the otg phy
+  power should be on  before calling the usb_add_hcd. So should make sure
+  usb_add_hcd is called after otg_set_host is called in usb_hcd_fsl_probe().
+- Before switch the otg mode form Host mode to Device mode,we must call
+  dr_discharge_line() to make sure no abnormal usb wakeup interrupt happen.
+- Some user case ,the BM_USBPHY_CTRL_ENHOSTDISCONDETECT bit is cleared by
+  mistake. For example,the otg port connect a extern USB hub and a USB device
+  connected to the USB hub.Unplug the USB device,the Hub will enter auto suspend
+  mode,then plug in the device, hub will auto resume by the device plug in ,the
+  BM_USBPHY_CTRL_ENHOSTDISCONDETECT bit is cleared by mistake.So the function
+  platform_set_disconnect_det() should be called after usb_disconnect.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ drivers/usb/core/hub.c      |   37 +++++++++++++++++++------------------
+ drivers/usb/host/ehci-arc.c |   34 +++++++++++++++++-----------------
+ drivers/usb/otg/fsl_otg.c   |    2 ++
+ 3 files changed, 38 insertions(+), 35 deletions(-)
+
+diff --git a/drivers/usb/core/hub.c b/drivers/usb/core/hub.c
+index f293c69..3c99167 100644
+--- a/drivers/usb/core/hub.c
++++ b/drivers/usb/core/hub.c
+@@ -3198,24 +3198,6 @@ static void hub_port_connect_change(struct usb_hub *hub, int port1,
+ 		hub->indicator[port1-1] = INDICATOR_AUTO;
+ 	}
+ 
+-#ifdef MX6_USB_HOST_HACK
+-	{
+-		struct device *dev = hcd->self.controller;
+-		struct fsl_usb2_platform_data *pdata;
+-
+-		pdata = (struct fsl_usb2_platform_data *)dev->platform_data;
+-		if (dev->parent && (hdev->level == 0) && dev->type) {
+-			if (port1 == 1 && pdata->init)
+-				pdata->init(NULL);
+-		}
+-		if ((port1 == 1) && (hdev->level == 0)) {
+-			/* Must clear HOSTDISCONDETECT when port connect change happen*/
+-			if (pdata->platform_set_disconnect_det)
+-				pdata->platform_set_disconnect_det(pdata, 0);
+-
+-		}
+-	}
+-#endif
+ #ifdef	CONFIG_USB_OTG
+ 	/* during HNP, don't repeat the debounce */
+ 	if (hdev->bus->is_b_host)
+@@ -3256,6 +3238,25 @@ static void hub_port_connect_change(struct usb_hub *hub, int port1,
+ 		usb_disconnect(&hdev->children[port1-1]);
+ 	clear_bit(port1, hub->change_bits);
+ 
++#ifdef MX6_USB_HOST_HACK
++	{
++		struct device *dev = hcd->self.controller;
++		struct fsl_usb2_platform_data *pdata;
++
++		pdata = (struct fsl_usb2_platform_data *)dev->platform_data;
++		if (dev->parent && (hdev->level == 0) && dev->type) {
++			if (port1 == 1 && pdata->init)
++				pdata->init(NULL);
++		}
++		if ((port1 == 1) && (hdev->level == 0)) {
++			/* Must clear HOSTDISCONDETECT when port connect change happen*/
++			if (pdata->platform_set_disconnect_det)
++				pdata->platform_set_disconnect_det(pdata, 0);
++
++		}
++	}
++#endif
++
+ 	/* We can forget about a "removed" device when there's a physical
+ 	 * disconnect or the connect status changes.
+ 	 */
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index 08324a6..471998a 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -258,21 +258,8 @@ int usb_hcd_fsl_probe(const struct hc_driver *driver,
+ 
+ 	fsl_platform_set_host_mode(hcd);
+ 	hcd->power_budget = pdata->power_budget;
+-	/*
+-	 * The ehci_fsl_pre_irq must be registered before usb_hcd_irq, in that case
+-	 * it can be called before usb_hcd_irq when irq occurs
+-	 */
+-	retval = request_irq(irq, ehci_fsl_pre_irq, IRQF_SHARED,
+-			"fsl ehci pre interrupt", (void *)pdev);
+-	if (retval != 0)
+-		goto err4;
+-
+-	retval = usb_add_hcd(hcd, irq, IRQF_DISABLED | IRQF_SHARED);
+-	if (retval != 0)
+-		goto err5;
+-
++	ehci = hcd_to_ehci(hcd);
+ 	if (pdata->operating_mode == FSL_USB2_DR_OTG) {
+-		struct ehci_hcd *ehci = hcd_to_ehci(hcd);
+ 
+ 		dbg("pdev=0x%p  hcd=0x%p  ehci=0x%p\n", pdev, hcd, ehci);
+ 
+@@ -282,7 +269,7 @@ int usb_hcd_fsl_probe(const struct hc_driver *driver,
+ 		if (!ehci->transceiver) {
+ 			printk(KERN_ERR "can't find transceiver\n");
+ 			retval = -ENODEV;
+-			goto err6;
++			goto err4;
+ 		}
+ 
+ 		retval = otg_set_host(ehci->transceiver, &ehci_to_hcd(ehci)->self);
+@@ -292,6 +279,19 @@ int usb_hcd_fsl_probe(const struct hc_driver *driver,
+ 			(pdata->operating_mode == FSL_USB2_DR_HOST))
+ 		fsl_platform_set_vbus_power(pdata, 1);
+ 
++	/*
++	 * The ehci_fsl_pre_irq must be registered before usb_hcd_irq, in that case
++	 * it can be called before usb_hcd_irq when irq occurs
++	 */
++	retval = request_irq(irq, ehci_fsl_pre_irq, IRQF_SHARED,
++			"fsl ehci pre interrupt", (void *)pdev);
++	if (retval != 0)
++		goto err5;
++
++	retval = usb_add_hcd(hcd, irq, IRQF_DISABLED | IRQF_SHARED);
++	if (retval != 0)
++		goto err6;
++
+ 	fsl_platform_set_ahb_burst(hcd);
+ 	ehci_testmode_init(hcd_to_ehci(hcd));
+ 	/*
+@@ -306,9 +306,9 @@ int usb_hcd_fsl_probe(const struct hc_driver *driver,
+ 	pdata->pm_command = ehci->command;
+ 	return retval;
+ err6:
+-	usb_remove_hcd(hcd);
+-err5:
+ 	free_irq(irq, (void *)pdev);
++err5:
++	otg_put_transceiver(ehci->transceiver);
+ err4:
+ 	iounmap(hcd->regs);
+ err3:
+diff --git a/drivers/usb/otg/fsl_otg.c b/drivers/usb/otg/fsl_otg.c
+index 2e7d97e..186fdaf 100755
+--- a/drivers/usb/otg/fsl_otg.c
++++ b/drivers/usb/otg/fsl_otg.c
+@@ -747,6 +747,8 @@ static void fsl_otg_event(struct work_struct *work)
+ 		fsm->a_conn = 0;
+ 
+ 	if (fsm->id) {		/* switch to gadget */
++		if (pdata->dr_discharge_line)
++			pdata->dr_discharge_line(true);
+ 		fsl_otg_start_host(fsm, 0);
+ 		if (pdata->wake_up_enable)
+ 			pdata->wake_up_enable(pdata, false);
+-- 
+1.7.7.4
+

@@ -1,0 +1,171 @@
+From 4496dbb3d8be4190c6507294c2ae49319b11ea9a Mon Sep 17 00:00:00 2001
+From: Richard Zhao <richard.zhao@freescale.com>
+Date: Thu, 14 Apr 2011 16:08:05 +0800
+Subject: [PATCH 0091/2463] ENGR00142119-2 arm: imx5: add
+ mxc_gpu_platform_data
+
+The struct inclues z160_revision and reserved mem info .
+
+Signed-off-by: Richard Zhao <richard.zhao@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx50_rdp.c              |    6 +++-
+ arch/arm/mach-mx5/board-mx51_babbage.c          |    4 +-
+ arch/arm/mach-mx5/board-mx53_loco.c             |    8 +++---
+ arch/arm/plat-mxc/devices/platform-mxc_gpu.c    |    8 +------
+ arch/arm/plat-mxc/include/mach/devices-common.h |    3 +-
+ arch/arm/plat-mxc/include/mach/mxc_gpu.h        |   24 +++++++++++++++++++++++
+ 6 files changed, 37 insertions(+), 16 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx50_rdp.c b/arch/arm/mach-mx5/board-mx50_rdp.c
+index e28f395..1b52cf8 100755
+--- a/arch/arm/mach-mx5/board-mx50_rdp.c
++++ b/arch/arm/mach-mx5/board-mx50_rdp.c
+@@ -189,7 +189,9 @@ static const struct imxi2c_platform_data i2c_data __initconst = {
+ 	.bitrate = 100000,
+ };
+ 
+-static int z160_revision __initdata = 1;
++static struct mxc_gpu_platform_data gpu_data __initdata = {
++	.z160_revision = 1,
++};
+ 
+ /*
+  * Board specific initialization.
+@@ -212,7 +214,7 @@ static void __init mx50_rdp_board_init(void)
+ 	imx50_add_imx_i2c(0, &i2c_data);
+ 	imx50_add_imx_i2c(1, &i2c_data);
+ 	imx50_add_imx_i2c(2, &i2c_data);
+-	imx50_add_mxc_gpu(&z160_revision);
++	imx50_add_mxc_gpu(&gpu_data);
+ 	imx50_add_sdhci_esdhc_imx(0, NULL);
+ 	imx50_add_sdhci_esdhc_imx(1, NULL);
+ 	imx50_add_sdhci_esdhc_imx(2, NULL);
+diff --git a/arch/arm/mach-mx5/board-mx51_babbage.c b/arch/arm/mach-mx5/board-mx51_babbage.c
+index a555871..b7dcc64 100755
+--- a/arch/arm/mach-mx5/board-mx51_babbage.c
++++ b/arch/arm/mach-mx5/board-mx51_babbage.c
+@@ -347,7 +347,7 @@ static const struct spi_imx_master mx51_babbage_spi_pdata __initconst = {
+ 	.num_chipselect = ARRAY_SIZE(mx51_babbage_spi_cs),
+ };
+ 
+-static int z160_revision __initdata;
++static struct mxc_gpu_platform_data gpu_data __initdata;
+ 
+ /*
+  * Board specific initialization.
+@@ -397,7 +397,7 @@ static void __init mx51_babbage_init(void)
+ 		ARRAY_SIZE(mx51_babbage_spi_board_info));
+ 	imx51_add_ecspi(0, &mx51_babbage_spi_pdata);
+ 	imx51_add_imx2_wdt(0, NULL);
+-	imx51_add_mxc_gpu(&z160_revision);
++	imx51_add_mxc_gpu(&gpu_data);
+ }
+ 
+ static void __init mx51_babbage_timer_init(void)
+diff --git a/arch/arm/mach-mx5/board-mx53_loco.c b/arch/arm/mach-mx5/board-mx53_loco.c
+index fc49b5d..8e60cc1 100755
+--- a/arch/arm/mach-mx5/board-mx53_loco.c
++++ b/arch/arm/mach-mx5/board-mx53_loco.c
+@@ -628,7 +628,7 @@ static struct mxc_iim_platform_data iim_data = {
+ 	.disable_fuse = mxc_iim_disable_fuse,
+ };
+ 
+-static int z160_revision __initdata;
++static struct mxc_gpu_platform_data gpu_data __initdata;
+ 
+ static struct fsl_mxc_ldb_platform_data ldb_data = {
+ 	.ext_ref = 1,
+@@ -681,10 +681,10 @@ static void __init mx53_loco_board_init(void)
+ 
+ 	/*GPU*/
+ 	if (mx53_revision() >= IMX_CHIP_REVISION_2_0)
+-		z160_revision = 1;
++		gpu_data.z160_revision = 1;
+ 	else
+-		z160_revision = 0;
+-	imx53_add_mxc_gpu(&z160_revision);
++		gpu_data.z160_revision = 0;
++	imx53_add_mxc_gpu(&gpu_data);
+ 	imx_add_gpio_keys(&loco_button_data);
+ }
+ 
+diff --git a/arch/arm/plat-mxc/devices/platform-mxc_gpu.c b/arch/arm/plat-mxc/devices/platform-mxc_gpu.c
+index f30fe85..06ac156 100755
+--- a/arch/arm/plat-mxc/devices/platform-mxc_gpu.c
++++ b/arch/arm/plat-mxc/devices/platform-mxc_gpu.c
+@@ -60,7 +60,7 @@ const struct imx_mxc_gpu_data imx53_gpu_data __initconst =
+ 
+ struct platform_device *__init imx_add_mxc_gpu(
+ 		const struct imx_mxc_gpu_data *data,
+-		const int *pdata)
++		const struct mxc_gpu_platform_data *pdata)
+ {
+ 	struct resource res[] = {
+ 		{
+@@ -93,12 +93,6 @@ struct platform_device *__init imx_add_mxc_gpu(
+ 			.name = "gpu_graphics_mem",
+ 			.flags = IORESOURCE_MEM,
+ 		},
+-		{
+-			.start = 0,
+-			.end = 0,
+-			.name = "gpu_reserved_mem",
+-			.flags = IORESOURCE_MEM,
+-		},
+ 	};
+ 
+ 	return imx_add_platform_device_dmamask("mxc_gpu", 0,
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index a5ee1db..1209047 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -360,6 +360,7 @@ struct platform_device *__init imx_add_iim(
+ 		const struct imx_iim_data *data,
+ 		const struct mxc_iim_platform_data *pdata);
+ 
++#include <mach/mxc_gpu.h>
+ struct imx_mxc_gpu_data {
+ 	resource_size_t irq_2d;
+ 	resource_size_t irq_3d;
+@@ -394,7 +395,7 @@ struct imx_perfmon_data {
+ 
+ struct platform_device *__init imx_add_perfmon(
+ 		const struct imx_perfmon_data *data);
+-		const int *pdata);
++		const struct mxc_gpu_platform_data *pdata);
+ struct imx_otp_data {
+ 	resource_size_t iobase;
+ 	struct mxc_otp_platform_data *pdata;
+diff --git a/arch/arm/plat-mxc/include/mach/mxc_gpu.h b/arch/arm/plat-mxc/include/mach/mxc_gpu.h
+new file mode 100644
+index 0000000..a43d6ec
+--- /dev/null
++++ b/arch/arm/plat-mxc/include/mach/mxc_gpu.h
+@@ -0,0 +1,24 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * for more details.
++ */
++
++#ifndef __MACH_MXC_GPU_H_
++#define __MACH_MXC_GPU_H_
++
++struct mxc_gpu_platform_data {
++	int z160_revision;
++	resource_size_t reserved_mem_base;
++	resource_size_t reserved_mem_size;
++};
++
++#endif /* __MACH_MXC_GPU_H_ */
+-- 
+1.7.7.4
+

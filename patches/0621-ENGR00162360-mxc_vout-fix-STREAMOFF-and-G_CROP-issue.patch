@@ -1,0 +1,98 @@
+From 84f4d38fa4df15a16ab94bce6eedc260be1d198c Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Wed, 16 Nov 2011 17:33:15 +0800
+Subject: [PATCH 0621/2463] ENGR00162360 mxc_vout: fix STREAMOFF and G_CROP
+ issues
+
+1. move videobuf_mmap_free to mxc_vout_release.
+2. call videobuf_queue_cancel in mxc_vout_release if no streamon called.
+3. correct return value of G_CROP for support_window case.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_vout.c |   47 ++++++++++++++++------------
+ 1 files changed, 27 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_vout.c b/drivers/media/video/mxc/output/mxc_vout.c
+index 1cacbd6..d7e6fa3 100644
+--- a/drivers/media/video/mxc/output/mxc_vout.c
++++ b/drivers/media/video/mxc/output/mxc_vout.c
+@@ -650,8 +650,11 @@ static int mxc_vout_release(struct file *file)
+ 	if (--vout->open_cnt == 0) {
+ 		q = &vout->vbq;
+ 		if (q->streaming)
+-			ret = mxc_vidioc_streamoff(file, vout, vout->type);
++			mxc_vidioc_streamoff(file, vout, vout->type);
++		else
++			videobuf_queue_cancel(q);
+ 		destroy_workqueue(vout->v4l_wq);
++		ret = videobuf_mmap_free(q);
+ 	}
+ 
+ 	return ret;
+@@ -917,16 +920,23 @@ static int mxc_vidioc_g_crop(struct file *file, void *fh, struct v4l2_crop *crop
+ 	if (crop->type != V4L2_BUF_TYPE_VIDEO_OUTPUT)
+ 		return -EINVAL;
+ 
+-	if (vout->task.output.crop.w && vout->task.output.crop.h) {
+-		crop->c.left = vout->task.output.crop.pos.x;
+-		crop->c.top = vout->task.output.crop.pos.y;
+-		crop->c.width = vout->task.output.crop.w;
+-		crop->c.height = vout->task.output.crop.h;
+-	} else {
+-		crop->c.left = 0;
+-		crop->c.top = 0;
++	if (vout->disp_support_windows) {
++		crop->c.left = vout->win_pos.x;
++		crop->c.top = vout->win_pos.y;
+ 		crop->c.width = vout->task.output.width;
+ 		crop->c.height = vout->task.output.height;
++	} else {
++		if (vout->task.output.crop.w && vout->task.output.crop.h) {
++			crop->c.left = vout->task.output.crop.pos.x;
++			crop->c.top = vout->task.output.crop.pos.y;
++			crop->c.width = vout->task.output.crop.w;
++			crop->c.height = vout->task.output.crop.h;
++		} else {
++			crop->c.left = 0;
++			crop->c.top = 0;
++			crop->c.width = vout->task.output.width;
++			crop->c.height = vout->task.output.height;
++		}
+ 	}
+ 
+ 	return 0;
+@@ -1349,22 +1359,19 @@ static int mxc_vidioc_streamoff(struct file *file, void *fh, enum v4l2_buf_type
+ {
+ 	struct mxc_vout_output *vout = fh;
+ 	struct videobuf_queue *q = &vout->vbq;
+-	int ret;
+-
+-	del_timer(&vout->timer);
++	int ret = 0;
+ 
+-	cancel_work_sync(&vout->disp_work);
+-	flush_workqueue(vout->v4l_wq);
++	if (q->streaming) {
++		del_timer(&vout->timer);
+ 
+-	release_disp_output(vout);
++		cancel_work_sync(&vout->disp_work);
++		flush_workqueue(vout->v4l_wq);
+ 
+-	ret = videobuf_streamoff(&vout->vbq);
+-	if (ret < 0)
+-		goto err;
++		release_disp_output(vout);
+ 
+-	ret = videobuf_mmap_free(q);
++		ret = videobuf_streamoff(&vout->vbq);
++	}
+ 
+-err:
+ 	return ret;
+ }
+ 
+-- 
+1.7.7.4
+

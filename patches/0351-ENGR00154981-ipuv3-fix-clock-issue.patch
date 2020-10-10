@@ -1,0 +1,54 @@
+From 201c52eebc77f425b453b412fdef8d80d999b61c Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Thu, 18 Aug 2011 11:09:03 +0800
+Subject: [PATCH 0351/2463] ENGR00154981 ipuv3: fix clock issue
+
+ipu clock should be enable before pixel clock set parent.
+because the set parent function access ipu register.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c |    8 ++++----
+ 1 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index db35c29..32fb0cc 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -236,7 +236,7 @@ static int _ipu_pixel_clk_set_parent(struct clk *clk, struct clk *parent)
+ #else
+ #define __INIT_CLK_DEBUG(n)
+ #endif
+-static int __devinit ipu_clk_setup(struct ipu_soc *ipu,
++static int __devinit ipu_clk_setup_enable(struct ipu_soc *ipu,
+ 		struct platform_device *pdev)
+ {
+ 	struct imx_ipuv3_platform_data *plat_data = pdev->dev.platform_data;
+@@ -298,6 +298,8 @@ static int __devinit ipu_clk_setup(struct ipu_soc *ipu,
+ 	clk_debug_register(&ipu->pixel_clk[0]);
+ 	clk_debug_register(&ipu->pixel_clk[1]);
+ 
++	clk_enable(ipu->ipu_clk);
++
+ 	clk_set_parent(&ipu->pixel_clk[0], ipu->ipu_clk);
+ 	clk_set_parent(&ipu->pixel_clk[1], ipu->ipu_clk);
+ 
+@@ -596,14 +598,12 @@ static int __devinit ipu_probe(struct platform_device *pdev)
+ 	dev_dbg(ipu->dev, "IPU Display Region 1 Mem = %p\n", ipu->disp_base[1]);
+ 	dev_dbg(ipu->dev, "IPU VDI Regs = %p\n", ipu->vdi_reg);
+ 
+-	ret = ipu_clk_setup(ipu, pdev);
++	ret = ipu_clk_setup_enable(ipu, pdev);
+ 	if (ret < 0) {
+ 		dev_err(ipu->dev, "ipu clk setup failed\n");
+ 		goto failed_clk_setup;
+ 	}
+ 
+-	clk_enable(ipu->ipu_clk);
+-
+ 	platform_set_drvdata(pdev, ipu);
+ 
+ 	ipu_reset(ipu);
+-- 
+1.7.7.4
+

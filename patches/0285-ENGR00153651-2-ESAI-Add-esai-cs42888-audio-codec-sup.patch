@@ -1,0 +1,2760 @@
+From fa23b2ae91b228a9a11ef3a7b2a4a04315bdead2 Mon Sep 17 00:00:00 2001
+From: Lionel Xu <Lionel.Xu@freescale.com>
+Date: Mon, 25 Jul 2011 21:58:43 +0800
+Subject: [PATCH 0285/2463] ENGR00153651-2 ESAI: Add esai/cs42888 audio codec
+ support on mx6q platform
+
+Add ESAI and related audio codec cs42888 support on mx6q platform.
+
+Signed-off-by: Lionel Xu <R63889@freescale.com>
+---
+ sound/soc/codecs/Kconfig    |    5 +
+ sound/soc/codecs/Makefile   |    2 +
+ sound/soc/codecs/cs42888.c  | 1037 +++++++++++++++++++++++++++++++++++++++++++
+ sound/soc/codecs/cs42888.h  |   31 ++
+ sound/soc/imx/Kconfig       |   12 +
+ sound/soc/imx/Makefile      |    2 +-
+ sound/soc/imx/Makefile.rej  |   20 +-
+ sound/soc/imx/imx-cs42888.c |  389 ++++++++++++++++
+ sound/soc/imx/imx-esai.c    |  794 +++++++++++++++++++++++++++++++++
+ sound/soc/imx/imx-esai.h    |  335 ++++++++++++++
+ 10 files changed, 2611 insertions(+), 16 deletions(-)
+
+diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
+index f4470c7..44ef5d7 100644
+--- a/sound/soc/codecs/Kconfig
++++ b/sound/soc/codecs/Kconfig
+@@ -33,6 +33,7 @@ config SND_SOC_ALL_CODECS
+ 	select SND_SOC_DFBMCS320
+ 	select SND_SOC_JZ4740_CODEC if SOC_JZ4740
+ 	select SND_SOC_LM4857 if I2C
++	select SND_SOC_CS42888 if I2C
+ 	select SND_SOC_MAX98088 if I2C
+ 	select SND_SOC_MAX98095 if I2C
+ 	select SND_SOC_MAX9850 if I2C
+@@ -213,6 +214,10 @@ config SND_SOC_SGTL5000
+ config SND_SOC_SN95031
+ 	tristate
+ 
++#CLI CS42888 codec
++config SND_SOC_CS42888
++	tristate
++
+ config SND_SOC_SPDIF
+ 	tristate
+ 
+diff --git a/sound/soc/codecs/Makefile b/sound/soc/codecs/Makefile
+index 7f4b288..cc398bc 100644
+--- a/sound/soc/codecs/Makefile
++++ b/sound/soc/codecs/Makefile
+@@ -25,6 +25,7 @@ snd-soc-max98095-objs := max98095.o
+ snd-soc-max9850-objs := max9850.o
+ snd-soc-pcm3008-objs := pcm3008.o
+ snd-soc-sgtl5000-objs := sgtl5000.o
++snd-soc-cs42888-objs := cs42888.o
+ snd-soc-alc5623-objs := alc5623.o
+ snd-soc-sn95031-objs := sn95031.o
+ snd-soc-spdif-objs := spdif_transciever.o
+@@ -108,6 +109,7 @@ obj-$(CONFIG_SND_SOC_CQ0093VC) += snd-soc-cq93vc.o
+ obj-$(CONFIG_SND_SOC_CS42L51)	+= snd-soc-cs42l51.o
+ obj-$(CONFIG_SND_SOC_CS4270)	+= snd-soc-cs4270.o
+ obj-$(CONFIG_SND_SOC_CS4271)	+= snd-soc-cs4271.o
++obj-$(CONFIG_SND_SOC_CS42888)  += snd-soc-cs42888.o
+ obj-$(CONFIG_SND_SOC_CX20442)	+= snd-soc-cx20442.o
+ obj-$(CONFIG_SND_SOC_DA7210)	+= snd-soc-da7210.o
+ obj-$(CONFIG_SND_SOC_DFBMCS320)	+= snd-soc-dfbmcs320.o
+diff --git a/sound/soc/codecs/cs42888.c b/sound/soc/codecs/cs42888.c
+new file mode 100644
+index 0000000..90894c0
+--- /dev/null
++++ b/sound/soc/codecs/cs42888.c
+@@ -0,0 +1,1037 @@
++/*
++ * cs42888.c  -- CS42888 ALSA SoC Audio Driver
++ * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/kernel.h>
++#include <linux/init.h>
++#include <linux/delay.h>
++#include <linux/pm.h>
++#include <linux/i2c.h>
++#include <linux/spi/spi.h>
++#include <linux/platform_device.h>
++#include <linux/regulator/consumer.h>
++#include <linux/fsl_devices.h>
++
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++#include <sound/soc-dapm.h>
++#include <sound/tlv.h>
++#include <sound/initval.h>
++#include <asm/div64.h>
++
++#include "cs42888.h"
++#define CS42888_NUM_SUPPLIES 4
++static const char *cs42888_supply_names[CS42888_NUM_SUPPLIES] = {
++	"VA",
++	"VD",
++	"VLS",
++	"VLC",
++};
++
++#define CS42888_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S20_3LE |\
++			SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE)
++
++/* CS42888 registers addresses */
++#define CS42888_CHIPID		0x01	/* Chip ID */
++#define CS42888_PWRCTL		0x02	/* Power Control */
++#define CS42888_MODE		0x03	/* Functional Mode */
++#define CS42888_FORMAT		0x04	/* Interface Formats */
++#define CS42888_ADCCTL		0x05	/* ADC Control */
++#define CS42888_TRANS		0x06	/* Transition Control */
++#define CS42888_MUTE		0x07	/* Mute Control */
++#define CS42888_VOLAOUT1	0x08	/* Volume Control AOUT1*/
++#define CS42888_VOLAOUT2	0x09	/* Volume Control AOUT2*/
++#define CS42888_VOLAOUT3	0x0A	/* Volume Control AOUT3*/
++#define CS42888_VOLAOUT4	0x0B	/* Volume Control AOUT4*/
++#define CS42888_VOLAOUT5	0x0C	/* Volume Control AOUT5*/
++#define CS42888_VOLAOUT6	0x0D	/* Volume Control AOUT6*/
++#define CS42888_VOLAOUT7	0x0E	/* Volume Control AOUT7*/
++#define CS42888_VOLAOUT8	0x0F	/* Volume Control AOUT8*/
++#define CS42888_DACINV		0x10	/* DAC Channel Invert */
++#define CS42888_VOLAIN1		0x11	/* Volume Control AIN1 */
++#define CS42888_VOLAIN2		0x12	/* Volume Control AIN2 */
++#define CS42888_VOLAIN3		0x13	/* Volume Control AIN3 */
++#define CS42888_VOLAIN4		0x14	/* Volume Control AIN4 */
++#define CS42888_ADCINV		0x17	/* ADC Channel Invert */
++#define CS42888_STATUSCTL	0x18	/* Status Control */
++#define CS42888_STATUS		0x19	/* Status */
++#define CS42888_STATUSMASK	0x1A	/* Status Mask */
++
++#define CS42888_FIRSTREG	0x01
++#define CS42888_LASTREG		0x1A
++#define CS42888_NUMREGS	(CS42888_LASTREG - CS42888_FIRSTREG + 1)
++#define CS42888_I2C_INCR	0x80
++
++/* Bit masks for the CS42888 registers */
++#define CS42888_CHIPID_ID_MASK	0xF0
++#define CS42888_CHIPID_REV	0x0F
++#define CS42888_PWRCTL_PDN_ADC2_OFFSET		6
++#define CS42888_PWRCTL_PDN_ADC1_OFFSET		5
++#define CS42888_PWRCTL_PDN_DAC4_OFFSET		4
++#define CS42888_PWRCTL_PDN_DAC3_OFFSET		3
++#define CS42888_PWRCTL_PDN_DAC2_OFFSET		2
++#define CS42888_PWRCTL_PDN_DAC1_OFFSET		1
++#define CS42888_PWRCTL_PDN_OFFSET		0
++#define CS42888_PWRCTL_PDN_ADC2_MASK	(1 << CS42888_PWRCTL_PDN_ADC2_OFFSET)
++#define CS42888_PWRCTL_PDN_ADC1_MASK	(1 << CS42888_PWRCTL_PDN_ADC1_OFFSET)
++#define CS42888_PWRCTL_PDN_DAC4_MASK	(1 << CS42888_PWRCTL_PDN_DAC4_OFFSET)
++#define CS42888_PWRCTL_PDN_DAC3_MASK	(1 << CS42888_PWRCTL_PDN_DAC3_OFFSET)
++#define CS42888_PWRCTL_PDN_DAC2_MASK	(1 << CS42888_PWRCTL_PDN_DAC2_OFFSET)
++#define CS42888_PWRCTL_PDN_DAC1_MASK	(1 << CS42888_PWRCTL_PDN_DAC1_OFFSET)
++#define CS42888_PWRCTL_PDN_MASK		(1 << CS42888_PWRCTL_PDN_OFFSET)
++
++#define CS42888_MODE_SPEED_MASK	0xF0
++#define CS42888_MODE_1X		0x00
++#define CS42888_MODE_2X		0x50
++#define CS42888_MODE_4X		0xA0
++#define CS42888_MODE_SLAVE	0xF0
++#define CS42888_MODE_DIV_MASK	0x0E
++#define CS42888_MODE_DIV1	0x00
++#define CS42888_MODE_DIV2	0x02
++#define CS42888_MODE_DIV3	0x04
++#define CS42888_MODE_DIV4	0x06
++#define CS42888_MODE_DIV5	0x08
++
++#define CS42888_FORMAT_FREEZE_OFFSET	7
++#define CS42888_FORMAT_AUX_DIF_OFFSET	6
++#define CS42888_FORMAT_DAC_DIF_OFFSET	3
++#define CS42888_FORMAT_ADC_DIF_OFFSET	0
++#define CS42888_FORMAT_FREEZE_MASK	(1 << CS42888_FORMAT_FREEZE_OFFSET)
++#define CS42888_FORMAT_AUX_DIF_MASK	(1 << CS42888_FORMAT_AUX_DIF_OFFSET)
++#define CS42888_FORMAT_DAC_DIF_MASK	(7 << CS42888_FORMAT_DAC_DIF_OFFSET)
++#define CS42888_FORMAT_ADC_DIF_MASK	(7 << CS42888_FORMAT_ADC_DIF_OFFSET)
++
++#define CS42888_TRANS_DAC_SNGVOL_OFFSET	    7
++#define CS42888_TRANS_DAC_SZC_OFFSET	    5
++#define CS42888_TRANS_AMUTE_OFFSET	    4
++#define CS42888_TRANS_MUTE_ADC_SP_OFFSET    3
++#define CS42888_TRANS_ADC_SNGVOL_OFFSET	    2
++#define CS42888_TRANS_ADC_SZC_OFFSET	    0
++#define CS42888_TRANS_DAC_SNGVOL_MASK	(1 << CS42888_TRANS_DAC_SNGVOL_OFFSET)
++#define CS42888_TRANS_DAC_SZC_MASK	(3 << CS42888_TRANS_DAC_SZC_OFFSET)
++#define CS42888_TRANS_AMUTE_MASK	(1 << CS42888_TRANS_AMUTE_OFFSET)
++#define CS42888_TRANS_MUTE_ADC_SP_MASK	(1 << CS42888_TRANS_MUTE_ADC_SP_OFFSET)
++#define CS42888_TRANS_ADC_SNGVOL_MASK	(1 << CS42888_TRANS_ADC_SNGVOL_OFFSET)
++#define CS42888_TRANS_ADC_SZC_MASK	(3 << CS42888_TRANS_ADC_SZC_OFFSET)
++
++#define CS42888_MUTE_AOUT8	(0x1 << 7)
++#define CS42888_MUTE_AOUT7	(0x1 << 6)
++#define CS42888_MUTE_AOUT6	(0x1 << 5)
++#define CS42888_MUTE_AOUT5	(0x1 << 4)
++#define CS42888_MUTE_AOUT4	(0x1 << 3)
++#define CS42888_MUTE_AOUT3	(0x1 << 2)
++#define CS42888_MUTE_AOUT2	(0x1 << 1)
++#define CS42888_MUTE_AOUT1	(0x1 << 0)
++#define CS42888_MUTE_ALL	(CS42888_MUTE_AOUT1 | CS42888_MUTE_AOUT2 | \
++				CS42888_MUTE_AOUT3 | CS42888_MUTE_AOUT4 | \
++				CS42888_MUTE_AOUT5 | CS42888_MUTE_AOUT6 | \
++				CS42888_MUTE_AOUT7 | CS42888_MUTE_AOUT8)
++
++#define DIF_LEFT_J		0
++#define DIF_I2S			1
++#define DIF_RIGHT_J		2
++#define DIF_TDM			6
++
++/* Private data for the CS42888 */
++struct cs42888_private {
++	struct snd_soc_codec codec;
++	u8 reg_cache[CS42888_NUMREGS + 1];
++	unsigned int mclk; /* Input frequency of the MCLK pin */
++	unsigned int mode; /* The mode (I2S or left-justified) */
++	unsigned int slave_mode;
++	unsigned int manual_mute;
++	struct regulator_bulk_data supplies[CS42888_NUM_SUPPLIES];
++};
++
++/**
++ * cs42888_fill_cache - pre-fill the CS42888 register cache.
++ * @codec: the codec for this CS42888
++ *
++ * This function fills in the CS42888 register cache by reading the register
++ * values from the hardware.
++ *
++ * This CS42888 registers are cached to avoid excessive I2C I/O operations.
++ * After the initial read to pre-fill the cache, the CS42888 never updates
++ * the register values, so we won't have a cache coherency problem.
++ *
++ * We use the auto-increment feature of the CS42888 to read all registers in
++ * one shot.
++ */
++static int cs42888_fill_cache(struct snd_soc_codec *codec)
++{
++	u8 *cache = codec->reg_cache;
++	struct i2c_client *i2c_client = codec->control_data;
++	s32 length;
++
++	length = i2c_smbus_read_i2c_block_data(i2c_client,
++		CS42888_FIRSTREG | CS42888_I2C_INCR, CS42888_NUMREGS, \
++		cache + 1);
++
++	if (length != CS42888_NUMREGS) {
++		dev_err(codec->dev, "i2c read failure, addr=0x%x\n",
++		       i2c_client->addr);
++		return -EIO;
++	}
++
++	return 0;
++}
++
++
++#ifdef CS42888_DEBUG
++static void dump_reg(struct snd_soc_codec *codec)
++{
++	int i, reg;
++	int ret;
++	printk(KERN_DEBUG "dump begin\n");
++	printk(KERN_DEBUG "reg value in cache\n");
++	for (i = 0; i < CS42888_NUMREGS; i++)
++		printk(KERN_DEBUG "reg[%d] = 0x%x\n", i, cache[i]);
++
++	printk(KERN_DEBUG "real reg value\n");
++	ret = cs42888_fill_cache(codec);
++	if (ret < 0) {
++		pr_err("failed to fill register cache\n");
++		return ret;
++	}
++	for (i = 0; i < CS42888_NUMREGS; i++)
++		printk(KERN_DEBUG "reg[%d] = 0x%x\n", i, cache[i]);
++
++	printk(KERN_DEBUG "dump end\n");
++}
++#else
++static void dump_reg(struct snd_soc_codec *codec)
++{
++}
++#endif
++
++/* -127.5dB to 0dB with step of 0.5dB */
++static const DECLARE_TLV_DB_SCALE(dac_tlv, -12750, 50, 1);
++/* -64dB to 24dB with step of 0.5dB */
++static const DECLARE_TLV_DB_SCALE(adc_tlv, -6400, 50, 1);
++
++static int cs42888_out_vu(struct snd_kcontrol *kcontrol,
++			 struct snd_ctl_elem_value *ucontrol)
++{
++	struct soc_mixer_control *mc =
++		(struct soc_mixer_control *)kcontrol->private_value;
++	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
++	unsigned int reg = mc->reg;
++	unsigned int reg2 = mc->rreg;
++	int ret;
++	u16 val;
++
++	ret = snd_soc_put_volsw_2r(kcontrol, ucontrol);
++	if (ret < 0)
++		return ret;
++
++	/* Now write again with the volume update bit set */
++	val = snd_soc_read(codec, reg);
++	ret = snd_soc_write(codec, reg, val);
++
++	val = snd_soc_read(codec, reg2);
++	ret = snd_soc_write(codec, reg2, val);
++	return 0;
++}
++
++int cs42888_info_volsw_s8(struct snd_kcontrol *kcontrol,
++	struct snd_ctl_elem_info *uinfo)
++{
++	struct soc_mixer_control *mc =
++		(struct soc_mixer_control *)kcontrol->private_value;
++	int max = mc->max;
++	int min = mc->min;
++
++	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
++	uinfo->count = 2;
++	uinfo->value.integer.min = 0;
++	uinfo->value.integer.max = max-min;
++	return 0;
++}
++
++int cs42888_get_volsw_s8(struct snd_kcontrol *kcontrol,
++	struct snd_ctl_elem_value *ucontrol)
++{
++	struct soc_mixer_control *mc =
++		(struct soc_mixer_control *)kcontrol->private_value;
++	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
++	unsigned int reg = mc->reg;
++	unsigned int reg2 = mc->rreg;
++	int min = mc->min;
++	int val = snd_soc_read(codec, reg);
++
++	ucontrol->value.integer.value[0] =
++		((signed char)(val))-min;
++
++	val = snd_soc_read(codec, reg2);
++	ucontrol->value.integer.value[1] =
++		((signed char)(val))-min;
++	return 0;
++}
++
++int cs42888_put_volsw_s8(struct snd_kcontrol *kcontrol,
++	struct snd_ctl_elem_value *ucontrol)
++{
++	struct soc_mixer_control *mc =
++		(struct soc_mixer_control *)kcontrol->private_value;
++	struct snd_soc_codec *codec = snd_kcontrol_chip(kcontrol);
++	unsigned int reg = mc->reg;
++	unsigned int reg2 = mc->rreg;
++	int min = mc->min;
++	unsigned short val;
++	int ret;
++
++	val = (ucontrol->value.integer.value[0]+min);
++	ret = snd_soc_write(codec, reg, val);
++	if (ret < 0) {
++		pr_err("i2c write failed\n");
++		return ret;
++	}
++
++	val = ((ucontrol->value.integer.value[1]+min));
++	ret = snd_soc_write(codec, reg2, val);
++	if (ret < 0) {
++		pr_err("i2c write failed\n");
++		return ret;
++	}
++
++	return 0;
++}
++
++#define SOC_CS42888_DOUBLE_R_TLV(xname, reg_left, reg_right, xshift, xmax, \
++				    xinvert, tlv_array)			\
++{	.iface = SNDRV_CTL_ELEM_IFACE_MIXER, \
++	.name = (xname), \
++	.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ |\
++		SNDRV_CTL_ELEM_ACCESS_READWRITE,  \
++	.tlv.p = (tlv_array), \
++	.info = snd_soc_info_volsw_2r, \
++	.get = snd_soc_get_volsw_2r, \
++	.put = cs42888_out_vu, \
++	.private_value = (unsigned long)&(struct soc_mixer_control) \
++		{.reg = reg_left, \
++		    .rreg = reg_right, \
++		    .shift = xshift, \
++		    .max = xmax, \
++		    .invert = xinvert} \
++}
++
++#define SOC_CS42888_DOUBLE_R_S8_TLV(xname, reg_left, reg_right, xmin, xmax, \
++				    tlv_array) \
++{	.iface  = SNDRV_CTL_ELEM_IFACE_MIXER, .name = (xname), \
++	.access = SNDRV_CTL_ELEM_ACCESS_TLV_READ | \
++		  SNDRV_CTL_ELEM_ACCESS_READWRITE, \
++	.tlv.p  = (tlv_array), \
++	.info   = cs42888_info_volsw_s8, .get = cs42888_get_volsw_s8, \
++	.put    = cs42888_put_volsw_s8, \
++	.private_value = (unsigned long)&(struct soc_mixer_control) \
++		{.reg = reg_left, \
++		    .rreg = reg_right, \
++		    .min = xmin, \
++		    .max = xmax} \
++}
++
++static const char *cs42888_adcfilter[] = { "None", "High Pass" };
++static const char *cs42888_dacinvert[] = { "Disabled", "Enabled" };
++static const char *cs42888_adcinvert[] = { "Disabled", "Enabled" };
++static const char *cs42888_dacamute[] = { "Disabled", "AutoMute" };
++static const char *cs42888_dac_sngvol[] = { "Disabled", "Enabled" };
++static const char *cs42888_dac_szc[] = { "Immediate Change", "Zero Cross",
++				"Soft Ramp", "Soft Ramp on Zero Cross" };
++static const char *cs42888_mute_adc[] = { "UnMute", "Mute" };
++static const char *cs42888_adc_sngvol[] = { "Disabled", "Enabled" };
++static const char *cs42888_adc_szc[] = { "Immediate Change", "Zero Cross",
++				"Soft Ramp", "Soft Ramp on Zero Cross" };
++static const char *cs42888_dac_dem[] = { "No-De-Emphasis", "De-Emphasis" };
++static const char *cs42888_adc_single[] = { "Differential", "Single-Ended" };
++
++static const struct soc_enum cs42888_enum[] = {
++	SOC_ENUM_SINGLE(CS42888_ADCCTL, 7, 2, cs42888_adcfilter),
++	SOC_ENUM_DOUBLE(CS42888_DACINV, 0, 1, 2, cs42888_dacinvert),
++	SOC_ENUM_DOUBLE(CS42888_DACINV, 2, 3, 2, cs42888_dacinvert),
++	SOC_ENUM_DOUBLE(CS42888_DACINV, 4, 5, 2, cs42888_dacinvert),
++	SOC_ENUM_DOUBLE(CS42888_DACINV, 6, 7, 2, cs42888_dacinvert),
++	SOC_ENUM_DOUBLE(CS42888_ADCINV, 0, 1, 2, cs42888_adcinvert),
++	SOC_ENUM_DOUBLE(CS42888_ADCINV, 2, 3, 2, cs42888_adcinvert),
++	SOC_ENUM_SINGLE(CS42888_TRANS, 4, 2, cs42888_dacamute),
++	SOC_ENUM_SINGLE(CS42888_TRANS, 7, 2, cs42888_dac_sngvol),
++	SOC_ENUM_SINGLE(CS42888_TRANS, 5, 4, cs42888_dac_szc),
++	SOC_ENUM_SINGLE(CS42888_TRANS, 3, 2, cs42888_mute_adc),
++	SOC_ENUM_SINGLE(CS42888_TRANS, 2, 2, cs42888_adc_sngvol),
++	SOC_ENUM_SINGLE(CS42888_TRANS, 0, 4, cs42888_adc_szc),
++	SOC_ENUM_SINGLE(CS42888_ADCCTL, 5, 2, cs42888_dac_dem),
++	SOC_ENUM_SINGLE(CS42888_ADCCTL, 4, 2, cs42888_adc_single),
++	SOC_ENUM_SINGLE(CS42888_ADCCTL, 3, 2, cs42888_adc_single),
++};
++
++static const struct snd_kcontrol_new cs42888_snd_controls[] = {
++SOC_CS42888_DOUBLE_R_TLV("DAC1 Playback Volume",
++			    CS42888_VOLAOUT1,
++			    CS42888_VOLAOUT2,
++			    0, 0xff, 1, dac_tlv),
++SOC_CS42888_DOUBLE_R_TLV("DAC2 Playback Volume",
++			    CS42888_VOLAOUT3,
++			    CS42888_VOLAOUT4,
++			    0, 0xff, 1, dac_tlv),
++SOC_CS42888_DOUBLE_R_TLV("DAC3 Playback Volume",
++			    CS42888_VOLAOUT5,
++			    CS42888_VOLAOUT6,
++			    0, 0xff, 1, dac_tlv),
++SOC_CS42888_DOUBLE_R_TLV("DAC4 Playback Volume",
++			    CS42888_VOLAOUT7,
++			    CS42888_VOLAOUT8,
++			    0, 0xff, 1, dac_tlv),
++SOC_CS42888_DOUBLE_R_S8_TLV("ADC1 Capture Volume",
++			    CS42888_VOLAIN1,
++			    CS42888_VOLAIN2,
++			    -128, 48, adc_tlv),
++SOC_CS42888_DOUBLE_R_S8_TLV("ADC2 Capture Volume",
++			    CS42888_VOLAIN3,
++			    CS42888_VOLAIN4,
++			    -128, 48, adc_tlv),
++SOC_ENUM("ADC High-Pass Filter Switch", cs42888_enum[0]),
++SOC_ENUM("DAC1 Invert Switch", cs42888_enum[1]),
++SOC_ENUM("DAC2 Invert Switch", cs42888_enum[2]),
++SOC_ENUM("DAC3 Invert Switch", cs42888_enum[3]),
++SOC_ENUM("DAC4 Invert Switch", cs42888_enum[4]),
++SOC_ENUM("ADC1 Invert Switch", cs42888_enum[5]),
++SOC_ENUM("ADC2 Invert Switch", cs42888_enum[6]),
++SOC_ENUM("DAC Auto Mute Switch", cs42888_enum[7]),
++SOC_ENUM("DAC Single Volume Control Switch", cs42888_enum[8]),
++SOC_ENUM("DAC Soft Ramp and Zero Cross Control Switch", cs42888_enum[9]),
++SOC_ENUM("Mute ADC Serial Port Switch", cs42888_enum[10]),
++SOC_ENUM("ADC Single Volume Control Switch", cs42888_enum[11]),
++SOC_ENUM("ADC Soft Ramp and Zero Cross Control Switch", cs42888_enum[12]),
++SOC_ENUM("DAC Deemphasis Switch", cs42888_enum[13]),
++SOC_ENUM("ADC1 Single Ended Mode Switch", cs42888_enum[14]),
++SOC_ENUM("ADC2 Single Ended Mode Switch", cs42888_enum[15]),
++};
++
++
++static const struct snd_soc_dapm_widget cs42888_dapm_widgets[] = {
++SND_SOC_DAPM_DAC("DAC1", "Playback", CS42888_PWRCTL, 1, 1),
++SND_SOC_DAPM_DAC("DAC2", "Playback", CS42888_PWRCTL, 2, 1),
++SND_SOC_DAPM_DAC("DAC3", "Playback", CS42888_PWRCTL, 3, 1),
++SND_SOC_DAPM_DAC("DAC4", "Playback", CS42888_PWRCTL, 4, 1),
++
++SND_SOC_DAPM_OUTPUT("AOUT1L"),
++SND_SOC_DAPM_OUTPUT("AOUT1R"),
++SND_SOC_DAPM_OUTPUT("AOUT2L"),
++SND_SOC_DAPM_OUTPUT("AOUT2R"),
++SND_SOC_DAPM_OUTPUT("AOUT3L"),
++SND_SOC_DAPM_OUTPUT("AOUT3R"),
++SND_SOC_DAPM_OUTPUT("AOUT4L"),
++SND_SOC_DAPM_OUTPUT("AOUT4R"),
++
++SND_SOC_DAPM_ADC("ADC1", "Capture", CS42888_PWRCTL, 5, 1),
++SND_SOC_DAPM_ADC("ADC2", "Capture", CS42888_PWRCTL, 6, 1),
++
++SND_SOC_DAPM_INPUT("AIN1L"),
++SND_SOC_DAPM_INPUT("AIN1R"),
++SND_SOC_DAPM_INPUT("AIN2L"),
++SND_SOC_DAPM_INPUT("AIN2R"),
++};
++
++static const struct snd_soc_dapm_route audio_map[] = {
++	/* Playback */
++	{ "AOUT1L", NULL, "DAC1" },
++	{ "AOUT1R", NULL, "DAC1" },
++
++	{ "AOUT2L", NULL, "DAC2" },
++	{ "AOUT2R", NULL, "DAC2" },
++
++	{ "AOUT3L", NULL, "DAC3" },
++	{ "AOUT3R", NULL, "DAC3" },
++
++	{ "AOUT4L", NULL, "DAC4" },
++	{ "AOUT4R", NULL, "DAC4" },
++
++	/* Capture */
++	{ "ADC1", NULL, "AIN1L" },
++	{ "ADC1", NULL, "AIN1R" },
++
++	{ "ADC2", NULL, "AIN2L" },
++	{ "ADC2", NULL, "AIN2R" },
++};
++
++
++static int cs42888_add_widgets(struct snd_soc_codec *codec)
++{
++	snd_soc_dapm_new_controls(&codec->dapm, cs42888_dapm_widgets,
++				  ARRAY_SIZE(cs42888_dapm_widgets));
++
++	snd_soc_dapm_add_routes(&codec->dapm, audio_map, ARRAY_SIZE(audio_map));
++
++	snd_soc_dapm_new_widgets(&codec->dapm);
++	return 0;
++}
++
++/**
++ * struct cs42888_mode_ratios - clock ratio tables
++ * @ratio: the ratio of MCLK to the sample rate
++ * @speed_mode: the Speed Mode bits to set in the Mode Control register for
++ *              this ratio
++ * @mclk: the Ratio Select bits to set in the Mode Control register for this
++ *        ratio
++ *
++ * The data for this chart is taken from Table 10 of the CS42888 reference
++ * manual.
++ *
++ * This table is used to determine how to program the Functional Mode register.
++ * It is also used by cs42888_set_dai_sysclk() to tell ALSA which sampling
++ * rates the CS42888 currently supports.
++ *
++ * @speed_mode is the corresponding bit pattern to be written to the
++ * MODE bits of the Mode Control Register
++ *
++ * @mclk is the corresponding bit pattern to be wirten to the MCLK bits of
++ * the Mode Control Register.
++ *
++ */
++struct cs42888_mode_ratios {
++	unsigned int ratio;
++	u8 speed_mode;
++	u8 mclk;
++};
++
++static struct cs42888_mode_ratios cs42888_mode_ratios[] = {
++	{64, CS42888_MODE_4X, CS42888_MODE_DIV1},
++	{96, CS42888_MODE_4X, CS42888_MODE_DIV2},
++	{128, CS42888_MODE_2X, CS42888_MODE_DIV1},
++	{192, CS42888_MODE_2X, CS42888_MODE_DIV2},
++	{256, CS42888_MODE_1X, CS42888_MODE_DIV1},
++	{384, CS42888_MODE_2X, CS42888_MODE_DIV4},
++	{512, CS42888_MODE_1X, CS42888_MODE_DIV3},
++	{768, CS42888_MODE_1X, CS42888_MODE_DIV4},
++	{1024, CS42888_MODE_1X, CS42888_MODE_DIV5}
++};
++
++/* The number of MCLK/LRCK ratios supported by the CS42888 */
++#define NUM_MCLK_RATIOS		ARRAY_SIZE(cs42888_mode_ratios)
++
++/**
++ * cs42888_set_dai_sysclk - determine the CS42888 samples rates.
++ * @codec_dai: the codec DAI
++ * @clk_id: the clock ID (ignored)
++ * @freq: the MCLK input frequency
++ * @dir: the clock direction (ignored)
++ *
++ * This function is used to tell the codec driver what the input MCLK
++ * frequency is.
++ *
++ */
++static int cs42888_set_dai_sysclk(struct snd_soc_dai *codec_dai,
++				 int clk_id, unsigned int freq, int dir)
++{
++	struct snd_soc_codec *codec = codec_dai->codec;
++	struct cs42888_private *cs42888 = snd_soc_codec_get_drvdata(codec);
++
++	cs42888->mclk = freq;
++	return 0;
++}
++
++/**
++ * cs42888_set_dai_fmt - configure the codec for the selected audio format
++ * @codec_dai: the codec DAI
++ * @format: a SND_SOC_DAIFMT_x value indicating the data format
++ *
++ * This function takes a bitmask of SND_SOC_DAIFMT_x bits and programs the
++ * codec accordingly.
++ *
++ * Currently, this function only supports SND_SOC_DAIFMT_I2S and
++ * SND_SOC_DAIFMT_LEFT_J.  The CS42888 codec also supports right-justified
++ * data for playback only, but ASoC currently does not support different
++ * formats for playback vs. record.
++ */
++static int cs42888_set_dai_fmt(struct snd_soc_dai *codec_dai,
++			      unsigned int format)
++{
++	struct snd_soc_codec *codec = codec_dai->codec;
++	struct cs42888_private *cs42888 =  snd_soc_codec_get_drvdata(codec);
++	int ret = 0;
++	u8 val;
++
++	val = snd_soc_read(codec, CS42888_FORMAT);
++	val &= ~CS42888_FORMAT_DAC_DIF_MASK;
++	val &= ~CS42888_FORMAT_ADC_DIF_MASK;
++	/* set DAI format */
++	switch (format & SND_SOC_DAIFMT_FORMAT_MASK) {
++	case SND_SOC_DAIFMT_LEFT_J:
++		val |= DIF_LEFT_J << CS42888_FORMAT_DAC_DIF_OFFSET;
++		val |= DIF_LEFT_J << CS42888_FORMAT_ADC_DIF_OFFSET;
++		break;
++	case SND_SOC_DAIFMT_I2S:
++		val |= DIF_I2S << CS42888_FORMAT_DAC_DIF_OFFSET;
++		val |= DIF_I2S << CS42888_FORMAT_ADC_DIF_OFFSET;
++		break;
++	case SND_SOC_DAIFMT_RIGHT_J:
++		val |= DIF_RIGHT_J << CS42888_FORMAT_DAC_DIF_OFFSET;
++		val |= DIF_RIGHT_J << CS42888_FORMAT_ADC_DIF_OFFSET;
++		break;
++	default:
++		dev_err(codec->dev, "invalid dai format\n");
++		ret = -EINVAL;
++		return ret;
++	}
++
++	ret = snd_soc_write(codec, CS42888_FORMAT, val);
++	if (ret < 0) {
++		pr_err("i2c write failed\n");
++		return ret;
++	}
++
++	val = snd_soc_read(codec, CS42888_MODE);
++	/* set master/slave audio interface */
++	switch (format & SND_SOC_DAIFMT_MASTER_MASK) {
++	case SND_SOC_DAIFMT_CBS_CFS:
++		cs42888->slave_mode = 1;
++		val &= ~CS42888_MODE_SPEED_MASK;
++		val |= CS42888_MODE_SLAVE;
++		break;
++	case SND_SOC_DAIFMT_CBM_CFM:
++		cs42888->slave_mode = 0;
++		break;
++	default:
++		/* all other modes are unsupported by the hardware */
++		ret = -EINVAL;
++		return ret;
++	}
++
++	ret = snd_soc_write(codec, CS42888_MODE, val);
++	if (ret < 0) {
++		pr_err("i2c write failed\n");
++		return ret;
++	}
++
++	return ret;
++}
++
++/**
++ * cs42888_hw_params - program the CS42888 with the given hardware parameters.
++ * @substream: the audio stream
++ * @params: the hardware parameters to set
++
++ * @dai: the SOC DAI (ignored)
++ *
++ * This function programs the hardware with the values provided.
++ * Specifically, the sample rate and the data format.
++ *
++ * The .ops functions are used to provide board-specific data, like input
++ * frequencies, to this driver.  This function takes that information,
++ * combines it with the hardware parameters provided, and programs the
++ * hardware accordingly.
++ */
++static int cs42888_hw_params(struct snd_pcm_substream *substream,
++			    struct snd_pcm_hw_params *params,
++			    struct snd_soc_dai *dai)
++{
++	struct snd_soc_pcm_runtime *rtd = substream->private_data;
++	struct snd_soc_codec *codec = rtd->codec;
++	struct cs42888_private *cs42888 =  snd_soc_codec_get_drvdata(codec);
++	int ret;
++	unsigned int i;
++	unsigned int rate;
++	unsigned int ratio;
++	u8 val;
++
++	rate = params_rate(params);	/* Sampling rate, in Hz */
++	ratio = cs42888->mclk / rate;	/* MCLK/LRCK ratio */
++	for (i = 0; i < NUM_MCLK_RATIOS; i++) {
++		if (cs42888_mode_ratios[i].ratio == ratio)
++			break;
++	}
++
++	if (i == NUM_MCLK_RATIOS) {
++		/* We did not find a matching ratio */
++		dev_err(codec->dev, "could not find matching ratio\n");
++		return -EINVAL;
++	}
++
++	if (!cs42888->slave_mode) {
++		val = snd_soc_read(codec, CS42888_MODE);
++		val &= ~CS42888_MODE_SPEED_MASK;
++		val |= cs42888_mode_ratios[i].speed_mode;
++		val &= ~CS42888_MODE_DIV_MASK;
++		val |= cs42888_mode_ratios[i].mclk;
++	} else {
++		val = snd_soc_read(codec, CS42888_MODE);
++		val &= ~CS42888_MODE_SPEED_MASK;
++		val |= CS42888_MODE_SLAVE;
++		val &= ~CS42888_MODE_DIV_MASK;
++		val |= cs42888_mode_ratios[i].mclk;
++	}
++	ret = snd_soc_write(codec, CS42888_MODE, val);
++	if (ret < 0) {
++		pr_err("i2c write failed\n");
++		return ret;
++	}
++
++	/* Out of low power state */
++	val = snd_soc_read(codec, CS42888_PWRCTL);
++	val &= ~CS42888_PWRCTL_PDN_MASK;
++	ret = snd_soc_write(codec, CS42888_PWRCTL, val);
++	if (ret < 0) {
++		pr_err("i2c write failed\n");
++		return ret;
++	}
++
++	/* Unmute all the channels */
++	val = snd_soc_read(codec, CS42888_MUTE);
++	val &= ~CS42888_MUTE_ALL;
++	ret = snd_soc_write(codec, CS42888_MUTE, val);
++	if (ret < 0) {
++		pr_err("i2c write failed\n");
++		return ret;
++	}
++
++	ret = cs42888_fill_cache(codec);
++	if (ret < 0) {
++		pr_err("failed to fill register cache\n");
++		return ret;
++	}
++
++	return ret;
++}
++
++/**
++ * cs42888_shutdown - cs42888 enters into low power mode again.
++ * @substream: the audio stream
++ * @dai: the SOC DAI (ignored)
++ *
++ * The .ops functions are used to provide board-specific data, like input
++ * frequencies, to this driver.  This function takes that information,
++ * combines it with the hardware parameters provided, and programs the
++ * hardware accordingly.
++ */
++static void cs42888_shutdown(struct snd_pcm_substream *substream,
++				  struct snd_soc_dai *dai)
++{
++	struct snd_soc_pcm_runtime *rtd = substream->private_data;
++	struct snd_soc_codec *codec = rtd->codec;
++	int ret;
++	u8 val;
++
++	/* Mute all the channels */
++	val = snd_soc_read(codec, CS42888_MUTE);
++
++	val |= CS42888_MUTE_ALL;
++	ret = snd_soc_write(codec, CS42888_MUTE, val);
++	if (ret < 0)
++		pr_err("i2c write failed\n");
++
++	/* Enter low power state */
++	val = snd_soc_read(codec, CS42888_PWRCTL);
++	val |= CS42888_PWRCTL_PDN_MASK;
++	ret = snd_soc_write(codec, CS42888_PWRCTL, val);
++	if (ret < 0)
++		pr_err("i2c write failed\n");
++}
++
++static struct snd_soc_dai_ops cs42888_dai_ops = {
++	.set_fmt	= cs42888_set_dai_fmt,
++	.set_sysclk	= cs42888_set_dai_sysclk,
++	.hw_params	= cs42888_hw_params,
++	.shutdown	= cs42888_shutdown,
++};
++
++struct snd_soc_dai_driver cs42888_dai = {
++	.name = "CS42888",
++	.playback = {
++		.stream_name = "Playback",
++		.channels_min = 1,
++		.channels_max = 8,
++		.rates = (SNDRV_PCM_RATE_44100 | SNDRV_PCM_RATE_88200 |\
++			SNDRV_PCM_RATE_176400),
++		.formats = CS42888_FORMATS,
++	},
++	.capture = {
++		.stream_name = "Capture",
++		.channels_min = 1,
++		.channels_max = 4,
++		.rates = (SNDRV_PCM_RATE_44100 | SNDRV_PCM_RATE_88200 |\
++			SNDRV_PCM_RATE_176400),
++		.formats = CS42888_FORMATS,
++	},
++	.ops = &cs42888_dai_ops,
++	.symmetric_rates = 1,
++};
++
++/**
++ * cs42888_probe - ASoC probe function
++ * @pdev: platform device
++ *
++ * This function is called when ASoC has all the pieces it needs to
++ * instantiate a sound driver.
++ */
++static int cs42888_probe(struct snd_soc_codec *codec)
++{
++	int ret, i;
++	int val;
++
++	struct cs42888_private *cs42888 = snd_soc_codec_get_drvdata(codec);
++	/* setup i2c data ops */
++	ret = snd_soc_codec_set_cache_io(codec, 8, 8, SND_SOC_I2C);
++	if (ret < 0) {
++		dev_err(codec->dev, "Failed to set cache I/O: %d\n", ret);
++		return ret;
++	}
++
++	for (i = 0; i < ARRAY_SIZE(cs42888->supplies); i++)
++		cs42888->supplies[i].supply = cs42888_supply_names[i];
++
++	ret = regulator_bulk_get(codec->dev, ARRAY_SIZE(cs42888->supplies),
++				 cs42888->supplies);
++	if (ret != 0) {
++		dev_err(codec->dev, "Failed to request supplies: %d\n", ret);
++		return ret;
++	}
++
++	ret = regulator_bulk_enable(ARRAY_SIZE(cs42888->supplies),
++				    cs42888->supplies);
++	if (ret != 0) {
++		dev_err(codec->dev, "Failed to enable supplies: %d\n", ret);
++		goto err;
++	}
++	msleep(1);
++
++	/* Verify that we have a CS42888 */
++	val = snd_soc_read(codec, CS42888_CHIPID);
++	if (val < 0) {
++		pr_err("Device with ID register %x is not a CS42888", val);
++		return -ENODEV;
++	}
++	/* The top four bits of the chip ID should be 0000. */
++	if ((val & CS42888_CHIPID_ID_MASK) != 0x00) {
++		dev_err(codec->dev, "device is not a CS42888\n");
++		return -ENODEV;
++	}
++
++	dev_info(codec->dev, "hardware revision %X\n", val & 0xF);
++
++	/* The I2C interface is set up, so pre-fill our register cache */
++	ret = cs42888_fill_cache(codec);
++	if (ret < 0) {
++		dev_err(codec->dev, "failed to fill register cache\n");
++		goto err;
++	}
++
++	/* Enter low power state */
++	val = snd_soc_read(codec, CS42888_PWRCTL);
++	val |= CS42888_PWRCTL_PDN_MASK;
++	ret = snd_soc_write(codec, CS42888_PWRCTL, val);
++	if (ret < 0) {
++		dev_err(codec->dev, "i2c write failed\n");
++		return ret;
++	}
++
++	/* Disable auto-mute */
++	val = snd_soc_read(codec, CS42888_TRANS);
++	val &= ~CS42888_TRANS_AMUTE_MASK;
++	ret = snd_soc_write(codec, CS42888_TRANS, val);
++	if (ret < 0) {
++		pr_err("i2c write failed\n");
++		return ret;
++	}
++	/* Add the non-DAPM controls */
++	snd_soc_add_controls(codec, cs42888_snd_controls,
++				ARRAY_SIZE(cs42888_snd_controls));
++
++	/* Add DAPM controls */
++	cs42888_add_widgets(codec);
++
++	return 0;
++err:
++	regulator_bulk_disable(ARRAY_SIZE(cs42888->supplies),
++						cs42888->supplies);
++	regulator_bulk_free(ARRAY_SIZE(cs42888->supplies),
++				cs42888->supplies);
++	return ret;
++}
++
++/**
++ * cs42888_remove - ASoC remove function
++ * @pdev: platform device
++ *
++ * This function is the counterpart to cs42888_probe().
++ */
++static int cs42888_remove(struct snd_soc_codec *codec)
++{
++	struct cs42888_private *cs42888 = snd_soc_codec_get_drvdata(codec);
++
++	regulator_bulk_disable(ARRAY_SIZE(cs42888->supplies),
++						cs42888->supplies);
++	regulator_bulk_free(ARRAY_SIZE(cs42888->supplies),
++				cs42888->supplies);
++
++	return 0;
++};
++
++/*
++ * ASoC codec device structure
++ *
++ * Assign this variable to the codec_dev field of the machine driver's
++ * snd_soc_device structure.
++ */
++struct snd_soc_codec_driver cs42888_driver = {
++	.probe =	cs42888_probe,
++	.remove =	cs42888_remove,
++	.reg_cache_size = CS42888_NUMREGS + 1,
++	.reg_word_size = sizeof(u8),
++	.reg_cache_step = 1,
++};
++
++/**
++ * cs42888_i2c_probe - initialize the I2C interface of the CS42888
++ * @i2c_client: the I2C client object
++ * @id: the I2C device ID (ignored)
++ *
++ * This function is called whenever the I2C subsystem finds a device that
++ * matches the device ID given via a prior call to i2c_add_driver().
++ */
++static int cs42888_i2c_probe(struct i2c_client *i2c_client,
++	const struct i2c_device_id *id)
++{
++	struct cs42888_private *cs42888;
++	int ret;
++
++	/* Allocate enough space for the snd_soc_codec structure
++	   and our private data together. */
++	cs42888 = kzalloc(sizeof(struct cs42888_private), GFP_KERNEL);
++	if (!cs42888) {
++		dev_err(&i2c_client->dev, "could not allocate codec\n");
++		return -ENOMEM;
++	}
++
++	i2c_set_clientdata(i2c_client, cs42888);
++
++	ret = snd_soc_register_codec(&i2c_client->dev,
++		&cs42888_driver, &cs42888_dai, 1);
++	if (ret) {
++		dev_err(&i2c_client->dev, "Failed to register codec:%d\n", ret);
++		kfree(cs42888);
++	return ret;
++	}
++	return 0;
++}
++
++/**
++ * cs42888_i2c_remove - remove an I2C device
++ * @i2c_client: the I2C client object
++ *
++ * This function is the counterpart to cs42888_i2c_probe().
++ */
++static int cs42888_i2c_remove(struct i2c_client *i2c_client)
++{
++	struct cs42888_private *cs42888 = i2c_get_clientdata(i2c_client);
++
++	snd_soc_unregister_codec(&i2c_client->dev);
++	kfree(cs42888);
++
++	return 0;
++}
++
++/*
++ * cs42888_i2c_id - I2C device IDs supported by this driver
++ */
++static struct i2c_device_id cs42888_i2c_id[] = {
++	{"cs42888", 0},
++	{}
++};
++MODULE_DEVICE_TABLE(i2c, cs42888_i2c_id);
++
++#ifdef CONFIG_PM
++/* This suspend/resume implementation can handle both - a simple standby
++ * where the codec remains powered, and a full suspend, where the voltage
++ * domain the codec is connected to is teared down and/or any other hardware
++ * reset condition is asserted.
++ *
++ * The codec's own power saving features are enabled in the suspend callback,
++ * and all registers are written back to the hardware when resuming.
++ */
++
++static int cs42888_i2c_suspend(struct i2c_client *client, pm_message_t mesg)
++{
++	struct cs42888_private *cs42888 = i2c_get_clientdata(client);
++	struct snd_soc_codec *codec = &cs42888->codec;
++	int reg = snd_soc_read(codec, CS42888_PWRCTL) | CS42888_PWRCTL_PDN_MASK;
++
++	return snd_soc_write(codec, CS42888_PWRCTL, reg);
++}
++
++static int cs42888_i2c_resume(struct i2c_client *client)
++{
++	struct cs42888_private *cs42888 = i2c_get_clientdata(client);
++	struct snd_soc_codec *codec = &cs42888->codec;
++	int reg;
++
++	/* In case the device was put to hard reset during sleep, we need to
++	 * wait 500ns here before any I2C communication. */
++	ndelay(500);
++
++	/* first restore the entire register cache ... */
++	for (reg = CS42888_FIRSTREG; reg <= CS42888_LASTREG; reg++) {
++		u8 val = snd_soc_read(codec, reg);
++
++		if (i2c_smbus_write_byte_data(client, reg, val)) {
++			dev_err(codec->dev, "i2c write failed\n");
++			return -EIO;
++		}
++	}
++
++	/* ... then disable the power-down bits */
++	reg = snd_soc_read(codec, CS42888_PWRCTL);
++	reg &= ~CS42888_PWRCTL_PDN_MASK;
++
++	return snd_soc_write(codec, CS42888_PWRCTL, reg);
++}
++#else
++#define cs42888_i2c_suspend	NULL
++#define cs42888_i2c_resume	NULL
++#endif /* CONFIG_PM */
++
++/*
++ * cs42888_i2c_driver - I2C device identification
++ *
++ * This structure tells the I2C subsystem how to identify and support a
++ * given I2C device type.
++ */
++static struct i2c_driver cs42888_i2c_driver = {
++	.driver = {
++		.name = "cs42888",
++		.owner = THIS_MODULE,
++	},
++	.probe = cs42888_i2c_probe,
++	.remove = cs42888_i2c_remove,
++	.suspend = cs42888_i2c_suspend,
++	.resume = cs42888_i2c_resume,
++	.id_table = cs42888_i2c_id,
++};
++
++static int __init cs42888_init(void)
++{
++	pr_info("Cirrus Logic CS42888 ALSA SoC Codec Driver\n");
++	return i2c_add_driver(&cs42888_i2c_driver);
++}
++module_init(cs42888_init);
++
++static void __exit cs42888_exit(void)
++{
++	i2c_del_driver(&cs42888_i2c_driver);
++}
++module_exit(cs42888_exit);
++
++MODULE_AUTHOR("Xu Lionel <R63889@freescale.com>");
++MODULE_DESCRIPTION("Cirrus Logic CS42888 ALSA SoC Codec Driver");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/codecs/cs42888.h b/sound/soc/codecs/cs42888.h
+new file mode 100644
+index 0000000..a650c9d
+--- /dev/null
++++ b/sound/soc/codecs/cs42888.h
+@@ -0,0 +1,31 @@
++/*
++ * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#ifndef _CS42888_H
++#define _CS42888_H
++
++/*
++ * The ASoC codec DAI structure for the CS42888.  Assign this structure to
++ * the .codec_dai field of your machine driver's snd_soc_dai_link structure.
++ */
++extern struct snd_soc_dai_driver cs42888_dai;
++
++/*
++ * The ASoC codec device structure for the CS42888.  Assign this structure
++ * to the .codec_dev field of your machine driver's snd_soc_device
++ * structure.
++ */
++extern struct snd_soc_codec_device soc_codec_device_cs42888;
++
++extern void gpio_cs42888_pdwn(int pdwn);
++#endif
+diff --git a/sound/soc/imx/Kconfig b/sound/soc/imx/Kconfig
+index 1bf9702..67b7739 100644
+--- a/sound/soc/imx/Kconfig
++++ b/sound/soc/imx/Kconfig
+@@ -11,6 +11,9 @@ menuconfig SND_IMX_SOC
+ 
+ if SND_IMX_SOC
+ 
++config SND_MXC_SOC_ESAI
++	tristate
++
+ config SND_MXC_SOC_FIQ
+ 	tristate
+ 
+@@ -56,6 +59,15 @@ config SND_SOC_IMX_SGTL5000
+ 	  Say Y if you want to add support for SoC audio on an i.MX board with
+ 	  a sgtl5000 codec.
+ 
++config SND_SOC_IMX_CS42888
++	tristate "SoC Audio support for i.MX boards with cs42888"
++	depends on MACH_MX6Q_SABREAUTO
++	select SND_SOC_CS42888
++	select SND_MXC_SOC_MX2
++	help
++	  Say Y if you want to add support for SoC audio on an i.MX board with
++	  a cs42888 codec
++
+ config SND_SOC_EUKREA_TLV320
+ 	tristate "Eukrea TLV320"
+ 	depends on MACH_EUKREA_MBIMX27_BASEBOARD \
+diff --git a/sound/soc/imx/Makefile b/sound/soc/imx/Makefile
+index 38693ed..e9e2c10 100644
+--- a/sound/soc/imx/Makefile
++++ b/sound/soc/imx/Makefile
+@@ -1,5 +1,5 @@
+ # i.MX Platform Support
+-snd-soc-imx-objs := imx-ssi.o
++snd-soc-imx-objs := imx-esai.o
+ snd-soc-imx-fiq-objs := imx-pcm-fiq.o
+ snd-soc-imx-mx2-objs := imx-pcm-dma-mx2.o
+ 
+diff --git a/sound/soc/imx/Makefile.rej b/sound/soc/imx/Makefile.rej
+index acdaa6d..7ff4796 100644
+--- a/sound/soc/imx/Makefile.rej
++++ b/sound/soc/imx/Makefile.rej
+@@ -1,25 +1,15 @@
+ --- sound/soc/imx/Makefile
+ +++ sound/soc/imx/Makefile
+-@@ -2,18 +2,22 @@
+- snd-soc-imx-objs := imx-ssi.o
+- snd-soc-imx-fiq-objs := imx-pcm-fiq.o
+- snd-soc-imx-mx2-objs := imx-pcm-dma-mx2.o
+-+snd-soc-imx-spdif-dai-objs := imx-spdif-dai.o
+- 
+- obj-$(CONFIG_SND_IMX_SOC) += snd-soc-imx.o
+- obj-$(CONFIG_SND_MXC_SOC_FIQ) += snd-soc-imx-fiq.o
+- obj-$(CONFIG_SND_MXC_SOC_MX2) += snd-soc-imx-mx2.o
+-+obj-$(CONFIG_SND_MXC_SOC_SPDIF_DAI) += snd-soc-imx-spdif-dai.o
+- 
+- # i.MX Machine Support
+- snd-soc-eukrea-tlv320-objs := eukrea-tlv320.o
++@@ -14,10 +14,12 @@
+  snd-soc-phycore-ac97-objs := phycore-ac97.o
+  snd-soc-wm1133-ev1-objs := wm1133-ev1.o
+  snd-soc-imx-sgtl5000-objs := imx-sgtl5000.o
+-+snd-soc-imx-spdif-objs := imx-spdif.o
+++snd-soc-imx-cs42888-objs := imx-cs42888.o
++ snd-soc-imx-spdif-objs := imx-spdif.o
+  
+  obj-$(CONFIG_SND_SOC_EUKREA_TLV320) += snd-soc-eukrea-tlv320.o
+  obj-$(CONFIG_SND_SOC_PHYCORE_AC97) += snd-soc-phycore-ac97.o
+  obj-$(CONFIG_SND_MXC_SOC_WM1133_EV1) += snd-soc-wm1133-ev1.o
+  obj-$(CONFIG_SND_SOC_IMX_SGTL5000) += snd-soc-imx-sgtl5000.o
+-+obj-$(CONFIG_SND_SOC_IMX_SPDIF) += snd-soc-imx-spdif.o
+++obj-$(CONFIG_SND_SOC_IMX_CS42888) += snd-soc-imx-cs42888.o
++ obj-$(CONFIG_SND_SOC_IMX_SPDIF) += snd-soc-imx-spdif.o
+diff --git a/sound/soc/imx/imx-cs42888.c b/sound/soc/imx/imx-cs42888.c
+new file mode 100644
+index 0000000..fe6ae4e
+--- /dev/null
++++ b/sound/soc/imx/imx-cs42888.c
+@@ -0,0 +1,389 @@
++/*
++ * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/module.h>
++#include <linux/moduleparam.h>
++#include <linux/slab.h>
++#include <linux/device.h>
++#include <linux/i2c.h>
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/regulator/consumer.h>
++#include <linux/fsl_devices.h>
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/soc.h>
++#include <sound/soc-dapm.h>
++#include <sound/initval.h>
++#include <sound/soc-dai.h>
++
++#include <mach/hardware.h>
++#include <mach/clock.h>
++
++#include "imx-esai.h"
++#include "../codecs/cs42888.h"
++
++#if defined(CONFIG_MXC_ASRC) || defined(CONFIG_MXC_ASRC_MODULE)
++#include <linux/mxc_asrc.h>
++#endif
++
++#if defined(CONFIG_MXC_ASRC) || defined(CONFIG_MXC_ASRC_MODULE)
++static unsigned int asrc_rates[] = {
++	0,
++	8000,
++	11025,
++	16000,
++	22050,
++	32000,
++	44100,
++	48000,
++	64000,
++	88200,
++	96000,
++	176400,
++	192000,
++};
++
++struct asrc_esai {
++	unsigned int cpu_dai_rates;
++	unsigned int codec_dai_rates;
++	enum asrc_pair_index asrc_index;
++	unsigned int output_sample_rate;
++};
++
++static struct asrc_esai asrc_esai_data;
++
++#endif
++
++struct imx_3stack_pcm_state {
++	int lr_clk_active;
++};
++
++static struct imx_3stack_pcm_state clk_state;
++unsigned int mclk_freq;
++
++static int imx_3stack_startup(struct snd_pcm_substream *substream)
++{
++	clk_state.lr_clk_active++;
++#if defined(CONFIG_MXC_ASRC) || defined(CONFIG_MXC_ASRC_MODULE)
++	if (asrc_esai_data.output_sample_rate >= 32000) {
++		struct snd_soc_pcm_runtime *rtd = substream->private_data;
++		struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
++		struct snd_soc_dai *codec_dai = rtd->codec_dai;
++		asrc_esai_data.cpu_dai_rates = cpu_dai->playback.rates;
++		asrc_esai_data.codec_dai_rates = codec_dai->playback.rates;
++		cpu_dai->playback.rates =
++		    SNDRV_PCM_RATE_8000_192000 | SNDRV_PCM_RATE_KNOT;
++		codec_dai->playback.rates =
++		    SNDRV_PCM_RATE_8000_192000 | SNDRV_PCM_RATE_KNOT;
++	}
++#endif
++
++	return 0;
++}
++
++static void imx_3stack_shutdown(struct snd_pcm_substream *substream)
++{
++#if defined(CONFIG_MXC_ASRC) || defined(CONFIG_MXC_ASRC_MODULE)
++	struct snd_soc_pcm_runtime *rtd = substream->private_data;
++
++	if (asrc_esai_data.output_sample_rate >= 32000) {
++		struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
++		struct snd_soc_dai *codec_dai = rtd->codec_dai;
++		codec_dai->playback.rates = asrc_esai_data.codec_dai_rates;
++		cpu_dai->playback.rates = asrc_esai_data.cpu_dai_rates;
++		asrc_release_pair(asrc_esai_data.asrc_index);
++	}
++#endif
++
++	clk_state.lr_clk_active--;
++}
++
++static int imx_3stack_surround_hw_params(struct snd_pcm_substream *substream,
++					 struct snd_pcm_hw_params *params)
++{
++	struct snd_soc_pcm_runtime *rtd = substream->private_data;
++	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
++	struct snd_soc_dai *codec_dai = rtd->codec_dai;
++	unsigned int rate = params_rate(params);
++	u32 dai_format;
++	unsigned int lrclk_ratio = 0;
++#if defined(CONFIG_MXC_ASRC) || defined(CONFIG_MXC_ASRC_MODULE)
++	unsigned int channel = params_channels(params);
++#endif
++	if (clk_state.lr_clk_active > 1)
++		return 0;
++
++#if defined(CONFIG_MXC_ASRC) || defined(CONFIG_MXC_ASRC_MODULE)
++	if (asrc_esai_data.output_sample_rate >= 32000) {
++		unsigned int asrc_input_rate = rate;
++		struct mxc_runtime_data *pcm_data =
++		    substream->runtime->private_data;
++		struct asrc_config config;
++		int retVal = 0;;
++
++		retVal = asrc_req_pair(channel, &asrc_esai_data.asrc_index);
++		if (retVal < 0) {
++			pr_err("Fail to request asrc pair\n");
++			return -1;
++		}
++
++		config.pair = asrc_esai_data.asrc_index;
++		config.channel_num = channel;
++		config.input_sample_rate = asrc_input_rate;
++		config.output_sample_rate = asrc_esai_data.output_sample_rate;
++		config.inclk = INCLK_NONE;
++		config.word_width = 32;
++		config.outclk = OUTCLK_ESAI_TX;
++		retVal = asrc_config_pair(&config);
++		if (retVal < 0) {
++			pr_err("Fail to config asrc\n");
++			asrc_release_pair(asrc_esai_data.asrc_index);
++			return retVal;
++		}
++		rate = asrc_esai_data.output_sample_rate;
++		pcm_data->asrc_index = asrc_esai_data.asrc_index;
++		pcm_data->asrc_enable = 1;
++	}
++#endif
++
++	switch (rate) {
++	case 32000:
++		lrclk_ratio = 5;
++		break;
++	case 48000:
++		lrclk_ratio = 5;
++		break;
++	case 64000:
++		lrclk_ratio = 2;
++		break;
++	case 96000:
++		lrclk_ratio = 2;
++		break;
++	case 128000:
++		lrclk_ratio = 2;
++		break;
++	case 44100:
++		lrclk_ratio = 5;
++		break;
++	case 88200:
++		lrclk_ratio = 2;
++		break;
++	case 176400:
++		lrclk_ratio = 0;
++		break;
++	case 192000:
++		lrclk_ratio = 0;
++		break;
++	default:
++		pr_info("Rate not support.\n");
++		return -EINVAL;;
++	}
++
++	dai_format = SND_SOC_DAIFMT_LEFT_J | SND_SOC_DAIFMT_NB_NF |
++	    SND_SOC_DAIFMT_CBS_CFS;
++
++
++	/* set cpu DAI configuration */
++	snd_soc_dai_set_fmt(cpu_dai, dai_format);
++	/* set i.MX active slot mask */
++	snd_soc_dai_set_tdm_slot(cpu_dai, 0x3, 0x3, 2, 32);
++	/* set the ESAI system clock as output */
++	snd_soc_dai_set_sysclk(cpu_dai, ESAI_CLK_EXTAL_DIV,
++		mclk_freq, SND_SOC_CLOCK_OUT);
++	/* set the ratio */
++	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_PSR, 1);
++	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_PM, 2);
++	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_FP, lrclk_ratio);
++	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_PSR, 1);
++	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_PM, 0);
++	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_FP, lrclk_ratio);
++
++	/* set codec DAI configuration */
++	snd_soc_dai_set_fmt(codec_dai, dai_format);
++	/* set codec Master clock */
++	snd_soc_dai_set_sysclk(codec_dai, 0, mclk_freq, SND_SOC_CLOCK_IN);
++
++	return 0;
++}
++
++static struct snd_soc_ops imx_3stack_surround_ops = {
++	.startup = imx_3stack_startup,
++	.shutdown = imx_3stack_shutdown,
++	.hw_params = imx_3stack_surround_hw_params,
++};
++
++static const struct snd_soc_dapm_widget imx_3stack_dapm_widgets[] = {
++	SND_SOC_DAPM_LINE("Line Out Jack", NULL),
++	SND_SOC_DAPM_LINE("Line In Jack", NULL),
++};
++
++static const struct snd_soc_dapm_route audio_map[] = {
++	/* Line out jack */
++	{"Line Out Jack", NULL, "AOUT1L"},
++	{"Line Out Jack", NULL, "AOUT1R"},
++	{"Line Out Jack", NULL, "AOUT2L"},
++	{"Line Out Jack", NULL, "AOUT2R"},
++	{"Line Out Jack", NULL, "AOUT3L"},
++	{"Line Out Jack", NULL, "AOUT3R"},
++	{"Line Out Jack", NULL, "AOUT4L"},
++	{"Line Out Jack", NULL, "AOUT4R"},
++	{"AIN1L", NULL, "Line In Jack"},
++	{"AIN1R", NULL, "Line In Jack"},
++	{"AIN2L", NULL, "Line In Jack"},
++	{"AIN2R", NULL, "Line In Jack"},
++};
++
++#if defined(CONFIG_MXC_ASRC) || defined(CONFIG_MXC_ASRC_MODULE)
++static int asrc_func;
++
++static const char *asrc_function[] = {
++	"disable", "32KHz", "44.1KHz",
++	"48KHz", "64KHz", "88.2KHz", "96KHz", "176.4KHz", "192KHz"
++};
++
++static const struct soc_enum asrc_enum[] = {
++	SOC_ENUM_SINGLE_EXT(9, asrc_function),
++};
++
++static int asrc_get_rate(struct snd_kcontrol *kcontrol,
++			 struct snd_ctl_elem_value *ucontrol)
++{
++	ucontrol->value.enumerated.item[0] = asrc_func;
++	return 0;
++}
++
++static int asrc_set_rate(struct snd_kcontrol *kcontrol,
++			 struct snd_ctl_elem_value *ucontrol)
++{
++	if (asrc_func == ucontrol->value.enumerated.item[0])
++		return 0;
++
++	asrc_func = ucontrol->value.enumerated.item[0];
++	asrc_esai_data.output_sample_rate = asrc_rates[asrc_func + 4];
++
++	return 1;
++}
++
++static const struct snd_kcontrol_new asrc_controls[] = {
++	SOC_ENUM_EXT("ASRC", asrc_enum[0], asrc_get_rate,
++		     asrc_set_rate),
++};
++
++#endif
++
++static int imx_3stack_cs42888_init(struct snd_soc_pcm_runtime *rtd)
++{
++	struct snd_soc_codec *codec = rtd->codec;
++#if defined(CONFIG_MXC_ASRC) || defined(CONFIG_MXC_ASRC_MODULE)
++	int i;
++	int ret;
++	for (i = 0; i < ARRAY_SIZE(asrc_controls); i++) {
++		ret = snd_ctl_add(codec->card,
++				  snd_soc_cnew(&asrc_controls[i], codec, NULL));
++		if (ret < 0)
++			return ret;
++	}
++	asrc_esai_data.output_sample_rate = asrc_rates[asrc_func + 4];
++#endif
++
++	snd_soc_dapm_new_controls(&codec->dapm, imx_3stack_dapm_widgets,
++				  ARRAY_SIZE(imx_3stack_dapm_widgets));
++
++	snd_soc_dapm_add_routes(&codec->dapm, audio_map, ARRAY_SIZE(audio_map));
++
++	snd_soc_dapm_sync(&codec->dapm);
++
++	return 0;
++}
++
++static struct snd_soc_dai_link imx_3stack_dai[] = {
++	{
++	.name = "HiFi",
++	.stream_name = "HiFi",
++	.codec_dai_name = "CS42888",
++	.codec_name = "cs42888.0-0048",
++	.cpu_dai_name = "imx-esai.0",
++	.platform_name = "imx-pcm-audio.0",
++	.init = imx_3stack_cs42888_init,
++	.ops = &imx_3stack_surround_ops,
++	},
++};
++
++static struct snd_soc_card snd_soc_card_imx_3stack = {
++	.name = "imx-3stack",
++	.dai_link = imx_3stack_dai,
++	.num_links = ARRAY_SIZE(imx_3stack_dai),
++};
++
++/*
++ * This function will register the snd_soc_pcm_link drivers.
++ */
++static int __devinit imx_3stack_cs42888_probe(struct platform_device *pdev)
++{
++	struct mxc_audio_platform_data *plat_data = pdev->dev.platform_data;
++	mclk_freq = plat_data->sysclk;
++	return 0;
++}
++
++static int __devexit imx_3stack_cs42888_remove(struct platform_device *pdev)
++{
++	return 0;
++}
++
++static struct platform_driver imx_3stack_cs42888_driver = {
++	.probe = imx_3stack_cs42888_probe,
++	.remove = __devexit_p(imx_3stack_cs42888_remove),
++	.driver = {
++		   .name = "imx-cs42888",
++		   .owner = THIS_MODULE,
++		   },
++};
++
++static struct platform_device *imx_3stack_snd_device;
++
++static int __init imx_3stack_asoc_init(void)
++{
++	int ret;
++	pr_info("imx_3stack asoc driver\n");
++	ret = platform_driver_register(&imx_3stack_cs42888_driver);
++	if (ret < 0)
++		goto exit;
++
++	imx_3stack_snd_device = platform_device_alloc("soc-audio", 1);
++	if (!imx_3stack_snd_device)
++		goto err_device_alloc;
++	platform_set_drvdata(imx_3stack_snd_device, &snd_soc_card_imx_3stack);
++	ret = platform_device_add(imx_3stack_snd_device);
++	if (0 == ret)
++		goto exit;
++
++	platform_device_unregister(imx_3stack_snd_device);
++err_device_alloc:
++	platform_driver_unregister(&imx_3stack_cs42888_driver);
++exit:
++	return ret;
++}
++
++static void __exit imx_3stack_asoc_exit(void)
++{
++	platform_driver_unregister(&imx_3stack_cs42888_driver);
++	platform_device_unregister(imx_3stack_snd_device);
++}
++
++module_init(imx_3stack_asoc_init);
++module_exit(imx_3stack_asoc_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("ALSA SoC cs42888 Machine Layer Driver");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/imx/imx-esai.c b/sound/soc/imx/imx-esai.c
+new file mode 100644
+index 0000000..03bf074
+--- /dev/null
++++ b/sound/soc/imx/imx-esai.c
+@@ -0,0 +1,794 @@
++/*
++ * Copyright 2008-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++ /*!
++  * @file       imx-esai.c
++  * @brief      this file implements the esai interface
++  *             in according to ASoC architeture
++  */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/fsl_devices.h>
++#include <linux/slab.h>
++#include <linux/dma-mapping.h>
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <sound/core.h>
++#include <sound/pcm.h>
++#include <sound/pcm_params.h>
++#include <sound/soc.h>
++#include <mach/dma.h>
++#include <mach/clock.h>
++#include <asm/mach-types.h>
++#include <mach/hardware.h>
++#include <mach/esai.h>
++
++#include "imx-esai.h"
++
++static struct imx_esai *local_esai;
++
++static int imx_esai_set_dai_sysclk(struct snd_soc_dai *cpu_dai,
++				   int clk_id, unsigned int freq, int dir)
++{
++	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
++	u32 ecr, tccr, rccr;
++
++	ecr = readl(esai->base + ESAI_ECR);
++	tccr = readl(esai->base + ESAI_TCCR);
++	rccr = readl(esai->base + ESAI_RCCR);
++
++	if (dir == SND_SOC_CLOCK_IN) {
++		tccr &= ~(ESAI_TCCR_THCKD | ESAI_TCCR_TCKD | ESAI_TCCR_TFSD);
++		rccr &= ~(ESAI_RCCR_RHCKD | ESAI_RCCR_RCKD | ESAI_RCCR_RFSD);
++	} else {
++		tccr |= ESAI_TCCR_THCKD | ESAI_TCCR_TCKD | ESAI_TCCR_TFSD;
++		rccr |= ESAI_RCCR_RHCKD | ESAI_RCCR_RCKD | ESAI_RCCR_RFSD;
++
++		if (clk_id == ESAI_CLK_FSYS) {
++			ecr &= ~(ESAI_ECR_ETI | ESAI_ECR_ETO);
++			ecr &= ~(ESAI_ECR_ERI | ESAI_ECR_ERO);
++		} else if (clk_id == ESAI_CLK_EXTAL) {
++			ecr |= ESAI_ECR_ETI;
++			ecr |= ESAI_ECR_ETO;
++			ecr |= ESAI_ECR_ERI;
++			ecr |= ESAI_ECR_ERO;
++		} else if (clk_id == ESAI_CLK_EXTAL_DIV) {
++			ecr |= ESAI_ECR_ETI;
++			ecr &= ~ESAI_ECR_ETO;
++			ecr |= ESAI_ECR_ERI;
++			ecr |= ESAI_ECR_ERO;
++		}
++	}
++
++	writel(ecr, esai->base + ESAI_ECR);
++	writel(tccr, esai->base + ESAI_TCCR);
++	writel(rccr, esai->base + ESAI_RCCR);
++
++	ESAI_DUMP();
++	return 0;
++}
++
++static int imx_esai_set_dai_clkdiv(struct snd_soc_dai *cpu_dai,
++				   int div_id, int div)
++{
++	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
++	u32 tccr, rccr;
++
++	tccr = readl(esai->base + ESAI_TCCR);
++	rccr = readl(esai->base + ESAI_RCCR);
++
++	switch (div_id) {
++	case ESAI_TX_DIV_PSR:
++		tccr &= ESAI_TCCR_TPSR_MASK;
++		if (div)
++			tccr |= ESAI_TCCR_TPSR_BYPASS;
++		else
++			tccr &= ~ESAI_TCCR_TPSR_DIV8;
++		break;
++	case ESAI_TX_DIV_PM:
++		tccr &= ESAI_TCCR_TPM_MASK;
++		tccr |= ESAI_TCCR_TPM(div);
++		break;
++	case ESAI_TX_DIV_FP:
++		tccr &= ESAI_TCCR_TFP_MASK;
++		tccr |= ESAI_TCCR_TFP(div);
++		break;
++	case ESAI_RX_DIV_PSR:
++		rccr &= ESAI_RCCR_RPSR_MASK;
++		if (div)
++			rccr |= ESAI_RCCR_RPSR_BYPASS;
++		else
++			rccr &= ~ESAI_RCCR_RPSR_DIV8;
++		break;
++	case ESAI_RX_DIV_PM:
++		rccr &= ESAI_RCCR_RPM_MASK;
++		rccr |= ESAI_RCCR_RPM(div);
++		break;
++	case ESAI_RX_DIV_FP:
++		rccr &= ESAI_RCCR_RFP_MASK;
++		rccr |= ESAI_RCCR_RFP(div);
++		break;
++		return -EINVAL;
++	}
++	writel(tccr, esai->base + ESAI_TCCR);
++	writel(rccr, esai->base + ESAI_RCCR);
++	return 0;
++}
++
++/*
++ * ESAI Network Mode or TDM slots configuration.
++ */
++static int imx_esai_set_dai_tdm_slot(struct snd_soc_dai *cpu_dai,
++	unsigned int tx_mask, unsigned int rx_mask, int slots, int slot_width)
++{
++	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
++	u32 tccr, rccr;
++
++	tccr = readl(esai->base + ESAI_TCCR);
++
++	tccr &= ESAI_TCCR_TDC_MASK;
++	tccr |= ESAI_TCCR_TDC(slots - 1);
++
++	writel(tccr, esai->base + ESAI_TCCR);
++	writel((tx_mask & 0xffff), esai->base + ESAI_TSMA);
++	writel(((tx_mask >> 16) & 0xffff), esai->base + ESAI_TSMB);
++
++	rccr = readl(esai->base + ESAI_RCCR);
++
++	rccr &= ESAI_RCCR_RDC_MASK;
++	rccr |= ESAI_RCCR_RDC(slots - 1);
++
++	writel(rccr, esai->base + ESAI_RCCR);
++	writel((rx_mask & 0xffff), esai->base + ESAI_RSMA);
++	writel(((rx_mask >> 16) & 0xffff), esai->base + ESAI_RSMB);
++
++	ESAI_DUMP();
++	return 0;
++}
++
++/*
++ * ESAI DAI format configuration.
++ */
++static int imx_esai_set_dai_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
++{
++	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
++	u32 tcr, tccr, rcr, rccr, saicr;
++
++	tcr = readl(esai->base + ESAI_TCR);
++	tccr = readl(esai->base + ESAI_TCCR);
++	rcr = readl(esai->base + ESAI_RCR);
++	rccr = readl(esai->base + ESAI_RCCR);
++	saicr = readl(esai->base + ESAI_SAICR);
++
++	/* DAI mode */
++	switch (fmt & SND_SOC_DAIFMT_FORMAT_MASK) {
++	case SND_SOC_DAIFMT_I2S:
++		/* data on rising edge of bclk, frame low 1clk before data */
++		tcr &= ~ESAI_TCR_TFSL;
++		tcr |= ESAI_TCR_TFSR;
++		rcr &= ~ESAI_RCR_RFSL;
++		rcr |= ESAI_RCR_RFSR;
++		break;
++	case SND_SOC_DAIFMT_LEFT_J:
++		/* data on rising edge of bclk, frame high with data */
++		tcr &= ~(ESAI_TCR_TFSL | ESAI_TCR_TFSR);
++		rcr &= ~(ESAI_RCR_RFSL | ESAI_RCR_RFSR);
++		break;
++	case SND_SOC_DAIFMT_DSP_B:
++		/* data on rising edge of bclk, frame high with data */
++		tcr |= ESAI_TCR_TFSL;
++		rcr |= ESAI_RCR_RFSL;
++		break;
++	case SND_SOC_DAIFMT_DSP_A:
++		/* data on rising edge of bclk, frame high 1clk before data */
++		tcr |= ESAI_TCR_TFSL;
++		rcr |= ESAI_RCR_RFSL;
++		break;
++	}
++
++	/* DAI clock inversion */
++	switch (fmt & SND_SOC_DAIFMT_INV_MASK) {
++	case SND_SOC_DAIFMT_IB_IF:
++		tccr |= ESAI_TCCR_TFSP;
++		tccr &= ~(ESAI_TCCR_TCKP | ESAI_TCCR_THCKP);
++		rccr &= ~(ESAI_RCCR_RCKP | ESAI_RCCR_RHCKP);
++		rccr |= ESAI_RCCR_RFSP;
++		break;
++	case SND_SOC_DAIFMT_IB_NF:
++		tccr &= ~(ESAI_TCCR_TCKP | ESAI_TCCR_THCKP | ESAI_TCCR_TFSP);
++		rccr &= ~(ESAI_RCCR_RCKP | ESAI_RCCR_RHCKP | ESAI_RCCR_RFSP);
++		break;
++	case SND_SOC_DAIFMT_NB_IF:
++		tccr |= ESAI_TCCR_TCKP | ESAI_TCCR_THCKP | ESAI_TCCR_TFSP;
++		rccr |= ESAI_RCCR_RCKP | ESAI_RCCR_RHCKP | ESAI_RCCR_RFSP;
++		break;
++	case SND_SOC_DAIFMT_NB_NF:
++		tccr &= ~ESAI_TCCR_TFSP;
++		tccr |= ESAI_TCCR_TCKP | ESAI_TCCR_THCKP;
++		rccr &= ~ESAI_RCCR_RFSP;
++		rccr |= ESAI_RCCR_RCKP | ESAI_RCCR_RHCKP;
++		break;
++	}
++
++	/* DAI clock master masks */
++	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
++	case SND_SOC_DAIFMT_CBM_CFM:
++		tccr &= ~(ESAI_TCCR_TFSD | ESAI_TCCR_TCKD);
++		rccr &= ~(ESAI_RCCR_RFSD | ESAI_RCCR_RCKD);
++		break;
++	case SND_SOC_DAIFMT_CBS_CFM:
++		tccr &= ~ESAI_TCCR_TFSD;
++		tccr |= ESAI_TCCR_TCKD;
++		rccr &= ~ESAI_RCCR_RFSD;
++		rccr |= ESAI_RCCR_RCKD;
++		break;
++	case SND_SOC_DAIFMT_CBM_CFS:
++		tccr &= ~ESAI_TCCR_TCKD;
++		tccr |= ESAI_TCCR_TFSD;
++		rccr &= ~ESAI_RCCR_RCKD;
++		rccr |= ESAI_RCCR_RFSD;
++		break;
++	case SND_SOC_DAIFMT_CBS_CFS:
++		tccr |= (ESAI_TCCR_TFSD | ESAI_TCCR_TCKD);
++		rccr |= (ESAI_RCCR_RFSD | ESAI_RCCR_RCKD);
++	}
++
++	/* sync */
++	if (esai->flags == IMX_ESAI_SYN)
++		saicr |= ESAI_SAICR_SYNC;
++	else
++		saicr &= ~ESAI_SAICR_SYNC;
++
++	tcr &= ESAI_TCR_TMOD_MASK;
++	rcr &= ESAI_RCR_RMOD_MASK;
++	if (esai->flags == IMX_ESAI_NET) {
++		tcr |= ESAI_TCR_TMOD_NETWORK;
++		rcr |= ESAI_RCR_RMOD_NETWORK;
++	} else {
++		tcr |= ESAI_TCR_TMOD_NORMAL;
++		rcr |= ESAI_RCR_RMOD_NORMAL;
++	}
++
++	writel(tcr, esai->base + ESAI_TCR);
++	writel(tccr, esai->base + ESAI_TCCR);
++	writel(rcr, esai->base + ESAI_RCR);
++	writel(rccr, esai->base + ESAI_RCCR);
++
++	writel(saicr, esai->base + ESAI_SAICR);
++
++	ESAI_DUMP();
++	return 0;
++}
++
++static int imx_esai_startup(struct snd_pcm_substream *substream,
++			    struct snd_soc_dai *cpu_dai)
++{
++	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
++
++	writel(ESAI_ECR_ERST, esai->base + ESAI_ECR);
++	writel(ESAI_ECR_ESAIEN, esai->base + ESAI_ECR);
++
++	writel(ESAI_GPIO_ESAI, esai->base + ESAI_PRRC);
++	writel(ESAI_GPIO_ESAI, esai->base + ESAI_PCRC);
++
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++		writel(ESAI_TCR_TPR, esai->base + ESAI_TCR);
++	else
++		writel(ESAI_RCR_RPR, esai->base + ESAI_RCR);
++
++	ESAI_DUMP();
++	return 0;
++}
++
++/*
++ * This function is called to initialize the TX port before enable
++ * the tx port.
++ */
++static int imx_esai_hw_tx_params(struct snd_pcm_substream *substream,
++				 struct snd_pcm_hw_params *params,
++				 struct snd_soc_dai *cpu_dai)
++{
++	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
++	u32 tcr, tfcr;
++	unsigned int channels;
++	struct imx_pcm_dma_params *dma_data;
++	/* Tx/Rx config */
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK)
++		dma_data = &esai->dma_params_tx;
++	else
++		dma_data = &esai->dma_params_rx;
++
++	snd_soc_dai_set_dma_data(cpu_dai, substream, dma_data);
++
++	tcr = readl(esai->base + ESAI_TCR);
++	tfcr = readl(esai->base + ESAI_TFCR);
++
++	tfcr |= ESAI_TFCR_TFR;
++	writel(tfcr, esai->base + ESAI_TFCR);
++	tfcr &= ~ESAI_TFCR_TFR;
++	/* DAI data (word) size */
++	tfcr &= ESAI_TFCR_TWA_MASK;
++	tcr &= ESAI_TCR_TSWS_MASK;
++	switch (params_format(params)) {
++	case SNDRV_PCM_FORMAT_S16_LE:
++		tfcr |= ESAI_WORD_LEN_16;
++		tcr |= ESAI_TCR_TSHFD_MSB | ESAI_TCR_TSWS_STL32_WDL16;
++		break;
++	case SNDRV_PCM_FORMAT_S20_3LE:
++		tfcr |= ESAI_WORD_LEN_20;
++		tcr |= ESAI_TCR_TSHFD_MSB | ESAI_TCR_TSWS_STL32_WDL20;
++		break;
++	case SNDRV_PCM_FORMAT_S24_LE:
++		tfcr |= ESAI_WORD_LEN_24;
++		tcr |= ESAI_TCR_TSHFD_MSB | ESAI_TCR_TSWS_STL32_WDL24;
++		break;
++	}
++
++	channels = params_channels(params);
++	tfcr &= ESAI_TFCR_TE_MASK;
++	tfcr |= ESAI_TFCR_TE(channels);
++
++	tfcr |= ESAI_TFCR_TFWM(64);
++
++	/* Left aligned, Zero padding */
++	tcr |= ESAI_TCR_PADC;
++	/* TDR initialized from the FIFO */
++	tfcr |= ESAI_TFCR_TIEN;
++
++	writel(tcr, esai->base + ESAI_TCR);
++	writel(tfcr, esai->base + ESAI_TFCR);
++
++	ESAI_DUMP();
++	return 0;
++}
++
++/*
++ * This function is called to initialize the RX port before enable
++ * the rx port.
++ */
++static int imx_esai_hw_rx_params(struct snd_pcm_substream *substream,
++				 struct snd_pcm_hw_params *params,
++				 struct snd_soc_dai *cpu_dai)
++{
++	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
++	u32 rcr, rfcr;
++	unsigned int channels;
++
++	rcr = readl(esai->base + ESAI_RCR);
++	rfcr = readl(esai->base + ESAI_RFCR);
++
++	rfcr |= ESAI_RFCR_RFR;
++	writel(rfcr, esai->base + ESAI_RFCR);
++	rfcr &= ~ESAI_RFCR_RFR;
++
++	rfcr &= ESAI_RFCR_RWA_MASK;
++	rcr &= ESAI_RCR_RSWS_MASK;
++	switch (params_format(params)) {
++	case SNDRV_PCM_FORMAT_S16_LE:
++		rfcr |= ESAI_WORD_LEN_16;
++		rcr |= ESAI_RCR_RSHFD_MSB | ESAI_RCR_RSWS_STL32_WDL16;
++		break;
++	}
++
++	channels = params_channels(params);
++	rfcr &= ESAI_RFCR_RE_MASK;
++	rfcr |= ESAI_RFCR_RE(channels);
++
++	rfcr |= ESAI_RFCR_RFWM(64);
++
++	writel(rcr, esai->base + ESAI_RCR);
++	writel(rfcr, esai->base + ESAI_RFCR);
++
++	ESAI_DUMP();
++	return 0;
++}
++
++/*
++ * This function is called to initialize the TX or RX port,
++ */
++static int imx_esai_hw_params(struct snd_pcm_substream *substream,
++			      struct snd_pcm_hw_params *params,
++			      struct snd_soc_dai *cpu_dai)
++{
++	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
++	/* Tx/Rx config */
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
++		if (readl(esai->base + ESAI_TCR) & ESAI_TCR_TE0)
++			return 0;
++		return imx_esai_hw_tx_params(substream, params, cpu_dai);
++	} else {
++		if (readl(esai->base + ESAI_RCR) & ESAI_RCR_RE1)
++			return 0;
++		return imx_esai_hw_rx_params(substream, params, cpu_dai);
++	}
++}
++
++static int imx_esai_trigger(struct snd_pcm_substream *substream, int cmd,
++			    struct snd_soc_dai *cpu_dai)
++{
++	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
++	u32 reg, tfcr = 0, rfcr = 0;
++	u32 temp;
++
++	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
++		tfcr = readl(esai->base + ESAI_TFCR);
++		reg = readl(esai->base + ESAI_TCR);
++	} else {
++		rfcr = readl(esai->base + ESAI_RFCR);
++		reg = readl(esai->base + ESAI_RCR);
++	}
++	switch (cmd) {
++	case SNDRV_PCM_TRIGGER_START:
++	case SNDRV_PCM_TRIGGER_RESUME:
++	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
++			tfcr |= ESAI_TFCR_TFEN;
++			writel(tfcr, esai->base + ESAI_TFCR);
++			reg &= ~ESAI_TCR_TPR;
++			reg |= ESAI_TCR_TE(substream->runtime->channels);
++			writel(reg, esai->base + ESAI_TCR);
++		} else {
++			temp = readl(esai->base + ESAI_TCR);
++			temp &= ~ESAI_TCR_TPR;
++			writel(temp, esai->base + ESAI_TCR);
++			rfcr |= ESAI_RFCR_RFEN;
++			writel(rfcr, esai->base + ESAI_RFCR);
++			reg &= ~ESAI_RCR_RPR;
++			reg |= ESAI_RCR_RE(substream->runtime->channels);
++			writel(reg, esai->base + ESAI_RCR);
++		}
++		break;
++	case SNDRV_PCM_TRIGGER_SUSPEND:
++	case SNDRV_PCM_TRIGGER_STOP:
++	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
++		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
++			reg &= ~ESAI_TCR_TE(substream->runtime->channels);
++			writel(reg, esai->base + ESAI_TCR);
++			reg |= ESAI_TCR_TPR;
++			writel(reg, esai->base + ESAI_TCR);
++			tfcr |= ESAI_TFCR_TFR;
++			tfcr &= ~ESAI_TFCR_TFEN;
++			writel(tfcr, esai->base + ESAI_TFCR);
++			tfcr &= ~ESAI_TFCR_TFR;
++			writel(tfcr, esai->base + ESAI_TFCR);
++		} else {
++			reg &= ~ESAI_RCR_RE(substream->runtime->channels);
++			writel(reg, esai->base + ESAI_RCR);
++			reg |= ESAI_RCR_RPR;
++			writel(reg, esai->base + ESAI_RCR);
++			rfcr |= ESAI_RFCR_RFR;
++			rfcr &= ~ESAI_RFCR_RFEN;
++			writel(rfcr, esai->base + ESAI_RFCR);
++			rfcr &= ~ESAI_RFCR_RFR;
++			writel(rfcr, esai->base + ESAI_RFCR);
++		}
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	ESAI_DUMP();
++	return 0;
++}
++
++#ifdef CONFIG_PM
++static int imx_esai_suspend(struct snd_soc_dai *cpu_dai)
++{
++	return 0;
++}
++
++static int imx_esai_resume(struct snd_soc_dai *cpu_dai)
++{
++	return 0;
++}
++
++#else
++#define imx_esai_suspend	NULL
++#define imx_esai_resume	NULL
++#endif
++
++
++#define IMX_ESAI_RATES  SNDRV_PCM_RATE_8000_192000
++
++#define IMX_ESAI_FORMATS \
++	(SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S20_3LE | \
++	SNDRV_PCM_FMTBIT_S24_LE)
++
++static struct snd_soc_dai_ops imx_esai_dai_ops = {
++	.startup = imx_esai_startup,
++	.trigger = imx_esai_trigger,
++	.hw_params = imx_esai_hw_params,
++	.set_sysclk = imx_esai_set_dai_sysclk,
++	.set_clkdiv = imx_esai_set_dai_clkdiv,
++	.set_fmt = imx_esai_set_dai_fmt,
++	.set_tdm_slot = imx_esai_set_dai_tdm_slot,
++};
++
++static int imx_esai_dai_probe(struct snd_soc_dai *dai)
++{
++	struct imx_esai *esai = dev_get_drvdata(dai->dev);
++	snd_soc_dai_set_drvdata(dai, esai);
++	return 0;
++}
++
++static struct snd_soc_dai_driver imx_esai_dai = {
++	 .name = "imx-esai.0",
++	 .probe = imx_esai_dai_probe,
++	 .suspend = imx_esai_suspend,
++	 .resume = imx_esai_resume,
++	 .playback = {
++		      .channels_min = 1,
++		      .channels_max = 6,
++		      .rates = IMX_ESAI_RATES,
++		      .formats = IMX_ESAI_FORMATS,
++		      },
++	 .capture = {
++		     .channels_min = 1,
++		     .channels_max = 4,
++		     .rates = IMX_ESAI_RATES,
++		     .formats = IMX_ESAI_FORMATS,
++		     },
++	 .ops = &imx_esai_dai_ops,
++};
++
++int snd_imx_pcm_mmap(struct snd_pcm_substream *substream,
++		struct vm_area_struct *vma)
++{
++	struct snd_pcm_runtime *runtime = substream->runtime;
++	int ret;
++
++	ret = dma_mmap_coherent(NULL, vma, runtime->dma_area,
++			runtime->dma_addr, runtime->dma_bytes);
++
++	pr_debug("%s: ret: %d %p 0x%08x 0x%08x\n", __func__, ret,
++			runtime->dma_area,
++			runtime->dma_addr,
++			runtime->dma_bytes);
++	return ret;
++}
++EXPORT_SYMBOL_GPL(snd_imx_pcm_mmap);
++
++static int imx_pcm_preallocate_dma_buffer(struct snd_pcm *pcm, int stream)
++{
++	struct snd_pcm_substream *substream = pcm->streams[stream].substream;
++	struct snd_dma_buffer *buf = &substream->dma_buffer;
++	size_t size = IMX_ESAI_DMABUF_SIZE;
++
++	buf->dev.type = SNDRV_DMA_TYPE_DEV;
++	buf->dev.dev = pcm->card->dev;
++	buf->private_data = NULL;
++	buf->area = dma_alloc_writecombine(pcm->card->dev, size,
++					   &buf->addr, GFP_KERNEL);
++	if (!buf->area)
++		return -ENOMEM;
++	buf->bytes = size;
++
++	return 0;
++}
++
++static u64 imx_pcm_dmamask = DMA_BIT_MASK(32);
++
++int imx_pcm_new(struct snd_card *card, struct snd_soc_dai *dai,
++	struct snd_pcm *pcm)
++{
++
++	int ret = 0;
++
++	if (!card->dev->dma_mask)
++		card->dev->dma_mask = &imx_pcm_dmamask;
++	if (!card->dev->coherent_dma_mask)
++		card->dev->coherent_dma_mask = DMA_BIT_MASK(32);
++	if (dai->driver->playback.channels_min) {
++		ret = imx_pcm_preallocate_dma_buffer(pcm,
++			SNDRV_PCM_STREAM_PLAYBACK);
++		if (ret)
++			goto out;
++	}
++
++	if (dai->driver->capture.channels_min) {
++		ret = imx_pcm_preallocate_dma_buffer(pcm,
++			SNDRV_PCM_STREAM_CAPTURE);
++		if (ret)
++			goto out;
++	}
++
++out:
++	return ret;
++}
++EXPORT_SYMBOL_GPL(imx_pcm_new);
++
++void imx_pcm_free(struct snd_pcm *pcm)
++{
++	struct snd_pcm_substream *substream;
++	struct snd_dma_buffer *buf;
++	int stream;
++
++	for (stream = 0; stream < 2; stream++) {
++		substream = pcm->streams[stream].substream;
++		if (!substream)
++			continue;
++
++		buf = &substream->dma_buffer;
++		if (!buf->area)
++			continue;
++
++		dma_free_writecombine(pcm->card->dev, buf->bytes,
++				      buf->area, buf->addr);
++		buf->area = NULL;
++	}
++}
++EXPORT_SYMBOL_GPL(imx_pcm_free);
++
++static int imx_esai_probe(struct platform_device *pdev)
++{
++	struct resource *res;
++	struct imx_esai *esai;
++	struct imx_esai_platform_data *pdata = pdev->dev.platform_data;
++	int ret = 0;
++
++	esai = kzalloc(sizeof(*esai), GFP_KERNEL);
++	if (!esai)
++		return -ENOMEM;
++	local_esai = esai;
++	dev_set_drvdata(&pdev->dev, esai);
++
++	if (pdata)
++		esai->flags = pdata->flags;
++
++	esai->irq = platform_get_irq(pdev, 0);
++
++	esai->clk = clk_get(&pdev->dev, "esai_clk");
++	if (IS_ERR(esai->clk)) {
++		ret = PTR_ERR(esai->clk);
++		dev_err(&pdev->dev, "Cannot get the clock: %d\n",
++			ret);
++		goto failed_clk;
++	}
++	clk_enable(esai->clk);
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!res) {
++		ret = -ENODEV;
++		goto failed_get_resource;
++	}
++
++	if (!request_mem_region(res->start, resource_size(res), DRV_NAME)) {
++		dev_err(&pdev->dev, "request_mem_region failed\n");
++		ret = -EBUSY;
++		goto failed_get_resource;
++	}
++
++	esai->base = ioremap(res->start, resource_size(res));
++	if (!esai->base) {
++		dev_err(&pdev->dev, "ioremap failed\n");
++		ret = -ENODEV;
++		goto failed_ioremap;
++	}
++
++	esai->dma_params_rx.dma_addr = res->start + ESAI_ERDR;
++	esai->dma_params_tx.dma_addr = res->start + ESAI_ETDR;
++
++	esai->dma_params_tx.peripheral_type = IMX_DMATYPE_ESAI;
++	esai->dma_params_rx.peripheral_type = IMX_DMATYPE_ESAI;
++
++	res = platform_get_resource_byname(pdev, IORESOURCE_DMA, "tx");
++	if (res)
++		esai->dma_params_tx.dma = res->start;
++
++	res = platform_get_resource_byname(pdev, IORESOURCE_DMA, "rx");
++	if (res)
++		esai->dma_params_rx.dma = res->start;
++
++	platform_set_drvdata(pdev, esai);
++	ret = snd_soc_register_dai(&pdev->dev, &imx_esai_dai);
++	if (ret) {
++		dev_err(&pdev->dev, "register DAI failed\n");
++		goto failed_register;
++	}
++
++	esai->soc_platform_pdev_fiq = \
++		platform_device_alloc("imx-fiq-pcm-audio", pdev->id);
++	if (!esai->soc_platform_pdev_fiq) {
++		ret = -ENOMEM;
++		goto failed_pdev_fiq_alloc;
++	}
++
++	platform_set_drvdata(esai->soc_platform_pdev_fiq, esai);
++	ret = platform_device_add(esai->soc_platform_pdev_fiq);
++	if (ret) {
++		dev_err(&pdev->dev, "failed to add platform device\n");
++		goto failed_pdev_fiq_add;
++	}
++
++	esai->soc_platform_pdev = \
++		platform_device_alloc("imx-pcm-audio", pdev->id);
++	if (!esai->soc_platform_pdev) {
++		ret = -ENOMEM;
++		goto failed_pdev_alloc;
++	}
++
++	platform_set_drvdata(esai->soc_platform_pdev, esai);
++	ret = platform_device_add(esai->soc_platform_pdev);
++	if (ret) {
++		dev_err(&pdev->dev, "failed to add platform device\n");
++		goto failed_pdev_add;
++	}
++
++	return 0;
++
++failed_pdev_add:
++	platform_device_put(esai->soc_platform_pdev);
++failed_pdev_alloc:
++	platform_device_del(esai->soc_platform_pdev_fiq);
++failed_pdev_fiq_add:
++	platform_device_put(esai->soc_platform_pdev_fiq);
++failed_pdev_fiq_alloc:
++	snd_soc_unregister_dai(&pdev->dev);
++failed_register:
++	iounmap(esai->base);
++failed_ioremap:
++	release_mem_region(res->start, resource_size(res));
++failed_get_resource:
++	clk_disable(esai->clk);
++	clk_put(esai->clk);
++failed_clk:
++	kfree(esai);
++
++	return ret;
++}
++static int __devexit imx_esai_remove(struct platform_device *pdev)
++{
++	struct resource *res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	struct imx_esai *esai = platform_get_drvdata(pdev);
++
++	platform_device_unregister(esai->soc_platform_pdev);
++	platform_device_unregister(esai->soc_platform_pdev_fiq);
++
++	snd_soc_unregister_dai(&pdev->dev);
++
++	iounmap(esai->base);
++	release_mem_region(res->start, resource_size(res));
++	clk_disable(esai->clk);
++	clk_put(esai->clk);
++	kfree(esai);
++
++	return 0;
++}
++
++
++static struct platform_driver imx_esai_driver = {
++	.probe = imx_esai_probe,
++	.remove = __devexit_p(imx_esai_remove),
++	.driver = {
++		   .name = "imx-esai",
++		   },
++};
++
++static int __init imx_esai_init(void)
++{
++	return platform_driver_register(&imx_esai_driver);
++}
++
++static void __exit imx_esai_exit(void)
++{
++	platform_driver_unregister(&imx_esai_driver);
++}
++
++module_init(imx_esai_init);
++module_exit(imx_esai_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("i.MX ASoC ESAI driver");
++MODULE_LICENSE("GPL");
+diff --git a/sound/soc/imx/imx-esai.h b/sound/soc/imx/imx-esai.h
+new file mode 100644
+index 0000000..ac50e72
+--- /dev/null
++++ b/sound/soc/imx/imx-esai.h
+@@ -0,0 +1,335 @@
++/*
++ * imx-esai.h  --  ESAI driver header file for Freescale IMX
++ *
++ * Copyright 2008-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#ifndef _MXC_ESAI_H
++#define _MXC_ESAI_H
++
++#ifdef IMX_ESAI_DUMP
++#define ESAI_DUMP() \
++	do {pr_info("dump @ %s\n", __func__); \
++	pr_info("ecr %x\n", readl(esai->base + ESAI_ECR)); \
++	pr_info("esr %x\n", readl(esai->base + ESAI_ESR)); \
++	pr_info("tfcr %x\n", readl(esai->base + ESAI_TFCR)); \
++	pr_info("tfsr %x\n", readl(esai->base + ESAI_TFSR)); \
++	pr_info("rfcr %x\n", readl(esai->base + ESAI_RFCR)); \
++	pr_info("rfsr %x\n", readl(esai->base + ESAI_RFSR)); \
++	pr_info("tsr %x\n", readl(esai->base + ESAI_TSR)); \
++	pr_info("saisr %x\n", readl(esai->base + ESAI_SAISR)); \
++	pr_info("saicr %x\n", readl(esai->base + ESAI_SAICR)); \
++	pr_info("tcr %x\n", readl(esai->base + ESAI_TCR)); \
++	pr_info("tccr %x\n", readl(esai->base + ESAI_TCCR)); \
++	pr_info("rcr %x\n", readl(esai->base + ESAI_RCR)); \
++	pr_info("rccr %x\n", readl(esai->base + ESAI_RCCR)); \
++	pr_info("tsma %x\n", readl(esai->base + ESAI_TSMA)); \
++	pr_info("tsmb %x\n", readl(esai->base + ESAI_TSMB)); \
++	pr_info("rsma %x\n", readl(esai->base + ESAI_RSMA)); \
++	pr_info("rsmb %x\n", readl(esai->base + ESAI_RSMB)); \
++	pr_info("prrc %x\n", readl(esai->base + ESAI_PRRC)); \
++	pr_info("pcrc %x\n", readl(esai->base + ESAI_PCRC)); } while (0);
++#else
++#define ESAI_DUMP()
++#endif
++
++#define ESAI_ETDR	0x00
++#define ESAI_ERDR	0x04
++#define ESAI_ECR	0x08
++#define ESAI_ESR	0x0C
++#define ESAI_TFCR	0x10
++#define ESAI_TFSR	0x14
++#define ESAI_RFCR	0x18
++#define ESAI_RFSR	0x1C
++#define ESAI_TX0	0x80
++#define ESAI_TX1	0x84
++#define ESAI_TX2	0x88
++#define ESAI_TX3	0x8C
++#define ESAI_TX4	0x90
++#define ESAI_TX5	0x94
++#define ESAI_TSR	0x98
++#define ESAI_RX0	0xA0
++#define ESAI_RX1	0xA4
++#define ESAI_RX2	0xA8
++#define ESAI_RX3	0xAC
++#define ESAI_SAISR	0xCC
++#define ESAI_SAICR	0xD0
++#define ESAI_TCR	0xD4
++#define ESAI_TCCR	0xD8
++#define ESAI_RCR	0xDC
++#define ESAI_RCCR	0xE0
++#define ESAI_TSMA	0xE4
++#define ESAI_TSMB	0xE8
++#define ESAI_RSMA	0xEC
++#define ESAI_RSMB	0xF0
++#define ESAI_PRRC	0xF8
++#define ESAI_PCRC	0xFC
++
++#define ESAI_ECR_ETI	(1 << 19)
++#define ESAI_ECR_ETO	(1 << 18)
++#define ESAI_ECR_ERI	(1 << 17)
++#define ESAI_ECR_ERO	(1 << 16)
++#define ESAI_ECR_ERST	(1 << 1)
++#define ESAI_ECR_ESAIEN	(1 << 0)
++
++#define ESAI_ESR_TINIT	(1 << 10)
++#define ESAI_ESR_RFF	(1 << 9)
++#define ESAI_ESR_TFE	(1 << 8)
++#define ESAI_ESR_TLS	(1 << 7)
++#define ESAI_ESR_TDE	(1 << 6)
++#define ESAI_ESR_TED	(1 << 5)
++#define ESAI_ESR_TD	(1 << 4)
++#define ESAI_ESR_RLS	(1 << 3)
++#define ESAI_ESR_RDE	(1 << 2)
++#define ESAI_ESR_RED	(1 << 1)
++#define ESAI_ESR_RD	(1 << 0)
++
++#define ESAI_TFCR_TIEN	(1 << 19)
++#define ESAI_TFCR_TE5	(1 << 7)
++#define ESAI_TFCR_TE4	(1 << 6)
++#define ESAI_TFCR_TE3	(1 << 5)
++#define ESAI_TFCR_TE2	(1 << 4)
++#define ESAI_TFCR_TE1	(1 << 3)
++#define ESAI_TFCR_TE0	(1 << 2)
++#define ESAI_TFCR_TFR	(1 << 1)
++#define ESAI_TFCR_TFEN	(1 << 0)
++#define ESAI_TFCR_TE(x) ((0x3f >> (6 - ((x + 1) >> 1))) << 2)
++#define ESAI_TFCR_TE_MASK	0xfff03
++#define ESAI_TFCR_TFWM(x)	((x - 1) << 8)
++#define ESAI_TFCR_TWA_MASK	0xf8ffff
++
++#define ESAI_RFCR_REXT	(1 << 19)
++#define ESAI_RFCR_RE3	(1 << 5)
++#define ESAI_RFCR_RE2	(1 << 4)
++#define ESAI_RFCR_RE1	(1 << 3)
++#define ESAI_RFCR_RE0	(1 << 2)
++#define ESAI_RFCR_RFR	(1 << 1)
++#define ESAI_RFCR_RFEN	(1 << 0)
++#define ESAI_RFCR_RE(x) ((0xf >> (4 - ((x + 1) >> 1))) << 2)
++#define ESAI_RFCR_RE_MASK	0xfffc3
++#define ESAI_RFCR_RFWM(x)       ((x-1) << 8)
++#define ESAI_RFCR_RWA_MASK	0xf8ffff
++
++#define ESAI_WORD_LEN_32	(0x00 << 16)
++#define ESAI_WORD_LEN_28	(0x01 << 16)
++#define ESAI_WORD_LEN_24	(0x02 << 16)
++#define ESAI_WORD_LEN_20	(0x03 << 16)
++#define ESAI_WORD_LEN_16	(0x04 << 16)
++#define ESAI_WORD_LEN_12	(0x05 << 16)
++#define ESAI_WORD_LEN_8	(0x06 << 16)
++#define ESAI_WORD_LEN_4	(0x07 << 16)
++
++#define ESAI_SAISR_TODFE	(1 << 17)
++#define ESAI_SAISR_TEDE	(1 << 16)
++#define ESAI_SAISR_TDE	(1 << 15)
++#define ESAI_SAISR_TUE	(1 << 14)
++#define ESAI_SAISR_TFS	(1 << 13)
++#define ESAI_SAISR_RODF	(1 << 10)
++#define ESAI_SAISR_REDF	(1 << 9)
++#define ESAI_SAISR_RDF	(1 << 8)
++#define ESAI_SAISR_ROE	(1 << 7)
++#define ESAI_SAISR_RFS	(1 << 6)
++#define ESAI_SAISR_IF2	(1 << 2)
++#define ESAI_SAISR_IF1	(1 << 1)
++#define ESAI_SAISR_IF0	(1 << 0)
++
++#define ESAI_SAICR_ALC	(1 << 8)
++#define ESAI_SAICR_TEBE	(1 << 7)
++#define ESAI_SAICR_SYNC	(1 << 6)
++#define ESAI_SAICR_OF2	(1 << 2)
++#define ESAI_SAICR_OF1	(1 << 1)
++#define ESAI_SAICR_OF0	(1 << 0)
++
++#define ESAI_TCR_TLIE	(1 << 23)
++#define ESAI_TCR_TIE	(1 << 22)
++#define ESAI_TCR_TEDIE	(1 << 21)
++#define ESAI_TCR_TEIE	(1 << 20)
++#define ESAI_TCR_TPR	(1 << 19)
++#define ESAI_TCR_PADC	(1 << 17)
++#define ESAI_TCR_TFSR	(1 << 16)
++#define ESAI_TCR_TFSL	(1 << 15)
++#define ESAI_TCR_TWA	(1 << 7)
++#define ESAI_TCR_TSHFD_MSB	(0 << 6)
++#define ESAI_TCR_TSHFD_LSB	(1 << 6)
++#define ESAI_TCR_TE5	(1 << 5)
++#define ESAI_TCR_TE4	(1 << 4)
++#define ESAI_TCR_TE3	(1 << 3)
++#define ESAI_TCR_TE2	(1 << 2)
++#define ESAI_TCR_TE1	(1 << 1)
++#define ESAI_TCR_TE0	(1 << 0)
++#define ESAI_TCR_TE(x) (0x3f >> (6 - ((x + 1) >> 1)))
++
++#define ESAI_TCR_TSWS_MASK	0xff83ff
++#define ESAI_TCR_TSWS_STL8_WDL8	(0x00 << 10)
++#define ESAI_TCR_TSWS_STL12_WDL8	(0x04 << 10)
++#define ESAI_TCR_TSWS_STL12_WDL12	(0x01 << 10)
++#define ESAI_TCR_TSWS_STL16_WDL8	(0x08 << 10)
++#define ESAI_TCR_TSWS_STL16_WDL12	(0x05 << 10)
++#define ESAI_TCR_TSWS_STL16_WDL16	(0x02 << 10)
++#define ESAI_TCR_TSWS_STL20_WDL8	(0x0c << 10)
++#define ESAI_TCR_TSWS_STL20_WDL12	(0x09 << 10)
++#define ESAI_TCR_TSWS_STL20_WDL16	(0x06 << 10)
++#define ESAI_TCR_TSWS_STL20_WDL20	(0x03 << 10)
++#define ESAI_TCR_TSWS_STL24_WDL8	(0x10 << 10)
++#define ESAI_TCR_TSWS_STL24_WDL12	(0x0d << 10)
++#define ESAI_TCR_TSWS_STL24_WDL16	(0x0a << 10)
++#define ESAI_TCR_TSWS_STL24_WDL20	(0x07 << 10)
++#define ESAI_TCR_TSWS_STL24_WDL24	(0x1e << 10)
++#define ESAI_TCR_TSWS_STL32_WDL8	(0x18 << 10)
++#define ESAI_TCR_TSWS_STL32_WDL12	(0x15 << 10)
++#define ESAI_TCR_TSWS_STL32_WDL16	(0x12 << 10)
++#define ESAI_TCR_TSWS_STL32_WDL20	(0x0f << 10)
++#define ESAI_TCR_TSWS_STL32_WDL24	(0x1f << 10)
++
++#define ESAI_TCR_TMOD_MASK	0xfffcff
++#define ESAI_TCR_TMOD_NORMAL	(0x00 << 8)
++#define ESAI_TCR_TMOD_ONDEMAND	(0x01 << 8)
++#define ESAI_TCR_TMOD_NETWORK	(0x01 << 8)
++#define ESAI_TCR_TMOD_RESERVED (0x02 << 8)
++#define ESAI_TCR_TMOD_AC97	(0x03 << 8)
++
++#define ESAI_TCCR_THCKD	(1 << 23)
++#define ESAI_TCCR_TFSD	(1 << 22)
++#define ESAI_TCCR_TCKD	(1 << 21)
++#define ESAI_TCCR_THCKP	(1 << 20)
++#define ESAI_TCCR_TFSP	(1 << 19)
++#define ESAI_TCCR_TCKP	(1 << 18)
++
++#define ESAI_TCCR_TPSR_MASK 0xfffeff
++#define ESAI_TCCR_TPSR_BYPASS (1 << 8)
++#define ESAI_TCCR_TPSR_DIV8 (0 << 8)
++
++#define ESAI_TCCR_TFP_MASK	0xfc3fff
++#define ESAI_TCCR_TFP(x)	((x & 0xf) << 14)
++
++#define ESAI_TCCR_TDC_MASK	0xffc1ff
++#define ESAI_TCCR_TDC(x)	(((x) & 0x1f) << 9)
++
++#define ESAI_TCCR_TPM_MASK	0xffff00
++#define ESAI_TCCR_TPM(x)	(x & 0xff)
++
++#define ESAI_RCR_RLIE	(1 << 23)
++#define ESAI_RCR_RIE	(1 << 22)
++#define ESAI_RCR_REDIE	(1 << 21)
++#define ESAI_RCR_REIE	(1 << 20)
++#define ESAI_RCR_RPR	(1 << 19)
++#define ESAI_RCR_RFSR	(1 << 16)
++#define ESAI_RCR_RFSL	(1 << 15)
++#define ESAI_RCR_RWA	(1 << 7)
++#define ESAI_RCR_RSHFD_MSB (0 << 6)
++#define ESAI_RCR_RSHFD_LSB (1 << 6)
++#define ESAI_RCR_RE3	(1 << 3)
++#define ESAI_RCR_RE2	(1 << 2)
++#define ESAI_RCR_RE1	(1 << 1)
++#define ESAI_RCR_RE0	(1 << 0)
++#define ESAI_RCR_RE(x) (0xf >> (4 - ((x + 1) >> 1)))
++
++#define ESAI_RCR_RSWS_MASK	0xff83ff
++#define ESAI_RCR_RSWS_STL8_WDL8	(0x00 << 10)
++#define ESAI_RCR_RSWS_STL12_WDL8	(0x04 << 10)
++#define ESAI_RCR_RSWS_STL12_WDL12	(0x01 << 10)
++#define ESAI_RCR_RSWS_STL16_WDL8	(0x08 << 10)
++#define ESAI_RCR_RSWS_STL16_WDL12	(0x05 << 10)
++#define ESAI_RCR_RSWS_STL16_WDL16	(0x02 << 10)
++#define ESAI_RCR_RSWS_STL20_WDL8	(0x0c << 10)
++#define ESAI_RCR_RSWS_STL20_WDL12	(0x09 << 10)
++#define ESAI_RCR_RSWS_STL20_WDL16	(0x06 << 10)
++#define ESAI_RCR_RSWS_STL20_WDL20	(0x03 << 10)
++#define ESAI_RCR_RSWS_STL24_WDL8	(0x10 << 10)
++#define ESAI_RCR_RSWS_STL24_WDL12	(0x0d << 10)
++#define ESAI_RCR_RSWS_STL24_WDL16	(0x0a << 10)
++#define ESAI_RCR_RSWS_STL24_WDL20	(0x07 << 10)
++#define ESAI_RCR_RSWS_STL24_WDL24	(0x1e << 10)
++#define ESAI_RCR_RSWS_STL32_WDL8	(0x18 << 10)
++#define ESAI_RCR_RSWS_STL32_WDL12	(0x15 << 10)
++#define ESAI_RCR_RSWS_STL32_WDL16	(0x12 << 10)
++#define ESAI_RCR_RSWS_STL32_WDL20	(0x0f << 10)
++#define ESAI_RCR_RSWS_STL32_WDL24	(0x1f << 10)
++
++#define ESAI_RCR_RMOD_MASK	0xfffcff
++#define ESAI_RCR_RMOD_NORMAL	(0x00 << 8)
++#define ESAI_RCR_RMOD_ONDEMAND	(0x01 << 8)
++#define ESAI_RCR_RMOD_NETWORK	(0x01 << 8)
++#define ESAI_RCR_RMOD_RESERVED (0x02 << 8)
++#define ESAI_RCR_RMOD_AC97	(0x03 << 8)
++
++#define ESAI_RCCR_RHCKD	(1 << 23)
++#define ESAI_RCCR_RFSD	(1 << 22)
++#define ESAI_RCCR_RCKD	(1 << 21)
++#define ESAI_RCCR_RHCKP	(1 << 20)
++#define ESAI_RCCR_RFSP	(1 << 19)
++#define ESAI_RCCR_RCKP	(1 << 18)
++
++#define ESAI_RCCR_RPSR_MASK 0xfffeff
++#define ESAI_RCCR_RPSR_BYPASS (1 << 8)
++#define ESAI_RCCR_RPSR_DIV8 (0 << 8)
++
++#define ESAI_RCCR_RFP_MASK	0xfc3fff
++#define ESAI_RCCR_RFP(x)	((x & 0xf) << 14)
++
++#define ESAI_RCCR_RDC_MASK	0xffc1ff
++#define ESAI_RCCR_RDC(x)	(((x) & 0x1f) << 9)
++
++#define ESAI_RCCR_RPM_MASK	0xffff00
++#define ESAI_RCCR_RPM(x)	(x & 0xff)
++
++#define ESAI_GPIO_ESAI	0xfff
++
++/* ESAI clock source */
++#define ESAI_CLK_FSYS	0
++#define ESAI_CLK_EXTAL 1
++#define ESAI_CLK_EXTAL_DIV 2
++
++/* ESAI clock divider */
++#define ESAI_TX_DIV_PSR	0
++#define ESAI_TX_DIV_PM 1
++#define ESAI_TX_DIV_FP	2
++#define ESAI_RX_DIV_PSR	3
++#define ESAI_RX_DIV_PM	4
++#define ESAI_RX_DIV_FP	5
++
++#define IMX_ESAI_DMABUF_SIZE     (64 * 1024)
++
++#define DRV_NAME "imx-esai"
++
++#include <linux/dmaengine.h>
++#include <mach/dma.h>
++
++struct imx_esai {
++	struct platform_device *ac97_dev;
++	struct snd_soc_dai *imx_ac97;
++	struct clk *clk;
++	void __iomem *base;
++	int irq;
++	int fiq_enable;
++	unsigned int offset;
++
++	unsigned int flags;
++
++	void (*ac97_reset) (struct snd_ac97 *ac97);
++	void (*ac97_warm_reset)(struct snd_ac97 *ac97);
++
++	struct imx_pcm_dma_params dma_params_rx;
++	struct imx_pcm_dma_params dma_params_tx;
++
++	int enabled;
++
++	struct platform_device *soc_platform_pdev;
++	struct platform_device *soc_platform_pdev_fiq;
++};
++int snd_imx_pcm_mmap(struct snd_pcm_substream *substream, \
++	struct vm_area_struct *vma);
++int imx_pcm_new(struct snd_card *card, struct snd_soc_dai *dai,
++	struct snd_pcm *pcm);
++void imx_pcm_free(struct snd_pcm *pcm);
++
++#endif
+-- 
+1.7.7.4
+

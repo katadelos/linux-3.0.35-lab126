@@ -1,0 +1,44 @@
+From c6540757475f35b8ee39fdb370d7e8e23530fd5e Mon Sep 17 00:00:00 2001
+From: Danny Nold <dannynold@freescale.com>
+Date: Tue, 5 Jul 2011 14:26:49 -0500
+Subject: [PATCH 0219/2463] ENGR00152681 - EPDC fb: Updates may be shifted
+ right by 1 column
+
+- Fixed PxP input left coordinate value.  Was previously being incorrectly
+computed such that the value would be incorrect when using 16bpp RGB and an
+X coordinate that is offset from 4-pixel alignment by 1 (e.g. x=1, x=5).
+The resulting effect was that updates meeting this criteria would be
+drawn to the EPD panel shifted to the right by 1 pixel.
+
+Signed-off-by: Danny Nold <dannynold@freescale.com>
+---
+ drivers/video/mxc/mxc_epdc_fb.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_epdc_fb.c b/drivers/video/mxc/mxc_epdc_fb.c
+index ab8dd25..44414ed 100644
+--- a/drivers/video/mxc/mxc_epdc_fb.c
++++ b/drivers/video/mxc/mxc_epdc_fb.c
+@@ -1660,7 +1660,8 @@ static int epdc_process_update(struct update_data_list *upd_data_list,
+ 	input_unaligned = ((offset_from_4 * bytes_per_pixel % 4) != 0) ?
+ 				true : false;
+ 
+-	pix_per_line_added = offset_from_4 / bytes_per_pixel;
++	pix_per_line_added = (offset_from_4 * bytes_per_pixel % 4)
++					/ bytes_per_pixel;
+ 	if ((((fb_data->epdc_fb_var.rotate == FB_ROTATE_UR) ||
+ 		fb_data->epdc_fb_var.rotate == FB_ROTATE_UD)) &&
+ 		(ALIGN(src_upd_region->width, 8) <
+@@ -1710,7 +1711,8 @@ static int epdc_process_update(struct update_data_list *upd_data_list,
+ 			* bytes_per_pixel & 0xFFFFFFFC;
+ 		/* Update region should change to reflect relative position to input ptr */
+ 		pxp_upd_region.top = 0;
+-		pxp_upd_region.left = offset_from_4 / bytes_per_pixel;
++		pxp_upd_region.left = (offset_from_4 * bytes_per_pixel % 4)
++					/ bytes_per_pixel;
+ 	} else {
+ 		pxp_input_offs =
+ 			(src_upd_region->top * src_width + src_upd_region->left)
+-- 
+1.7.7.4
+

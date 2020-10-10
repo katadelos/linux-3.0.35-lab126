@@ -1,0 +1,44 @@
+From 659b57564b03ea7c9b0cbaeda3a7b5a3ce1ef54e Mon Sep 17 00:00:00 2001
+From: Xinyu Chen <xinyu.chen@freescale.com>
+Date: Thu, 19 Apr 2012 17:04:57 +0800
+Subject: [PATCH 1344/2463] ENGR00172292 usb otg: enable dtds postpone free on
+ mx6
+
+We found this bug occurs again on mx6 when running
+CTS with ADB over USB. The system will hang without
+any log, and screen a little mess.
+It's proved to be a known USB IP issue: USB controller
+may access a wrong address for the dTD and then hang.
+Re enable this workaround to avoid any system unstability.
+
+Signed-off-by: Xinyu Chen <xinyu.chen@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.h |    6 +-----
+ 1 files changed, 1 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.h b/drivers/usb/gadget/arcotg_udc.h
+index 00c8e8a..8f4b88e 100755
+--- a/drivers/usb/gadget/arcotg_udc.h
++++ b/drivers/usb/gadget/arcotg_udc.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2009-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2009-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -46,11 +46,7 @@
+ #define NEED_IRAM(ep) ((g_iram_size) && \
+ 	((ep)->desc->bmAttributes == USB_ENDPOINT_XFER_BULK))
+ 
+-#ifdef CONFIG_ARCH_MX5
+ #define POSTPONE_FREE_LAST_DTD
+-#else
+-#undef POSTPONE_FREE_LAST_DTD
+-#endif
+ 
+ /* ### define USB registers here
+  */
+-- 
+1.7.7.4
+

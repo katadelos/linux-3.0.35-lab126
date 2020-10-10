@@ -1,0 +1,73 @@
+From e926cd3e11782e105993a5ae5421b39c3588551b Mon Sep 17 00:00:00 2001
+From: Adrian Hunter <adrian.hunter@intel.com>
+Date: Fri, 21 Sep 2012 18:28:42 +0800
+Subject: [PATCH 2057/2463] ENGR00225534-1 mmc: core: move ->request() call
+ from atomic context
+
+mmc_request_done() is sometimes called from interrupt or other atomic
+context.  Mostly all mmc_request_done() does is complete(), however it
+contains code to retry on error, which uses ->request().  As the error
+path is certainly not performance critical, this may be moved to the
+waiting function mmc_wait_for_req_done().
+
+This allows ->request() to use runtime PM get_sync() and guarantee it
+is never in an atomic context.
+
+Signed-off-by: Adrian Hunter <adrian.hunter@intel.com>
+Acked-by: Ulf Hansson <ulf.hansson@stericsson.com>
+Signed-off-by: Chris Ball <cjb@laptop.org>
+Acked-by: Ryan QIAN <b32804@freescale.com>
+Signed-off-by: Dong Aisheng <b29396@freescale.com>
+---
+ drivers/mmc/core/core.c |   28 +++++++++++++++++++++-------
+ 1 files changed, 21 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
+index d6a406c..cdc68bc 100644
+--- a/drivers/mmc/core/core.c
++++ b/drivers/mmc/core/core.c
+@@ -101,12 +101,12 @@ void mmc_request_done(struct mmc_host *host, struct mmc_request *mrq)
+ 	}
+ 
+ 	if (err && cmd->retries) {
+-		pr_debug("%s: req failed (CMD%u): %d, retrying...\n",
+-			mmc_hostname(host), cmd->opcode, err);
+-
+-		cmd->retries--;
+-		cmd->error = 0;
+-		host->ops->request(host, mrq);
++		/*
++		 * Request starter must handle retries - see
++		 * mmc_wait_for_req_done().
++		 */
++		if (mrq->done)
++			mrq->done(mrq);
+ 	} else {
+ 		led_trigger_event(host->led, LED_OFF);
+ 
+@@ -211,7 +211,21 @@ static void __mmc_start_req(struct mmc_host *host, struct mmc_request *mrq)
+ static void mmc_wait_for_req_done(struct mmc_host *host,
+ 				  struct mmc_request *mrq)
+ {
+-	wait_for_completion(&mrq->completion);
++	struct mmc_command *cmd;
++
++	while (1) {
++		wait_for_completion(&mrq->completion);
++
++		cmd = mrq->cmd;
++		if (!cmd->error || !cmd->retries)
++			break;
++
++		pr_debug("%s: req failed (CMD%u): %d, retrying...\n",
++			 mmc_hostname(host), cmd->opcode, cmd->error);
++		cmd->retries--;
++		cmd->error = 0;
++		host->ops->request(host, mrq);
++	}
+ }
+ 
+ /**
+-- 
+1.7.7.4
+

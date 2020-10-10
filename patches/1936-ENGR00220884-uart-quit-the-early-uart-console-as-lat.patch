@@ -1,0 +1,37 @@
+From aa078a38bc17d5521e6d442dad88c19396c79cf4 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Tue, 21 Aug 2012 16:21:41 +0800
+Subject: [PATCH 1936/2463] ENGR00220884 uart: quit the early uart console as
+ late as possible
+
+If we use the late_initcall(), then there is a time slot between
+the exit of early uart console and the real console:
+
+      -->late_initcall(mxc_early_uart_console_disable)
+	......
+      -->imx_startup()
+
+In this time slot, the clock will be closed, so the log printed during
+the time slot is buffered, this is why we can not see the NFS's log.
+
+Change the late_initcall() to late_initcall_sync() which eliminates the
+time slot.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/tty/serial/mxc_uart_early.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/tty/serial/mxc_uart_early.c b/drivers/tty/serial/mxc_uart_early.c
+index 4a4518f..ffa3660 100644
+--- a/drivers/tty/serial/mxc_uart_early.c
++++ b/drivers/tty/serial/mxc_uart_early.c
+@@ -188,4 +188,4 @@ int __init mxc_early_uart_console_disable(void)
+ 	}
+ 	return 0;
+ }
+-late_initcall(mxc_early_uart_console_disable);
++late_initcall_sync(mxc_early_uart_console_disable);
+-- 
+1.7.7.4
+

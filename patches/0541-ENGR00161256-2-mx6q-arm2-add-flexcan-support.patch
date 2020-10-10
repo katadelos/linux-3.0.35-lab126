@@ -1,0 +1,435 @@
+From fe5cc1910108f7c926bf4db2745b75009a573d81 Mon Sep 17 00:00:00 2001
+From: Dong Aisheng <b29396@freescale.com>
+Date: Wed, 2 Nov 2011 19:23:31 +0800
+Subject: [PATCH 0541/2463] ENGR00161256-2 mx6q arm2: add flexcan support
+
+Add flexcan support.
+
+Signed-off-by: Dong Aisheng <b29396@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig                 |   17 +++++-
+ arch/arm/mach-mx6/Kconfig                       |    1 +
+ arch/arm/mach-mx6/board-mx6q_arm2.c             |   68 +++++++++++++++++++++-
+ arch/arm/mach-mx6/clock.c                       |   72 +++++++++++++++++++++--
+ arch/arm/mach-mx6/crm_regs.h                    |    4 +-
+ arch/arm/mach-mx6/devices-imx6q.h               |    6 ++
+ arch/arm/plat-mxc/devices/platform-flexcan.c    |   22 +++++--
+ arch/arm/plat-mxc/include/mach/devices-common.h |    1 +
+ arch/arm/plat-mxc/include/mach/mx6.h            |    8 +-
+ 9 files changed, 178 insertions(+), 21 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 2755a44..3d0bfc1 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux/arm 2.6.38 Kernel Configuration
+-# Mon Oct 31 18:13:45 2011
++# Wed Nov  2 16:21:15 2011
+ #
+ CONFIG_ARM=y
+ CONFIG_HAVE_PWM=y
+@@ -258,6 +258,7 @@ CONFIG_ARCH_MXC=y
+ CONFIG_GPIO_PCA953X=y
+ CONFIG_IMX_HAVE_PLATFORM_DMA=y
+ CONFIG_IMX_HAVE_PLATFORM_FEC=y
++CONFIG_IMX_HAVE_PLATFORM_FLEXCAN=y
+ CONFIG_IMX_HAVE_PLATFORM_FSL_USB2_UDC=y
+ CONFIG_IMX_HAVE_PLATFORM_GPMI_NFC=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX2_WDT=y
+@@ -576,7 +577,19 @@ CONFIG_CAN_BCM=y
+ #
+ CONFIG_CAN_VCAN=y
+ # CONFIG_CAN_SLCAN is not set
+-# CONFIG_CAN_DEV is not set
++CONFIG_CAN_DEV=y
++CONFIG_CAN_CALC_BITTIMING=y
++# CONFIG_CAN_MCP251X is not set
++CONFIG_HAVE_CAN_FLEXCAN=y
++CONFIG_CAN_FLEXCAN=y
++# CONFIG_CAN_SJA1000 is not set
++
++#
++# CAN USB interfaces
++#
++# CONFIG_CAN_EMS_USB is not set
++# CONFIG_CAN_ESD_USB2 is not set
++# CONFIG_CAN_SOFTING is not set
+ CONFIG_CAN_DEBUG_DEVICES=y
+ # CONFIG_IRDA is not set
+ CONFIG_BT=y
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 9441aa9..95e1ad4 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -52,6 +52,7 @@ config MACH_MX6Q_ARM2
+ 	select IMX_HAVE_PLATFORM_IMX_ASRC
+ 	select IMX_HAVE_PLATFORM_IMX_SPDIF
+ 	select IMX_HAVE_PLATFORM_IMX_MIPI_DSI
++	select IMX_HAVE_PLATFORM_FLEXCAN
+ 	help
+ 	  Include support for i.MX 6Quad Armadillo2 platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 93bf906..8c4158b 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -16,7 +16,6 @@
+  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+  */
+ 
+-
+ #include <linux/types.h>
+ #include <linux/sched.h>
+ #include <linux/delay.h>
+@@ -91,6 +90,15 @@
+ #define MX6Q_ARM2_MAX7310_2_BASE_ADDR	IMX_GPIO_NR(8, 8)
+ #define MX6Q_ARM2_CAP_TCH_INT	IMX_GPIO_NR(3, 31)
+ 
++#define MX6Q_ARM2_IO_EXP_GPIO1(x) \
++		(MX6Q_ARM2_MAX7310_1_BASE_ADDR + (x))
++#define MX6Q_ARM2_IO_EXP_GPIO2(x) \
++		(MX6Q_ARM2_MAX7310_2_BASE_ADDR + (x))
++
++#define MX6Q_ARM2_CAN1_STBY       IMX_GPIO_NR(7, 12)
++#define MX6Q_ARM2_CAN1_EN         IMX_GPIO_NR(7, 13)
++#define MX6Q_ARM2_CAN2_STBY       MX6Q_ARM2_IO_EXP_GPIO2(1)
++#define MX6Q_ARM2_CAN2_EN         IMX_GPIO_NR(5, 24)
+ 
+ #define MX6Q_SMD_CSI0_RST		IMX_GPIO_NR(4, 5)
+ #define MX6Q_SMD_CSI0_PWN		IMX_GPIO_NR(5, 23)
+@@ -279,6 +287,17 @@ static iomux_v3_cfg_t mx6q_arm2_pads[] = {
+ 	/* SPDIF */
+ 	MX6Q_PAD_GPIO_16__SPDIF_IN1,
+ 	MX6Q_PAD_GPIO_17__SPDIF_OUT1,
++
++	/* CAN1 */
++	MX6Q_PAD_GPIO_7__CAN1_TXCAN,
++	MX6Q_PAD_KEY_ROW2__CAN1_RXCAN,
++	MX6Q_PAD_GPIO_17__GPIO_7_12,	/* CAN1 STBY */
++	MX6Q_PAD_GPIO_18__GPIO_7_13,	/* CAN1 EN */
++
++	/* CAN2 */
++	MX6Q_PAD_KEY_COL4__CAN2_TXCAN,
++	MX6Q_PAD_KEY_ROW4__CAN2_RXCAN,
++	MX6Q_PAD_CSI0_DAT6__GPIO_5_24,	/* CAN2 EN */
+ };
+ 
+ static iomux_v3_cfg_t mx6q_arm2_esai_record_pads[] = {
+@@ -884,6 +903,43 @@ static struct platform_pwm_backlight_data mx6_arm2_pwm_backlight_data = {
+ 	.pwm_period_ns = 50000,
+ };
+ 
++static struct gpio mx6q_flexcan_gpios[] = {
++	{ MX6Q_ARM2_CAN1_EN, GPIOF_OUT_INIT_LOW, "flexcan1-en" },
++	{ MX6Q_ARM2_CAN1_STBY, GPIOF_OUT_INIT_LOW, "flexcan1-stby" },
++	{ MX6Q_ARM2_CAN2_EN, GPIOF_OUT_INIT_LOW, "flexcan2-en" },
++};
++
++static void mx6q_flexcan0_switch(int enable)
++{
++	if (enable) {
++		gpio_set_value(MX6Q_ARM2_CAN1_EN, 1);
++		gpio_set_value(MX6Q_ARM2_CAN1_STBY, 1);
++	} else {
++		gpio_set_value(MX6Q_ARM2_CAN1_EN, 0);
++		gpio_set_value(MX6Q_ARM2_CAN1_STBY, 0);
++	}
++}
++
++static void mx6q_flexcan1_switch(int enable)
++{
++	if (enable) {
++		gpio_set_value(MX6Q_ARM2_CAN2_EN, 1);
++		gpio_set_value(MX6Q_ARM2_CAN2_STBY, 1);
++	} else {
++		gpio_set_value(MX6Q_ARM2_CAN2_EN, 0);
++		gpio_set_value(MX6Q_ARM2_CAN2_STBY, 0);
++	}
++}
++
++static const struct flexcan_platform_data
++		mx6q_arm2_flexcan_pdata[] __initconst = {
++	{
++		.transceiver_switch = mx6q_flexcan0_switch,
++	}, {
++		.transceiver_switch = mx6q_flexcan1_switch,
++	}
++};
++
+ static void arm2_suspend_enter(void)
+ {
+ 	/* suspend preparation */
+@@ -1250,6 +1306,7 @@ static struct mxc_spdif_platform_data mxc_spdif_data = {
+ static void __init mx6_board_init(void)
+ {
+ 	int i;
++	int ret;
+ 
+ 	mxc_iomux_v3_setup_multiple_pads(mx6q_arm2_pads,
+ 					ARRAY_SIZE(mx6q_arm2_pads));
+@@ -1347,6 +1404,15 @@ static void __init mx6_board_init(void)
+ 
+ 	imx6q_add_hdmi_soc();
+ 	imx6q_add_hdmi_soc_dai();
++
++	ret = gpio_request_array(mx6q_flexcan_gpios,
++			ARRAY_SIZE(mx6q_flexcan_gpios));
++	if (ret) {
++		pr_err("failed to request flexcan-gpios: %d\n", ret);
++	} else {
++		imx6q_add_flexcan0(&mx6q_arm2_flexcan_pdata[0]);
++		imx6q_add_flexcan1(&mx6q_arm2_flexcan_pdata[1]);
++	}
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 58e6f3c..6a71747 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -3032,11 +3032,70 @@ static struct clk ipu2_di_clk[] = {
+ 	},
+ };
+ 
++static unsigned long _clk_can_root_round_rate(struct clk *clk,
++						unsigned long rate)
++{
++	u32 div;
++	u32 parent_rate = clk_get_rate(clk->parent);
++
++	div = parent_rate / rate;
++
++	/* Make sure rate is not greater than the maximum value for the clock.
++	 * Also prevent a div of 0.
++	 */
++	if (div == 0)
++		div++;
++
++	if (div > 64)
++		div = 64;
++
++	return parent_rate / div;
++}
++
++static int _clk_can_root_set_rate(struct clk *clk, unsigned long rate)
++{
++	u32 reg, div;
++	u32 parent_rate = clk_get_rate(clk->parent);
++
++	div = parent_rate / rate;
++	if (div == 0)
++		div++;
++	if (((parent_rate / div) != rate) || (div > 64))
++		return -EINVAL;
++
++	reg = __raw_readl(MXC_CCM_CSCMR2) & MXC_CCM_CSCMR2_CAN_CLK_PODF_MASK;
++	reg |= ((div - 1) << MXC_CCM_CSCMR2_CAN_CLK_PODF_OFFSET);
++
++	__raw_writel(reg, MXC_CCM_CSCMR2);
++
++	return 0;
++}
++
++static unsigned long _clk_can_root_get_rate(struct clk *clk)
++{
++	u32 reg, div;
++	unsigned long val;
++
++	reg = __raw_readl(MXC_CCM_CSCMR2) & MXC_CCM_CSCMR2_CAN_CLK_PODF_MASK;
++	div = (reg >> MXC_CCM_CSCMR2_CAN_CLK_PODF_OFFSET) + 1;
++	val = clk_get_rate(clk->parent) / div;
++
++	return val;
++}
++
++static struct clk can_clk_root = {
++	 __INIT_CLK_DEBUG(can_clk_root)
++	.parent = &pll3_60M,
++	.set_rate = _clk_can_root_set_rate,
++	.get_rate = _clk_can_root_get_rate,
++	.round_rate = _clk_can_root_round_rate,
++};
++
+ static struct clk can2_clk[] = {
+ 	{
+ 	 __INIT_CLK_DEBUG(can2_module_clk)
+ 	.id = 0,
+-	.parent = &pll3_60M,
++	.parent = &can_clk_root,
+ 	.enable_reg = MXC_CCM_CCGR0,
+ 	.enable_shift = MXC_CCM_CCGRx_CG9_OFFSET,
+ 	.enable = _clk_enable,
+@@ -3047,7 +3106,7 @@ static struct clk can2_clk[] = {
+ 	{
+ 	 __INIT_CLK_DEBUG(can2_serial_clk)
+ 	.id = 1,
+-	.parent = &pll3_60M,
++	.parent = &can_clk_root,
+ 	.enable_reg = MXC_CCM_CCGR0,
+ 	.enable_shift = MXC_CCM_CCGRx_CG10_OFFSET,
+ 	.enable = _clk_enable,
+@@ -3060,7 +3119,7 @@ static struct clk can1_clk[] = {
+ 	{
+ 	 __INIT_CLK_DEBUG(can1_module_clk)
+ 	.id = 0,
+-	.parent = &pll3_60M,
++	.parent = &can_clk_root,
+ 	.enable_reg = MXC_CCM_CCGR0,
+ 	.enable_shift = MXC_CCM_CCGRx_CG7_OFFSET,
+ 	.enable = _clk_enable,
+@@ -3071,7 +3130,7 @@ static struct clk can1_clk[] = {
+ 	{
+ 	 __INIT_CLK_DEBUG(can1_serial_clk)
+ 	.id = 1,
+-	.parent = &pll3_60M,
++	.parent = &can_clk_root,
+ 	.enable_reg = MXC_CCM_CCGR0,
+ 	.enable_shift = MXC_CCM_CCGRx_CG8_OFFSET,
+ 	.enable = _clk_enable,
+@@ -4630,8 +4689,9 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "ipu1_di1_clk", ipu1_di_clk[1]),
+ 	_REGISTER_CLOCK(NULL, "ipu2_di0_clk", ipu2_di_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "ipu2_di1_clk", ipu2_di_clk[1]),
+-	_REGISTER_CLOCK("FlexCAN.0", "can_clk", can1_clk[0]),
+-	_REGISTER_CLOCK("FlexCAN.1", "can_clk", can2_clk[0]),
++	_REGISTER_CLOCK(NULL, "can_root_clk", can_clk_root),
++	_REGISTER_CLOCK("imx6q-flexcan.0", NULL, can1_clk[0]),
++	_REGISTER_CLOCK("imx6q-flexcan.1", NULL, can2_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "ldb_di0_clk", ldb_di0_clk),
+ 	_REGISTER_CLOCK(NULL, "ldb_di1_clk", ldb_di1_clk),
+ 	_REGISTER_CLOCK("mxc_spdif.0", NULL, spdif0_clk[0]),
+diff --git a/arch/arm/mach-mx6/crm_regs.h b/arch/arm/mach-mx6/crm_regs.h
+index c17f8bb..5b80070 100644
+--- a/arch/arm/mach-mx6/crm_regs.h
++++ b/arch/arm/mach-mx6/crm_regs.h
+@@ -282,8 +282,8 @@
+ #define MXC_CCM_CSCMR2_ESAI_CLK_SEL_OFFSET		(19)
+ #define MXC_CCM_CSCMR2_LDB_DI1_IPU_DIV			(1 << 11)
+ #define MXC_CCM_CSCMR2_LDB_DI0_IPU_DIV			(1 << 10)
+-#define MXC_CCM_CSCMR2_CAN_CLK_SEL_MASK			(0x3F << 2)
+-#define MXC_CCM_CSCMR2_CAN_CLK_SEL_OFFSET		(2)
++#define MXC_CCM_CSCMR2_CAN_CLK_PODF_MASK		(0x3F << 2)
++#define MXC_CCM_CSCMR2_CAN_CLK_PODF_OFFSET		(2)
+ 
+ /* Define the bits in register CSCDR1 */
+ #define MXC_CCM_CSCDR1_VPU_AXI_PODF_MASK		(0x7 << 25)
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 2f0610d..c4b876b 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -179,3 +179,9 @@ extern const struct imx_hdmi_soc_data imx6q_imx_hdmi_soc_dai_data __initconst;
+ extern const struct imx_mipi_dsi_data imx6q_mipi_dsi_data __initconst;
+ #define imx6q_add_mipi_dsi(pdata)	\
+ 	imx_add_mipi_dsi(&imx6q_mipi_dsi_data, pdata)
++
++extern const struct imx_flexcan_data imx6q_flexcan_data[] __initconst;
++#define imx6q_add_flexcan(id, pdata)	\
++	imx_add_flexcan(&imx6q_flexcan_data[id], pdata)
++#define imx6q_add_flexcan0(pdata)	imx6q_add_flexcan(0, pdata)
++#define imx6q_add_flexcan1(pdata)	imx6q_add_flexcan(1, pdata)
+diff --git a/arch/arm/plat-mxc/devices/platform-flexcan.c b/arch/arm/plat-mxc/devices/platform-flexcan.c
+index 4e8497a..d660237 100644
+--- a/arch/arm/plat-mxc/devices/platform-flexcan.c
++++ b/arch/arm/plat-mxc/devices/platform-flexcan.c
+@@ -8,21 +8,22 @@
+ #include <mach/hardware.h>
+ #include <mach/devices-common.h>
+ 
+-#define imx_flexcan_data_entry_single(soc, _id, _hwid, _size)		\
++#define imx_flexcan_data_entry_single(soc, _devid, _id, _hwid, _size)	\
+ 	{								\
++		.devid = _devid,					\
+ 		.id = _id,						\
+ 		.iobase = soc ## _CAN ## _hwid ## _BASE_ADDR,		\
+ 		.iosize = _size,					\
+ 		.irq = soc ## _INT_CAN ## _hwid,			\
+ 	}
+ 
+-#define imx_flexcan_data_entry(soc, _id, _hwid, _size)			\
+-	[_id] = imx_flexcan_data_entry_single(soc, _id, _hwid, _size)
++#define imx_flexcan_data_entry(soc, _devid, _id, _hwid, _size)		\
++	[_id] = imx_flexcan_data_entry_single(soc, _devid, _id, _hwid, _size)
+ 
+ #ifdef CONFIG_SOC_IMX25
+ const struct imx_flexcan_data imx25_flexcan_data[] __initconst = {
+ #define imx25_flexcan_data_entry(_id, _hwid)				\
+-	imx_flexcan_data_entry(MX25, _id, _hwid, SZ_16K)
++	imx_flexcan_data_entry(MX25, "imx25-flexcan", _id, _hwid, SZ_16K)
+ 	imx25_flexcan_data_entry(0, 1),
+ 	imx25_flexcan_data_entry(1, 2),
+ };
+@@ -31,12 +32,21 @@ const struct imx_flexcan_data imx25_flexcan_data[] __initconst = {
+ #ifdef CONFIG_SOC_IMX35
+ const struct imx_flexcan_data imx35_flexcan_data[] __initconst = {
+ #define imx35_flexcan_data_entry(_id, _hwid)				\
+-	imx_flexcan_data_entry(MX35, _id, _hwid, SZ_16K)
++	imx_flexcan_data_entry(MX35, "imx35-flexcan", _id, _hwid, SZ_16K)
+ 	imx35_flexcan_data_entry(0, 1),
+ 	imx35_flexcan_data_entry(1, 2),
+ };
+ #endif /* ifdef CONFIG_SOC_IMX35 */
+ 
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_flexcan_data imx6q_flexcan_data[] __initconst = {
++#define imx6q_flexcan_data_entry(_id, _hwid)				\
++	imx_flexcan_data_entry(MX6Q, "imx6q-flexcan", _id, _hwid, SZ_16K)
++	imx6q_flexcan_data_entry(0, 1),
++	imx6q_flexcan_data_entry(1, 2),
++};
++#endif /* ifdef CONFIG_SOC_IMX6Q*/
++
+ struct platform_device *__init imx_add_flexcan(
+ 		const struct imx_flexcan_data *data,
+ 		const struct flexcan_platform_data *pdata)
+@@ -53,6 +63,6 @@ struct platform_device *__init imx_add_flexcan(
+ 		},
+ 	};
+ 
+-	return imx_add_platform_device("flexcan", data->id,
++	return imx_add_platform_device(data->devid, data->id,
+ 			res, ARRAY_SIZE(res), pdata, sizeof(*pdata));
+ }
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 0dab3ef..4b464bb 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -40,6 +40,7 @@ struct platform_device *__init imx_add_fec(
+ 
+ #include <linux/can/platform/flexcan.h>
+ struct imx_flexcan_data {
++	const char *devid;
+ 	int id;
+ 	resource_size_t iobase;
+ 	resource_size_t iosize;
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 7ad9058..6658138 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -156,8 +156,8 @@
+ #define MX6Q_PWM2_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x4000)
+ #define MX6Q_PWM3_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x8000)
+ #define MX6Q_PWM4_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0xC000)
+-#define CAN1_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x10000)
+-#define CAN2_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x14000)
++#define MX6Q_CAN1_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x10000)
++#define MX6Q_CAN2_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x14000)
+ #define GPT_BASE_ADDR               (AIPS1_OFF_BASE_ADDR + 0x18000)
+ #define GPIO1_BASE_ADDR             (AIPS1_OFF_BASE_ADDR + 0x1C000)
+ #define GPIO2_BASE_ADDR             (AIPS1_OFF_BASE_ADDR + 0x20000)
+@@ -389,8 +389,8 @@
+ #define MXC_INT_INTERRUPT_139_NUM                          139
+ #define MXC_INT_TZASC1                             140
+ #define MXC_INT_TZASC2                             141
+-#define MXC_INT_CAN1                               142
+-#define MXC_INT_CAN2                               143
++#define MX6Q_INT_CAN1                               142
++#define MX6Q_INT_CAN2                               143
+ #define MXC_INT_PERFMON1                           144
+ #define MXC_INT_PERFMON2                           145
+ #define MXC_INT_PERFMON3                           146
+-- 
+1.7.7.4
+

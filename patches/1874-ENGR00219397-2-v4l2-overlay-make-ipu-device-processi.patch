@@ -1,0 +1,73 @@
+From 28608af41ed4623fb3f7723b08192f155663603c Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Mon, 6 Aug 2012 18:43:53 +0800
+Subject: [PATCH 1874/2463] ENGR00219397-2 v4l2 overlay: make ipu device
+ processing optional for overaly
+
+Add ipu device queue processing for overlay, and make it default.
+This will instead prp_viewfinder work flow in the most user case.
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ drivers/media/video/mxc/capture/Kconfig  |   22 +++++++++++++++++++---
+ drivers/media/video/mxc/capture/Makefile |    1 +
+ 2 files changed, 20 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/Kconfig b/drivers/media/video/mxc/capture/Kconfig
+index eaebf2e..17fdd36 100644
+--- a/drivers/media/video/mxc/capture/Kconfig
++++ b/drivers/media/video/mxc/capture/Kconfig
+@@ -122,12 +122,26 @@ config MXC_CAMERA_SENSOR_CLK
+ 	---help---
+ 	  If you plan to use the Camera with your MXC system, say Y here.
+ 
+-
+-config MXC_IPU_PRP_VF_SDC
+-	tristate "Pre-Processor VF SDC library"
++choice
++	prompt "Select Overlay Rounting"
++	default MXC_IPU_DEVICE_QUEUE_SDC
+ 	depends on VIDEO_MXC_IPU_CAMERA && FB_MXC_SYNC_PANEL
++
++config MXC_IPU_DEVICE_QUEUE_SDC
++	tristate "Queue ipu device for overlay library"
++	depends on VIDEO_MXC_IPU_CAMERA
+ 	default y
+ 	---help---
++	  Use case CSI->MEM->IPU DEVICE->SDC:
++		Images from sensor will be frist recieved in memory,then
++		queue to ipu device for processing if needed, and displaying
++		it on synchronous display with SDC use case.
++
++config MXC_IPU_PRP_VF_SDC
++	bool "Pre-Processor VF SDC library"
++	depends on VIDEO_MXC_IPU_CAMERA
++	default n
++	---help---
+ 	  Use case PRP_VF_SDC:
+ 		Preprocessing image from smart sensor for viewfinder and
+ 		displaying it on synchronous display with SDC use case.
+@@ -136,6 +150,8 @@ config MXC_IPU_PRP_VF_SDC
+ 		MEM -> IC (ROT) -> MEM
+ 		MEM -> SDC (FG/BG)
+ 
++endchoice
++
+ config MXC_IPU_PRP_ENC
+ 	tristate "Pre-processor Encoder library"
+ 	depends on VIDEO_MXC_IPU_CAMERA
+diff --git a/drivers/media/video/mxc/capture/Makefile b/drivers/media/video/mxc/capture/Makefile
+index d249923..04b7153 100644
+--- a/drivers/media/video/mxc/capture/Makefile
++++ b/drivers/media/video/mxc/capture/Makefile
+@@ -1,6 +1,7 @@
+ ifeq ($(CONFIG_VIDEO_MXC_IPU_CAMERA),y)
+ 	obj-$(CONFIG_VIDEO_MXC_CAMERA) += mxc_v4l2_capture.o
+ 	obj-$(CONFIG_MXC_IPU_PRP_VF_SDC) += ipu_prp_vf_sdc.o ipu_prp_vf_sdc_bg.o
++	obj-$(CONFIG_MXC_IPU_DEVICE_QUEUE_SDC) += ipu_fg_overlay_sdc.o ipu_prp_vf_sdc_bg.o
+ 	obj-$(CONFIG_MXC_IPU_PRP_ENC) += ipu_prp_enc.o ipu_still.o
+ 	obj-$(CONFIG_MXC_IPU_CSI_ENC) += ipu_csi_enc.o ipu_still.o
+ endif
+-- 
+1.7.7.4
+

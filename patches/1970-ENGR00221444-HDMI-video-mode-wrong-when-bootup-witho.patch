@@ -1,0 +1,41 @@
+From 073566a6648b978d1a1e392a98dc85bab34272ac Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Mon, 27 Aug 2012 10:25:02 +0800
+Subject: [PATCH 1970/2463] ENGR00221444 HDMI: video mode wrong when bootup
+ without HDMI cable
+
+Bootup Android without HDMI cable plugin, then plugin HDMI cable,
+video mode in /sys/class/graphics/fb0/mode not same as actually
+HDMI work video mode.
+
+The root cause is in video mode point to one of video mode in
+original video modelist, but the modelist will be updated when
+HDMI cable plug to new monitor.
+If HDMI original worked video mode can work on new monitor,
+the HDMI and framebuffer will not updated, so HDMI actually
+work mode not same as /sys/class/graphics/fb0/mode
+
+Updated fbi mode pointer even if video mode no changed
+in case moselist is updated, the issue will fixed.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ drivers/video/mxc_hdmi.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index d5f3b5d..0144f7f 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -1655,6 +1655,8 @@ static void mxc_hdmi_set_mode(struct mxc_hdmi *hdmi)
+ 	if (fb_mode_is_equal(&hdmi->previous_non_vga_mode, mode)) {
+ 		dev_dbg(&hdmi->pdev->dev,
+ 				"%s: Video mode same as previous\n", __func__);
++		/* update fbi mode in case modelist is updated */
++		hdmi->fbi->mode = mode;
+ 		mxc_hdmi_phy_init(hdmi);
+ 	} else {
+ 		dev_dbg(&hdmi->pdev->dev, "%s: New video mode\n", __func__);
+-- 
+1.7.7.4
+

@@ -1,0 +1,45 @@
+From 9bb4f0dae1c74e2b5c24942925a8339e2b0e6921 Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Sat, 18 Aug 2012 13:16:44 +0800
+Subject: [PATCH 1924/2463] ENGR00220705 v4l2 overlay: Cancel the work
+ structure schedule at overlay stop
+
+Add flush_work_sync and cancel_work_sync at the overlay stop to
+prevent moving data by DMA even when the space of those data address
+is freed.
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com
+---
+ .../media/video/mxc/capture/ipu_bg_overlay_sdc.c   |    2 ++
+ .../media/video/mxc/capture/ipu_fg_overlay_sdc.c   |    2 ++
+ 2 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ipu_bg_overlay_sdc.c b/drivers/media/video/mxc/capture/ipu_bg_overlay_sdc.c
+index f22d04a..1a02297 100644
+--- a/drivers/media/video/mxc/capture/ipu_bg_overlay_sdc.c
++++ b/drivers/media/video/mxc/capture/ipu_bg_overlay_sdc.c
+@@ -418,6 +418,8 @@ static int bg_overlay_stop(void *private)
+ 	}
+ #endif
+ 
++	flush_work_sync(&cam->csi_work_struct);
++	cancel_work_sync(&cam->csi_work_struct);
+ 	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_VF, cam->csi, false, false);
+ 
+ 	if (cam->vf_bufs_vaddr[0]) {
+diff --git a/drivers/media/video/mxc/capture/ipu_fg_overlay_sdc.c b/drivers/media/video/mxc/capture/ipu_fg_overlay_sdc.c
+index 05c88c7..312462a 100644
+--- a/drivers/media/video/mxc/capture/ipu_fg_overlay_sdc.c
++++ b/drivers/media/video/mxc/capture/ipu_fg_overlay_sdc.c
+@@ -508,6 +508,8 @@ static int foreground_stop(void *private)
+ 	}
+ #endif
+ 
++	flush_work_sync(&cam->csi_work_struct);
++	cancel_work_sync(&cam->csi_work_struct);
+ 	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_VF, cam->csi, false, false);
+ 
+ 	if (cam->vf_bufs_vaddr[0]) {
+-- 
+1.7.7.4
+

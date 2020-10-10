@@ -1,0 +1,60 @@
+From 6aaf2a69e13ae84980a90cebce70a86c2a09f404 Mon Sep 17 00:00:00 2001
+From: Dong Aisheng <b29396@freescale.com>
+Date: Wed, 28 Mar 2012 15:58:48 +0800
+Subject: [PATCH 1244/2463] ENGR00178290-2 mmc: sdhci: introduce
+ QUIRK_BROKEN_AUTO_CMD23 for mx6
+
+We observed a few commands timeout when using auto cmd23.
+The root cause is still unkonwn.
+This patch is a workaround to not use auto cmd23 temporarily.
+
+Signed-off-by: Dong Aisheng <b29396@freescale.com>
+---
+ drivers/mmc/host/sdhci-esdhc-imx.c |    3 +++
+ drivers/mmc/host/sdhci.c           |    1 +
+ include/linux/mmc/sdhci.h          |    3 +++
+ 3 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index 291ef7a..9d7fada 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -701,6 +701,9 @@ static int esdhc_pltfm_init(struct sdhci_host *host, struct sdhci_pltfm_data *pd
+ 		host->quirks |= SDHCI_QUIRK_NO_MULTIBLOCK
+ 			| SDHCI_QUIRK_BROKEN_ADMA;
+ 
++	if (cpu_is_mx6())
++		host->quirks2 |= SDHCI_QUIRK_BROKEN_AUTO_CMD23,
++
+ 	/* write_protect can't be routed to controller, use gpio */
+ 	sdhci_esdhc_ops.get_ro = esdhc_pltfm_get_ro;
+ 
+diff --git a/drivers/mmc/host/sdhci.c b/drivers/mmc/host/sdhci.c
+index 428f352..4d36a87 100755
+--- a/drivers/mmc/host/sdhci.c
++++ b/drivers/mmc/host/sdhci.c
+@@ -2654,6 +2654,7 @@ int sdhci_add_host(struct sdhci_host *host)
+ 
+ 	/* Auto-CMD23 stuff only works in ADMA or PIO. */
+ 	if ((host->version >= SDHCI_SPEC_300) &&
++	    !(host->quirks2 & SDHCI_QUIRK_BROKEN_AUTO_CMD23) &&
+ 	    ((host->flags & SDHCI_USE_ADMA) ||
+ 	     !(host->flags & SDHCI_USE_SDMA))) {
+ 		host->flags |= SDHCI_AUTO_CMD23;
+diff --git a/include/linux/mmc/sdhci.h b/include/linux/mmc/sdhci.h
+index d9dca27..a477e2e 100644
+--- a/include/linux/mmc/sdhci.h
++++ b/include/linux/mmc/sdhci.h
+@@ -93,6 +93,9 @@ struct sdhci_host {
+ /* The read-only detection via SDHCI_PRESENT_STATE register is unstable */
+ #define SDHCI_QUIRK_UNSTABLE_RO_DETECT			(1<<31)
+ 
++	unsigned int quirks2;   /* More deviations from spec. */
++#define SDHCI_QUIRK_BROKEN_AUTO_CMD23			(1<<0)
++
+ 	int irq;		/* Device IRQ */
+ 	void __iomem *ioaddr;	/* Mapped address */
+ 
+-- 
+1.7.7.4
+

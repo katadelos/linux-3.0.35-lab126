@@ -1,0 +1,69 @@
+From 57ecfa9474e486a17e29747867f58278c05b781e Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Fri, 17 Feb 2012 19:07:17 +0800
+Subject: [PATCH 1063/2463] ENGR00174896 i.mx6: i.mx6l: clock: gpu/vpu clock
+ adjustment
+
+GPU clock on i.mx6dl:
+gpu2d_core_clk source from gpu3d_shader_clk,
+gpu3d_axi_clk source from mmdc0 directly, 400Mhz by default,
+gpu2d_axi_clk source from mmdc0 directly, 400Mhz by default,
+
+AXI_CLK on i.mx6dl:
+set axi_clk parent to pll3_pfd_540M and divid by 2, which will
+get 270Mhz by default,
+
+VPU clock on i.mx6dl:
+VPU will parent from axi_clk, then by default, it will be 270Mhz,
+which will be suitable for VPU 1080p support.
+
+pll3_pfd_540M on i.mx6dl will be dedicated to VPU/IPU/AXI_CLK use,
+other users should not change this assignment
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |   15 ++++++++++++---
+ 1 files changed, 12 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 1c27d50..84e0176 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4362,11 +4362,15 @@ static int _clk_gpu2d_core_set_parent(struct clk *clk, struct clk *parent)
+ 
+ static unsigned long _clk_gpu2d_core_get_rate(struct clk *clk)
+ {
+-	u32 reg, div;
++	u32 reg, div = 1;
+ 
+ 	reg = __raw_readl(MXC_CCM_CBCMR);
+-	div = ((reg & MXC_CCM_CBCMR_GPU2D_CORE_PODF_MASK) >>
+-			MXC_CCM_CBCMR_GPU2D_CORE_PODF_OFFSET) + 1;
++	if (cpu_is_mx6q())
++		div = ((reg & MXC_CCM_CBCMR_GPU2D_CORE_PODF_MASK) >>
++				MXC_CCM_CBCMR_GPU2D_CORE_PODF_OFFSET) + 1;
++	else if (cpu_is_mx6dl())
++		/* on i.mx6dl, gpu2d_core_clk source from gpu3d_shader_clk */
++		return clk_get_rate(clk->parent);
+ 
+ 	return clk_get_rate(clk->parent) / div;
+ }
+@@ -5220,10 +5224,15 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	if (cpu_is_mx6dl()) {
+ 		/*on mx6dl, 2d core clock sources from 3d shader core clock*/
+ 		clk_set_parent(&gpu2d_core_clk[0], &gpu3d_shader_clk);
++		/* on mx6dl gpu3d_axi_clk source from mmdc0 directly */
++		clk_set_parent(&gpu3d_axi_clk, &mmdc_ch0_axi_clk[0]);
+ 		/* on mx6dl gpu2d_axi_clk source from mmdc0 directly */
+ 		clk_set_parent(&gpu2d_axi_clk, &mmdc_ch0_axi_clk[0]);
+ 		gpu2d_axi_clk.secondary = NULL;
+ 
++		/* set axi_clk parent to pll3_pfd_540M */
++		clk_set_parent(&axi_clk, &pll3_pfd_540M);
++
+ 		/* on mx6dl, max ipu clock is 274M */
+ 		clk_set_parent(&ipu1_clk, &pll3_pfd_540M);
+ 		clk_set_parent(&ldb_di0_clk, &pll2_pfd_352M);
+-- 
+1.7.7.4
+

@@ -1,0 +1,195 @@
+From 124f4882db739c49dc3c1f1795635244951d0ca0 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Wed, 12 Sep 2012 18:34:28 +0800
+Subject: [PATCH 2034/2463] ENGR00223816 HDMI AUDIO: fix kernel panic cause by
+ accessing unavailable memory
+
+HDMI audio driver is responsible for add IEC header into audio sample.
+In HDMI audio driver, a variable named rtd->appl_bytes is maintained to
+stand for how many audio sample have already processed. appl_bytes
+stands for how many audio sample the user space have already feed into
+kernel driver. So we use the connt = appl_bytes - rtd->appl_bytes to
+decide how many data need to be processed. And the processed data would
+be write into an preallocated buffer called hw_buf in driver.
+
+When doing seek operation, the appl_bytes changes in an wide range. So
+it is possible that the count value is far larger than the size of
+hw_buf and the memory access un-existed address error would happens.
+
+In this patch, Add check operation for count to avoid kernel panic.
+
+Kernel panic log:
+seeking: 0:00:18.000000000/0:03:0Unable to handle kernel paging request
+at virtual address ffdf0000
+pgd = 80004000
+[ffdf0000] *pgd=71e35811, *pte=00000000, *ppte=00000000
+Internal error: Oops: 7 [#1] PREEMPT SMP
+Modules linked in: vivante drm galcore
+CPU: 0    Not tainted  (3.0.35-2014-g7a9337b #1)
+PC is at hdmi_dma_mmap_copy+0x134/0x190
+LR is at hdmi_dma_mmap_copy+0x5c/0x190
+pc : [<803e1e4c>]    lr : [<803e1d74>]    psr: 800f0193
+sp : 80a61e98  ip : ffdf0000  fp : ffdeffc0
+r10: 00000055  r9 : ffdeff80  r8 : 0029b450
+r7 : 00000060  r6 : ffdf0200  r5 : 00000240  r4 : 00000120
+r3 : 00000000  r2 : ffdf0000  r1 : 00000000  r0 : 00000090
+Flags: Nzcv  IRQs off  FIQs on  Mode SVC_32  ISA ARM  Segment kernel
+Control: 10c53c7d  Table: 6d28804a  DAC: 00000015
+Process swapper (pid: 0, stack limit = 0x80a602f0)
+Stack: (0x80a61e98 to 0x80a62000)
+1e80:                                                       00000002
+000037f1
+1ea0: 00006000 e1d3a7e4 a00f0193 e1d3a780 e1dcab00 00a83100 00a83100
+00006000
+1ec0: 00006000 803e24f4 413187b9 00000000 0073001a e1dd1e00 00000001
+00000001
+1ee0: 00000080 00000093 80ac7070 80a66a80 00000001 800a5ca8 8c80e568
+efb3e7b9
+1f00: 00000055 80a66a80 80a66acc e1ea9bc0 00000093 00000000 80a60000
+00000000
+1f20: 00000000 800a5e14 80a66a80 80a66acc 0000107f 800a8198 80a71cc0
+80038c00
+1f40: 80a60000 800a5610 000001f0 80040830 ffffffff f2a00100 00000093
+00000002
+1f60: 00000001 8003f9cc 80ac5f60 800f0093 00000001 00000000 80a60000
+80abeb64
+1f80: 804e1a54 80a74e7c 1000406a 412fc09a 00000000 00000000 00000000
+80a61fb0
+1fa0: 8004d52c 80040ac4 400f0013 ffffffff 80040aa0 80040cbc 00000001
+80a71b3c
+1fc0: 80abeac0 8002e3c4 8c80b140 80008868 800082f8 00000000 00000000
+8002e3c4
+1fe0: 00000000 10c53c7d 80a71a6c 8002e3c0 80a74e74 10008040 00000000
+00000000
+[<803e1e4c>] (hdmi_dma_mmap_copy+0x134/0x190) from [<803e24f4>]
+(hdmi_dma_isr+0x17c/0x1a0)
+[<803e24f4>] (hdmi_dma_isr+0x17c/0x1a0) from [<800a5ca8>]
+(handle_irq_event_percpu+0x50/0x180)
+[<800a5ca8>] (handle_irq_event_percpu+0x50/0x180) from [<800a5e14>]
+(handle_irq_event+0x3c/0x5c)
+[<800a5e14>] (handle_irq_event+0x3c/0x5c) from [<800a8198>]
+(handle_fasteoi_irq+0xbc/0x154)
+[<800a8198>] (handle_fasteoi_irq+0xbc/0x154) from [<800a5610>]
+(generic_handle_irq+0x28/0x3c)
+[<800a5610>] (generic_handle_irq+0x28/0x3c) from [<80040830>]
+(handle_IRQ+0x4c/0xac)
+[<80040830>] (handle_IRQ+0x4c/0xac) from [<8003f9cc>]
+(__irq_svc+0x4c/0xe8)
+[<8003f9cc>] (__irq_svc+0x4c/0xe8) from [<80040ac4>]
+(default_idle+0x24/0x28)
+[<80040ac4>] (default_idle+0x24/0x28) from [<80040cbc>]
+(cpu_idle+0xbc/0xfc)
+[<80040cbc>] (cpu_idle+0xbc/0xfc) from [<80008868>]
+(start_kernel+0x248/0x288)
+[<80008868>] (start_kernel+0x248/0x288) from [<10008040>] (0x10008040)
+Code: c1a0c009 c08b6005 c1a0200b da00000a (e0d230b2)
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ sound/soc/imx/imx-hdmi-dma.c |   63 ++++++++++++++++++++++++++++++++---------
+ 1 files changed, 49 insertions(+), 14 deletions(-)
+
+diff --git a/sound/soc/imx/imx-hdmi-dma.c b/sound/soc/imx/imx-hdmi-dma.c
+index 4581142..ab0207a 100644
+--- a/sound/soc/imx/imx-hdmi-dma.c
++++ b/sound/soc/imx/imx-hdmi-dma.c
+@@ -597,15 +597,27 @@ static void hdmi_sdma_isr(void *data)
+ 		if (runtime->access == SNDRV_PCM_ACCESS_MMAP_INTERLEAVED) {
+ 			appl_bytes = frames_to_bytes(runtime,
+ 						runtime->control->appl_ptr);
+-			if (rtd->appl_bytes > appl_bytes)
+-				rtd->appl_bytes = 0;
++
++			if (rtd->appl_bytes > appl_bytes) {
++				if (appl_bytes > rtd->buffer_bytes)
++					rtd->appl_bytes =
++						appl_bytes - rtd->buffer_bytes;
++				else
++					rtd->appl_bytes = 0;
++			} else {
++				if ((appl_bytes - rtd->appl_bytes) >
++						rtd->buffer_bytes)
++					rtd->appl_bytes =
++						appl_bytes - rtd->buffer_bytes;
++
++			}
++
+ 			offset = rtd->appl_bytes % rtd->buffer_bytes;
+ 			space_to_end = rtd->buffer_bytes - offset;
+ 			count = appl_bytes - rtd->appl_bytes;
+-			if (count > rtd->buffer_bytes) {
+-				pr_info("HDMI is slow,ring buffer size[%ld], count[%ld]!\n",
+-						rtd->buffer_bytes, count);
+-			}
++			if (count > rtd->buffer_bytes)
++				count = rtd->buffer_bytes;
++
+ 			rtd->appl_bytes = appl_bytes;
+ 
+ 			if (count <= space_to_end) {
+@@ -651,15 +663,25 @@ static irqreturn_t hdmi_dma_isr(int irq, void *dev_id)
+ 		if (runtime->access == SNDRV_PCM_ACCESS_MMAP_INTERLEAVED) {
+ 			appl_bytes = frames_to_bytes(runtime,
+ 						runtime->control->appl_ptr);
+-			if (rtd->appl_bytes > appl_bytes)
+-				rtd->appl_bytes = 0;
++			if (rtd->appl_bytes > appl_bytes) {
++				if (appl_bytes > rtd->buffer_bytes)
++					rtd->appl_bytes =
++						appl_bytes - rtd->buffer_bytes;
++				else
++					rtd->appl_bytes = 0;
++			} else {
++				if ((appl_bytes - rtd->appl_bytes) >
++							rtd->buffer_bytes)
++					rtd->appl_bytes =
++						appl_bytes - rtd->buffer_bytes;
++
++			}
++
+ 			offset = rtd->appl_bytes % rtd->buffer_bytes;
+ 			space_to_end = rtd->buffer_bytes - offset;
+ 			count = appl_bytes - rtd->appl_bytes;
+-			if (count > rtd->buffer_bytes) {
+-				pr_info("HDMI is slow,ring buffer size[%ld],count[%ld]!\n",
+-						rtd->buffer_bytes, count);
+-			}
++			if (count > rtd->buffer_bytes)
++				count = rtd->buffer_bytes;
+ 			rtd->appl_bytes = appl_bytes;
+ 
+ 			if (count <= space_to_end) {
+@@ -1101,8 +1123,20 @@ static int hdmi_dma_trigger(struct snd_pcm_substream *substream, int cmd)
+ 			 * keep the old value but the control->
+ 			 * appl_ptr is clear. Reset it if this
+ 			 * misalignment happens*/
+-			if (rtd->appl_bytes > appl_bytes)
+-				rtd->appl_bytes = 0;
++			if (rtd->appl_bytes > appl_bytes) {
++				if (appl_bytes > rtd->buffer_bytes)
++					rtd->appl_bytes =
++						appl_bytes - rtd->buffer_bytes;
++				else
++					rtd->appl_bytes = 0;
++			} else {
++				if ((appl_bytes - rtd->appl_bytes) >
++						rtd->buffer_bytes)
++					rtd->appl_bytes =
++						appl_bytes - rtd->buffer_bytes;
++
++			}
++
+ 			offset = rtd->appl_bytes % rtd->buffer_bytes;
+ 			space_to_end = rtd->buffer_bytes - offset;
+ 			count = appl_bytes - rtd->appl_bytes;
+@@ -1123,6 +1157,7 @@ static int hdmi_dma_trigger(struct snd_pcm_substream *substream, int cmd)
+ 				hdmi_dma_mmap_copy(substream,
+ 						0, count - space_to_end);
+ 			}
++
+ 		}
+ 		dumpregs();
+ 
+-- 
+1.7.7.4
+

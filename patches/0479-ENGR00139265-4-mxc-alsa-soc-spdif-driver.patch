@@ -1,0 +1,251 @@
+From bbd99ba9b523266f2d584ae9a7ab0a9a5bdfc092 Mon Sep 17 00:00:00 2001
+From: Alan Tull <alan.tull@freescale.com>
+Date: Tue, 28 Jun 2011 11:18:05 -0500
+Subject: [PATCH 0479/2463] ENGR00139265-4 mxc alsa soc spdif driver
+
+* Add support for S/PDIF on i.Mx6
+
+Signed-off-by: Alan Tull <alan.tull@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig                    |    5 ++-
+ arch/arm/mach-mx6/Kconfig                          |    2 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c           |   39 ++++++++++++++++++++
+ arch/arm/mach-mx6/clock.c                          |    5 ++-
+ arch/arm/mach-mx6/devices-imx6q.h                  |   11 ++++++
+ arch/arm/plat-mxc/devices/platform-imx-spdif-dai.c |    5 +++
+ arch/arm/plat-mxc/devices/platform-imx-spdif.c     |    5 +++
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h        |    4 ++-
+ arch/arm/plat-mxc/include/mach/mx6.h               |    4 +-
+ 9 files changed, 75 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 891e0c1..a24c803 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -275,6 +275,7 @@ CONFIG_IMX_HAVE_PLATFORM_AHCI=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_OCOTP=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_VIIM=y
+ CONFIG_IMX_HAVE_PLATFORM_LDB=y
++CONFIG_IMX_HAVE_PLATFORM_IMX_SPDIF=y
+ CONFIG_IMX_HAVE_PLATFORM_VIV_GPU=y
+ CONFIG_IMX_HAVE_PLATFORM_MXC_HDMI=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_ANATOP_THERMAL=y
+@@ -1450,10 +1451,12 @@ CONFIG_SND_SOC=y
+ CONFIG_SND_SOC_AC97_BUS=y
+ CONFIG_SND_IMX_SOC=y
+ CONFIG_SND_MXC_SOC_MX2=y
++CONFIG_SND_MXC_SOC_SPDIF_DAI=y
+ CONFIG_SND_SOC_IMX_CS42888=y
+-# CONFIG_SND_SOC_IMX_SPDIF is not set
++CONFIG_SND_SOC_IMX_SPDIF=y
+ CONFIG_SND_SOC_I2C_AND_SPI=y
+ # CONFIG_SND_SOC_ALL_CODECS is not set
++CONFIG_SND_SOC_MXC_SPDIF=y
+ CONFIG_SND_SOC_CS42888=y
+ # CONFIG_SOUND_PRIME is not set
+ CONFIG_AC97_BUS=y
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 9fddbdf..d9f6894 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -12,6 +12,7 @@ config ARCH_MX6Q
+ 	select IMX_HAVE_PLATFORM_IMX_IPUV3
+ 	select IMX_HAVE_PLATFORM_MXC_PWM
+ 	select IMX_HAVE_PLATFORM_LDB
++	select IMX_HAVE_PLATFORM_IMX_SPDIF
+ 
+ config FORCE_MAX_ZONEORDER
+     int "MAX_ORDER"
+@@ -48,6 +49,7 @@ config MACH_MX6Q_SABREAUTO
+ 	select IMX_HAVE_PLATFORM_IMX_PM
+ 	select IMX_HAVE_PLATFORM_MXC_HDMI
+ 	select IMX_HAVE_PLATFORM_IMX_ASRC
++	select IMX_HAVE_PLATFORM_IMX_SPDIF
+ 	help
+ 	  Include support for i.MX 6Quad SABRE Automotive Infotainment platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 4a71738..9149cb6 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -264,6 +264,10 @@ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 
+ 	/* USBOTG ID pin */
+ 	MX6Q_PAD_GPIO_1__USBOTG_ID,
++
++	/* SPDIF */
++	MX6Q_PAD_GPIO_16__SPDIF_IN1,
++	MX6Q_PAD_GPIO_17__SPDIF_OUT1,
+ };
+ 
+ static iomux_v3_cfg_t mx6q_sabreauto_esai_record_pads[] = {
+@@ -869,6 +873,35 @@ static inline void __init mx6q_csi0_io_init(void)
+ 	gpio_set_value(MX6Q_SMD_CSI0_PWN, 0);
+ 	mxc_iomux_set_gpr_register(1, 19, 1, 1);
+ }
++
++static int spdif_clk_set_rate(struct clk *clk, unsigned long rate)
++{
++	unsigned long rate_actual;
++	rate_actual = clk_round_rate(clk, rate);
++	clk_set_rate(clk, rate_actual);
++	return 0;
++}
++
++static struct mxc_spdif_platform_data mxc_spdif_data = {
++	.spdif_tx = 1,		/* enable tx */
++	.spdif_rx = 1,		/* enable rx */
++	/*
++	 * spdif0_clk will be 454.7MHz divided by ccm dividers.
++	 *
++	 * 44.1KHz: 454.7MHz / 7 (ccm) / 23 (spdif) = 44,128 Hz ~ 0.06% error
++	 * 48KHz:   454.7MHz / 4 (ccm) / 37 (spdif) = 48,004 Hz ~ 0.01% error
++	 * 32KHz:   454.7MHz / 6 (ccm) / 37 (spdif) = 32,003 Hz ~ 0.01% error
++	 */
++	.spdif_clk_44100 = 1,	/* tx clk from spdif0_clk_root */
++	.spdif_clk_48000 = 1,	/* tx clk from spdif0_clk_root */
++	.spdif_div_44100 = 23,
++	.spdif_div_48000 = 37,
++	.spdif_div_32000 = 37,
++	.spdif_rx_clk = 0,	/* rx clk from spdif stream */
++	.spdif_clk_set_rate = spdif_clk_set_rate,
++	.spdif_clk = NULL,	/* spdif bus clk */
++};
++
+ /*!
+  * Board specific initialization.
+  */
+@@ -954,6 +987,12 @@ static void __init mx6_board_init(void)
+ 	imx6q_add_gpmi(&mx6q_gpmi_nfc_platform_data);
+ 
+ 	imx6q_add_dvfs_core(&sabreauto_dvfscore_data);
++
++	mxc_spdif_data.spdif_core_clk = clk_get_sys("mxc_spdif.0", NULL);
++	clk_put(mxc_spdif_data.spdif_core_clk);
++	imx6q_add_spdif(&mxc_spdif_data);
++	imx6q_add_spdif_dai();
++	imx6q_add_spdif_audio_device();
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 007fd7b..fe9dba2 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4483,7 +4483,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK("FlexCAN.1", "can_clk", can2_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "ldb_di0_clk", ldb_di0_clk),
+ 	_REGISTER_CLOCK(NULL, "ldb_di1_clk", ldb_di1_clk),
+-	_REGISTER_CLOCK(NULL, "mxc_alsa_spdif.0", spdif0_clk[0]),
++	_REGISTER_CLOCK("mxc_spdif.0", NULL, spdif0_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "esai_clk", esai_clk),
+ 	_REGISTER_CLOCK("mxc_spi.0", NULL, ecspi_clk[0]),
+ 	_REGISTER_CLOCK("mxc_spi.1", NULL, ecspi_clk[1]),
+@@ -4653,6 +4653,9 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	/* Lower the ipg_perclk frequency to 8.25MHz. */
+ 	clk_set_rate(&ipg_perclk, 8250000);
+ 
++	/* S/PDIF */
++	clk_set_parent(&spdif0_clk[0], &pll3_pfd_454M);
++
+ 	base = ioremap(GPT_BASE_ADDR, SZ_4K);
+ 	mxc_timer_init(&gpt_clk[0], base, MXC_INT_GPT);
+ 
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index b607758..98c94cb 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -143,3 +143,14 @@ extern const struct imx_dvfs_core_data imx6q_dvfs_core_data __initconst;
+ #define imx6q_add_dvfs_core(pdata)	\
+ 	imx_add_dvfs_core(&imx6q_dvfs_core_data, pdata)
+ 
++extern const struct imx_viv_gpu_data imx6_gc2000_data __initconst;
++extern const struct imx_viv_gpu_data imx6_gc320_data __initconst;
++extern const struct imx_viv_gpu_data imx6_gc355_data __initconst;
++
++extern const struct imx_spdif_data imx6q_imx_spdif_data __initconst;
++#define imx6q_add_spdif(pdata)	imx_add_spdif(&imx6q_imx_spdif_data, pdata)
++
++extern const struct imx_spdif_dai_data imx6q_spdif_dai_data __initconst;
++#define imx6q_add_spdif_dai()	imx_add_spdif_dai(&imx6q_spdif_dai_data)
++
++#define imx6q_add_spdif_audio_device(pdata)	imx_add_spdif_audio_device()
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-spdif-dai.c b/arch/arm/plat-mxc/devices/platform-imx-spdif-dai.c
+index 516ebc5..7e0a97b 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-spdif-dai.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-spdif-dai.c
+@@ -33,6 +33,11 @@ const struct imx_spdif_dai_data imx53_spdif_dai_data __initconst =
+ 			imx_spdif_dai_data_entry(MX53);
+ #endif /* ifdef CONFIG_SOC_IMX53 */
+ 
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_spdif_dai_data imx6q_spdif_dai_data __initconst =
++			imx_spdif_dai_data_entry(MX6Q);
++#endif /* #ifdef CONFIG_SOC_IMX6Q */
++
+ struct platform_device *__init imx_add_spdif_dai(
+ 			const struct imx_spdif_dai_data *data)
+ {
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-spdif.c b/arch/arm/plat-mxc/devices/platform-imx-spdif.c
+index 80a5e78..90a5889 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-spdif.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-spdif.c
+@@ -42,6 +42,11 @@ const struct imx_spdif_data imx53_imx_spdif_data __initconst =
+ 			imx5_spdif_data_entry_single(MX53);
+ #endif /* ifdef CONFIG_SOC_IMX53 */
+ 
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_spdif_data imx6q_imx_spdif_data __initconst =
++			imx5_spdif_data_entry_single(MX6Q);
++#endif /* ifdef CONFIG_SOC_IMX6Q */
++
+ struct platform_device *__init imx_add_spdif(
+ 		const struct imx_spdif_data *data,
+ 		const struct mxc_spdif_platform_data *pdata)
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index c48fe75..8927779 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -78,6 +78,8 @@ typedef enum iomux_config {
+ #define MX6Q_GPMI_PAD_CTRL1 (PAD_CTL_DSE_40ohm | PAD_CTL_SPEED_MED | PAD_CTL_SRE_FAST)
+ #define MX6Q_GPMI_PAD_CTRL2 (MX6Q_GPMI_PAD_CTRL0 | MX6Q_GPMI_PAD_CTRL1)
+ 
++#define MX6Q_SPDIF_OUT_PAD_CTRL (PAD_CTL_DSE_120ohm | PAD_CTL_SRE_FAST)
++
+ #define _MX6Q_PAD_SD2_DAT1__USDHC2_DAT1				\
+ 		IOMUX_PAD(0x0360, 0x004C, 0, 0x0000, 0, 0)
+ #define _MX6Q_PAD_SD2_DAT1__ECSPI5_SS0				\
+@@ -6029,7 +6031,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_GPIO_17__SDMA_SDMA_EXT_EVENT_0		\
+ 		(_MX6Q_PAD_GPIO_17__SDMA_SDMA_EXT_EVENT_0 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_17__SPDIF_OUT1		\
+-		(_MX6Q_PAD_GPIO_17__SPDIF_OUT1 | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_GPIO_17__SPDIF_OUT1 | MUX_PAD_CTRL(MX6Q_SPDIF_OUT_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_17__GPIO_7_12		\
+ 		(_MX6Q_PAD_GPIO_17__GPIO_7_12 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_17__SJC_JTAG_ACT		\
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index cead192..9103e9d 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -130,7 +130,7 @@
+ #define ATZ2_BASE_ADDR              AIPS2_ARB_BASE_ADDR
+ 
+ /* slots 0,7 of SDMA reserved, therefore left unused in IPMUX3 */
+-#define SPDIF_BASE_ADDR             (ATZ1_BASE_ADDR + 0x04000) /* slot 1 */
++#define MX6Q_SPDIF_BASE_ADDR             (ATZ1_BASE_ADDR + 0x04000) /* slot 1 */
+ #define MX6Q_ECSPI1_BASE_ADDR            (ATZ1_BASE_ADDR + 0x08000) /* slot 2 */
+ #define MX6Q_ECSPI2_BASE_ADDR            (ATZ1_BASE_ADDR + 0x0C000) /* slot 3 */
+ #define MX6Q_ECSPI3_BASE_ADDR            (ATZ1_BASE_ADDR + 0x10000) /* slot 4 */
+@@ -330,7 +330,7 @@
+ #define MXC_INT_ANATOP_TEMPSNSR                    81
+ #define MX6Q_INT_ASRC                               82
+ #define MXC_INT_ESAI                              83
+-#define MXC_INT_SPDIF                              84
++#define MX6Q_INT_SPDIF                              84
+ #define MXC_INT_MLB                                85
+ #define MXC_INT_ANATOP_ANA1                        86
+ #define MXC_INT_GPT                                87
+-- 
+1.7.7.4
+

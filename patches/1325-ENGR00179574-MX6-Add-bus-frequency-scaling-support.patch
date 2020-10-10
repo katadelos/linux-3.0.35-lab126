@@ -1,0 +1,1895 @@
+From e49e91034281133c9871a9fe6a1ed2864a947765 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Tue, 7 Feb 2012 14:34:13 -0600
+Subject: [PATCH 1325/2463] ENGR00179574: MX6- Add bus frequency scaling
+ support
+
+Add support for scaling the bus frequency (both DDR
+and ahb_clk).
+The DDR and AHB_CLK are dropped to 24MHz when all devices
+that need high AHB frequency are disabled and the CORE
+frequency is at the lowest setpoint.
+The DDR is dropped to 400MHz for the video playback usecase.
+In this mode the GPU, FEC, SATA etc are disabled.
+
+To scale the bus frequency, its necessary that all cores
+except the core that is executing the DDR frequency change
+are in WFE. This is achieved by generating interrupts on
+un-used interrupts (Int no 139, 144, 145 and 146).
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx5/clock.c                |   12 +-
+ arch/arm/mach-mx6/Makefile               |    4 +-
+ arch/arm/mach-mx6/board-mx6q_arm2.c      |    3 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabresd.c   |    1 +
+ arch/arm/mach-mx6/bus_freq.c             |  223 +++++++--
+ arch/arm/mach-mx6/clock.c                |   48 +-
+ arch/arm/mach-mx6/cpu.c                  |    8 +-
+ arch/arm/mach-mx6/devices-imx6q.h        |    3 +
+ arch/arm/mach-mx6/mx6_ddr_freq.S         |  873 ++++++++++++++++++++++++++++++
+ arch/arm/mach-mx6/mx6_mmdc.c             |  313 +++++++++++
+ arch/arm/plat-mxc/clock.c                |   13 +-
+ arch/arm/plat-mxc/cpufreq.c              |    9 +
+ 14 files changed, 1439 insertions(+), 73 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/clock.c b/arch/arm/mach-mx5/clock.c
+index d34a8c9..bf60ffa 100755
+--- a/arch/arm/mach-mx5/clock.c
++++ b/arch/arm/mach-mx5/clock.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2008-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2008-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -148,11 +148,6 @@ static int _clk_enable(struct clk *clk)
+ 	reg |= MXC_CCM_CCGRx_CG_MASK << clk->enable_shift;
+ 	__raw_writel(reg, clk->enable_reg);
+ 
+-	if (clk->flags & AHB_HIGH_SET_POINT)
+-		lp_high_freq++;
+-	else if (clk->flags & AHB_MED_SET_POINT)
+-		lp_med_freq++;
+-
+ 	return 0;
+ }
+ 
+@@ -173,11 +168,6 @@ static void _clk_disable(struct clk *clk)
+ 	reg = __raw_readl(clk->enable_reg);
+ 	reg &= ~(MXC_CCM_CCGRx_CG_MASK << clk->enable_shift);
+ 	__raw_writel(reg, clk->enable_reg);
+-
+-	if (clk->flags & AHB_HIGH_SET_POINT)
+-		lp_high_freq--;
+-	else if (clk->flags & AHB_MED_SET_POINT)
+-		lp_med_freq--;
+ }
+ 
+ static void _clk_disable_inwait(struct clk *clk)
+diff --git a/arch/arm/mach-mx6/Makefile b/arch/arm/mach-mx6/Makefile
+index 21f776a..e76f438 100644
+--- a/arch/arm/mach-mx6/Makefile
++++ b/arch/arm/mach-mx6/Makefile
+@@ -3,7 +3,9 @@
+ #
+ 
+ # Object file lists.
+-obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o usb_dr.o usb_h1.o usb_h2.o usb_h3.o pm.o cpu_op-mx6.o mx6_wfi.o mx6_fec.o mx6_anatop_regulator.o cpu_regulator-mx6.o
++obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o usb_dr.o usb_h1.o usb_h2.o usb_h3.o \
++pm.o cpu_op-mx6.o mx6_wfi.o mx6_fec.o mx6_anatop_regulator.o cpu_regulator-mx6.o \
++mx6_mmdc.o mx6_ddr_freq.o
+ 
+ obj-$(CONFIG_ARCH_MX6) += clock.o mx6q_suspend.o
+ obj-$(CONFIG_MACH_MX6Q_ARM2) += board-mx6q_arm2.o
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 38e34f9..1c00882 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -2051,6 +2051,8 @@ static void __init mx6_arm2_init(void)
+ 
+ 	gp_reg_id = arm2_dvfscore_data.reg_id;
+ 	mx6_arm2_init_uart();
++
++
+ 	imx6q_add_mipi_csi2(&mipi_csi2_pdata);
+ 	imx6q_add_mxc_hdmi_core(&hdmi_core_data);
+ 
+@@ -2177,6 +2179,7 @@ static void __init mx6_arm2_init(void)
+ 		imx6dl_add_imx_epdc(&epdc_data);
+ 	}
+ 	imx6q_add_pcie(&mx6_arm2_pcie_data);
++	imx6q_add_busfreq();
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 7f19fd3..c639d32 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -1497,6 +1497,7 @@ static void __init mx6_board_init(void)
+ 	mxc_register_device(&si4763_codec_device, NULL);
+ 	mxc_register_device(&mxc_si4763_audio_device, &si4763_audio_data);
+ 
++	imx6q_add_busfreq();
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index f6da893..95145f4 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -1162,6 +1162,7 @@ static void __init mx6_sabrelite_board_init(void)
+ 	rate = clk_round_rate(clko2, 24000000);
+ 	clk_set_rate(clko2, rate);
+ 	clk_enable(clko2);
++	imx6q_add_busfreq();
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index a4e0655..bf3ac5f 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1664,6 +1664,7 @@ static void __init mx6_sabresd_board_init(void)
+ 	/* Register charger chips */
+ 	platform_device_register(&sabresd_max8903_charger_1);
+ 	pm_power_off = mx6_snvs_poweroff;
++	imx6q_add_busfreq();
+ 
+ 	imx6q_add_pcie(&mx6_sabresd_pcie_data);
+ }
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index 36308c1..e4244af 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -43,58 +43,36 @@
+ #include <asm/mach-types.h>
+ #include <asm/cacheflush.h>
+ #include <asm/tlb.h>
++#include "crm_regs.h"
+ 
+-#define LP_LOW_VOLTAGE		1050000
+-#define LP_NORMAL_VOLTAGE		1250000
+-#define LP_APM_CLK			24000000
+-#define NAND_LP_APM_CLK			12000000
+-#define AXI_A_NORMAL_CLK		166250000
+-#define AXI_A_CLK_NORMAL_DIV		4
+-#define AXI_B_CLK_NORMAL_DIV		5
+-#define AHB_CLK_NORMAL_DIV		AXI_B_CLK_NORMAL_DIV
+-#define EMI_SLOW_CLK_NORMAL_DIV		AXI_B_CLK_NORMAL_DIV
+-#define NFC_CLK_NORMAL_DIV		4
+-#define SPIN_DELAY	1000000 /* in nanoseconds */
+-#define DDR_TYPE_DDR3		0x0
+-#define DDR_TYPE_DDR2		0x1
+ 
+-DEFINE_SPINLOCK(ddr_freq_lock);
+-
+-unsigned long lp_normal_rate;
+-unsigned long lp_med_rate;
+-unsigned long ddr_normal_rate;
+-unsigned long ddr_med_rate;
+-unsigned long ddr_low_rate;
++#define LPAPM_CLK	24000000
++#define DDR_MED_CLK	400000000
++#define DDR3_NORMAL_CLK	528000000
+ 
+-struct regulator *pll_regulator;
++DEFINE_SPINLOCK(ddr_freq_lock);
+ 
+-struct regulator *lp_regulator;
+ int low_bus_freq_mode;
+ int high_bus_freq_mode;
+ int med_bus_freq_mode;
+ 
+ int bus_freq_scaling_initialized;
+-char *lp_reg_id;
+-
+ static struct device *busfreq_dev;
+ static int busfreq_suspended;
+ 
+ /* True if bus_frequency is scaled not using DVFS-PER */
+ int bus_freq_scaling_is_active;
+ 
+-int cpu_op_nr;
+ int lp_high_freq;
+ int lp_med_freq;
+-
+-struct workqueue_struct *voltage_wq;
+-struct completion voltage_change_cmpl;
++unsigned int ddr_low_rate;
++unsigned int ddr_med_rate;
++unsigned int ddr_normal_rate;
+ 
+ int low_freq_bus_used(void);
+ void set_ddr_freq(int ddr_freq);
+ 
+ extern struct cpu_op *(*get_cpu_op)(int *op);
+-extern void __iomem *ccm_base;
+-extern void __iomem *databahn_base;
+ extern int update_ddr_freq(int ddr_rate);
+ 
+ 
+@@ -103,29 +81,140 @@ struct mutex bus_freq_mutex;
+ struct timeval start_time;
+ struct timeval end_time;
+ 
+-int set_low_bus_freq(void)
++static int cpu_op_nr;
++static struct cpu_op *cpu_op_tbl;
++static struct clk *pll2_400;
++static struct clk *cpu_clk;
++static unsigned int org_ldo;
++static struct clk *pll3;
++
++static struct delayed_work low_bus_freq_handler;
++
++static void reduce_bus_freq_handler(struct work_struct *work)
+ {
+-	return 0;
++	unsigned long reg;
++
++	if (low_bus_freq_mode || !low_freq_bus_used())
++		return;
++
++	while (!mutex_trylock(&bus_freq_mutex))
++		msleep(1);
++
++	/* PLL3 is used in the DDR freq change process, enable it. */
++
++	if (low_bus_freq_mode || !low_freq_bus_used()) {
++		mutex_unlock(&bus_freq_mutex);
++		return;
++	}
++	clk_enable(pll3);
++
++
++	update_ddr_freq(24000000);
++
++	if (med_bus_freq_mode)
++		clk_disable(pll2_400);
++
++	low_bus_freq_mode = 1;
++	high_bus_freq_mode = 0;
++	med_bus_freq_mode = 0;
++
++	/* Power gate the PU LDO. */
++	org_ldo = reg = __raw_readl(ANADIG_REG_CORE);
++	reg &= ~(ANADIG_REG_TARGET_MASK << ANADIG_REG1_PU_TARGET_OFFSET);
++	__raw_writel(reg, ANADIG_REG_CORE);
++
++	mutex_unlock(&bus_freq_mutex);
++	clk_disable(pll3);
++
++
+ }
+ 
+-int set_high_bus_freq(int high_bus_freq)
++/* Set the DDR, AHB to 24MHz.
++  * This mode will be activated only when none of the modules that
++  * need a higher DDR or AHB frequency are active.
++  */
++int set_low_bus_freq(void)
+ {
++	if (busfreq_suspended)
++		return 0;
++
++	if (!bus_freq_scaling_initialized || !bus_freq_scaling_is_active)
++		return 0;
++
++	/* Don't lower the frequency immediately. Instead scheduled a delayed work
++	  * and drop the freq if the conditions still remain the same.
++	  */
++	schedule_delayed_work(&low_bus_freq_handler, usecs_to_jiffies(3000000));
+ 	return 0;
+ }
+ 
+-void exit_lpapm_mode_mx6q(int high_bus_freq)
++/* Set the DDR to either 528MHz or 400MHz for MX6q
++ * or 400MHz for MX6DL.
++ */
++int set_high_bus_freq(int high_bus_freq)
+ {
++	if (busfreq_suspended)
++		return 0;
+ 
+-}
++	if (!bus_freq_scaling_initialized || !bus_freq_scaling_is_active)
++		return 0;
+ 
++	if (high_bus_freq_mode && high_bus_freq)
++		return 0;
+ 
+-void set_ddr_freq(int ddr_rate)
+-{
++	if (med_bus_freq_mode && !high_bus_freq)
++		return 0;
+ 
++	while (!mutex_trylock(&bus_freq_mutex))
++		msleep(1);
++
++	if ((high_bus_freq_mode && (high_bus_freq || lp_high_freq)) ||
++		(med_bus_freq_mode && !high_bus_freq && lp_med_freq && !lp_high_freq)) {
++		mutex_unlock(&bus_freq_mutex);
++		return 0;
++	}
++	clk_enable(pll3);
++
++	/* Enable the PU LDO */
++	if (low_bus_freq_mode)
++		__raw_writel(org_ldo, ANADIG_REG_CORE);
++
++	if (high_bus_freq) {
++		update_ddr_freq(ddr_normal_rate);
++		if (med_bus_freq_mode)
++			clk_disable(pll2_400);
++		low_bus_freq_mode = 0;
++		high_bus_freq_mode = 1;
++		med_bus_freq_mode = 0;
++	} else {
++		clk_enable(pll2_400);
++		update_ddr_freq(ddr_med_rate);
++		low_bus_freq_mode = 0;
++		high_bus_freq_mode = 0;
++		med_bus_freq_mode = 1;
++	}
++
++	mutex_unlock(&bus_freq_mutex);
++	clk_disable(pll3);
++
++	return 0;
+ }
+ 
++
+ int low_freq_bus_used(void)
+ {
++	if (!bus_freq_scaling_initialized)
++		return 0;
++
++	/* We only go the lowest setpoint if ARM is also
++	 * at the lowest setpoint.
++	 */
++	if ((clk_get_rate(cpu_clk) >
++			cpu_op_tbl[cpu_op_nr - 1].cpu_rate)
++		|| (cpu_op_nr == 1)) {
++		return 0;
++	}
++
+ 	if ((lp_high_freq == 0)
+ 	    && (lp_med_freq == 0))
+ 		return 1;
+@@ -150,6 +239,14 @@ static ssize_t bus_freq_scaling_enable_store(struct device *dev,
+ 				 struct device_attribute *attr,
+ 				 const char *buf, size_t size)
+ {
++	if (strncmp(buf, "1", 1) == 0) {
++		bus_freq_scaling_is_active = 1;
++		set_high_bus_freq(0);
++	} else if (strncmp(buf, "0", 1) == 0) {
++		if (bus_freq_scaling_is_active)
++			set_high_bus_freq(1);
++		bus_freq_scaling_is_active = 0;
++	}
+ 	return size;
+ }
+ 
+@@ -180,6 +277,54 @@ static DEVICE_ATTR(enable, 0644, bus_freq_scaling_enable_show,
+  */
+ static int __devinit busfreq_probe(struct platform_device *pdev)
+ {
++	u32 err;
++
++	busfreq_dev = &pdev->dev;
++
++	pll2_400 = clk_get(NULL, "pll2_pfd_400M");
++	if (IS_ERR(pll2_400)) {
++		printk(KERN_DEBUG "%s: failed to get axi_clk\n",
++		       __func__);
++		return PTR_ERR(pll2_400);
++	}
++
++	cpu_clk = clk_get(NULL, "cpu_clk");
++	if (IS_ERR(cpu_clk)) {
++		printk(KERN_DEBUG "%s: failed to get cpu_clk\n",
++		       __func__);
++		return PTR_ERR(cpu_clk);
++	}
++
++	pll3 = clk_get(NULL, "pll3_main_clk");
++
++	err = sysfs_create_file(&busfreq_dev->kobj, &dev_attr_enable.attr);
++	if (err) {
++		printk(KERN_ERR
++		       "Unable to register sysdev entry for BUSFREQ");
++		return err;
++	}
++
++	cpu_op_tbl = get_cpu_op(&cpu_op_nr);
++	low_bus_freq_mode = 0;
++	high_bus_freq_mode = 1;
++	med_bus_freq_mode = 0;
++	bus_freq_scaling_is_active = 0;
++	bus_freq_scaling_initialized = 1;
++
++	if (cpu_is_mx6q()) {
++		ddr_low_rate = LPAPM_CLK;
++		ddr_med_rate = DDR_MED_CLK;
++		ddr_normal_rate = DDR3_NORMAL_CLK;
++	}
++	if (cpu_is_mx6dl()) {
++		ddr_low_rate = LPAPM_CLK;
++		ddr_normal_rate = ddr_med_rate = DDR_MED_CLK;
++	}
++
++	INIT_DELAYED_WORK(&low_bus_freq_handler, reduce_bus_freq_handler);
++
++	mutex_init(&bus_freq_mutex);
++
+ 	return 0;
+ }
+ 
+@@ -218,7 +363,7 @@ static void __exit busfreq_cleanup(void)
+ 	bus_freq_scaling_initialized = 0;
+ }
+ 
+-module_init(busfreq_init);
++late_initcall(busfreq_init);
+ module_exit(busfreq_cleanup);
+ 
+ MODULE_AUTHOR("Freescale Semiconductor, Inc.");
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 5372dac..bd90ba8 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -170,11 +170,6 @@ static int _clk_enable(struct clk *clk)
+ 	reg |= MXC_CCM_CCGRx_CG_MASK << clk->enable_shift;
+ 	__raw_writel(reg, clk->enable_reg);
+ 
+-	if (clk->flags & AHB_HIGH_SET_POINT)
+-		lp_high_freq++;
+-	else if (clk->flags & AHB_MED_SET_POINT)
+-		lp_med_freq++;
+-
+ 	return 0;
+ }
+ 
+@@ -184,11 +179,6 @@ static void _clk_disable(struct clk *clk)
+ 	reg = __raw_readl(clk->enable_reg);
+ 	reg &= ~(MXC_CCM_CCGRx_CG_MASK << clk->enable_shift);
+ 	__raw_writel(reg, clk->enable_reg);
+-
+-	if (clk->flags & AHB_HIGH_SET_POINT)
+-		lp_high_freq--;
+-	else if (clk->flags & AHB_MED_SET_POINT)
+-		lp_med_freq--;
+ }
+ 
+ static void _clk_disable_inwait(struct clk *clk)
+@@ -2228,7 +2218,6 @@ static struct clk ipu2_clk = {
+ static struct clk usdhc_dep_clk = {
+ 	.parent = &mmdc_ch0_axi_clk[0],
+ 	.secondary = &mx6per1_clk,
+-	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ 	};
+ 
+ static unsigned long _clk_usdhc_round_rate(struct clk *clk,
+@@ -2306,7 +2295,6 @@ static struct clk usdhc1_clk = {
+ 	.round_rate = _clk_usdhc_round_rate,
+ 	.set_rate = _clk_usdhc1_set_rate,
+ 	.get_rate = _clk_usdhc1_get_rate,
+-	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static int _clk_usdhc2_set_parent(struct clk *clk, struct clk *parent)
+@@ -2364,7 +2352,6 @@ static struct clk usdhc2_clk = {
+ 	.round_rate = _clk_usdhc_round_rate,
+ 	.set_rate = _clk_usdhc2_set_rate,
+ 	.get_rate = _clk_usdhc2_get_rate,
+-	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static int _clk_usdhc3_set_parent(struct clk *clk, struct clk *parent)
+@@ -2423,7 +2410,6 @@ static struct clk usdhc3_clk = {
+ 	.round_rate = _clk_usdhc_round_rate,
+ 	.set_rate = _clk_usdhc3_set_rate,
+ 	.get_rate = _clk_usdhc3_get_rate,
+-	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static int _clk_usdhc4_set_parent(struct clk *clk, struct clk *parent)
+@@ -2482,7 +2468,6 @@ static struct clk usdhc4_clk = {
+ 	.round_rate = _clk_usdhc_round_rate,
+ 	.set_rate = _clk_usdhc4_set_rate,
+ 	.get_rate = _clk_usdhc4_get_rate,
+-	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static unsigned long _clk_ssi_round_rate(struct clk *clk,
+@@ -5144,7 +5129,7 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	unsigned long ckih1, unsigned long ckih2)
+ {
+ 	__iomem void *base;
+-	int i;
++	int i, reg;
+ 
+ 	external_low_reference = ckil;
+ 	external_high_reference = ckih1;
+@@ -5278,8 +5263,8 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 
+ 	__raw_writel(0, MXC_CCM_CCGR6);
+ 
+-	/* Lower the ipg_perclk frequency to 8.25MHz. */
+-	clk_set_rate(&ipg_perclk, 8250000);
++	/* Lower the ipg_perclk frequency to 6MHz. */
++	clk_set_rate(&ipg_perclk, 6000000);
+ 
+ 	/* S/PDIF */
+ 	clk_set_parent(&spdif0_clk[0], &pll3_pfd_454M);
+@@ -5310,6 +5295,33 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	lp_high_freq = 0;
+ 	lp_med_freq = 0;
+ 
++	/* Turn OFF all unnecessary PHYs. */
++	/* Turn off SATA PHY. */
++	base = ioremap(MX6Q_SATA_BASE_ADDR, SZ_8K);
++	reg = __raw_readl(base + PORT_PHY_CTL);
++	__raw_writel(reg | PORT_PHY_CTL_PDDQ_LOC, base + PORT_PHY_CTL);
++
++	/* Turn off HDMI PHY. */
++	base = ioremap(MX6Q_HDMI_ARB_BASE_ADDR, SZ_128K);
++	reg = __raw_readb(base + HDMI_PHY_CONF0);
++	__raw_writeb(reg | HDMI_PHY_CONF0_GEN2_PDDQ_MASK, base + HDMI_PHY_CONF0);
++
++	reg = __raw_readb(base + HDMI_MC_PHYRSTZ);
++	__raw_writeb(reg | HDMI_MC_PHYRSTZ_DEASSERT, base + HDMI_MC_PHYRSTZ);
++
++	iounmap(base);
++
++	base = ioremap(MX6Q_IOMUXC_BASE_ADDR, SZ_4K);
++	/* Close PLL inside SATA PHY. */
++	reg = __raw_readl(base + 0x34);
++	__raw_writel(reg | (1 << 1), base + 0x34);
++
++	/* Close PCIE PHY. */
++	reg = __raw_readl(base + 0x04);
++	reg |= (1 << 18);
++	__raw_writel(reg, base + 0x04);
++	iounmap(base);
++
+ 	return 0;
+ 
+ }
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index 8401026..6f3765e 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -33,6 +33,11 @@
+ 
+ extern unsigned int num_cpu_idle_lock;
+ 
++void *mx6_wait_in_iram_base;
++void (*mx6_wait_in_iram)(void);
++extern void mx6_wait(void);
++extern int init_mmdc_settings(void);
++
+ struct cpu_op *(*get_cpu_op)(int *op);
+ bool enable_wait_mode;
+ u32 arm_max_freq = CPU_AT_1GHz;
+@@ -87,8 +92,6 @@ static int __init post_cpu_init(void)
+ {
+ 	unsigned int reg;
+ 	void __iomem *base;
+-	unsigned long iram_paddr, cpaddr;
+-
+ 
+ 	iram_init(MX6Q_IRAM_BASE_ADDR, MX6Q_IRAM_SIZE);
+ 
+@@ -129,6 +132,7 @@ static int __init post_cpu_init(void)
+ 
+ 	num_cpu_idle_lock = 0x0;
+ 
++	init_mmdc_settings();
+ 	return 0;
+ }
+ postcore_initcall(post_cpu_init);
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index df5e72c..2c3e0c5 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -213,3 +213,6 @@ extern const struct imx_vdoa_data imx6q_vdoa_data __initconst;
+ 
+ extern const struct imx_pcie_data imx6q_pcie_data __initconst;
+ #define imx6q_add_pcie(pdata) imx_add_pcie(&imx6q_pcie_data, pdata)
++
++#define imx6q_add_busfreq(pdata)	imx_add_busfreq(pdata)
++
+diff --git a/arch/arm/mach-mx6/mx6_ddr_freq.S b/arch/arm/mach-mx6/mx6_ddr_freq.S
+new file mode 100644
+index 0000000..766d867
+--- /dev/null
++++ b/arch/arm/mach-mx6/mx6_ddr_freq.S
+@@ -0,0 +1,873 @@
++/*
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <linux/linkage.h>
++#include <mach/hardware.h>
++
++	.macro   switch_to_528MHz
++
++	/* DDR freq change to 528MHz */
++
++	/* check if periph_clk_sel is already set */
++	ldr     r0, [r6, #0x14]
++	and     r0, r0, #0x2000000
++	cmp     r0, #0x2000000
++	beq	    switch_pre_periph_clk_528
++
++	/* Step 1: Change periph_clk to be sourced from pll3_clk. */
++	/* Ensure PLL3 is the source and set the divider to 1. */
++	ldr     r0, [r6, #0x18]
++	bic     r0, r0, #0x3000
++	str     r0, [r6, #0x18]
++
++	ldr     r0, [r6, #0x14]
++	bic     r0, r0, #0x38000000
++	str     r0, [r6, #0x14]
++
++	/* Now switch periph_clk to pll3_main_clk. */
++	ldr     r0, [r6, #0x14]
++	orr     r0, r0, #0x2000000
++	str     r0, [r6, #0x14]
++
++periph_clk_switch3:
++	ldr      r0, [r6, #0x48]
++	cmp    r0, #0
++	bne     periph_clk_switch3
++
++switch_pre_periph_clk_528:
++
++	/* Now switch pre_periph_clk to PLL2_528MHz. */
++	ldr     r0, [r6, #0x18]
++	bic     r0, r0, #0xC0000
++	str     r0, [r6, #0x18]
++
++	/* Set the MMDC_DIV=1, AXI_DIV = 2, AHB_DIV=4 (need to maintain GPT divider). */
++	ldr     r0, [r6, #0x14]
++	ldr     r2, =0x3F1D00
++	bic     r0, r0, r2
++	orr     r0, r0, #0x10000
++	orr     r0, r0, #0xD00
++	str     r0, [r6, #0x14]
++
++wait_div_update1:
++	ldr     r0, [r6, #0x48]
++	cmp     r0, #0
++	bne     wait_div_update1
++
++	/* Now switch periph_clk back. */
++	ldr     r0, [r6, #0x14]
++	bic     r0, r0, #0x2000000
++	str     r0, [r6, #0x14]
++
++periph_clk_switch4:
++	ldr     r0, [r6, #0x48]
++	cmp     r0, #0
++	bne     periph_clk_switch4
++
++	/* Change the GPT divider so that its at 6MHz. */
++	ldr     r0, [r6, #0x1C]
++	bic     r0, r0, #0x3F
++	orr     r0, r0, #0xB
++	str     r0, [r6, #0x1C]
++
++	.endm
++
++	.macro   switch_to_400MHz
++
++	/* check if periph_clk_sel is already set */
++	ldr     r0, [r6, #0x14]
++	and     r0, r0, #0x2000000
++	cmp 	 r0, #0x2000000
++	beq	 switch_pre_periph_clk_400
++
++	/* Step 1: Change periph_clk to be sourced from pll3_clk. */
++	/* Ensure PLL3 is the source and set the divider to 1. */
++	ldr     r0, [r6, #0x18]
++	bic     r0, r0, #0x3000
++	str     r0, [r6, #0x18]
++
++	ldr     r0, [r6, #0x14]
++	bic     r0, r0, #0x38000000
++	str     r0, [r6, #0x14]
++
++	/* Now switch periph_clk to pll3_main_clk. */
++	ldr     r0, [r6, #0x14]
++	orr     r0, r0, #0x2000000
++	str     r0, [r6, #0x14]
++
++periph_clk_switch5:
++	ldr      r0, [r6, #0x48]
++	cmp    r0, #0
++	bne     periph_clk_switch5
++
++switch_pre_periph_clk_400:
++
++    /* Now switch pre_periph_clk to PFD_400MHz. */
++	ldr     r0, [r6, #0x18]
++	bic     r0, r0, #0xC0000
++	orr     r0, r0, #0x40000
++	str     r0, [r6, #0x18]
++
++	/* Set the MMDC_DIV=1, AXI_DIV = 2, AHB_DIV=3 (need to maintain GPT divider). */
++	ldr     r0, [r6, #0x14]
++	ldr     r2, =0x3F1D00
++	bic     r0, r0, r2
++	orr     r0, r0, #0x10000
++	orr     r0, r0, #0x900
++	str     r0, [r6, #0x14]
++
++wait_div_update400:
++	ldr     r0, [r6, #0x48]
++	cmp     r0, #0
++	bne     wait_div_update400
++
++	/* Now switch periph_clk back. */
++	ldr     r0, [r6, #0x14]
++	bic     r0, r0, #0x2000000
++	str     r0, [r6, #0x14]
++
++periph_clk_switch6:
++	ldr      r0, [r6, #0x48]
++	cmp    r0, #0
++	bne     periph_clk_switch6
++
++	/* Change the GPT divider so that its at 6MHz. */
++	ldr     r0, [r6, #0x1C]
++	bic     r0, r0, #0x3F
++	orr     r0, r0, #0xB
++	str     r0, [r6, #0x1C]
++
++	.endm
++
++	.macro   switch_to_50MHz
++
++	/* Set DDR to 50MHz. */
++	/* check if periph_clk_sel is already set */
++	ldr     r0, [r6, #0x14]
++	and     r0, r0, #0x2000000
++	cmp 	 r0, #0x2000000
++	beq	 switch_pre_periph_clk_50
++
++	/* Set the periph_clk to be sourced from PLL2_PFD_200M */
++	/* Step 1: Change periph_clk to be sourced from pll3_clk. */
++	/* Ensure PLL3 is the source and set the divider to 1. */
++	ldr     r0, [r6, #0x18]
++	bic     r0, r0, #0x3000
++	str     r0, [r6, #0x18]
++
++	ldr     r0, [r6, #0x14]
++	bic     r0, r0, #0x38000000
++	str     r0, [r6, #0x14]
++
++	/* Now switch periph_clk to pll3_main_clk. */
++	ldr     r0, [r6, #0x14]
++	orr     r0, r0, #0x2000000
++	str     r0, [r6, #0x14]
++
++periph_clk_switch_50:
++	ldr      r0, [r6, #0x48]
++	cmp    r0, #0
++	bne     periph_clk_switch_50
++
++switch_pre_periph_clk_50:
++
++	/* Now switch pre_periph_clk to PFD_200MHz. */
++	ldr     r0, [r6, #0x18]
++	orr     r0, r0, #0xC0000
++	str     r0, [r6, #0x18]
++
++	/* Set the MMDC_DIV=4, AXI_DIV = 4, AHB_DIV=6 (need to maintain GPT divider). */
++	ldr     r0, [r6, #0x14]
++	ldr     r2, =0x3F1C00
++	bic     r0, r0, r2
++
++	orr     r0, r0, #0x180000
++	orr     r0, r0, #0x10000
++
++	/* If changing AHB divider remember to change the IPGPER divider too below. */
++	 orr     r0, r0, #0xC00
++	 str     r0, [r6, #0x14]
++
++wait_div_update_50:
++	ldr      r0, [r6, #0x48]
++	cmp    r0, #0
++	bne     wait_div_update_50
++
++	/* Now switch periph_clk back. */
++	ldr     r0, [r6, #0x14]
++	bic     r0, r0, #0x2000000
++	str     r0, [r6, #0x14]
++
++periph_clk_switch2:
++	ldr      r0, [r6, #0x48]
++	cmp    r0, #0
++	bne     periph_clk_switch2
++
++	/* Change the GPT divider so that its at 6MHz. */
++	ldr     r0, [r6, #0x1C]
++	bic     r0, r0, #0x3F
++	orr     r0, r0, #0x3
++	str     r0, [r6, #0x1C]
++
++	.endm
++
++	.macro   switch_to_24MHz
++	/* Change the freq now */
++	/* Try setting DDR to 24MHz. */
++	/* Source it from the periph_clk2 */
++	/* Ensure the periph_clk2 is sourced from 24MHz
++	and the divider is 1. */
++	ldr     r0, [r6, #0x18]
++	bic     r0, r0, #0x3000
++	orr     r0, r0, #0x1000
++	str     r0, [r6, #0x18]
++
++	ldr     r0, [r6, #0x14]
++	bic     r0, r0, #0x38000000
++	str     r0, [r6, #0x14]
++
++	/* Now switch periph_clk to 24MHz. */
++	ldr     r0, [r6, #0x14]
++	orr     r0, r0, #0x2000000
++	str     r0, [r6, #0x14]
++
++periph_clk_switch1:
++	ldr      r0, [r6, #0x48]
++	cmp    r0, #0
++	bne     periph_clk_switch1
++
++	/* Change all the dividers to 1. */
++	ldr     r0, [r6, #0x14]
++	ldr     r2, =0x3F1C00
++	bic     r0, r0, r2
++	str     r0, [r6, #0x14]
++
++	/* Wait for the divider to change. */
++wait_div_update:
++	ldr      r0, [r6, #0x48]
++	cmp    r0, #0
++	bne     wait_div_update
++
++	/* Change the GPT divider so that its at 6MHz. */
++	ldr     r0, [r6, #0x1C]
++	bic     r0, r0, #0x3F
++	orr     r0, r0, #0x1
++	str     r0, [r6, #0x1C]
++
++	.endm
++
++/*
++ *  mx6_ddr_freq_change
++ *
++ *  Idle the processor (eg, wait for interrupt).
++ *  Make sure DDR is in self-refresh.
++ *  IRQs are already disabled.
++ */
++ENTRY(mx6_ddr_freq_change)
++
++	stmfd   sp!, {r4,r5,r6, r7, r8, r9, r10, r11}      @ Save registers
++
++	ldr     r6, =CCM_BASE_ADDR
++	add     r6, r6, #PERIPBASE_VIRT
++	ldr     r5, =MMDC_P0_BASE_ADDR
++	add     r5, r5, #PERIPBASE_VIRT
++	ldr     r7, =MX6Q_IOMUXC_BASE_ADDR
++	add     r7, r7, #PERIPBASE_VIRT
++
++	mov     r4, r0				@save new freq requested
++	mov     r8, r1				@save the ddr settings for the new rate
++	mov     r9, r2				@save the mode DDR is currently in (DLL ON/OFF)
++	mov     r11, r3			@save iomux offsets
++
++ddr_freq_change:
++	/* Make sure no TLB miss will occur when the DDR is in self refresh. */
++	/* Invalidate TLB single entry to ensure that the address is not
++	  * already in the TLB.
++	  */
++
++	adr   r10, ddr_freq_change               @Address in this function.
++
++
++	mcr   p15, 0, r10, c8, c7, 1      @//@ Make sure freq code address
++	                                       @//  @ is not already in TLB.
++	mcr   p15, 0, r6, c8, c7, 1      @//@ Make sure CCM address
++	                                         @//@ is not already in TLB.
++	mcr   p15, 0, r5, c8, c7, 1      @//@ make sure MMDC address
++	                                         @//@ is not already in TLB.
++	mcr   p15, 0, r7, c8, c7, 1      @//@ make sure IOMUX address
++	                                         @//@ is not already in TLB.
++
++	mrc   p15, 0, r0, c10, c0, 0    @//@ Read the TLB lockdown register
++	orr    r0, r0, #1                    @//@ Set the Preserve bit.
++	mcr   p15, 0, r0, c10, c0, 0    @//@ Write to the lockdown register
++
++	ldr    r2, [r6]                        @ TLB will miss,
++	                                         @CCM address will be loaded
++	ldr    r2, [r5]                        @ TLB will miss,
++	                                         @MMDC address will be loaded
++	ldr    r2, [r7]                        @ TLB will miss,
++	                                         @IOMUX will be loaded
++
++	ldr    r2, [r8]                        @ Get the DDR settings.
++
++	ldr    r2, [r10]                        @ TLB will miss
++
++	ldr    r2, [r11]				@Get the IOMUX settings
++
++	mrc  p15, 0, r0, c10, c0, 0      @//@ Read the lockdown register
++	                                             @//@ (victim will be incremented)
++	bic   r0, r0, #1                     @//@ Clear the preserve bit
++	mcr   p15, 0, r0, c10, c0, 0     @//@ Write to the lockdown register
++
++	/* Disable automatic power saving. */
++
++	ldr    r0, [r5, #0x404]
++	orr    r0, r0, #0x01
++	str    r0, [r5, #0x404]
++
++	/* Disable MMDC power down timer. */
++	/*MMDC0_MDPDC disable power down timer */
++	ldr    r0, [r5, #0x4]
++	bic    r0, r0, #0xff00
++	str    r0, [r5, #0x4]
++
++	/* set CON_REG */
++	ldr     r0, =0x8000
++		str     r0, [r5, #0x1C]
++poll_conreq_set_1:
++	ldr     r0, [r5, #0x1C]
++	and     r0, r0, #0x4000
++	cmp	    r0, #0x4000
++	bne     poll_conreq_set_1
++
++	/*setmem /32 0x021b001c = 0x00008010 //Precharge all on cs0  */
++	/*setmem /32 0x021b001c = 0x00008018 //Precharge all on cs1 */
++	ldr     r0, =0x00008010
++	str     r0, [r5, #0x1C]
++	ldr     r0, =0x00008018
++	str     r0, [r5, #0x1C]
++
++	/* if requested frequency is greater than 300MHz go to DLL on mode */
++	ldr     r1, =300000000
++	cmp     r4, r1
++	bge     dll_on_mode
++
++dll_off_mode:
++
++	/* if DLL is currently on, turn it off
++	cmp    	r9, #1
++	beq 	continue_dll_off_1
++
++	/* setmem /32 0x021b001c = 0x00018031 //Rtt_NOM off + set dll off, cs 0 */
++	/* setmem /32 0x021b001c = 0x00018039 //Rtt_NOM off + set dll off, cs 1 */
++	ldr     r0, =0x00018031
++	str     r0, [r5, #0x1C]
++
++	ldr     r0, =0x00018039
++	str     r0, [r5, #0x1C]
++
++	ldr      r1, =10
++delay1a:
++	ldr      r2, =0
++cont1a:
++	ldr      r0, [r5, r2]
++	add     r2, r2, #4
++	cmp    r2, #16
++	bne     cont1a
++	sub     r1, r1, #1
++	cmp    r1, #0
++	bgt     delay1a
++
++continue_dll_off_1:
++
++	/* set DVFS - enter self refresh mode */
++	ldr     r0, [r5, #0x404]
++	orr    r0, r0, #0x200000
++	str     r0, [r5, #0x404]
++
++	/* de-assert con_req */
++	mov    r0, #0x0
++	str    r0, [r5, #0x1C]
++
++poll_dvfs_set_1:
++	ldr     r0, [r5, #0x404]
++	and     r0, r0, #0x2000000
++	cmp	    r0, #0x2000000
++	bne   	poll_dvfs_set_1
++
++	ldr     r1, =24000000
++	cmp     r4, r1
++	beq     switch_freq_24
++
++	switch_to_50MHz
++	b continue_dll_off_2
++
++switch_freq_24:
++	switch_to_24MHz
++
++continue_dll_off_2:
++
++	/* set SBS - block ddr accesses */
++	ldr     r0, [r5, #0x410]
++	orr    	r0, r0, #0x100
++	str     r0, [r5, #0x410]
++
++	/* clear DVFS - exit from self refresh mode */
++	ldr     r0, [r5, #0x404]
++	bic     r0, r0, #0x200000
++	str     r0, [r5, #0x404]
++
++poll_dvfs_clear_1:
++	ldr     r0, [r5, #0x404]
++	and     r0, r0, #0x2000000
++	cmp     r0, #0x2000000
++	beq     poll_dvfs_clear_1
++
++	/* if DLL was previously on, continue DLL off routine
++	cmp    	r9, #1
++	beq 	continue_dll_off_3
++
++	/* setmem /32 0x021b001c = 0x00018031 //Rtt_NOM off + set dll off, cs 0 */
++	/* setmem /32 0x021b001c = 0x00018039 //Rtt_NOM off + set dll off, cs 1 */
++	ldr     r0, =0x00018031
++	str     r0, [r5, #0x1C]
++
++	ldr     r0, =0x00018039
++	str     r0, [r5, #0x1C]
++
++	/* setmem /32 0x021b001c = 0x04208030 //write mode reg MR0: CL=6, wr=6 ,cs 0  */
++	/* setmem /32 0x021b001c = 0x04208038 //write mode reg MR0: CL=6, wr=6 ,cs 1  */
++	ldr     r0, =0x08208030
++	str     r0, [r5, #0x1C]
++
++	ldr     r0, =0x08208038
++	str     r0, [r5, #0x1C]
++
++	/* setmem /32 0x021b001c = 0x02088032 //write mode reg MR2 , CWL=6 ,cs0 */
++	/* setmem /32 0x021b001c = 0x0208803A //write mode reg MR2 , CWL=6 ,cs1 */
++	ldr     r0, =0x00088032
++	str     r0, [r5, #0x1C]
++
++	ldr     r0, =0x0008803A
++	str     r0, [r5, #0x1C]
++
++	/* double refresh ????
++	 ldr     r0, =0x00001800
++	 str     r0, [r5, #0x20]*/
++
++	/* delay for a while. */
++	ldr      r1, =4
++delay_1:
++	ldr      r2, =0
++cont_1:
++	ldr      r0, [r5, r2]
++	add     r2, r2, #4
++	cmp    r2, #16
++	bne     cont_1
++	sub     r1, r1, #1
++	cmp    r1, #0
++	bgt     delay_1
++
++	/* MMDC0_MDCFG0 see spread sheet for timings, CAS=6 */
++	ldr     r0, [r5, #0x0C]
++	bic     r0, r0, #0xf
++	orr     r0, r0, #0x3
++	str     r0, [r5, #0x0C]
++
++	/* MMDC0_MDCFG1 see spread sheet for timings, tCWL=6 */
++	ldr     r0, [r5, #0x10]
++	bic     r0, r0, #0x7
++	orr     r0, r0, #0x4
++	str     r0, [r5, #0x10]
++
++	/* Enable bank interleaving, Address mirror on, WALAT = 0x1, RALAT = 0x2, DDR2_EN = 0 */
++	/*setmem /32 0x021b0018 = 0x00091680 */
++	ldr     r0, =0x00091680
++	str     r0, [r5, #0x18]
++
++	/* enable dqs pull down in the IOMUX. */
++	/*
++	setmem /32 0x020e05a8 = 0x00003030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS0 - DSE=110
++	setmem /32 0x020e05b0 = 0x00003030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS1 - DSE=110
++	setmem /32 0x020e0524 = 0x00003030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS2 - DSE=110
++	setmem /32 0x020e051c = 0x00003030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS3 - DSE=110
++	setmem /32 0x020e0518 = 0x00003030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS4 - DSE=110
++	setmem /32 0x020e050c = 0x00003030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS5 - DSE=110
++	setmem /32 0x020e05b8 = 0x00003030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS6 - DSE=110
++	setmem /32 0x020e05c0 = 0x00003030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS7 - DSE=110
++	*/
++	ldr    r1, [r11]                   @size of array
++	add   r11, r11, #8            @skip first eight bytes in array
++	ldr     r2, =0x3028
++update_iomux:
++	ldr    r0, [r11, #0x0]           @ offset
++	ldr    r3, [r7, r0]
++	bic    r3, r3, r2		      @ Clear the DSE, PUE and PKE bits
++	orr	 r3, r3, #0x3000          @ Enable the Pull downs and lower the drive strength.
++	orr    r3, r3, #0x28
++	str    r3, [r7, r0]
++	add   r11, r11, #8
++	sub   r1, r1, #1
++	cmp  r1, #0
++	bgt   update_iomux
++
++	/*  ODT disabled */
++	/* setmem /32 0x021b0818 = 0x0      // DDR_PHY_P0_MPODTCTRL */
++	/* setmem /32 0x021b4818 = 0x0      // DDR_PHY_P1_MPODTCTRL */
++	ldr    r0, =0x0
++	ldr    r2, =0x818
++	str    r0, [r5, r2]
++	ldr    r2, =0x4818
++	str    r0, [r5, r2]
++
++	/* DQS gating disabled */
++	/* setmem /32 0x021b083c = 0x233f033f */
++	ldr    r2, =0x83c
++	ldr    r0, [r5, r2]
++	orr     r0, r0, #0x20000000
++	str    r0, [r5, r2]
++
++	ldr    r2, =0x483c
++	ldr    r0, [r5, r2]
++	orr     r0, r0, #0x20000000
++	str    r0, [r5, r2]
++
++	/* MMDC0_MAPSR adopt power down enable */
++	/* setmem /32 0x021b0404 = 0x00011006 */
++	ldr    r0, [r5, #0x404]
++	bic    r0, r0, #0x01
++	str    r0, [r5, #0x404]
++
++	/* frc_msr + mu bypass*/
++	ldr       r0, =0x00000060
++	str       r0, [r5, #0x8b8]
++	ldr       r2, =0x48b8
++	str       r0, [r5, r2]
++	ldr       r0, =0x00000460
++	str       r0, [r5, #0x8b8]
++	ldr       r2, =0x48b8
++	str       r0, [r5, r2]
++	ldr       r0, =0x00000c60
++	str       r0, [r5, #0x8b8]
++	ldr       r2, =0x48b8
++	str       r0, [r5, r2]
++
++continue_dll_off_3:
++
++	/* clear SBS - unblock accesses to DDR */
++	ldr     r0, [r5, #0x410]
++	bic     r0, r0, #0x100
++	str     r0, [r5, #0x410]
++
++	mov		r0, #0x0
++	str		r0, [r5, #0x1C]
++poll_conreq_clear_1:
++	ldr		r0, [r5, #0x1C]
++	and	    r0, r0, #0x4000
++	cmp	    r0, #0x4000
++	beq     poll_conreq_clear_1
++
++	b        done
++
++dll_on_mode:
++	/* assert DVFS - enter self refresh mode */
++	ldr     r0, [r5, #0x404]
++	orr    	r0, r0, #0x200000
++	str     r0, [r5, #0x404]
++
++	/* de-assert CON_REQ */
++	mov    r0, #0x0
++	str    r0, [r5, #0x1C]
++
++	/* poll DVFS ack */
++poll_dvfs_set_2:
++	ldr     r0, [r5, #0x404]
++	and     r0, r0, #0x2000000
++	cmp     r0, #0x2000000
++	bne     poll_dvfs_set_2
++
++	ldr    r1, =528000000
++	cmp  r4, r1
++	beq   switch_freq_528
++
++	switch_to_400MHz
++
++	b continue_dll_on
++
++switch_freq_528:
++	switch_to_528MHz
++
++continue_dll_on:
++
++	/* set step-by-step mode */
++	ldr     r0, [r5, #0x410]
++	orr     r0, r0, #0x100
++	str     r0, [r5, #0x410]
++
++	/* clear DVFS - exit self refresh mode */
++	ldr     r0, [r5, #0x404]
++	bic     r0, r0, #0x200000
++	str     r0, [r5, #0x404]
++
++poll_dvfs_clear_2:
++	ldr     r0, [r5, #0x404]
++	and     r0, r0, #0x2000000
++	cmp     r0, #0x2000000
++	beq     poll_dvfs_clear_2
++
++	/* if DLL is currently off, turn it back on */
++	cmp    	r9, #0
++	beq 	update_calibration
++
++	ldr     r0, =0xa5390003
++	str     r0, [r5, #0x800]
++	ldr     r2, =0x4800
++	str     r0, [r5, r2]
++
++	/* enable DQS gating */
++	ldr    r2, =0x83c
++	ldr    r0, [r5, r2]
++	bic    r0, r0, #0x20000000
++	str    r0, [r5, r2]
++
++	ldr    r2, =0x483c
++	ldr    r0, [r5, r2]
++	bic    r0, r0, #0x20000000
++	str    r0, [r5, r2]
++
++	/* force measure */
++	ldr       r0, =0x00000800
++	str       r0, [r5, #0x8b8]
++	ldr       r2, =0x48b8
++	str       r0, [r5, r2]
++
++	/* delay for while */
++	ldr      r1, =4
++delay5:
++	ldr      r2, =0
++cont5:
++	ldr      r0, [r5, r2]
++	add     r2, r2, #4
++	cmp    r2, #16
++	bne     cont5
++	sub     r1, r1, #1
++	cmp    r1, #0
++	bgt     delay5
++
++	/* Disable dqs pull down in the IOMUX. */
++	/*
++	setmem /32 0x020e05a8 = 0x00000030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS0 - DSE=110
++	setmem /32 0x020e05b0 = 0x00000030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS1 - DSE=110
++	setmem /32 0x020e0524 = 0x00000030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS2 - DSE=110
++	setmem /32 0x020e051c = 0x00000030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS3 - DSE=110
++	setmem /32 0x020e0518 = 0x00000030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS4 - DSE=110
++	setmem /32 0x020e050c = 0x00000030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS5 - DSE=110
++	setmem /32 0x020e05b8 = 0x00000030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS6 - DSE=110
++	setmem /32 0x020e05c0 = 0x00000030 // IOMUXC_SW_PAD_CTL_PAD_DRAM_SDQS7 - DSE=110
++	*/
++	ldr    r1, [r11]                   @size of array
++	add  r11, r11, #8             @skip first eight bytes in array
++update_iomux1:
++	ldr    r0, [r11, #0x0]       @ offset
++	ldr    r3, [r11, #0x4]
++	str    r3, [r7, r0]		  @Store the original IOMUX value read during boot
++	add   r11, r11, #8
++	sub   r1, r1, #1
++	cmp  r1, #0
++	bgt   update_iomux1
++
++	/* config ESDCTL timings to 528MHz:
++	@// setmem /32 0x021b000c = 0x555A7975		@// MMDC0_MDCFG0 see spread sheet for timings
++	@//setmem /32 0x021b0010 = 0xFF538E64		      @// MMDC0_MDCFG1 see spread sheet for timings
++	@//setmem /32 0x021b0014 = 0x01ff00db               @// MMDC0_MDCFG2 - tRRD - 4ck; tWTR - 4ck; tRTP - 4ck; tDLLK - 512ck
++	@//setmem /32 0x021b0018 = 0x00081740             @// MMDC0_MDMISC, RALAT=0x5 (original value)
++	*/
++
++	ldr     r0, [r5, #0x0C]
++	bic     r0, r0, #0xf
++	orr     r0, r0, #0x5
++	str     r0, [r5, #0x0C]
++
++	ldr     r0, [r5, #0x10]
++	bic     r0, r0, #0x7
++	orr     r0, r0, #0x4
++	str     r0, [r5, #0x10]
++
++	/* update MISC register: WALAT, RALAT */
++	ldr       r0, =0x00081740
++	str       r0, [r5, #0x18]
++
++	/*configure ddr devices to dll on, odt
++	@//setmem /32 0x021b001c = 0x00428031
++	@//setmem /32 0x021b001c = 0x00428039
++	*/
++	ldr      r0, =0x00028031
++	str      r0, [r5, #0x1C]
++
++	ldr      r0, =0x00028039
++	str      r0, [r5, #0x1C]
++
++	/* delay for while  */
++	ldr      r1, =4
++delay7:
++	ldr      r2, =0
++cont7:
++	ldr      r0, [r5, r2]
++	add     r2, r2, #4
++	cmp    r2, #16
++	bne     cont7
++	sub     r1, r1, #1
++	cmp    r1, #0
++	bgt     delay7
++
++	/* reset dll
++	@// setmem /32 0x021b001c = 0x09208030
++	@// setmem /32 0x021b001c = 0x09208038
++	*/
++	ldr       r0, =0x09208030
++	str       r0, [r5, #0x1C]
++
++	ldr       r0, =0x09208038
++	str       r0, [r5, #0x1C]
++
++	/* delay for while  */
++	ldr      r1, =100
++delay8:
++	ldr      r2, =0
++cont8:
++	ldr      r0, [r5, r2]
++	add     r2, r2, #4
++	cmp    r2, #16
++	bne     cont8
++	sub     r1, r1, #1
++	cmp    r1, #0
++	bgt     delay8
++
++	/* tcwl=6:
++	@//setmem /32 0x021b001c = 0x04088032
++	@//setmem /32 0x021b001c = 0x0408803a
++	*/
++	ldr      r0, =0x04088032
++	str      r0, [r5, #0x1C]
++
++	ldr      r0, =0x0408803a
++	str      r0, [r5, #0x1C]
++
++	ldr      r0, =0x00428031
++	str      r0, [r5, #0x1C]
++
++	ldr      r0, =0x00428039
++	str      r0, [r5, #0x1C]
++
++	/* tcl=8
++	@// setmem /32 0x021b001c = 0x08408030
++	@// setmem /32 0x021b001c = 0x08408038
++	*/
++	ldr       r0, =0x08408030
++	str       r0, [r5, #0x1C]
++
++	ldr       r0, =0x08408038
++	str       r0, [r5, #0x1C]
++
++	/* issue a zq command
++	@// setmem /32 0x021b001c = 0x04000040
++	@// setmem /32 0x021b001c = 0x04000048
++	 */
++	ldr       r0, =0x04008040
++	str       r0, [r5, #0x1C]
++
++	ldr       r0, =0x04008048
++	str       r0, [r5, #0x1C]
++
++	/* ESDCTL ODT enable
++	@//setmem /32 0x021b0818 = 0x00022225      @// DDR_PHY_P0_MPODTCTRL
++	@//setmem /32 0x021b4818 = 0x00022225      @// DDR_PHY_P1_MPODTCTRL
++	*/
++	ldr       r0, =0x00022225
++	str       r0, [r5, #0x818]
++	ldr       r2, =0x4818
++	str       r0, [r5, r2]
++
++	/* delay for while */
++	ldr      r1, =40
++delay15:
++	ldr      r2, =0
++cont15:
++	ldr      r0, [r5, r2]
++	add     r2, r2, #4
++	cmp    r2, #16
++	bne     cont15
++	sub     r1, r1, #1
++	cmp    r1, #0
++	bgt     delay15
++
++	/* MMDC0_MAPSR adopt power down enable */
++	/* setmem /32 0x021b0404 = 0x00011006 */
++	ldr    r0, [r5, #0x404]
++	bic    r0, r0, #0x01
++	str    r0, [r5, #0x404]
++
++	/* Enable MMDC power down timer. */
++	ldr    r0, [r5, #0x4]
++	orr    r0, r0, #0x5500
++	str    r0, [r5, #0x4]
++
++update_calibration:
++	/* Write the new calibration values. */
++	ldr     r1, [r8]             @size of array
++	add   r8, r8, #8             @skip first eight bytes in array
++update_calib:
++	ldr    r0, [r8, #0x0]       @ offset
++	ldr    r3, [r8, #0x4]       @ value
++	str    r3, [r5, r0]
++	add   r8, r8, #8
++	sub   r1, r1, #1
++	cmp  r1, #0
++	bgt   update_calib
++
++	/* Perform a force measurement. */
++	ldr     r0, =0x800
++	str     r0, [r5, #0x8B8]
++	ldr      r2, =0x48B8
++	str     r0, [r5, r2]
++
++	/* clear SBS - unblock DDR accesses */
++	ldr     r0, [r5, #0x410]
++	bic     r0, r0, #0x100
++	str     r0, [r5, #0x410]
++
++	mov		r0, #0x0
++	str		r0, [r5, #0x1C]
++poll_conreq_clear_2:
++	ldr		r0, [r5, #0x1C]
++	and	    r0, r0, #0x4000
++	cmp	    r0, #0x4000
++	beq     poll_conreq_clear_2
++
++done:
++
++	/* Restore registers */
++
++	ldmfd sp!, {r4,r5,r6, r7, r8, r9, r10, r11}
++
++	mov     pc, lr
++
++	.type   mx6_do_ddr_freq_change, #object
++ENTRY(mx6_do_ddr_freq_change)
++	.word   mx6_ddr_freq_change
++	.size    mx6_ddr_freq_change, . - mx6_ddr_freq_change
+diff --git a/arch/arm/mach-mx6/mx6_mmdc.c b/arch/arm/mach-mx6/mx6_mmdc.c
+new file mode 100644
+index 0000000..2b5ce84
+--- /dev/null
++++ b/arch/arm/mach-mx6/mx6_mmdc.c
+@@ -0,0 +1,313 @@
++/*
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file mx6_mmdc.c
++ *
++ * @brief MX6 MMDC specific file.
++ *
++ * @ingroup PM
++ */
++#include <asm/io.h>
++#include <linux/sched.h>
++#include <linux/proc_fs.h>
++#include <linux/clk.h>
++#include <linux/interrupt.h>
++#include <linux/platform_device.h>
++#include <linux/iram_alloc.h>
++#include <linux/mutex.h>
++#include <linux/delay.h>
++#include <linux/cpumask.h>
++#include <linux/kernel.h>
++#include <linux/smp.h>
++#include <mach/hardware.h>
++#include <mach/clock.h>
++#include <asm/mach/map.h>
++#include <asm/mach-types.h>
++#include <asm/cacheflush.h>
++#include <asm/tlb.h>
++#include <asm/hardware/gic.h>
++#include "crm_regs.h"
++
++
++/* DDR settings */
++unsigned long (*iram_ddr_settings)[2];
++unsigned long (*normal_mmdc_settings)[2];
++unsigned long (*iram_iomux_settings)[2];
++void __iomem *mmdc_base;
++void __iomem *iomux_base;
++void __iomem *gic_dist_base;
++void __iomem *gic_cpu_base;
++
++void (*mx6_change_ddr_freq)(u32 freq, void *ddr_settings, bool dll_mode, void* iomux_offsets) = NULL;
++
++extern unsigned int ddr_low_rate;
++extern unsigned int ddr_med_rate;
++extern unsigned int ddr_normal_rate;
++extern int low_bus_freq_mode;
++extern int mmdc_med_rate;
++extern void __iomem *ccm_base;
++extern void mx6_ddr_freq_change(u32 freq, void *ddr_settings, bool dll_mode, void *iomux_offsets);
++
++static void *ddr_freq_change_iram_base;
++static int ddr_settings_size;
++static int iomux_settings_size;
++static volatile unsigned int cpus_in_wfe;
++static volatile bool wait_for_ddr_freq_update;
++
++
++#define MIN_DLL_ON_FREQ		333000000
++#define MAX_DLL_OFF_FREQ		125000000
++
++unsigned long ddr3_mmdc_regs_offsets[][2] = {
++	{0x83c, 0x0},
++	{0x840, 0x0},
++	{0x483c, 0x0},
++	{0x4840, 0x0},
++	{0x848, 0x0},
++	{0x4848, 0x0},
++	{0x850, 0x0},
++	{0x4850, 0x0},
++};
++
++unsigned long iomux_offsets_mx6q[][2] = {
++	{0x5A8, 0x0},
++	{0x5B0, 0x0},
++	{0x524, 0x0},
++	{0x51C, 0x0},
++	{0x518, 0x0},
++	{0x50C, 0x0},
++	{0x5B8, 0x0},
++	{0x5C0, 0x0},
++};
++unsigned long iomux_offsets_mx6dl[][2] = {
++	{0x4BC, 0x0},
++	{0x4C0, 0x0},
++	{0x4C4, 0x0},
++	{0x4C8, 0x0},
++	{0x4CC, 0x0},
++	{0x4D0, 0x0},
++	{0x4D4, 0x0},
++	{0x4D8, 0x0},
++};
++
++unsigned long ddr3_400[][2] = {
++	{0x83c, 0x42490249},
++	{0x840, 0x02470247},
++	{0x483c, 0x42570257},
++	{0x4840, 0x02400240},
++	{0x848, 0x4039363C},
++	{0x4848, 0x3A39333F},
++	{0x850, 0x38414441},
++	{0x4850, 0x472D4833}
++};
++
++unsigned long *irq_used;
++
++unsigned long irqs_used_mx6q[] = {
++	MXC_INT_INTERRUPT_139_NUM,
++	MX6Q_INT_PERFMON1,
++	MX6Q_INT_PERFMON2,
++	MX6Q_INT_PERFMON3,
++};
++
++unsigned long irqs_used_mx6dl[] = {
++	MXC_INT_INTERRUPT_139_NUM,
++	MX6Q_INT_PERFMON1,
++};
++
++int can_change_ddr_freq(void)
++{
++	return 1;
++}
++
++
++/* Each active core apart from the one changing the DDR frequency will execute
++  * this function. The rest of the cores have to remain in WFE state until the frequency
++  * is changed.
++  */
++irqreturn_t wait_in_wfe_irq(int irq, void *dev_id)
++{
++	u32 me = smp_processor_id();
++
++	*((char *)(&cpus_in_wfe) + (u8)me) = 0xff;
++
++	while (wait_for_ddr_freq_update)
++		wfe();
++
++	*((char *)(&cpus_in_wfe) + (u8)me) = 0;
++	return IRQ_HANDLED;
++}
++
++/* Change the DDR frequency. */
++int update_ddr_freq(int ddr_rate)
++{
++	int i;
++	unsigned int reg;
++	bool dll_off = false;
++	unsigned int online_cpus = 0;
++	int cpu = 0;
++	int me;
++
++	if (!can_change_ddr_freq())
++		return -1;
++
++	if (low_bus_freq_mode)
++		dll_off = true;
++
++	iram_ddr_settings[0][0] = ddr_settings_size;
++	iram_iomux_settings[0][0] = iomux_settings_size;
++	if (ddr_rate == ddr_med_rate) {
++		for (i = 0; i < iram_ddr_settings[0][0]; i++) {
++			iram_ddr_settings[i + 1][0] =
++					ddr3_400[i][0];
++			iram_ddr_settings[i + 1][1] =
++					ddr3_400[i][1];
++		}
++	} else if (ddr_rate == ddr_normal_rate) {
++		for (i = 0; i < iram_ddr_settings[0][0]; i++) {
++			iram_ddr_settings[i + 1][0] =
++					normal_mmdc_settings[i][0];
++			iram_ddr_settings[i + 1][1] =
++					normal_mmdc_settings[i][1];
++		}
++	}
++
++	/* Ensure that all Cores are in WFE. */
++	local_irq_disable();
++
++	me = smp_processor_id();
++
++	*((char *)(&cpus_in_wfe) + (u8)me) = 0xff;
++	wait_for_ddr_freq_update = true;
++
++	for_each_online_cpu(cpu) {
++		*((char *)(&online_cpus) + (u8)cpu) = 0xff;
++		if (cpu != me) {
++			/* Set the interrupt to be pending in the GIC. */
++			reg = 1 << (irq_used[cpu] % 32);
++			writel_relaxed(reg, gic_dist_base + GIC_DIST_PENDING_SET + (irq_used[cpu] / 32) * 4);
++			udelay(10);
++		}
++	}
++	while (cpus_in_wfe != online_cpus)
++		udelay(5);
++
++	/* Now we can change the DDR frequency. */
++	mx6_change_ddr_freq(ddr_rate, iram_ddr_settings, dll_off, iram_iomux_settings);
++
++	/* DDR frequency change is done . */
++	wait_for_ddr_freq_update = false;
++
++	/* Wake up all the cores. */
++	sev();
++
++	*((char *)(&cpus_in_wfe) + (u8)me) = 0;
++
++	local_irq_enable();
++
++	return 0;
++}
++
++int init_mmdc_settings(void)
++{
++	unsigned long iram_paddr;
++	int i, err, cpu;
++
++	mmdc_base = ioremap(MMDC_P0_BASE_ADDR, SZ_32K);
++	iomux_base = ioremap(MX6Q_IOMUXC_BASE_ADDR, SZ_16K);
++	gic_dist_base = ioremap(IC_DISTRIBUTOR_BASE_ADDR, SZ_16K);
++	gic_cpu_base = ioremap(IC_INTERFACES_BASE_ADDR, SZ_16K);
++
++	normal_mmdc_settings = ddr3_mmdc_regs_offsets;
++	ddr_settings_size = ARRAY_SIZE(ddr3_mmdc_regs_offsets);
++
++	/* Store the original DDR settings at boot. */
++	for (i = 0; i < ddr_settings_size; i++) {
++		normal_mmdc_settings[i][1] =
++			__raw_readl(mmdc_base
++			+ normal_mmdc_settings[i][0]);
++	}
++	/* Store the size of the array in iRAM also,
++	 * increase the size by 8 bytes.
++	 */
++	iram_ddr_settings = iram_alloc(ddr_settings_size + 8, &iram_paddr);
++	if (iram_ddr_settings == NULL) {
++			printk(KERN_DEBUG
++			"%s: failed to allocate iRAM memory for ddr settings\n",
++			__func__);
++			return ENOMEM;
++	}
++
++	/* Store the size of the iomux settings in iRAM also,
++	 * increase the size by 8 bytes.
++	 */
++	iram_iomux_settings = iram_alloc(iomux_settings_size + 8, &iram_paddr);
++	if (iram_iomux_settings == NULL) {
++			printk(KERN_DEBUG
++			"%s: failed to allocate iRAM memory for iomuxr settings\n",
++			__func__);
++			return ENOMEM;
++	}
++
++	/* Store the IOMUX settings at boot. */
++	if (cpu_is_mx6q()) {
++		iomux_settings_size = ARRAY_SIZE(iomux_offsets_mx6q);
++		for (i = 0; i < iomux_settings_size; i++) {
++			iomux_offsets_mx6q[i][1] =
++				__raw_readl(iomux_base
++				+ iomux_offsets_mx6q[i][0]);
++			iram_iomux_settings[i+1][0] = iomux_offsets_mx6q[i][0];
++			iram_iomux_settings[i+1][1] = iomux_offsets_mx6q[i][1];
++		}
++		irq_used = irqs_used_mx6q;
++	}
++	if (cpu_is_mx6dl()) {
++		iomux_settings_size = ARRAY_SIZE(iomux_offsets_mx6dl);
++		for (i = 0; i < iomux_settings_size; i++) {
++			iomux_offsets_mx6dl[i][1] =
++				__raw_readl(iomux_base
++				+ iomux_offsets_mx6dl[i][0]);
++			iram_iomux_settings[i+1][0] = iomux_offsets_mx6dl[i][0];
++			iram_iomux_settings[i+1][1] = iomux_offsets_mx6dl[i][1];
++		}
++		irq_used = irqs_used_mx6dl;
++	}
++
++	/* Allocate IRAM for the DDR freq change code. */
++	iram_alloc(SZ_8K, &iram_paddr);
++	/* Need to remap the area here since we want the memory region
++		 to be executable. */
++	ddr_freq_change_iram_base = __arm_ioremap(iram_paddr,
++						SZ_8K, MT_MEMORY_NONCACHED);
++	memcpy(ddr_freq_change_iram_base, mx6_ddr_freq_change, SZ_8K);
++	mx6_change_ddr_freq = (void *)ddr_freq_change_iram_base;
++
++	for_each_online_cpu(cpu) {
++		/* Set up a reserved interrupt to get all the active cores into a WFE state
++		  * before changing the DDR frequency.
++		  */
++		err = request_irq(irq_used[cpu], wait_in_wfe_irq, IRQF_PERCPU, "mmdc_1",
++				  NULL);
++		if (err) {
++			printk(KERN_ERR "MMDC: Unable to attach to %ld,err = %d\n", irq_used[cpu], err);
++			return err;
++		}
++		err = irq_set_affinity(irq_used[cpu], cpumask_of(cpu));
++		if (err) {
++			printk(KERN_ERR "MMDC: unable to set irq affinity irq=%ld,\n", irq_used[cpu]);
++			return err;
++		}
++	}
++	return 0;
++}
+diff --git a/arch/arm/plat-mxc/clock.c b/arch/arm/plat-mxc/clock.c
+index 4b92479..f6e14a3 100755
+--- a/arch/arm/plat-mxc/clock.c
++++ b/arch/arm/plat-mxc/clock.c
+@@ -67,7 +67,7 @@ static void __clk_disable(struct clk *clk)
+ 		return;
+ 
+ 	if (!clk->usecount) {
+-		WARN(1, "clock enable/disable mismatch!\n");
++		WARN(1, "clock enable/disable mismatch! clk  %s\n", clk->name);
+ 		return;
+ 	}
+ 
+@@ -111,6 +111,11 @@ int clk_enable(struct clk *clk)
+ 	if (clk == NULL || IS_ERR(clk))
+ 		return -EINVAL;
+ 
++	if (clk->flags & AHB_HIGH_SET_POINT)
++		lp_high_freq++;
++	else if (clk->flags & AHB_MED_SET_POINT)
++		lp_med_freq++;
++
+ 	if ((clk->flags & CPU_FREQ_TRIG_UPDATE)
+ 			&& (clk_get_usecount(clk) == 0)) {
+ 		if (!(clk->flags &
+@@ -130,7 +135,6 @@ int clk_enable(struct clk *clk)
+ 				set_high_bus_freq(1);
+ 		}
+ 	}
+-
+ 	mutex_lock(&clocks_mutex);
+ 	ret = __clk_enable(clk);
+ 	mutex_unlock(&clocks_mutex);
+@@ -156,6 +160,11 @@ void clk_disable(struct clk *clk)
+ 	if (clk == NULL || IS_ERR(clk))
+ 		return;
+ 
++	if (clk->flags & AHB_HIGH_SET_POINT)
++		lp_high_freq--;
++	else if (clk->flags & AHB_MED_SET_POINT)
++		lp_med_freq--;
++
+ 	mutex_lock(&clocks_mutex);
+ 	__clk_disable(clk);
+ 	mutex_unlock(&clocks_mutex);
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index 0774d52..9dfdd39 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -45,6 +45,11 @@ static u32 pre_suspend_rate;
+ extern struct regulator *cpu_regulator;
+ extern int dvfs_core_is_active;
+ extern struct cpu_op *(*get_cpu_op)(int *op);
++extern int low_bus_freq_mode;
++extern int high_bus_freq_mode;
++extern int set_low_bus_freq(void);
++extern int set_high_bus_freq(int high_bus_speed);
++extern int low_freq_bus_used(void);
+ 
+ int set_cpu_freq(int freq)
+ {
+@@ -66,6 +71,8 @@ int set_cpu_freq(int freq)
+ 
+ 	/*Set the voltage for the GP domain. */
+ 	if (freq > org_cpu_rate) {
++		if (low_bus_freq_mode)
++			set_high_bus_freq(0);
+ 		ret = regulator_set_voltage(cpu_regulator, gp_volt,
+ 					    gp_volt);
+ 		if (ret < 0) {
+@@ -88,6 +95,8 @@ int set_cpu_freq(int freq)
+ 			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
+ 			return ret;
+ 		}
++		if (low_freq_bus_used() && !low_bus_freq_mode)
++			set_low_bus_freq();
+ 	}
+ 
+ 	return ret;
+-- 
+1.7.7.4
+

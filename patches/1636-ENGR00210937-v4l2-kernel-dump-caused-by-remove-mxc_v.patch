@@ -1,0 +1,54 @@
+From 1a51107c92df3329fa1b264c3250d61c19f87c49 Mon Sep 17 00:00:00 2001
+From: Wu Guoxing <b39297@freescale.com>
+Date: Thu, 21 Jun 2012 16:11:34 +0800
+Subject: [PATCH 1636/2463] ENGR00210937:v4l2: kernel dump caused by remove
+ mxc_v4l2_capture
+
+kernel dump when do "modprobe -r mxc_v4l2_capture"
+this is caused by unregister wrong v4l2 int device when rmmod
+
+Signed-off-by: Wu Guoxing <b39297@freescale.com>
+---
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |   12 +-----------
+ 1 files changed, 1 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index dcfc868..5bd4886 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -176,15 +176,6 @@ static struct v4l2_int_master mxc_v4l2_master = {
+ 	.detach = mxc_v4l2_master_detach,
+ };
+ 
+-static struct v4l2_int_device mxc_v4l2_int_device = {
+-	.module = THIS_MODULE,
+-	.name = "mxc_v4l2_cap",
+-	.type = v4l2_int_type_master,
+-	.u = {
+-		.master = &mxc_v4l2_master,
+-		},
+-};
+-
+ /***************************************************************************
+  * Functions for handling Frame buffers.
+  **************************************************************************/
+@@ -2678,7 +2669,6 @@ static int mxc_v4l2_probe(struct platform_device *pdev)
+ 
+ 	/* Set up the v4l2 device and register it*/
+ 	cam->self->priv = cam;
+-	/* This function contains a bug that won't let this be rmmod'd. */
+ 	v4l2_int_device_register(cam->self);
+ 
+ 	/* register v4l video device */
+@@ -2727,7 +2717,7 @@ static int mxc_v4l2_remove(struct platform_device *pdev)
+ 			&dev_attr_fsl_v4l2_overlay_property);
+ 
+ 		pr_info("V4L2 freeing image input device\n");
+-		v4l2_int_device_unregister(&mxc_v4l2_int_device);
++		v4l2_int_device_unregister(cam->self);
+ 		video_unregister_device(cam->video_dev);
+ 
+ 		mxc_free_frame_buf(cam);
+-- 
+1.7.7.4
+

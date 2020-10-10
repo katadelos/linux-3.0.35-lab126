@@ -1,0 +1,35 @@
+From 2bdfb4ccc93ec3d03c6c9d58e04775890ab742d4 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Sat, 28 Apr 2012 17:18:19 +0800
+Subject: [PATCH 1398/2463] ENGR00180103-2 V4L2: remove GFP_DMA flag when
+ alloc dma memory
+
+Remove GFP_DMA flag when alloc dma memory.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_vout.c |    7 +++++--
+ 1 files changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_vout.c b/drivers/media/video/mxc/output/mxc_vout.c
+index 5f1deee..9d9be79 100644
+--- a/drivers/media/video/mxc/output/mxc_vout.c
++++ b/drivers/media/video/mxc/output/mxc_vout.c
+@@ -965,9 +965,12 @@ static inline int vdoaipu_try_task(struct mxc_vout_output *vout)
+ 		vout->vdoa_dma.vaddr = dma_alloc_coherent(vout->vbq.dev,
+ 							vout->vdoa_dma.size,
+ 							&vout->vdoa_dma.paddr,
+-							GFP_DMA | GFP_KERNEL);
+-		if (!vout->vdoa_dma.vaddr)
++							GFP_KERNEL);
++		if (!vout->vdoa_dma.vaddr) {
++			v4l2_err(vout->vfd->v4l2_dev,
++				"cannot get vdoa dma buf size:0x%x\n", size);
+ 			return -ENOMEM;
++		}
+ 		v4l2_dbg(1, debug, vout->vfd->v4l2_dev,
+ 				"alloc vdoa_dma.size:0x%x, paddr:0x%x\n",
+ 				vout->vdoa_dma.size,
+-- 
+1.7.7.4
+

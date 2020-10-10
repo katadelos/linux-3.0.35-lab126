@@ -1,0 +1,411 @@
+From 3b6ff3e8590f5ad33c05bcd67e6dd1476f6e4348 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Fri, 13 Jul 2012 15:11:31 +0800
+Subject: [PATCH 1752/2463] ENGR00217122 mmc: esdhc: move sd3.0 tuning routine
+ into pltfm
+
+in mx6q/dl, move fsl tuning procedure into platform driver code from common
+code hacking.
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/core/core.c            |   19 --------
+ drivers/mmc/core/core.h            |    2 -
+ drivers/mmc/core/sd.c              |   30 ------------
+ drivers/mmc/core/sd_ops.c          |   43 -----------------
+ drivers/mmc/core/sd_ops.h          |    1 -
+ drivers/mmc/host/sdhci-esdhc-imx.c |   89 ++++++++++++++++++++++++++++++++++--
+ drivers/mmc/host/sdhci.c           |   22 ++++-----
+ drivers/mmc/host/sdhci.h           |    5 +-
+ include/linux/mmc/host.h           |    3 -
+ 9 files changed, 97 insertions(+), 117 deletions(-)
+
+diff --git a/drivers/mmc/core/core.c b/drivers/mmc/core/core.c
+index 7c36645..d6a406c 100644
+--- a/drivers/mmc/core/core.c
++++ b/drivers/mmc/core/core.c
+@@ -755,25 +755,6 @@ void mmc_set_clock(struct mmc_host *host, unsigned int hz)
+ 	mmc_host_clk_release(host);
+ }
+ 
+-void mmc_finish_tuning(struct mmc_host *host)
+-{
+-	host->ios.finish_tuning_flag = 1;
+-	mmc_set_ios(host);
+-	host->ios.finish_tuning_flag = 0;
+-}
+-
+-void mmc_set_tuning(struct mmc_host *host, unsigned int tuning)
+-{
+-	WARN_ON(tuning < host->tuning_min);
+-	if (tuning > host->tuning_max)
+-		tuning = host->tuning_max;
+-
+-	host->ios.tuning = tuning;
+-	host->ios.tuning_flag = 1;
+-	mmc_set_ios(host);
+-	host->ios.tuning_flag = 0;
+-}
+-
+ #ifdef CONFIG_MMC_CLKGATE
+ /*
+  * This gates the clock by setting it to 0 Hz.
+diff --git a/drivers/mmc/core/core.h b/drivers/mmc/core/core.h
+index afed70f..14664f1 100644
+--- a/drivers/mmc/core/core.h
++++ b/drivers/mmc/core/core.h
+@@ -33,8 +33,6 @@ void mmc_init_erase(struct mmc_card *card);
+ 
+ void mmc_set_chip_select(struct mmc_host *host, int mode);
+ void mmc_set_clock(struct mmc_host *host, unsigned int hz);
+-void mmc_set_tuning(struct mmc_host *host, unsigned int tuning);
+-void mmc_finish_tuning(struct mmc_host *host);
+ void mmc_gate_clock(struct mmc_host *host);
+ void mmc_ungate_clock(struct mmc_host *host);
+ void mmc_set_ungated(struct mmc_host *host);
+diff --git a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
+index ae4b1af..716c0a9 100644
+--- a/drivers/mmc/core/sd.c
++++ b/drivers/mmc/core/sd.c
+@@ -624,38 +624,8 @@ static int mmc_sd_init_uhs_card(struct mmc_card *card)
+ 		goto out;
+ 
+ 	/* SPI mode doesn't define CMD19 */
+-#ifdef CONFIG_MMC_SDHCI_ESDHC_IMX
+-	if (!mmc_host_is_spi(card->host) &&
+-		(card->sd_bus_speed == UHS_SDR104_BUS_SPEED)) {
+-		int min, max, avg;
+-
+-		min = card->host->tuning_min;
+-		while (min < card->host->tuning_max) {
+-			mmc_set_tuning(card->host, min);
+-			if (!mmc_send_tuning_cmd(card))
+-				break;
+-			min += card->host->tuning_step;
+-		}
+-
+-		max = min + card->host->tuning_step;
+-		while (max < card->host->tuning_max) {
+-			mmc_set_tuning(card->host, max);
+-			if (mmc_send_tuning_cmd(card)) {
+-				max -= card->host->tuning_step;
+-				break;
+-			}
+-			max += card->host->tuning_step;
+-		}
+-
+-		avg = (min + max) / 2;
+-		mmc_set_tuning(card->host, avg);
+-		mmc_send_tuning_cmd(card);
+-		mmc_finish_tuning(card->host);
+-	}
+-#else
+ 	if (!mmc_host_is_spi(card->host) && card->host->ops->execute_tuning)
+ 		err = card->host->ops->execute_tuning(card->host);
+-#endif
+ 
+ out:
+ 	kfree(status);
+diff --git a/drivers/mmc/core/sd_ops.c b/drivers/mmc/core/sd_ops.c
+index afafc8c..021fed1 100644
+--- a/drivers/mmc/core/sd_ops.c
++++ b/drivers/mmc/core/sd_ops.c
+@@ -345,49 +345,6 @@ int mmc_sd_switch(struct mmc_card *card, int mode, int group,
+ 	return 0;
+ }
+ 
+-int mmc_send_tuning_cmd(struct mmc_card *card)
+-{
+-	struct mmc_request mrq;
+-	struct mmc_command cmd;
+-	struct mmc_data data;
+-	struct scatterlist sg;
+-	char scr[64];
+-
+-	BUG_ON(!card);
+-	BUG_ON(!card->host);
+-
+-	memset(&mrq, 0, sizeof(struct mmc_request));
+-	memset(&cmd, 0, sizeof(struct mmc_command));
+-	memset(&data, 0, sizeof(struct mmc_data));
+-	memset(scr, 0, 64);
+-
+-	mrq.cmd = &cmd;
+-	mrq.data = &data;
+-
+-	cmd.opcode = MMC_SEND_TUNING_BLOCK;
+-	cmd.arg = 0;
+-	cmd.flags = MMC_RSP_R1 | MMC_CMD_ADTC;
+-
+-	data.blksz = 64;
+-	data.blocks = 1;
+-	data.flags = MMC_DATA_READ;
+-	data.sg = &sg;
+-	data.sg_len = 1;
+-
+-	sg_init_one(&sg, scr, 64);
+-
+-	mmc_set_data_timeout(&data, card);
+-
+-	mmc_wait_for_req(card->host, &mrq);
+-
+-	if (cmd.error)
+-		return cmd.error;
+-	if (data.error)
+-		return data.error;
+-
+-	return 0;
+-}
+-
+ int mmc_app_sd_status(struct mmc_card *card, void *ssr)
+ {
+ 	int err;
+diff --git a/drivers/mmc/core/sd_ops.h b/drivers/mmc/core/sd_ops.h
+index 2142da4..ffc2305 100644
+--- a/drivers/mmc/core/sd_ops.h
++++ b/drivers/mmc/core/sd_ops.h
+@@ -20,7 +20,6 @@ int mmc_app_send_scr(struct mmc_card *card, u32 *scr);
+ int mmc_sd_switch(struct mmc_card *card, int mode, int group,
+ 	u8 value, u8 *resp);
+ int mmc_app_sd_status(struct mmc_card *card, void *ssr);
+-int mmc_send_tuning_cmd(struct mmc_card *card);
+ 
+ #endif
+ 
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index ff45949..c1d8fb3 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -20,8 +20,10 @@
+ #include <linux/mmc/host.h>
+ #include <linux/mmc/sdhci-pltfm.h>
+ #include <linux/mmc/mmc.h>
++#include <linux/mmc/card.h>
+ #include <linux/mmc/sdio.h>
+ #include <linux/mmc/sd.h>
++#include <linux/scatterlist.h>
+ #include <mach/hardware.h>
+ #include <mach/esdhc.h>
+ #include "sdhci.h"
+@@ -70,6 +72,7 @@
+ 
+ #define SDHCI_FSL_SVN_300			0x11
+ 
++#define SDHCI_TUNING_BLOCK_PATTERN_LEN		64
+ /*
+  * There is an INT DMA ERR mis-match between eSDHC and STD SDHC SPEC:
+  * Bit25 is used in STD SPEC, and is reserved in fsl eSDHC design,
+@@ -91,6 +94,9 @@
+  */
+ #define ESDHC_FLAG_MULTIBLK_NO_INT	(1 << 1)
+ 
++static void esdhc_prepare_tuning(struct sdhci_host *host, u32 val);
++static void esdhc_post_tuning(struct sdhci_host *host);
++
+ struct pltfm_imx_data {
+ 	int flags;
+ 	u32 scratchpad;
+@@ -98,6 +104,80 @@ struct pltfm_imx_data {
+ 	unsigned char uhs_mode;
+ };
+ 
++static void request_done(struct mmc_request *mrq)
++{
++	complete(&mrq->completion);
++}
++
++static int esdhc_send_tuning_cmd(struct sdhci_host *host)
++{
++	struct mmc_command cmd = {0};
++	struct mmc_request mrq = {0};
++	struct mmc_data data = {0};
++	struct scatterlist sg;
++	char tuning_pattern[SDHCI_TUNING_BLOCK_PATTERN_LEN];
++
++	cmd.opcode = MMC_SEND_TUNING_BLOCK;
++	cmd.arg = 0;
++	cmd.flags = MMC_RSP_R1 | MMC_CMD_ADTC;
++
++	data.blksz = SDHCI_TUNING_BLOCK_PATTERN_LEN;
++	data.blocks = 1;
++	data.flags = MMC_DATA_READ;
++	data.sg = &sg;
++	data.sg_len = 1;
++
++	sg_init_one(&sg, tuning_pattern, sizeof(tuning_pattern));
++
++	mrq.cmd = &cmd;
++	mrq.cmd->mrq = &mrq;
++	mrq.data = &data;
++	mrq.data->mrq = &mrq;
++	mrq.cmd->data = mrq.data;
++
++	mrq.done = request_done;
++
++	init_completion(&(mrq.completion));
++	sdhci_request(host->mmc, &mrq);
++	wait_for_completion(&(mrq.completion));
++
++	if (cmd.error)
++		return cmd.error;
++	if (data.error)
++		return data.error;
++
++	return 0;
++}
++
++static int esdhc_execute_tuning(struct sdhci_host *host)
++{
++	int min, max, avg;
++
++	min = host->tuning_min;
++	while (min < host->tuning_max) {
++		esdhc_prepare_tuning(host, min);
++		if (!esdhc_send_tuning_cmd(host))
++			break;
++		min += host->tuning_step;
++	}
++
++	max = min + host->tuning_step;
++	while (max < host->tuning_max) {
++		esdhc_prepare_tuning(host, max);
++		if (esdhc_send_tuning_cmd(host)) {
++			max -= host->tuning_step;
++			break;
++		}
++		max += host->tuning_step;
++	}
++
++	avg = (min + max) / 2;
++	esdhc_prepare_tuning(host, avg);
++	esdhc_send_tuning_cmd(host);
++	esdhc_post_tuning(host);
++	return 0;
++}
++
+ static inline void esdhc_clrset_le(struct sdhci_host *host, u32 mask, u32 val, int reg)
+ {
+ 	void __iomem *base = host->ioaddr + (reg & ~0x3);
+@@ -304,7 +384,7 @@ static u16 esdhc_readw_le(struct sdhci_host *host, int reg)
+ 	return readw(host->ioaddr + reg);
+ }
+ 
+-void esdhc_post_tuning(struct sdhci_host *host)
++static void esdhc_post_tuning(struct sdhci_host *host)
+ {
+ 	struct sdhci_pltfm_host *pltfm_host = sdhci_priv(host);
+ 	struct pltfm_imx_data *imx_data = pltfm_host->priv;
+@@ -341,7 +421,7 @@ static void esdhc_reset(struct sdhci_host *host)
+ 	}
+ }
+ 
+-void esdhc_prepare_tuning(struct sdhci_host *host, u32 val)
++static void esdhc_prepare_tuning(struct sdhci_host *host, u32 val)
+ {
+ 	u32 reg;
+ 
+@@ -651,8 +731,6 @@ static struct sdhci_ops sdhci_esdhc_ops = {
+ 	.set_clock = esdhc_set_clock,
+ 	.get_max_clock = esdhc_pltfm_get_max_clock,
+ 	.get_min_clock = esdhc_pltfm_get_min_clock,
+-	.pre_tuning = esdhc_prepare_tuning,
+-	.post_tuning = esdhc_post_tuning,
+ 	.platform_8bit_width = plt_8bit_width,
+ 	.platform_clk_ctrl = plt_clk_ctrl,
+ };
+@@ -725,6 +803,9 @@ static int esdhc_pltfm_init(struct sdhci_host *host, struct sdhci_pltfm_data *pd
+ 	host->ocr_avail_mmc = MMC_VDD_29_30 | MMC_VDD_30_31 | \
+ 			MMC_VDD_32_33 | MMC_VDD_33_34;
+ 
++	if (cpu_is_mx6q() || cpu_is_mx6dl())
++		sdhci_esdhc_ops.platform_execute_tuning = esdhc_execute_tuning;
++
+ 	if (boarddata->support_18v)
+ 		host->ocr_avail_sd |= MMC_VDD_165_195;
+ 	if (boarddata->support_8bit)
+diff --git a/drivers/mmc/host/sdhci.c b/drivers/mmc/host/sdhci.c
+index 53af443..7a7ae2d 100755
+--- a/drivers/mmc/host/sdhci.c
++++ b/drivers/mmc/host/sdhci.c
+@@ -1247,7 +1247,7 @@ static void sdhci_set_power(struct sdhci_host *host, unsigned short power)
+  *                                                                           *
+ \*****************************************************************************/
+ 
+-static void sdhci_request(struct mmc_host *mmc, struct mmc_request *mrq)
++void sdhci_request(struct mmc_host *mmc, struct mmc_request *mrq)
+ {
+ 	struct sdhci_host *host;
+ 	bool present;
+@@ -1330,18 +1330,6 @@ static void sdhci_set_ios(struct mmc_host *mmc, struct mmc_ios *ios)
+ 	if (host->flags & SDHCI_DEVICE_DEAD)
+ 		goto out;
+ 
+-	if (ios->finish_tuning_flag) {
+-		if (host->ops->post_tuning)
+-			host->ops->post_tuning(host);
+-		goto out;
+-	}
+-
+-	if (ios->tuning_flag) {
+-		/* means this request is for tuning only */
+-		if (host->ops->pre_tuning)
+-			host->ops->pre_tuning(host, ios->tuning);
+-		goto out;
+-	}
+ 	/*
+ 	 * Reset the chip on each power off.
+ 	 * Should clear out any weird states.
+@@ -1692,6 +1680,14 @@ static int sdhci_execute_tuning(struct mmc_host *mmc)
+ 		return 0;
+ 	}
+ 
++	if (ctrl & SDHCI_CTRL_EXEC_TUNING) {
++		if (host->ops->platform_execute_tuning) {
++			spin_unlock(&host->lock);
++			enable_irq(host->irq);
++			return host->ops->platform_execute_tuning(host);
++		}
++	}
++
+ 	sdhci_writew(host, ctrl, SDHCI_HOST_CONTROL2);
+ 
+ 	/*
+diff --git a/drivers/mmc/host/sdhci.h b/drivers/mmc/host/sdhci.h
+index 27b1250..ef45fa98 100644
+--- a/drivers/mmc/host/sdhci.h
++++ b/drivers/mmc/host/sdhci.h
+@@ -274,9 +274,8 @@ struct sdhci_ops {
+ 	void	(*platform_reset_exit)(struct sdhci_host *host, u8 mask);
+ 	int	(*set_uhs_signaling)(struct sdhci_host *host, unsigned int uhs);
+ 
+-	void		(*pre_tuning)(struct sdhci_host *host, u32 val);
+-	void		(*post_tuning)(struct sdhci_host *host);
+ 	void		(*platform_clk_ctrl)(struct sdhci_host *host, bool enable);
++	int		(*platform_execute_tuning)(struct sdhci_host *host);
+ };
+ 
+ #ifdef CONFIG_MMC_SDHCI_IO_ACCESSORS
+@@ -382,4 +381,6 @@ extern int sdhci_resume_host(struct sdhci_host *host);
+ extern void sdhci_enable_irq_wakeups(struct sdhci_host *host);
+ #endif
+ 
++void sdhci_request(struct mmc_host *mmc, struct mmc_request *mrq);
++
+ #endif /* __SDHCI_HW_H */
+diff --git a/include/linux/mmc/host.h b/include/linux/mmc/host.h
+index 94ff413..472b157 100644
+--- a/include/linux/mmc/host.h
++++ b/include/linux/mmc/host.h
+@@ -74,9 +74,6 @@ struct mmc_ios {
+ #define MMC_SET_DRIVER_TYPE_A	1
+ #define MMC_SET_DRIVER_TYPE_C	2
+ #define MMC_SET_DRIVER_TYPE_D	3
+-	unsigned int	tuning_flag;		/* request tuning only */
+-	unsigned int	finish_tuning_flag;
+-	unsigned int	tuning;			/* tuning parameter */
+ };
+ 
+ struct mmc_host_ops {
+-- 
+1.7.7.4
+

@@ -1,0 +1,51 @@
+From f8e7fdf743d90ab57cf482bfb8f678f444892aee Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Mon, 22 Aug 2011 11:44:51 +0800
+Subject: [PATCH 0373/2463] ENGR00154080 ipuv3: fix clear buffer function
+
+fix clear buffer function.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c |   25 +++++++++----------------
+ 1 files changed, 9 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index d3dccdc..11e8a58 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -2143,22 +2143,15 @@ void ipu_clear_buffer_ready(struct ipu_soc *ipu, ipu_channel_t channel, ipu_buff
+ 
+ 	spin_lock_irqsave(&ipu->ipu_lock, lock_flags);
+ 	ipu_cm_write(ipu, 0xF0300000, IPU_GPR); /* write one to clear */
+-	if (bufNum == 0) {
+-		if (idma_is_set(ipu, IPU_CHA_BUF0_RDY, dma_ch)) {
+-			ipu_cm_write(ipu, idma_mask(dma_ch),
+-					IPU_CHA_BUF0_RDY(dma_ch));
+-		}
+-	} else if (bufNum == 1) {
+-		if (idma_is_set(ipu, IPU_CHA_BUF1_RDY, dma_ch)) {
+-			ipu_cm_write(ipu, idma_mask(dma_ch),
+-					IPU_CHA_BUF1_RDY(dma_ch));
+-		}
+-	} else {
+-		if (idma_is_set(ipu, IPU_CHA_BUF2_RDY, dma_ch)) {
+-			ipu_cm_write(ipu, idma_mask(dma_ch),
+-					IPU_CHA_BUF2_RDY(dma_ch));
+-		}
+-	}
++	if (bufNum == 0)
++		ipu_cm_write(ipu, idma_mask(dma_ch),
++				IPU_CHA_BUF0_RDY(dma_ch));
++	else if (bufNum == 1)
++		ipu_cm_write(ipu, idma_mask(dma_ch),
++				IPU_CHA_BUF1_RDY(dma_ch));
++	else
++		ipu_cm_write(ipu, idma_mask(dma_ch),
++				IPU_CHA_BUF2_RDY(dma_ch));
+ 	ipu_cm_write(ipu, 0x0, IPU_GPR); /* write one to set */
+ 	spin_unlock_irqrestore(&ipu->ipu_lock, lock_flags);
+ }
+-- 
+1.7.7.4
+

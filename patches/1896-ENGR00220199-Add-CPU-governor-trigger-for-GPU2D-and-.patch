@@ -1,0 +1,51 @@
+From 88a4498cc9eec58abf4687190a79068d0a0b8fd6 Mon Sep 17 00:00:00 2001
+From: Richard Liu <r66033@freescale.com>
+Date: Tue, 14 Aug 2012 14:08:29 +0800
+Subject: [PATCH 1896/2463] ENGR00220199 Add CPU governor trigger for GPU2D
+ and GPUVG core
+
+Add CPU governor trigger for GPU2D and GPUVG core, without these trigger
+some benchmark show performance drop when enable CPU governor
+
+Signed-off-by: Richard Liu <r66033@freescale.com>
+Acked-by: Lily Zhang
+---
+ arch/arm/mach-mx6/irq.c |    8 ++++++++
+ include/linux/cpufreq.h |    2 +-
+ 2 files changed, 9 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/irq.c b/arch/arm/mach-mx6/irq.c
+index 22ca75c..197c451 100644
+--- a/arch/arm/mach-mx6/irq.c
++++ b/arch/arm/mach-mx6/irq.c
+@@ -57,6 +57,14 @@ static struct irq_tuner mxc_irq_tuner[] = {
+ 	 .up_threshold = 0,
+ 	 .enable = 1,},
+ 	{
++	 .irq_number = 42, /* GPU 2D */
++	 .up_threshold = 40,
++	 .enable = 1,},
++	{
++	 .irq_number = 43, /* GPU VG */
++	 .up_threshold = 0,
++	 .enable = 1,},
++	{
+ 	 .irq_number = 54, /* uSDHC1 */
+ 	 .up_threshold = 4,
+ 	 .enable = 1,},
+diff --git a/include/linux/cpufreq.h b/include/linux/cpufreq.h
+index a61416f..a569962 100644
+--- a/include/linux/cpufreq.h
++++ b/include/linux/cpufreq.h
+@@ -73,7 +73,7 @@ extern struct kobject *cpufreq_global_kobject;
+  * not issue cpu freq change, but the devices' performance will be impacted
+  * significantly, we need to add irq number check to be as one condition of
+  * CPU freq change. */
+-#define MAX_CPUFREQ_IRQ_NUMBER 10
++#define MAX_CPUFREQ_IRQ_NUMBER 20
+ struct irq_tuner {
+ 	unsigned int irq_number;
+ 	unsigned int up_threshold;
+-- 
+1.7.7.4
+

@@ -1,0 +1,34 @@
+From 1e54665eb709d29f0df742737c5f529b799087f7 Mon Sep 17 00:00:00 2001
+From: "guoyin.chen" <guoyin.chen@freescale.com>
+Date: Fri, 7 Dec 2012 10:39:57 +0800
+Subject: [PATCH 2325/2463] ENGR00236141 csi:Add stride alignment setting from
+ userspace
+
+In android, IPU fills the I420 buffer. And GPU shows the buffer to display.
+mx6's GPU has 32 Y-stride alignment for I420. The stride alignment will
+be passed through by bytesperline. This update is only for
+csi->smfc->mem channel.
+
+Signed-off-by: guoyin.chen <guoyin.chen@freescale.com>
+(cherry picked from commit 4708dc1999ed4857799100434e4f46f68f4e7c13)
+---
+ drivers/media/video/mxc/capture/ipu_csi_enc.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ipu_csi_enc.c b/drivers/media/video/mxc/capture/ipu_csi_enc.c
+index 2c8d8d0..ff90e2b 100644
+--- a/drivers/media/video/mxc/capture/ipu_csi_enc.c
++++ b/drivers/media/video/mxc/capture/ipu_csi_enc.c
+@@ -171,7 +171,8 @@ static int csi_enc_setup(cam_data *cam)
+ 	err = ipu_init_channel_buffer(cam->ipu, CSI_MEM, IPU_OUTPUT_BUFFER,
+ 				      pixel_fmt, cam->v2f.fmt.pix.width,
+ 				      cam->v2f.fmt.pix.height,
+-				      cam->v2f.fmt.pix.width, IPU_ROTATE_NONE,
++				      cam->v2f.fmt.pix.bytesperline,
++				      IPU_ROTATE_NONE,
+ 				      dummy, dummy, 0,
+ 				      cam->offset.u_offset,
+ 				      cam->offset.v_offset);
+-- 
+1.7.7.4
+

@@ -1,0 +1,74 @@
+From 6c3b67138ca26e6f7a941f15a2546d7df7e94abd Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Fri, 23 Mar 2012 14:08:51 +0800
+Subject: [PATCH 1217/2463] ENGR00177757 Fix suspend/resume issue when enable
+ localtimer
+
+Need to disable localtimer's PPI when suspend, or ARM core
+will run into exception when resume.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/common/gic.c               |    9 +++++++++
+ arch/arm/include/asm/hardware/gic.h |    1 +
+ arch/arm/kernel/smp_twd.c           |    3 +++
+ 3 files changed, 13 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/common/gic.c b/arch/arm/common/gic.c
+index ab8c07d..b33a75f 100644
+--- a/arch/arm/common/gic.c
++++ b/arch/arm/common/gic.c
+@@ -385,6 +385,15 @@ void __cpuinit gic_enable_ppi(unsigned int irq)
+ 	gic_unmask_irq(irq_get_irq_data(irq));
+ 	local_irq_restore(flags);
+ }
++void __cpuinit gic_disable_ppi(unsigned int irq)
++{
++	unsigned long flags;
++
++	local_irq_save(flags);
++	irq_set_status_flags(irq, IRQ_NOPROBE);
++	gic_mask_irq(irq_get_irq_data(irq));
++	local_irq_restore(flags);
++}
+ 
+ void save_gic_cpu_state(unsigned int gic_nr, struct gic_cpu_state *gcs)
+ {
+diff --git a/arch/arm/include/asm/hardware/gic.h b/arch/arm/include/asm/hardware/gic.h
+index 0fa541d..c8647b3 100644
+--- a/arch/arm/include/asm/hardware/gic.h
++++ b/arch/arm/include/asm/hardware/gic.h
+@@ -67,6 +67,7 @@ void gic_secondary_init(unsigned int);
+ void gic_cascade_irq(unsigned int gic_nr, unsigned int irq);
+ void gic_raise_softirq(const struct cpumask *mask, unsigned int irq);
+ void gic_enable_ppi(unsigned int);
++void gic_disable_ppi(unsigned int);
+ void save_gic_cpu_state(unsigned int gic_nr, struct gic_cpu_state *gcs);
+ void restore_gic_cpu_state(unsigned int gic_nr, struct gic_cpu_state *gcs);
+ void save_gic_dist_state(unsigned int gic_nr, struct gic_dist_state *gds);
+diff --git a/arch/arm/kernel/smp_twd.c b/arch/arm/kernel/smp_twd.c
+index 983f8cc..a5a2f45 100644
+--- a/arch/arm/kernel/smp_twd.c
++++ b/arch/arm/kernel/smp_twd.c
+@@ -43,15 +43,18 @@ static void twd_set_mode(enum clock_event_mode mode,
+ 		ctrl = TWD_TIMER_CONTROL_ENABLE | TWD_TIMER_CONTROL_IT_ENABLE
+ 			| TWD_TIMER_CONTROL_PERIODIC;
+ 		__raw_writel(twd_timer_rate / HZ, twd_base + TWD_TIMER_LOAD);
++		gic_enable_ppi(clk->irq);
+ 		break;
+ 	case CLOCK_EVT_MODE_ONESHOT:
+ 		/* period set, and timer enabled in 'next_event' hook */
+ 		ctrl = TWD_TIMER_CONTROL_IT_ENABLE | TWD_TIMER_CONTROL_ONESHOT;
++		gic_enable_ppi(clk->irq);
+ 		break;
+ 	case CLOCK_EVT_MODE_UNUSED:
+ 	case CLOCK_EVT_MODE_SHUTDOWN:
+ 	default:
+ 		ctrl = 0;
++		gic_disable_ppi(clk->irq);
+ 	}
+ 
+ 	__raw_writel(ctrl, twd_base + TWD_TIMER_CONTROL);
+-- 
+1.7.7.4
+

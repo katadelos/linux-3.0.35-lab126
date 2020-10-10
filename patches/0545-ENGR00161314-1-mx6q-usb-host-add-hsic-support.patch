@@ -1,0 +1,992 @@
+From 3dc34bfa723c87cc7542f15d2ba665ad8dcb1e2d Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Thu, 3 Nov 2011 13:57:25 +0800
+Subject: [PATCH 0545/2463] ENGR00161314-1 mx6q usb-host: add hsic support
+
+MSL part
+
+Add HSIC support for Host2 and Host3, for HSIC mode, there
+is not usb phy needed, the usb device is always at the board
+
+- Validation hardware: iMX6Q Validation Port Card and Re-worked
+Rev X3 board, for hardware rework detail, contact Ken Sun (b03826)
+
+- Validation device: HSIC interface SMSC HUB(USB4640) and Host 3.
+Host 2 is coding finishes, but not verified due to hardware limitation.
+
+- Pin Conflict with Ethernet, order to use HSIC, the user need
+disable ethernet function at both u-boot and linux kernel.
+For u-boot: please undefine CONFIG_MXC_FEC at your board config file
+For kernel: please define CONFIG_USB_EHCI_ARC_HSIC, the entry is:
+Device Drivers---> USB support---> Support HSIC Host controller
+for Freescale SoC
+
+- Suspend/resume and wakeup are not supported due to IC issues,
+these IC issues will be fixed at TO1.1 for i.mx6, software will
+add these support after receiving TO1.1 chip.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig                    |    6 +-
+ arch/arm/mach-mx6/Makefile                         |    2 +-
+ arch/arm/mach-mx6/board-mx6q_arm2.c                |   17 ++-
+ arch/arm/mach-mx6/clock.c                          |   19 ++
+ arch/arm/mach-mx6/usb.h                            |    4 +
+ arch/arm/mach-mx6/usb_h2.c                         |  214 +++++++++++++++++++
+ arch/arm/mach-mx6/usb_h3.c                         |  216 ++++++++++++++++++++
+ arch/arm/plat-mxc/Makefile                         |    1 +
+ .../plat-mxc/devices/platform-fsl-usb2-wakeup.c    |    2 +
+ arch/arm/plat-mxc/devices/platform-mxc-ehci.c      |    2 +
+ arch/arm/plat-mxc/include/mach/arc_otg.h           |   58 ++++++
+ arch/arm/plat-mxc/include/mach/fsl_usb.h           |    7 +
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h        |   24 ++-
+ arch/arm/plat-mxc/include/mach/mx6.h               |    8 +
+ arch/arm/plat-mxc/include/mach/regs-usbphy-mx6.h   |    9 +-
+ arch/arm/plat-mxc/usb_common.c                     |    4 +
+ arch/arm/plat-mxc/usb_hsic_xcvr.c                  |   56 +++++
+ 17 files changed, 632 insertions(+), 17 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 3d0bfc1..60870a5 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux/arm 2.6.38 Kernel Configuration
+-# Wed Nov  2 16:21:15 2011
++# Fri Nov  4 11:06:29 2011
+ #
+ CONFIG_ARM=y
+ CONFIG_HAVE_PWM=y
+@@ -897,8 +897,7 @@ CONFIG_SMSC911X=y
+ # CONFIG_KS8851 is not set
+ # CONFIG_KS8851_MLL is not set
+ CONFIG_FEC=y
+-# CONFIG_FEC_158 is not set
+-# CONFIG_OUT_OF_BAND is not set
++# CONFIG_FEC_1588 is not set
+ # CONFIG_NETDEV_1000 is not set
+ # CONFIG_NETDEV_10000 is not set
+ CONFIG_WLAN=y
+@@ -1608,6 +1607,7 @@ CONFIG_USB_SUSPEND=y
+ CONFIG_USB_EHCI_HCD=y
+ CONFIG_USB_EHCI_ARC=y
+ CONFIG_USB_EHCI_ARC_OTG=y
++# CONFIG_USB_EHCI_ARC_HSIC is not set
+ # CONFIG_USB_STATIC_IRAM is not set
+ CONFIG_USB_EHCI_ROOT_HUB_TT=y
+ # CONFIG_USB_EHCI_TT_NEWSCHED is not set
+diff --git a/arch/arm/mach-mx6/Makefile b/arch/arm/mach-mx6/Makefile
+index c0d9a85..7b3231f 100644
+--- a/arch/arm/mach-mx6/Makefile
++++ b/arch/arm/mach-mx6/Makefile
+@@ -3,7 +3,7 @@
+ #
+ 
+ # Object file lists.
+-obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o usb_dr.o usb_h1.o pm.o cpu_op-mx6.o mx6_wfi.o mx6_anatop_regulator.o
++obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o usb_dr.o usb_h1.o usb_h2.o usb_h3.o pm.o cpu_op-mx6.o mx6_wfi.o mx6_anatop_regulator.o
+ 
+ obj-$(CONFIG_ARCH_MX6) += clock.o mx6q_suspend.o
+ obj-$(CONFIG_MACH_MX6Q_ARM2) += board-mx6q_arm2.o
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index c1d559a..43db966 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -120,8 +120,17 @@ static iomux_v3_cfg_t mx6q_arm2_pads[] = {
+ 	/* UART4 for debug */
+ 	MX6Q_PAD_KEY_COL0__UART4_TXD,
+ 	MX6Q_PAD_KEY_ROW0__UART4_RXD,
+-
++	/* USB HSIC ports use the same pin with ENET */
++#ifdef CONFIG_USB_EHCI_ARC_HSIC
++	/* USB H2 strobe/data pin */
++	MX6Q_PAD_RGMII_TX_CTL__USBOH3_H2_STROBE,
++	MX6Q_PAD_RGMII_TXC__USBOH3_H2_DATA,
++
++	/* USB H3 strobe/data pin */
++	MX6Q_PAD_RGMII_RXC__USBOH3_H3_STROBE,
++	MX6Q_PAD_RGMII_RX_CTL__USBOH3_H3_DATA,
+ 	/* ENET */
++#else
+ 	MX6Q_PAD_KEY_COL1__ENET_MDIO,
+ 	MX6Q_PAD_KEY_COL2__ENET_MDC,
+ 	MX6Q_PAD_RGMII_TXC__ENET_RGMII_TXC,
+@@ -137,6 +146,7 @@ static iomux_v3_cfg_t mx6q_arm2_pads[] = {
+ 	MX6Q_PAD_RGMII_RD2__ENET_RGMII_RD2,
+ 	MX6Q_PAD_RGMII_RD3__ENET_RGMII_RD3,
+ 	MX6Q_PAD_RGMII_RX_CTL__ENET_RGMII_RX_CTL,
++#endif
+ 	/* MCLK for csi0 */
+ 	MX6Q_PAD_GPIO_0__CCM_CLKO,
+ 	MX6Q_PAD_GPIO_3__CCM_CLKO2,
+@@ -709,7 +719,12 @@ static void __init imx6q_arm2_init_usb(void)
+ 	mx6_set_otghost_vbus_func(imx6q_arm2_usbotg_vbus);
+ 	mx6_usb_dr_init();
+ 	mx6_usb_h1_init();
++#ifdef CONFIG_USB_EHCI_ARC_HSIC
++	mx6_usb_h2_init();
++	mx6_usb_h3_init();
++#endif
+ }
++
+ static struct viv_gpu_platform_data imx6q_gpu_pdata __initdata = {
+ 	.reserved_mem_size = SZ_128M,
+ };
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 6a71747..7ddd287 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -634,6 +634,7 @@ static struct clk pll3_usb_otg_main_clk = {
+ 	.get_rate = _clk_pll3_usb_otg_get_rate,
+ };
+ 
++/* for USB OTG */
+ static struct clk usb_phy1_clk = {
+ 	__INIT_CLK_DEBUG(usb_phy1_clk)
+ 	.parent = &pll3_usb_otg_main_clk,
+@@ -641,6 +642,22 @@ static struct clk usb_phy1_clk = {
+ 	.get_rate = _clk_pll3_usb_otg_get_rate,
+ };
+ 
++/* For HSIC port 1 */
++static struct clk usb_phy3_clk = {
++	__INIT_CLK_DEBUG(usb_phy3_clk)
++	.parent = &pll3_usb_otg_main_clk,
++	.set_rate = _clk_pll3_usb_otg_set_rate,
++	.get_rate = _clk_pll3_usb_otg_get_rate,
++};
++
++/* For HSIC port 2 */
++static struct clk usb_phy4_clk = {
++	__INIT_CLK_DEBUG(usb_phy4_clk)
++	.parent = &pll3_usb_otg_main_clk,
++	.set_rate = _clk_pll3_usb_otg_set_rate,
++	.get_rate = _clk_pll3_usb_otg_get_rate,
++};
++
+ static struct clk pll3_pfd_508M = {
+ 	__INIT_CLK_DEBUG(pll3_pfd_508M)
+ 	.parent = &pll3_usb_otg_main_clk,
+@@ -4732,6 +4749,8 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "imx_sata_clk", sata_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "usboh3_clk", usboh3_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "usb_phy1_clk", usb_phy1_clk),
++	_REGISTER_CLOCK(NULL, "usb_phy3_clk", usb_phy3_clk),
++	_REGISTER_CLOCK(NULL, "usb_phy4_clk", usb_phy4_clk),
+ 	_REGISTER_CLOCK("imx2-wdt.0", NULL, dummy_clk),
+ 	_REGISTER_CLOCK("imx2-wdt.1", NULL, dummy_clk),
+ 	_REGISTER_CLOCK(NULL, "hdmi_isfr_clk", hdmi_clk[0]),
+diff --git a/arch/arm/mach-mx6/usb.h b/arch/arm/mach-mx6/usb.h
+index 88f14d0..145cfbf 100644
+--- a/arch/arm/mach-mx6/usb.h
++++ b/arch/arm/mach-mx6/usb.h
+@@ -30,8 +30,12 @@ extern void gpio_usbotg_utmi_inactive(void);
+ 
+ extern void __init mx6_usb_dr_init(void);
+ extern void __init mx6_usb_h1_init(void);
++extern void __init mx6_usb_h2_init(void);
++extern void __init mx6_usb_h3_init(void);
+ 
+ typedef void (*driver_vbus_func)(bool);
++extern void mx6_set_host3_vbus_func(driver_vbus_func);
++extern void mx6_set_host2_vbus_func(driver_vbus_func);
+ extern void mx6_set_host1_vbus_func(driver_vbus_func);
+ extern void mx6_set_otghost_vbus_func(driver_vbus_func);
+ extern struct platform_device anatop_thermal_device;
+diff --git a/arch/arm/mach-mx6/usb_h2.c b/arch/arm/mach-mx6/usb_h2.c
+new file mode 100644
+index 0000000..edbad95
+--- /dev/null
++++ b/arch/arm/mach-mx6/usb_h2.c
+@@ -0,0 +1,214 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * High Speed Inter Chip code for i.MX6, this file is for HSIC port 1
++ */
++
++#include <linux/kernel.h>
++#include <linux/types.h>
++#include <linux/delay.h>
++#include <linux/clk.h>
++#include <linux/platform_device.h>
++#include <linux/fsl_devices.h>
++#include <linux/gpio.h>
++#include <linux/io.h>
++#include <linux/delay.h>
++#include <mach/arc_otg.h>
++#include <mach/hardware.h>
++#include <mach/iomux-mx6q.h>
++#include "devices-imx6q.h"
++#include "regs-anadig.h"
++#include "usb.h"
++
++static struct clk *usb_oh3_clk;
++static struct clk *usb_phy3_clk;
++
++extern int clk_get_usecount(struct clk *clk);
++static struct fsl_usb2_platform_data usbh2_config;
++
++static void usbh2_internal_phy_clock_gate(bool on)
++{
++	if (on) {
++		USB_H2_CTRL |= UCTRL_UTMI_ON_CLOCK;
++		USB_UH2_HSIC_CTRL |= HSIC_CLK_ON;
++	} else {
++		USB_UH2_HSIC_CTRL &= ~HSIC_CLK_ON;
++		USB_H2_CTRL &= ~UCTRL_UTMI_ON_CLOCK;
++	}
++}
++
++static int fsl_usb_host_init_ext(struct platform_device *pdev)
++{
++	int ret;
++	struct clk *usb_clk;
++	usb_clk = clk_get(NULL, "usboh3_clk");
++	clk_enable(usb_clk);
++	usb_oh3_clk = usb_clk;
++
++	usb_clk = clk_get(NULL, "usb_phy3_clk");
++	clk_enable(usb_clk);
++	usb_phy3_clk = usb_clk;
++
++	ret = fsl_usb_host_init(pdev);
++	if (ret) {
++		printk(KERN_ERR "host1 init fails......\n");
++		return ret;
++	}
++	usbh2_internal_phy_clock_gate(true);
++	 /* Host2 HSIC enable */
++	USB_UH2_HSIC_CTRL |= HSIC_EN;
++
++	return 0;
++}
++
++static void fsl_usb_host_uninit_ext(struct platform_device *pdev)
++{
++	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
++
++	fsl_usb_host_uninit(pdata);
++
++	usbh2_internal_phy_clock_gate(false);
++
++	clk_disable(usb_phy3_clk);
++	clk_put(usb_phy3_clk);
++
++	clk_disable(usb_oh3_clk);
++	clk_put(usb_oh3_clk);
++
++}
++
++static void usbh2_clock_gate(bool on)
++{
++	pr_debug("%s: on is %d\n", __func__, on);
++	if (on) {
++		clk_enable(usb_oh3_clk);
++		clk_enable(usb_phy3_clk);
++		usbh2_internal_phy_clock_gate(true);
++	} else {
++		usbh2_internal_phy_clock_gate(false);
++		clk_disable(usb_phy3_clk);
++		clk_disable(usb_oh3_clk);
++	}
++}
++
++void mx6_set_host2_vbus_func(driver_vbus_func driver_vbus)
++{
++	usbh2_config.platform_driver_vbus = driver_vbus;
++}
++
++static void _wake_up_enable(struct fsl_usb2_platform_data *pdata, bool enable)
++{
++	pr_debug("host2, %s, enable is %d\n", __func__, enable);
++	if (enable) {
++		USB_H2_CTRL |= (UCTRL_OWIE);
++	} else {
++		USB_H2_CTRL &= ~(UCTRL_OWIE);
++		/* The interrupt must be disabled for at least 3
++		* cycles of the standby clock(32k Hz) , that is 0.094 ms*/
++		udelay(100);
++	}
++}
++
++static void _phy_lowpower_suspend(struct fsl_usb2_platform_data *pdata, bool enable)
++{
++	pr_debug("host2, %s, enable is %d\n", __func__, enable);
++	if (enable)
++		UH2_PORTSC1 |= PORTSC_PHCD;
++	else
++		UH2_PORTSC1 &= ~PORTSC_PHCD;
++
++}
++
++static enum usb_wakeup_event _is_usbh2_wakeup(struct fsl_usb2_platform_data *pdata)
++{
++	u32 wakeup_req = USB_H2_CTRL & UCTRL_OWIR;
++
++	if (wakeup_req)
++		return !WAKEUP_EVENT_INVALID;
++	pr_err("host2, %s, invalid wake up\n", __func__);
++	return WAKEUP_EVENT_INVALID;
++}
++
++static void h2_wakeup_handler(struct fsl_usb2_platform_data *pdata)
++{
++	_wake_up_enable(pdata, false);
++	_phy_lowpower_suspend(pdata, false);
++	pdata->wakeup_event = 1;
++}
++
++static void usbh2_wakeup_event_clear(void)
++{
++	u32 wakeup_req = USB_H2_CTRL & UCTRL_OWIR;
++	pr_debug("%s\n", __func__);
++
++	if (wakeup_req != 0) {
++		/* Disable H2 wakeup enable to clear H2 wakeup request, wait 3 clock
++		 * cycles of standly clock(32KHz)
++		 */
++		USB_H2_CTRL &= ~UCTRL_OWIE;
++		udelay(100);
++		USB_H2_CTRL |= UCTRL_OWIE;
++	}
++}
++
++static void hsic_start(void)
++{
++	pr_debug("%s\n", __func__);
++	/* strobe 47K pull up */
++	mxc_iomux_v3_setup_pad(MX6Q_PAD_RGMII_TX_CTL__USBOH3_H2_STROBE_START);
++}
++
++static struct fsl_usb2_platform_data usbh2_config = {
++	.name		= "Host 2",
++	.init		= fsl_usb_host_init_ext,
++	.exit		= fsl_usb_host_uninit_ext,
++	.operating_mode = FSL_USB2_MPH_HOST,
++	.phy_mode = FSL_USB2_PHY_HSIC,
++	.power_budget = 500,	/* 500 mA max power */
++	.wake_up_enable = _wake_up_enable,
++	.usb_clock_for_pm  = usbh2_clock_gate,
++	.phy_lowpower_suspend = _phy_lowpower_suspend,
++	.is_wakeup_event = _is_usbh2_wakeup,
++	.wakeup_handler = h2_wakeup_handler,
++	.transceiver = "hsic_xcvr",
++	.hsic_post_ops = hsic_start,
++};
++
++static struct fsl_usb2_wakeup_platform_data usbh2_wakeup_config = {
++		.name = "usbh2 wakeup",
++		.usb_clock_for_pm  = usbh2_clock_gate,
++		.usb_pdata = {&usbh2_config, NULL, NULL},
++		.usb_wakeup_exhandle = usbh2_wakeup_event_clear,
++};
++
++void __init mx6_usb_h2_init(void)
++{
++	struct platform_device *pdev, *pdev_wakeup;
++	static void __iomem *anatop_base_addr = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
++	usbh2_config.wakeup_pdata = &usbh2_wakeup_config;
++	pdev = imx6q_add_fsl_ehci_hs(2, &usbh2_config);
++	usbh2_wakeup_config.usb_pdata[0] = pdev->dev.platform_data;
++	pdev_wakeup = imx6q_add_fsl_usb2_hs_wakeup(2, &usbh2_wakeup_config);
++	((struct fsl_usb2_platform_data *)(pdev->dev.platform_data))->wakeup_pdata =
++		pdev_wakeup->dev.platform_data;
++	/* Some phy and power's special controls for host2
++	 * 1. Its 480M is from OTG's 480M
++	 * 2. EN_USB_CLKS should always be opened
++	 */
++	__raw_writel(BM_ANADIG_USB1_PLL_480_CTRL_EN_USB_CLKS,
++			anatop_base_addr + HW_ANADIG_USB1_PLL_480_CTRL_SET);
++}
+diff --git a/arch/arm/mach-mx6/usb_h3.c b/arch/arm/mach-mx6/usb_h3.c
+new file mode 100644
+index 0000000..43c2b12
+--- /dev/null
++++ b/arch/arm/mach-mx6/usb_h3.c
+@@ -0,0 +1,216 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ *
++ * High Speed Inter Chip code for i.MX6, this file is for HSIC port 2
++ */
++
++#include <linux/kernel.h>
++#include <linux/types.h>
++#include <linux/delay.h>
++#include <linux/clk.h>
++#include <linux/platform_device.h>
++#include <linux/fsl_devices.h>
++#include <linux/gpio.h>
++#include <linux/io.h>
++#include <linux/delay.h>
++#include <mach/arc_otg.h>
++#include <mach/hardware.h>
++#include <mach/iomux-mx6q.h>
++#include "devices-imx6q.h"
++#include "regs-anadig.h"
++#include "usb.h"
++
++static struct clk *usb_oh3_clk;
++static struct clk *usb_phy4_clk;
++
++extern int clk_get_usecount(struct clk *clk);
++static struct fsl_usb2_platform_data usbh3_config;
++
++static void usbh3_internal_phy_clock_gate(bool on)
++{
++	if (on) {
++		USB_H3_CTRL |= UCTRL_UTMI_ON_CLOCK;
++		USB_UH3_HSIC_CTRL |= HSIC_CLK_ON;
++	} else {
++		USB_UH3_HSIC_CTRL &= ~HSIC_CLK_ON;
++		USB_H3_CTRL &= ~UCTRL_UTMI_ON_CLOCK;
++	}
++}
++
++static int fsl_usb_host_init_ext(struct platform_device *pdev)
++{
++	int ret;
++	struct clk *usb_clk;
++	usb_clk = clk_get(NULL, "usboh3_clk");
++	clk_enable(usb_clk);
++	usb_oh3_clk = usb_clk;
++
++	usb_clk = clk_get(NULL, "usb_phy4_clk");
++	clk_enable(usb_clk);
++	usb_phy4_clk = usb_clk;
++
++	ret = fsl_usb_host_init(pdev);
++	if (ret) {
++		printk(KERN_ERR "host1 init fails......\n");
++		return ret;
++	}
++	usbh3_internal_phy_clock_gate(true);
++
++	 /* Host3 HSIC enable */
++	USB_UH3_HSIC_CTRL |= HSIC_EN;
++
++	return 0;
++}
++
++static void fsl_usb_host_uninit_ext(struct platform_device *pdev)
++{
++	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
++
++	fsl_usb_host_uninit(pdata);
++
++	usbh3_internal_phy_clock_gate(false);
++
++	clk_disable(usb_phy4_clk);
++	clk_put(usb_phy4_clk);
++
++	clk_disable(usb_oh3_clk);
++	clk_put(usb_oh3_clk);
++
++}
++
++static void usbh3_clock_gate(bool on)
++{
++	pr_debug("%s: on is %d\n", __func__, on);
++	if (on) {
++		clk_enable(usb_oh3_clk);
++		clk_enable(usb_phy4_clk);
++		usbh3_internal_phy_clock_gate(true);
++	} else {
++		usbh3_internal_phy_clock_gate(false);
++		clk_disable(usb_phy4_clk);
++		clk_disable(usb_oh3_clk);
++	}
++}
++
++void mx6_set_host3_vbus_func(driver_vbus_func driver_vbus)
++{
++	usbh3_config.platform_driver_vbus = driver_vbus;
++}
++
++static void _wake_up_enable(struct fsl_usb2_platform_data *pdata, bool enable)
++{
++	pr_debug("host3, %s, enable is %d\n", __func__, enable);
++	if (enable) {
++		USB_H3_CTRL |= (UCTRL_OWIE);
++	} else {
++		USB_H3_CTRL &= ~(UCTRL_OWIE);
++		/* The interrupt must be disabled for at least 3
++		* cycles of the standby clock(32k Hz) , that is 0.094 ms*/
++		udelay(100);
++	}
++}
++
++static void _phy_lowpower_suspend(struct fsl_usb2_platform_data *pdata, bool enable)
++{
++	pr_debug("host3, %s, enable is %d\n", __func__, enable);
++	if (enable)
++		UH3_PORTSC1 |= PORTSC_PHCD;
++	else
++		UH3_PORTSC1 &= ~PORTSC_PHCD;
++
++}
++
++static enum usb_wakeup_event _is_usbh3_wakeup(struct fsl_usb2_platform_data *pdata)
++{
++	u32 wakeup_req = USB_H3_CTRL & UCTRL_OWIR;
++
++	if (wakeup_req)
++		return !WAKEUP_EVENT_INVALID;
++	pr_err("host3, %s, invalid wake up\n", __func__);
++	return WAKEUP_EVENT_INVALID;
++}
++
++static void usbh3_wakeup_handler(struct fsl_usb2_platform_data *pdata)
++{
++	_wake_up_enable(pdata, false);
++	_phy_lowpower_suspend(pdata, false);
++	pdata->wakeup_event = 1;
++}
++
++static void usbh3_wakeup_event_clear(void)
++{
++	u32 wakeup_req = USB_H3_CTRL & UCTRL_OWIR;
++	pr_debug("%s\n", __func__);
++
++	if (wakeup_req != 0) {
++		/* Disable H3 wakeup enable to clear H3 wakeup request, wait 3 clock
++		 * cycles of standly clock(32KHz)
++		 */
++		USB_H3_CTRL &= ~UCTRL_OWIE;
++		udelay(100);
++		USB_H3_CTRL |= UCTRL_OWIE;
++	}
++}
++
++static void hsic_start(void)
++{
++	pr_debug("%s", __func__);
++	/* strobe 47K pull up */
++	mxc_iomux_v3_setup_pad(MX6Q_PAD_RGMII_RXC__USBOH3_H3_STROBE_START);
++}
++
++static struct fsl_usb2_platform_data usbh3_config = {
++	.name		= "Host 3",
++	.init		= fsl_usb_host_init_ext,
++	.exit		= fsl_usb_host_uninit_ext,
++	.operating_mode = FSL_USB2_MPH_HOST,
++	.phy_mode = FSL_USB2_PHY_HSIC,
++	.power_budget = 500,	/* 500 mA max power */
++	.wake_up_enable = _wake_up_enable,
++	.usb_clock_for_pm  = usbh3_clock_gate,
++	.phy_lowpower_suspend = _phy_lowpower_suspend,
++	.is_wakeup_event = _is_usbh3_wakeup,
++	.wakeup_handler = usbh3_wakeup_handler,
++	.transceiver = "hsic_xcvr",
++	.hsic_post_ops = hsic_start,
++};
++
++static struct fsl_usb2_wakeup_platform_data usbh3_wakeup_config = {
++		.name = "usbh3 wakeup",
++		.usb_clock_for_pm  = usbh3_clock_gate,
++		.usb_pdata = {&usbh3_config, NULL, NULL},
++		.usb_wakeup_exhandle = usbh3_wakeup_event_clear,
++};
++
++void __init mx6_usb_h3_init(void)
++{
++	struct platform_device *pdev, *pdev_wakeup;
++	static void __iomem *anatop_base_addr = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
++	usbh3_config.wakeup_pdata = &usbh3_wakeup_config;
++	pdev = imx6q_add_fsl_ehci_hs(3, &usbh3_config);
++	usbh3_wakeup_config.usb_pdata[0] = pdev->dev.platform_data;
++	pdev_wakeup = imx6q_add_fsl_usb2_hs_wakeup(3, &usbh3_wakeup_config);
++	((struct fsl_usb2_platform_data *)(pdev->dev.platform_data))->wakeup_pdata =
++		pdev_wakeup->dev.platform_data;
++
++	/* Some phy and power's special controls for host3
++	 * 1. Its 480M is from OTG's 480M
++	 * 2. EN_USB_CLKS should always be opened
++	 */
++	__raw_writel(BM_ANADIG_USB1_PLL_480_CTRL_EN_USB_CLKS,
++			anatop_base_addr + HW_ANADIG_USB1_PLL_480_CTRL_SET);
++}
+diff --git a/arch/arm/plat-mxc/Makefile b/arch/arm/plat-mxc/Makefile
+index 1ef12bf..6ff1c90 100755
+--- a/arch/arm/plat-mxc/Makefile
++++ b/arch/arm/plat-mxc/Makefile
+@@ -37,3 +37,4 @@ obj-$(CONFIG_MXC_DVFS_PER) 	+= dvfs_per.o
+ obj-$(CONFIG_ISP1504_MXC) += isp1504xc.o
+ obj-$(CONFIG_USB)    += utmixc.o
+ obj-$(CONFIG_USB)         += serialxc.o
++obj-$(CONFIG_USB)         += usb_hsic_xcvr.o
+diff --git a/arch/arm/plat-mxc/devices/platform-fsl-usb2-wakeup.c b/arch/arm/plat-mxc/devices/platform-fsl-usb2-wakeup.c
+index d774e78..523c5d4 100644
+--- a/arch/arm/plat-mxc/devices/platform-fsl-usb2-wakeup.c
++++ b/arch/arm/plat-mxc/devices/platform-fsl-usb2-wakeup.c
+@@ -22,6 +22,8 @@ const struct imx_fsl_usb2_wakeup_data imx6q_fsl_otg_wakeup_data __initconst =
+ 	imx_fsl_usb2_wakeup_data_entry_single(MX6Q, 0, OTG);
+ const struct imx_fsl_usb2_wakeup_data imx6q_fsl_hs_wakeup_data[] __initconst = {
+ 	imx_fsl_usb2_wakeup_data_entry_single(MX6Q, 1, HS1),
++	imx_fsl_usb2_wakeup_data_entry_single(MX6Q, 2, HS2),
++	imx_fsl_usb2_wakeup_data_entry_single(MX6Q, 3, HS3),
+ };
+ #endif /* ifdef CONFIG_SOC_IMX6Q */
+ 
+diff --git a/arch/arm/plat-mxc/devices/platform-mxc-ehci.c b/arch/arm/plat-mxc/devices/platform-mxc-ehci.c
+index deac241..fc2b32d 100644
+--- a/arch/arm/plat-mxc/devices/platform-mxc-ehci.c
++++ b/arch/arm/plat-mxc/devices/platform-mxc-ehci.c
+@@ -52,6 +52,8 @@ const struct imx_mxc_ehci_data imx6q_mxc_ehci_otg_data __initconst =
+ 	imx_mxc_ehci_data_entry_single(MX6Q, 0, OTG);
+ const struct imx_mxc_ehci_data imx6q_mxc_ehci_hs_data[] __initconst = {
+ 	imx_mxc_ehci_data_entry_single(MX6Q, 1, HS1),
++	imx_mxc_ehci_data_entry_single(MX6Q, 2, HS2),
++	imx_mxc_ehci_data_entry_single(MX6Q, 3, HS3),
+ };
+ #endif /* ifdef CONFIG_SOC_IMX6Q */
+ 
+diff --git a/arch/arm/plat-mxc/include/mach/arc_otg.h b/arch/arm/plat-mxc/include/mach/arc_otg.h
+index d35a29b..b5bd8c3 100755
+--- a/arch/arm/plat-mxc/include/mach/arc_otg.h
++++ b/arch/arm/plat-mxc/include/mach/arc_otg.h
+@@ -46,6 +46,9 @@ extern void __iomem *imx_otg_base;
+ #define USBH2_REG32(offset)	(*((volatile u32 __force *)(USB_H2REGS_BASE + (offset))))
+ #define USBH2_REG16(offset)	(*((volatile u16 __force *)(USB_H2REGS_BASE + (offset))))
+ 
++#define USBH3_REG32(offset)	(*((volatile u32 __force *)(USB_H3REGS_BASE + (offset))))
++#define USBH3_REG16(offset)	(*((volatile u16 __force *)(USB_H3REGS_BASE + (offset))))
++
+ #define USBOTHER_REG(offset)	(*((volatile u32 __force *)(USB_OTHERREGS_BASE + (offset))))
+ 
+ /*
+@@ -147,6 +150,60 @@ extern void __iomem *imx_otg_base;
+ #define UH2_PORTSC1		USBH2_REG32(0x184)	/* port status and control */
+ /* end EHCI registers */
+ #define UH2_USBMODE		USBH2_REG32(0x1a8)	/* USB device mode */
++/*
++ * Host 2 registers
++ */
++#define UH2_ID			USBH2_REG32(0x00)	/* Host ID */
++#define UH2_HWGENERAL		USBH2_REG32(0x04)	/* Host General */
++#define UH2_HWHOST		USBH2_REG32(0x08)	/* Host h/w params */
++#define UH2_HWTXBUF		USBH2_REG32(0x10)	/* TX buffer h/w params */
++#define UH2_HWRXBUF		USBH2_REG32(0x14)	/* RX buffer h/w params */
++#define UH2_CAPLENGTH		USBH2_REG16(0x100)	/* Capability register length */
++#define UH2_HCIVERSION		USBH2_REG16(0x102)	/* Host Interface version */
++#define UH2_HCSPARAMS		USBH2_REG32(0x104)	/* Host control structural params */
++#define UH2_HCCPARAMS		USBH2_REG32(0x108)	/* control capability params */
++/* start EHCI registers: */
++#define UH2_USBCMD		USBH2_REG32(0x140)	/* USB command register */
++#define UH2_USBSTS		USBH2_REG32(0x144)	/* USB status register */
++#define UH2_USBINTR		USBH2_REG32(0x148)	/* interrupt enable register */
++#define UH2_FRINDEX		USBH2_REG32(0x14c)	/* USB frame index */
++/*      segment                            (0x150)	   addr bits 63:32 if needed */
++#define UH2_PERIODICLISTBASE	USBH2_REG32(0x154)	/* host crtlr frame list base addr */
++#define UH2_ASYNCLISTADDR	USBH2_REG32(0x158)	/* host ctrlr nest async addr */
++#define UH2_BURSTSIZE		USBH2_REG32(0x160)	/* host ctrlr embedded TT async buf status */
++#define UH2_TXFILLTUNING	USBH2_REG32(0x164)	/* TX FIFO fill tuning */
++#define UH2_ULPIVIEW		USBH2_REG32(0x170)	/* ULPI viewport */
++/*      configured_flag                    (0x180)	   configflag (supports HS) */
++#define UH2_PORTSC1		USBH2_REG32(0x184)	/* port status and control */
++/* end EHCI registers */
++#define UH2_USBMODE		USBH2_REG32(0x1a8)	/* USB device mode */
++/*
++ * Host 2 registers
++ */
++#define UH3_ID			USBH3_REG32(0x00)	/* Host ID */
++#define UH3_HWGENERAL		USBH3_REG32(0x04)	/* Host General */
++#define UH3_HWHOST		USBH3_REG32(0x08)	/* Host h/w params */
++#define UH3_HWTXBUF		USBH3_REG32(0x10)	/* TX buffer h/w params */
++#define UH3_HWRXBUF		USBH3_REG32(0x14)	/* RX buffer h/w params */
++#define UH3_CAPLENGTH		USBH3_REG16(0x100)	/* Capability register length */
++#define UH3_HCIVERSION		USBH3_REG16(0x102)	/* Host Interface version */
++#define UH3_HCSPARAMS		USBH3_REG32(0x104)	/* Host control structural params */
++#define UH3_HCCPARAMS		USBH3_REG32(0x108)	/* control capability params */
++/* start EHCI registers: */
++#define UH3_USBCMD		USBH3_REG32(0x140)	/* USB command register */
++#define UH3_USBSTS		USBH3_REG32(0x144)	/* USB status register */
++#define UH3_USBINTR		USBH3_REG32(0x148)	/* interrupt enable register */
++#define UH3_FRINDEX		USBH3_REG32(0x14c)	/* USB frame index */
++/*      segment                            (0x150)	   addr bits 63:32 if needed */
++#define UH3_PERIODICLISTBASE	USBH3_REG32(0x154)	/* host crtlr frame list base addr */
++#define UH3_ASYNCLISTADDR	USBH3_REG32(0x158)	/* host ctrlr nest async addr */
++#define UH3_BURSTSIZE		USBH3_REG32(0x160)	/* host ctrlr embedded TT async buf status */
++#define UH3_TXFILLTUNING	USBH3_REG32(0x164)	/* TX FIFO fill tuning */
++#define UH3_ULPIVIEW		USBH3_REG32(0x170)	/* ULPI viewport */
++/*      configured_flag                    (0x180)	   configflag (supports HS) */
++#define UH3_PORTSC1		USBH3_REG32(0x184)	/* port status and control */
++/* end EHCI registers */
++#define UH3_USBMODE		USBH3_REG32(0x1a8)	/* USB device mode */
+ 
+ /*
+  * other regs (not part of ARC core)
+@@ -189,6 +246,7 @@ extern void __iomem *imx_otg_base;
+ #define PORTSC_PTS_SERIAL		(3 << 30)	/* serial */
+ #define PORTSC_STS			(1 << 29)	/* serial xcvr select */
+ #define PORTSC_PTW                      (1 << 28)       /* UTMI width */
++#define PORTSC_HSIC_MODE                (1 << 25)       /* Only for HSIC */
+ #define PORTSC_PHCD                     (1 << 23)       /* Low Power Suspend */
+ #define PORTSC_PORT_POWER		(1 << 12)	/* port power */
+ #define PORTSC_LS_MASK			(3 << 10)	/* Line State mask */
+diff --git a/arch/arm/plat-mxc/include/mach/fsl_usb.h b/arch/arm/plat-mxc/include/mach/fsl_usb.h
+index e358c39..c471064 100755
+--- a/arch/arm/plat-mxc/include/mach/fsl_usb.h
++++ b/arch/arm/plat-mxc/include/mach/fsl_usb.h
+@@ -97,4 +97,11 @@ static inline void fsl_platform_set_ahb_burst(struct usb_hcd *hcd)
+ 				hcd->regs + FSL_SOC_USB_TXFILLTUNING);
+ 	}
+ 
++	/* Increase TX fifo threshold for in Hostx */
++	if (cpu_is_mx6q()) {
++		temp = readl(hcd->regs + FSL_SOC_USB_TXFILLTUNING);
++		/* Change TX FIFO threshold to be 0x08 */
++		writel((temp & (~(0x3f << 16))) | (0x08 << 16),
++				hcd->regs + FSL_SOC_USB_TXFILLTUNING);
++	}
+ }
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index 0d7042d..15f12b4 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -79,6 +79,8 @@ typedef enum iomux_config {
+ #define MX6Q_GPMI_PAD_CTRL2 (MX6Q_GPMI_PAD_CTRL0 | MX6Q_GPMI_PAD_CTRL1)
+ 
+ #define MX6Q_SPDIF_OUT_PAD_CTRL (PAD_CTL_DSE_120ohm | PAD_CTL_SRE_FAST)
++#define MX6Q_USB_HSIC_PAD_CTRL	(PAD_CTL_HYS | PAD_CTL_PKE | PAD_CTL_PUE |	\
++				PAD_CTL_DSE_40ohm)
+ 
+ #define MX6Q_ECSPI_PAD_CTRL	(PAD_CTL_SRE_FAST | PAD_CTL_SPEED_MED | \
+ 		PAD_CTL_DSE_40ohm | PAD_CTL_HYS)
+@@ -133,7 +135,7 @@ typedef enum iomux_config {
+ 		IOMUX_PAD(0x0368, 0x0054, 7, 0x0000, 0, 0)
+ 
+ #define _MX6Q_PAD_RGMII_TXC__USBOH3_H2_DATA			\
+-		IOMUX_PAD(0x036C, 0x0058, 0, 0x0000, 0, 0)
++		IOMUX_PAD(0x036C, 0x0058, 0 | IOMUX_CONFIG_SION, 0x0000, 0, 0)
+ #define _MX6Q_PAD_RGMII_TXC__ENET_RGMII_TXC			\
+ 		IOMUX_PAD(0x036C, 0x0058, 1, 0x0000, 0, 0)
+ #define _MX6Q_PAD_RGMII_TXC__SPDIF_SPDIF_EXTCLK			\
+@@ -186,7 +188,7 @@ typedef enum iomux_config {
+ 		IOMUX_PAD(0x037C, 0x0068, 6, 0x0000, 0, 0)
+ 
+ #define _MX6Q_PAD_RGMII_RX_CTL__USBOH3_H3_DATA			\
+-		IOMUX_PAD(0x0380, 0x006C, 0, 0x0000, 0, 0)
++		IOMUX_PAD(0x0380, 0x006C, 0 | IOMUX_CONFIG_SION, 0x0000, 0, 0)
+ #define _MX6Q_PAD_RGMII_RX_CTL__ENET_RGMII_RX_CTL		\
+ 		IOMUX_PAD(0x0380, 0x006C, 1, 0x0858, 0, 0)
+ #define _MX6Q_PAD_RGMII_RX_CTL__GPIO_6_24			\
+@@ -204,7 +206,7 @@ typedef enum iomux_config {
+ 		IOMUX_PAD(0x0384, 0x0070, 6, 0x0000, 0, 0)
+ 
+ #define _MX6Q_PAD_RGMII_TX_CTL__USBOH3_H2_STROBE		\
+-		IOMUX_PAD(0x0388, 0x0074, 0, 0x0000, 0, 0)
++		IOMUX_PAD(0x0388, 0x0074, 0 | IOMUX_CONFIG_SION, 0x0000, 0, 0)
+ #define _MX6Q_PAD_RGMII_TX_CTL__ENET_RGMII_TX_CTL		\
+ 		IOMUX_PAD(0x0388, 0x0074, 1, 0x0000, 0, 0)
+ #define _MX6Q_PAD_RGMII_TX_CTL__GPIO_6_26			\
+@@ -244,7 +246,7 @@ typedef enum iomux_config {
+ 		IOMUX_PAD(0x0394, 0x0080, 6, 0x0000, 0, 0)
+ 
+ #define _MX6Q_PAD_RGMII_RXC__USBOH3_H3_STROBE			\
+-		IOMUX_PAD(0x0398, 0x0084, 0, 0x0000, 0, 0)
++		IOMUX_PAD(0x0398, 0x0084, 0 | IOMUX_CONFIG_SION, 0x0000, 0, 0)
+ #define _MX6Q_PAD_RGMII_RXC__ENET_RGMII_RXC			\
+ 		IOMUX_PAD(0x0398, 0x0084, 1, 0x0844, 0, 0)
+ #define _MX6Q_PAD_RGMII_RXC__GPIO_6_30				\
+@@ -3722,7 +3724,7 @@ typedef enum iomux_config {
+ 
+ 
+ #define  MX6Q_PAD_RGMII_TXC__USBOH3_H2_DATA		\
+-		(_MX6Q_PAD_RGMII_TXC__USBOH3_H2_DATA | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_RGMII_TXC__USBOH3_H2_DATA | MUX_PAD_CTRL(MX6Q_USB_HSIC_PAD_CTRL))
+ #define  MX6Q_PAD_RGMII_TXC__ENET_RGMII_TXC		\
+ 		(_MX6Q_PAD_RGMII_TXC__ENET_RGMII_TXC | MUX_PAD_CTRL(MX6Q_ENET_PAD_CTRL))
+ #define  MX6Q_PAD_RGMII_TXC__SPDIF_SPDIF_EXTCLK		\
+@@ -3779,7 +3781,7 @@ typedef enum iomux_config {
+ 
+ 
+ #define  MX6Q_PAD_RGMII_RX_CTL__USBOH3_H3_DATA		\
+-		(_MX6Q_PAD_RGMII_RX_CTL__USBOH3_H3_DATA | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_RGMII_RX_CTL__USBOH3_H3_DATA | MUX_PAD_CTRL(MX6Q_USB_HSIC_PAD_CTRL))
+ #define  MX6Q_PAD_RGMII_RX_CTL__ENET_RGMII_RX_CTL		\
+ 		(_MX6Q_PAD_RGMII_RX_CTL__ENET_RGMII_RX_CTL | MUX_PAD_CTRL(MX6Q_ENET_PAD_CTRL))
+ #define  MX6Q_PAD_RGMII_RX_CTL__GPIO_6_24		\
+@@ -3799,7 +3801,11 @@ typedef enum iomux_config {
+ 
+ 
+ #define  MX6Q_PAD_RGMII_TX_CTL__USBOH3_H2_STROBE		\
+-		(_MX6Q_PAD_RGMII_TX_CTL__USBOH3_H2_STROBE | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_RGMII_TX_CTL__USBOH3_H2_STROBE | MUX_PAD_CTRL(MX6Q_USB_HSIC_PAD_CTRL))
++#define  MX6Q_PAD_RGMII_TX_CTL__USBOH3_H2_STROBE_START		\
++		(_MX6Q_PAD_RGMII_TX_CTL__USBOH3_H2_STROBE | \
++		 MUX_PAD_CTRL(MX6Q_USB_HSIC_PAD_CTRL | PAD_CTL_PUS_47K_UP)\
++		 )
+ #define  MX6Q_PAD_RGMII_TX_CTL__ENET_RGMII_TX_CTL		\
+ 		(_MX6Q_PAD_RGMII_TX_CTL__ENET_RGMII_TX_CTL | MUX_PAD_CTRL(MX6Q_ENET_PAD_CTRL))
+ #define  MX6Q_PAD_RGMII_TX_CTL__GPIO_6_26		\
+@@ -3839,7 +3845,9 @@ typedef enum iomux_config {
+ 		(_MX6Q_PAD_RGMII_RD3__MIPI_CORE_DPHY_TEST_IN_10 | MUX_PAD_CTRL(NO_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_RGMII_RXC__USBOH3_H3_STROBE		\
+-		(_MX6Q_PAD_RGMII_RXC__USBOH3_H3_STROBE | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_RGMII_RXC__USBOH3_H3_STROBE | MUX_PAD_CTRL(MX6Q_USB_HSIC_PAD_CTRL))
++#define  MX6Q_PAD_RGMII_RXC__USBOH3_H3_STROBE_START		\
++		(_MX6Q_PAD_RGMII_RXC__USBOH3_H3_STROBE | MUX_PAD_CTRL(MX6Q_USB_HSIC_PAD_CTRL | PAD_CTL_PUS_47K_UP))
+ #define  MX6Q_PAD_RGMII_RXC__ENET_RGMII_RXC		\
+ 		(_MX6Q_PAD_RGMII_RXC__ENET_RGMII_RXC | MUX_PAD_CTRL(MX6Q_ENET_PAD_CTRL))
+ #define  MX6Q_PAD_RGMII_RXC__GPIO_6_30		\
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 6658138..81c90e7 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -200,6 +200,8 @@
+ #define MX6Q_PL301_BASE_ADDR          (AIPS2_OFF_BASE_ADDR + 0x0000)
+ #define MX6Q_USB_OTG_BASE_ADDR            (AIPS2_OFF_BASE_ADDR + 0x4000)
+ #define MX6Q_USB_HS1_BASE_ADDR            (AIPS2_OFF_BASE_ADDR + 0x4200)
++#define MX6Q_USB_HS2_BASE_ADDR            (AIPS2_OFF_BASE_ADDR + 0x4400)
++#define MX6Q_USB_HS3_BASE_ADDR            (AIPS2_OFF_BASE_ADDR + 0x4600)
+ #define ENET_BASE_ADDR                  (AIPS2_OFF_BASE_ADDR+0x8000)
+ #define MLB_BASE_ADDR                   (AIPS2_OFF_BASE_ADDR+0xC000)
+ 
+@@ -325,6 +327,12 @@
+ #define MX6Q_INT_USB_OTG				75
+ #define MX6Q_INT_USB_PHY0				76
+ #define MX6Q_INT_USB_PHY1				77
++/*
++ * MX6Q_INT_USB_PHY2, MX6Q_INT_USB_PHY3 are dummy interrupts
++ * In order to compile pass for platform device's definition
++ */
++#define MX6Q_INT_USB_PHY2				73
++#define MX6Q_INT_USB_PHY3				74
+ #define MX6Q_INT_SSI1                               78
+ #define MX6Q_INT_SSI2                               79
+ #define MX6Q_INT_SSI3                               80
+diff --git a/arch/arm/plat-mxc/include/mach/regs-usbphy-mx6.h b/arch/arm/plat-mxc/include/mach/regs-usbphy-mx6.h
+index 6458468..060b176 100644
+--- a/arch/arm/plat-mxc/include/mach/regs-usbphy-mx6.h
++++ b/arch/arm/plat-mxc/include/mach/regs-usbphy-mx6.h
+@@ -467,12 +467,13 @@
+ /* bit 0 - bit 6 is reserved at mx6q */
+ 
+ /* Host2/3 HSIC Ctrl */
+-#define H2_CLK_VLD		(1 << 31)	/* Indicating whether Host2 HSIC clock is valid */
+-#define H2_HSIC_EN		(1 << 12)	/* Host2 HSIC enable */
+-#define H2_HSIC_CLK_ON		(1 << 11)	/* Force Host2 HSIC module 480M clock on,
+-						 * even when in Host 2 is in suspend mode
++#define CLK_VLD		(1 << 31)	/* Indicating whether HSIC clock is valid */
++#define HSIC_EN		(1 << 12)	/* HSIC enable */
++#define HSIC_CLK_ON		(1 << 11)	/* Force HSIC module 480M clock on,
++						 * even when in Host is in suspend mode
+ 						 */
+ /* OTG/HOST1 Phy Ctrl */
+ #define PHY_UTMI_CLK_VLD	(1 << 31)	/* Indicating whether OTG UTMI PHY Clock Valida */
+ 
++#define NOP_XCVR		(0xffffffff)	/* Indicate it is no usb phy */
+ #endif /* __ARCH_ARM___USBPHY_H */
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index a6a32ee..5ebbc6e 100755
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -887,6 +887,10 @@ EXPORT_SYMBOL(usb_event_is_otg_wakeup);
+ void fsl_platform_set_usb_phy_dis(struct fsl_usb2_platform_data *pdata,
+ 				  bool enable)
+ {
++	/* for HSIC, we do not need to enable disconnect detection */
++	if (pdata->phy_mode == FSL_USB2_PHY_HSIC)
++		return;
++
+ 	if (enable)
+ 		__raw_writel(BM_USBPHY_CTRL_ENHOSTDISCONDETECT,
+ 			MX6_IO_ADDRESS(pdata->phy_regs) + HW_USBPHY_CTRL_SET);
+diff --git a/arch/arm/plat-mxc/usb_hsic_xcvr.c b/arch/arm/plat-mxc/usb_hsic_xcvr.c
+new file mode 100644
+index 0000000..9dbbdc4
+--- /dev/null
++++ b/arch/arm/plat-mxc/usb_hsic_xcvr.c
+@@ -0,0 +1,56 @@
++/*
++ * Copyright (C) 2005-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ * For HSIC, there is no usb phy, so the operation at this file is noop
++ */
++
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/types.h>
++#include <linux/device.h>
++#include <linux/errno.h>
++#include <linux/init.h>
++#include <linux/err.h>
++#include <linux/platform_device.h>
++#include <linux/fsl_devices.h>
++#include <linux/pmic_external.h>
++#include <linux/usb/fsl_xcvr.h>
++
++#include <mach/hardware.h>
++#include <mach/arc_otg.h>
++#include <asm/mach-types.h>
++
++static struct fsl_xcvr_ops hsic_xcvr_ops = {
++	.name = "hsic_xcvr",
++	.xcvr_type = PORTSC_HSIC_MODE,
++};
++
++extern void fsl_usb_xcvr_register(struct fsl_xcvr_ops *xcvr_ops);
++
++static int __init hsic_xcvr_init(void)
++{
++	fsl_usb_xcvr_register(&hsic_xcvr_ops);
++	return 0;
++}
++
++extern void fsl_usb_xcvr_unregister(struct fsl_xcvr_ops *xcvr_ops);
++
++static void __exit hsic_xcvr_exit(void)
++{
++	fsl_usb_xcvr_unregister(&hsic_xcvr_ops);
++}
++
++subsys_initcall(hsic_xcvr_init);
++module_exit(hsic_xcvr_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("nop xcvr driver");
++MODULE_LICENSE("GPL");
+-- 
+1.7.7.4
+

@@ -1,0 +1,80 @@
+From 6c88aca30c7851159fc3b28fedacb077b521fc84 Mon Sep 17 00:00:00 2001
+From: Anish Trivedi <anish@freescale.com>
+Date: Fri, 20 May 2011 11:51:01 -0500
+Subject: [PATCH 0174/2463] ENGR00143799 Add SCC RAM clock to dependency list
+ for SAHARA clock tree
+
+When ARM is in WAIT mode, the SCC RAM clock is disabled since
+1 is written to the CCGR register by default. At that point, if SAHARA
+tries to access a key or some other piece of data stored in the SCC RAM,
+then it might hang.
+
+To prevent this scenario, SCC RAM is added to dependency list
+for SCC clock, and SCC clock is added to dependency list for SAHARA.
+
+Signed-off-by: Anish Trivedi <anish@freescale.com>
+---
+ arch/arm/mach-mx5/clock.c |   26 +++++++++++++++++---------
+ 1 files changed, 17 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/clock.c b/arch/arm/mach-mx5/clock.c
+index 9ff2243..775e3f1 100755
+--- a/arch/arm/mach-mx5/clock.c
++++ b/arch/arm/mach-mx5/clock.c
+@@ -4148,36 +4148,44 @@ static struct clk fec_clk[] = {
+ 	},
+ };
+ 
+-static struct clk sahara_clk[] = {
++static struct clk scc_clk[] = {
+ 	{
+ 	__INIT_CLK_DEBUG(sahara_clk_0)
+ 	.parent = &ahb_clk,
+-	.secondary = &sahara_clk[1],
+-	.enable_reg = MXC_CCM_CCGR4,
+-	.enable_shift = MXC_CCM_CCGRx_CG7_OFFSET,
++	.secondary = &scc_clk[1],
++	.enable_reg = MXC_CCM_CCGR1,
++	.enable_shift = MXC_CCM_CCGRx_CG15_OFFSET,
+ 	.enable = _clk_enable,
+ 	.disable = _clk_disable,
+ 	},
+ 	{
+ 	__INIT_CLK_DEBUG(sahara_clk_1)
+ 	.parent = &tmax1_clk,
+-	.secondary = &emi_fast_clk,
++	.secondary = &scc_clk[2],
++	},
++	{
++	.parent = &emi_fast_clk,
++	.secondary = &emi_intr_clk[0],
+ 	}
+ };
+ 
+-static struct clk scc_clk[] = {
++static struct clk sahara_clk[] = {
+ 	{
+ 	__INIT_CLK_DEBUG(scc_clk_0)
+ 	.parent = &ahb_clk,
+-	.secondary = &scc_clk[1],
+-	.enable_reg = MXC_CCM_CCGR1,
+-	.enable_shift = MXC_CCM_CCGRx_CG15_OFFSET,
++	.secondary = &sahara_clk[1],
++	.enable_reg = MXC_CCM_CCGR4,
++	.enable_shift = MXC_CCM_CCGRx_CG7_OFFSET,
+ 	.enable = _clk_enable,
+ 	.disable = _clk_disable,
+ 	},
+ 	{
+ 	__INIT_CLK_DEBUG(scc_clk_1)
+ 	.parent = &tmax1_clk,
++	.secondary = &sahara_clk[2],
++	},
++	{
++	.parent = &scc_clk,
+ 	.secondary = &emi_fast_clk,
+ 	}
+ };
+-- 
+1.7.7.4
+

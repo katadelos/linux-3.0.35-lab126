@@ -1,0 +1,48 @@
+From f591a0415df118f0ad24e673c29f5928847a334e Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Tue, 15 Nov 2011 16:59:38 -0600
+Subject: [PATCH 0614/2463] ENGR00162318: MX6: Donot power down PLL when PLL
+ is disabled
+
+Relocking of PLL sometimes takes longer than 1msec when PLL is
+enabled after a power down. The kernel panics if the PLL is not locked
+in 1ms. Max time expected by HW is only 500us.
+Workaround is to disable the output of the PLL and set it in bypass
+mode when its output is not being used.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    9 ++-------
+ 1 files changed, 2 insertions(+), 7 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index d9d9ce9..0146947 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -62,7 +62,7 @@ static struct clk usdhc3_clk;
+ static struct cpu_op *cpu_op_tbl;
+ static int cpu_op_nr;
+ 
+-#define SPIN_DELAY	1000000 /* in nanoseconds */
++#define SPIN_DELAY	1200000 /* in nanoseconds */
+ 
+ #define AUDIO_VIDEO_MIN_CLK_FREQ	650000000
+ #define AUDIO_VIDEO_MAX_CLK_FREQ	1300000000
+@@ -407,13 +407,8 @@ static void _clk_pll_disable(struct clk *clk)
+ 
+ 	reg = __raw_readl(pllbase);
+ 	reg |= ANADIG_PLL_BYPASS;
+-	reg |= ANADIG_PLL_POWER_DOWN;
++	reg &= ~ANADIG_PLL_ENABLE;
+ 
+-	/* The 480MHz PLLs, pll3 & pll7, have the opposite
+-	 * definition for power bit.
+-	 */
+-	if (clk == &pll3_usb_otg_main_clk || clk == &pll7_usb_host_main_clk)
+-		reg &= ~ANADIG_PLL_POWER_DOWN;
+ 	__raw_writel(reg, pllbase);
+ }
+ 
+-- 
+1.7.7.4
+

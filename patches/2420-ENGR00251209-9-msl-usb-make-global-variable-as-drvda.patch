@@ -1,0 +1,68 @@
+From 9401d1aeb35c7f351e555a265642131da620db09 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Tue, 5 Mar 2013 11:21:04 +0800
+Subject: [PATCH 2420/2463] ENGR00251209-9 msl: usb: make global variable as
+ drvdata
+
+There is a bug when we try to remove wakeup module twice as
+g_ctrl is a globle variable, in fact, it is per controller
+wakeup driver, so the private data should be per device.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ arch/arm/plat-mxc/usb_wakeup.c |   20 ++++++++++----------
+ 1 files changed, 10 insertions(+), 10 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/usb_wakeup.c b/arch/arm/plat-mxc/usb_wakeup.c
+index 5d31d36..00af25f 100755
+--- a/arch/arm/plat-mxc/usb_wakeup.c
++++ b/arch/arm/plat-mxc/usb_wakeup.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -37,7 +37,6 @@ struct wakeup_ctrl {
+ 	struct task_struct *thread;
+ 	struct completion  event;
+ };
+-static struct wakeup_ctrl *g_ctrl;
+ 
+ extern int usb_event_is_otg_wakeup(struct fsl_usb2_platform_data *pdata);
+ extern void usb_debounce_id_vbus(void);
+@@ -218,7 +217,7 @@ static int wakeup_dev_probe(struct platform_device *pdev)
+ 	status = IS_ERR(ctrl->thread) ? -1 : 0;
+ 	if (status)
+ 		goto error2;
+-	g_ctrl = ctrl;
++	platform_set_drvdata(pdev, ctrl);
+ 
+ 	printk(KERN_DEBUG "the wakeup pdata is 0x%p\n", pdata);
+ 	return 0;
+@@ -231,13 +230,14 @@ error1:
+ 
+ static int  wakeup_dev_exit(struct platform_device *pdev)
+ {
+-	if (g_ctrl->thread) {
+-		g_ctrl->thread_close = true;
+-		complete(&g_ctrl->event);
+-		kthread_stop(g_ctrl->thread);
+-	}
+-	free_irq(g_ctrl->wakeup_irq, (void *)g_ctrl);
+-	kfree(g_ctrl);
++	struct wakeup_ctrl *wctrl = platform_get_drvdata(pdev);
++
++	wctrl->thread_close = true;
++	complete(&wctrl->event);
++	kthread_stop(wctrl->thread);
++	free_irq(wctrl->wakeup_irq, (void *)wctrl);
++	kfree(wctrl);
++
+ 	return 0;
+ }
+ static struct platform_driver wakeup_d = {
+-- 
+1.7.7.4
+

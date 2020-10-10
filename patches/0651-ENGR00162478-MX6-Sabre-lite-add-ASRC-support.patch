@@ -1,0 +1,47 @@
+From 58b06af1fd082b0ccd342e4e92e73d9095469c9d Mon Sep 17 00:00:00 2001
+From: Mahesh Mahadevan <r9aadq@freescale.com>
+Date: Mon, 21 Nov 2011 13:13:16 -0600
+Subject: [PATCH 0651/2463] ENGR00162478 MX6 Sabre-lite, add ASRC support
+
+Add support for ASRC driver in MX6 sabre-lite
+
+Signed-off-by: Mahesh Mahadevan <r9aadq@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |   10 ++++++++++
+ 1 files changed, 10 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index aa7be0b..994426e 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -580,10 +580,16 @@ static void __init imx6q_sabrelite_init_usb(void)
+ 	mx6_usb_dr_init();
+ 	mx6_usb_h1_init();
+ }
++
+ static struct viv_gpu_platform_data imx6q_gpu_pdata __initdata = {
+ 	.reserved_mem_size = SZ_128M,
+ };
+ 
++static struct imx_asrc_platform_data imx_asrc_data = {
++	.channel_bits = 4,
++	.clk_map_ver = 2,
++};
++
+ static struct ipuv3_fb_platform_data sabrelite_fb_data[] = {
+ 	{ /*fb0*/
+ 	.disp_dev = "ldb",
+@@ -897,6 +903,10 @@ static void __init mx6_sabrelite_board_init(void)
+ 	imx6q_add_vpu();
+ 	imx6q_init_audio();
+ 	platform_device_register(&sabrelite_vmmc_reg_devices);
++	imx_asrc_data.asrc_core_clk = clk_get(NULL, "asrc_clk");
++	imx_asrc_data.asrc_audio_clk = clk_get(NULL, "asrc_serial_clk");
++	imx6q_add_asrc(&imx_asrc_data);
++
+ 	/* release USB Hub reset */
+ 	gpio_set_value(MX6Q_SABRELITE_USB_HUB_RESET, 1);
+ 
+-- 
+1.7.7.4
+

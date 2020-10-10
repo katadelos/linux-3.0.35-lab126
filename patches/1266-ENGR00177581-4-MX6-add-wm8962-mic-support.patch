@@ -1,0 +1,88 @@
+From 6b4301cdb16ed9cb8711b6e591f13f545575ae14 Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Thu, 5 Apr 2012 16:19:32 +0800
+Subject: [PATCH 1266/2463] ENGR00177581-4 MX6: add wm8962 mic support
+
+1. add amic_detect pin
+2. add dmic_gpio init
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |   15 +++++++++++++--
+ arch/arm/mach-mx6/board-mx6q_sabresd.h |    3 ++-
+ 2 files changed, 15 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 82beefa..1fc33c9 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -54,6 +54,7 @@
+ #include <linux/mfd/max17135.h>
+ #include <linux/mfd/wm8994/pdata.h>
+ #include <linux/mfd/wm8994/gpio.h>
++#include <sound/wm8962.h>
+ 
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+@@ -332,7 +333,7 @@ static struct mxc_audio_platform_data wm8958_data = {
+ 	.hp_active_low = 1,
+ };
+ 
+-static struct wm8994_pdata wm8958_pdata = {
++static struct wm8994_pdata wm8958_config_data = {
+ 	.gpio_defaults = {
+ 		[0] = WM8994_GP_FN_GPIO | WM8994_GPN_DB,
+ 		[1] = WM8994_GP_FN_GPIO | WM8994_GPN_DB | WM8994_GPN_PD,
+@@ -376,12 +377,21 @@ static struct platform_device mx6_sabresd_audio_wm8962_device = {
+ 	.name = "imx-wm8962",
+ };
+ 
++static struct wm8962_pdata wm8962_config_data = {
++	.gpio_init = {
++		[2] = WM8962_GPIO_FN_DMICCLK,
++		[4] = 0x8000 | WM8962_GPIO_FN_DMICDAT,
++	},
++};
++
+ static struct mxc_audio_platform_data wm8962_data = {
+ 	.ssi_num = 1,
+ 	.src_port = 2,
+ 	.ext_port = 3,
+ 	.hp_gpio = SABRESD_HEADPHONE_DET,
+ 	.hp_active_low = 1,
++	.mic_gpio = SABRESD_MICROPHONE_DET,
++	.mic_active_low = 1,
+ };
+ 
+ static int mxc_wm8962_init(void)
+@@ -1487,9 +1497,10 @@ static void __init mx6_sabresd_board_init(void)
+ 
+ 	if (board_is_mx6_reva()) {
+ 		strcpy(mxc_i2c0_board_info[0].type, "wm8958");
+-		mxc_i2c0_board_info[0].platform_data = &wm8958_pdata;
++		mxc_i2c0_board_info[0].platform_data = &wm8958_config_data;
+ 	} else {
+ 		strcpy(mxc_i2c0_board_info[0].type, "wm8962");
++		mxc_i2c0_board_info[0].platform_data = &wm8962_config_data;
+ 	}
+ 	imx6q_add_imx_i2c(0, &mx6q_sabresd_i2c_data);
+ 	imx6q_add_imx_i2c(1, &mx6q_sabresd_i2c_data);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.h b/arch/arm/mach-mx6/board-mx6q_sabresd.h
+index 69c46f9..f4c04d3 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.h
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.h
+@@ -242,9 +242,10 @@ static iomux_v3_cfg_t mx6q_sabresd_pads[] = {
+ 	MX6Q_PAD_ENET_RXD0__GPIO_1_27, /* UOK_B */
+ 	MX6Q_PAD_EIM_CS1__GPIO_2_24,   /* DOK_B */
+ 
+-	/* WM8958 */
++	/* Audio Codec */
+ 	MX6Q_PAD_KEY_COL2__GPIO_4_10,		/* CODEC_PWR_EN */
+ 	MX6Q_PAD_SD3_RST__GPIO_7_8,			/* HEADPHONE_DET */
++	MX6Q_PAD_GPIO_9__GPIO_1_9,			/* MICROPHONE_DET */
+ 
+ 	/*GPS AUX_3V15_EN*/
+ 	MX6Q_PAD_NANDF_WP_B__GPIO_6_9,
+-- 
+1.7.7.4
+

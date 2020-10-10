@@ -1,0 +1,49 @@
+From 2080169c7b965141634540b6bcf0d2976f404957 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Thu, 5 Jul 2012 18:42:02 +0800
+Subject: [PATCH 1715/2463] ENGR00215884-1 MX6 SabreSD:Refine OV mipi camera
+ reset sequence
+
+This patch refines OV mipi camera reset sequence according to
+OV's recommendation:
+reset --------------------|_____|----------------
+                        ->| 1ms |<-
+pwdn  ----------|_________________________|------
+              ->|   5ms   |<- ->|   5ms   |<-
+    ->|   5ms   |<-
+
+This change makes the OV mipi camera be at a correct status
+after reset, otherwise, the wrong status of OV mipi camera
+will reduce the ~2.78V analog camera power to ~2.3V, which
+causes random thin colorful lines on OV5642 CSI camera image
+as OV5642 CSI camera uses the same analog power.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit 9e78895d8856651b769908e63d4ebc514314eeaa)
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |    8 +++++++-
+ 1 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 2089e2b..07d76ce 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -554,8 +554,14 @@ static void mx6q_mipi_sensor_io_init(void)
+ 	/* Camera power down */
+ 	gpio_request(SABRESD_MIPICSI_PWN, "cam-pwdn");
+ 	gpio_direction_output(SABRESD_MIPICSI_PWN, 1);
+-	msleep(1);
++	msleep(5);
+ 	gpio_set_value(SABRESD_MIPICSI_PWN, 0);
++	msleep(5);
++	gpio_set_value(SABRESD_MIPICSI_RST, 0);
++	msleep(1);
++	gpio_set_value(SABRESD_MIPICSI_RST, 1);
++	msleep(5);
++	gpio_set_value(SABRESD_MIPICSI_PWN, 1);
+ 
+ 	/*for mx6dl, mipi virtual channel 1 connect to csi 1*/
+ 	if (cpu_is_mx6dl())
+-- 
+1.7.7.4
+

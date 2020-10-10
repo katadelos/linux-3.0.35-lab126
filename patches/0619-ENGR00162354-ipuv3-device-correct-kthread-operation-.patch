@@ -1,0 +1,47 @@
+From 5ab9a74ae3da0fc3749a6798e0854bed09955956 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Wed, 16 Nov 2011 17:23:07 +0800
+Subject: [PATCH 0619/2463] ENGR00162354 ipuv3 device: correct kthread
+ operation for split task
+
+make could_finish to volatile.
+do_exit in split_task_thread instead of kthread_stop.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_device.c |    5 ++---
+ 1 files changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_device.c b/drivers/mxc/ipu3/ipu_device.c
+index 0f68441..9395d8a 100644
+--- a/drivers/mxc/ipu3/ipu_device.c
++++ b/drivers/mxc/ipu3/ipu_device.c
+@@ -144,7 +144,7 @@ struct ipu_split_task {
+ 	struct ipu_task task;
+ 	struct ipu_task_entry *parent_task;
+ 	struct task_struct *thread;
+-	bool could_finish;
++	volatile bool could_finish;
+ 	wait_queue_head_t waitq;
+ 	int ret;
+ 
+@@ -944,7 +944,7 @@ static int split_task_thread(void *data)
+ 
+ 	wake_up_interruptible(&t->waitq);
+ 
+-	return 0;
++	do_exit(0);
+ }
+ 
+ static int create_split_task(
+@@ -1176,7 +1176,6 @@ static int queue_split_task(struct ipu_task_entry *t)
+ 	} else {
+ 		for (i = 0; i < size; i++) {
+ 			wait_event_interruptible(sp_task[i].waitq, sp_task[i].could_finish);
+-			kthread_stop(sp_task[i].thread);
+ 			if (sp_task[i].ret < 0) {
+ 				ret = sp_task[i].ret;
+ 				dev_err(t->dev,
+-- 
+1.7.7.4
+

@@ -1,0 +1,54 @@
+From 765f6422a52983a225836164198e4c74d34ad434 Mon Sep 17 00:00:00 2001
+From: Sheng Nan <b38800@freescale.com>
+Date: Fri, 23 Nov 2012 10:59:22 +0800
+Subject: [PATCH 2283/2463] ENGR00234362 Camera: ov5640_mipi: wait for sensor
+ stable before streamon
+
+ov5642 add some delay to wait for sensor stable after S_PARM.
+And ov5640_mipi should keep the same behavior.
+So the upper layer can trust the first frame comes out of ov5640_mipi.
+
+- delay added according to the recommended time from ov company
+
+Signed-off-by: Sheng Nan <b38800@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov5640_mipi.c |   16 +++++++++++++++-
+ 1 files changed, 15 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov5640_mipi.c b/drivers/media/video/mxc/capture/ov5640_mipi.c
+index bde39a5..d2b79d2 100644
+--- a/drivers/media/video/mxc/capture/ov5640_mipi.c
++++ b/drivers/media/video/mxc/capture/ov5640_mipi.c
+@@ -1216,7 +1216,7 @@ static int ov5640_init_mode(enum ov5640_frame_rate frame_rate,
+ 	s32 ArySize = 0;
+ 	int retval = 0;
+ 	void *mipi_csi2_info;
+-	u32 mipi_reg;
++	u32 mipi_reg, msec_wait4stable = 0;
+ 	enum ov5640_downsize_mode dn_mode, orig_dn_mode;
+ 
+ 	if ((mode > ov5640_mode_MAX || mode < ov5640_mode_MIN)
+@@ -1288,6 +1288,20 @@ static int ov5640_init_mode(enum ov5640_frame_rate frame_rate,
+ 	OV5640_set_bandingfilter();
+ 	ov5640_set_virtual_channel(ov5640_data.csi);
+ 
++	/* add delay to wait for sensor stable */
++	if (mode == ov5640_mode_QSXGA_2592_1944) {
++		/* dump the first two frames: 1/7.5*2
++		 * the frame rate of QSXGA is 7.5fps */
++		msec_wait4stable = 267;
++	} else if (frame_rate == ov5640_15_fps) {
++		/* dump the first nine frames: 1/15*9 */
++		msec_wait4stable = 600;
++	} else if (frame_rate == ov5640_30_fps) {
++		/* dump the first nine frames: 1/30*9 */
++		msec_wait4stable = 300;
++	}
++	msleep(msec_wait4stable);
++
+ 	if (mipi_csi2_info) {
+ 		unsigned int i;
+ 
+-- 
+1.7.7.4
+

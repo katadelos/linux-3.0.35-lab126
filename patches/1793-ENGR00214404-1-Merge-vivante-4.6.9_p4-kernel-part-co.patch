@@ -1,0 +1,3403 @@
+From 6cd5d293d58aabe1049b9244f7c569b299f36a67 Mon Sep 17 00:00:00 2001
+From: Loren Huang <b02279@freescale.com>
+Date: Wed, 20 Jun 2012 17:46:43 +0800
+Subject: [PATCH 1793/2463] ENGR00214404-1 Merge vivante 4.6.9_p4 kernel part
+ code
+
+Merge vivante 4.6.9 kernel part code
+Updated clock management code
+Updated gpu reset code
+
+Signed-off-by: Loren Huang <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ drivers/mxc/gpu-viv/Kbuild                         |    3 +-
+ .../hal/kernel/gc_hal_kernel_hardware_command_vg.h |    1 -
+ .../GC350/hal/kernel/gc_hal_kernel_hardware_vg.c   |    4 +-
+ .../GC350/hal/kernel/gc_hal_kernel_hardware_vg.h   |    1 -
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_context.c   |   11 +-
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c  |  396 +++++++----
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c     |    9 +-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h     |   10 +-
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c |   11 +-
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c   |   16 +-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c |    6 +-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.h  |    2 -
+ .../hal/kernel/gc_hal_kernel_video_memory.c        |   17 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h        |   13 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h   |   40 +-
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h   |   22 +
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h |   15 +-
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h  |    1 -
+ .../gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h    |   61 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h |   22 +-
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_engine_vg.h  |    1 -
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h   |   10 +
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_md5.h    |  112 ---
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h    |   15 +-
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h   |    4 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_raster.h |   15 +
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h    |    4 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h     |   29 -
+ .../hal/os/linux/kernel/gc_hal_kernel_debug.h      |    6 +-
+ .../hal/os/linux/kernel/gc_hal_kernel_debugfs.c    |  795 ++++++++++++++++++++
+ .../hal/os/linux/kernel/gc_hal_kernel_debugfs.h    |   86 +++
+ .../hal/os/linux/kernel/gc_hal_kernel_device.c     |   50 ++-
+ .../hal/os/linux/kernel/gc_hal_kernel_device.h     |   34 +-
+ .../hal/os/linux/kernel/gc_hal_kernel_driver.c     |   81 +--
+ .../hal/os/linux/kernel/gc_hal_kernel_linux.h      |    1 +
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |  202 ++++--
+ 36 files changed, 1595 insertions(+), 511 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/Kbuild b/drivers/mxc/gpu-viv/Kbuild
+index 8d97b92..bc5ec02 100644
+--- a/drivers/mxc/gpu-viv/Kbuild
++++ b/drivers/mxc/gpu-viv/Kbuild
+@@ -42,7 +42,8 @@ OBJS := $(OS_KERNEL_DIR)/gc_hal_kernel_device.o \
+         $(OS_KERNEL_DIR)/gc_hal_kernel_driver.o \
+         $(OS_KERNEL_DIR)/gc_hal_kernel_linux.o \
+         $(OS_KERNEL_DIR)/gc_hal_kernel_math.o \
+-        $(OS_KERNEL_DIR)/gc_hal_kernel_os.o
++        $(OS_KERNEL_DIR)/gc_hal_kernel_os.o \
++        $(OS_KERNEL_DIR)/gc_hal_kernel_debugfs.o
+ 
+ ifeq ($(USE_3D_VG), 1)
+ 
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.h b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.h
+index a60bead..e2a9f8e 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.h
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_command_vg.h
+@@ -22,7 +22,6 @@
+ 
+ 
+ 
+-
+ #ifndef __gc_hal_kernel_hardware_command_vg_h_
+ #define __gc_hal_kernel_hardware_command_vg_h_
+ 
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+index c24439d..4670a50 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+@@ -344,8 +344,8 @@ gckVGHARDWARE_Construct(
+         hardware->idleSignal            = gcvNULL;
+         hardware->chipPowerState        = gcvPOWER_OFF;
+         hardware->chipPowerStateGlobal  = gcvPOWER_ON;
+-        hardware->clockState            = gcvTRUE;
+-        hardware->powerState            = gcvTRUE;
++        hardware->clockState            = gcvFALSE;
++        hardware->powerState            = gcvFALSE;
+         hardware->powerOffTimeout       = gcdPOWEROFF_TIMEOUT;
+         hardware->powerOffTime          = 0;
+         hardware->timeIdleThread        = gcvNULL;
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
+index 0b2742d..bca6f57 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
+@@ -22,7 +22,6 @@
+ 
+ 
+ 
+-
+ #ifndef __gc_hal_kernel_hardware_vg_h_
+ #define __gc_hal_kernel_hardware_vg_h_
+ 
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
+index a186bbe..633081b 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
+@@ -22,7 +22,6 @@
+ 
+ 
+ 
+-
+ #include "gc_hal.h"
+ #include "gc_hal_kernel.h"
+ #include "gc_hal_kernel_context.h"
+@@ -210,6 +209,7 @@ _FlushPipe(
+     return 6;
+ }
+ 
++#if !defined(VIVANTE_NO_3D)
+ static gctSIZE_T
+ _SemaphoreStall(
+     IN gckCONTEXT Context,
+@@ -245,6 +245,7 @@ _SemaphoreStall(
+     /* Semaphore/stall takes 4 slots. */
+     return 4;
+ }
++#endif
+ 
+ static gctSIZE_T
+ _SwitchPipe(
+@@ -477,6 +478,8 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x03850 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+ #endif
+ 
++    index += _FlushPipe(Context, index, gcvPIPE_3D);
++
+     /* Global states. */
+     index += _State(Context, index, 0x03814 >> 2, 0x00000001, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x03818 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+@@ -557,8 +560,8 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x00C14 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x00C18 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x00C1C >> 2, 0x42000000, 1, gcvFALSE, gcvFALSE);
+-    index += _State(Context, index, 0x00C20 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+-    index += _State(Context, index, 0x00C24 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x00C20 >> 2, 0x00000000, 1, gcvTRUE, gcvFALSE);
++    index += _State(Context, index, 0x00C24 >> 2, 0x00000000, 1, gcvTRUE, gcvFALSE);
+ 
+     /* Raster states. */
+     index += _State(Context, index, 0x00E00 >> 2, 0x00000001, 1, gcvFALSE, gcvFALSE);
+@@ -711,7 +714,6 @@ _InitializeContextBuffer(
+     /* Store the index of the "XD" entry. */
+     Context->entryOffsetXDFrom3D = index * gcmSIZEOF(gctUINT32);
+ 
+-    index += _FlushPipe(Context, index, gcvPIPE_3D);
+ 
+     /* Pixel Engine states. */
+     index += _State(Context, index, 0x01400 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+@@ -736,6 +738,7 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x014B4 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x014A4 >> 2, 0x000E400C, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x01580 >> 2, 0x00000000, 3, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x014B8 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+ 
+     /* Composition states. */
+     index += _State(Context, index, 0x03008 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+index c201c63..df15ef4 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+@@ -206,15 +206,19 @@ _IdentifyHardware(
+         }
+     }
+ 
+-    /* Enable A8 target for the 2D chips missing it. */
+-    if (!((((gctUINT32) (Identity->chipMinorFeatures)) >> (0 ? 29:29) & ((gctUINT32) ((((1 ? 29:29) - (0 ? 29:29) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 29:29) - (0 ? 29:29) + 1)))))) == (0x1  & ((gctUINT32) ((((1 ? 29:29) - (0 ? 29:29) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 29:29) - (0 ? 29:29) + 1))))))))
++    /* Get the Supertile layout in the hardware. */
++    if (((((gctUINT32) (Identity->chipMinorFeatures3)) >> (0 ? 26:26) & ((gctUINT32) ((((1 ? 26:26) - (0 ? 26:26) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 26:26) - (0 ? 26:26) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 26:26) - (0 ? 26:26) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 26:26) - (0 ? 26:26) + 1)))))))
++     || ((((gctUINT32) (Identity->chipMinorFeatures3)) >> (0 ? 8:8) & ((gctUINT32) ((((1 ? 8:8) - (0 ? 8:8) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:8) - (0 ? 8:8) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 8:8) - (0 ? 8:8) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:8) - (0 ? 8:8) + 1))))))))
+     {
+-        if (((Identity->chipModel == gcv300) && (Identity->chipRevision >= 0x4400))
+-            || (Identity->chipModel == gcv320))
+-        {
+-            Identity->chipMinorFeatures =
+-                ((((gctUINT32) (Identity->chipMinorFeatures)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 29:29) - (0 ? 29:29) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 29:29) - (0 ? 29:29) + 1))))))) << (0 ? 29:29))) | (((gctUINT32) (0x1  & ((gctUINT32) ((((1 ? 29:29) - (0 ? 29:29) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 29:29) - (0 ? 29:29) + 1))))))) << (0 ? 29:29)));
+-        }
++        Identity->superTileMode = 2;
++    }
++    else if (((((gctUINT32) (Identity->chipMinorFeatures)) >> (0 ? 27:27) & ((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1))))))))
++    {
++        Identity->superTileMode = 1;
++    }
++    else
++    {
++        Identity->superTileMode = 0;
+     }
+ 
+     /* If new HZ is available, disable other early z modes. */
+@@ -769,6 +773,7 @@ gckHARDWARE_InitializeHardware(
+     gceSTATUS status;
+     gctUINT32 baseAddress;
+     gctUINT32 chipRev;
++    gctUINT32 control;
+ 
+     gcmkHEADER_ARG("Hardware=0x%x", Hardware);
+ 
+@@ -793,6 +798,17 @@ gckHARDWARE_InitializeHardware(
+                                       0x00000,
+                                       ((((gctUINT32) (0x00000900)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 19:19) - (0 ? 19:19) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 19:19) - (0 ? 19:19) + 1))))))) << (0 ? 19:19))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 19:19) - (0 ? 19:19) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 19:19) - (0 ? 19:19) + 1))))))) << (0 ? 19:19)))));
+ 
++    gcmkONERROR(gckOS_ReadRegisterEx(Hardware->os,
++                                     Hardware->core,
++                                     0x00000,
++                                     &control));
++
++    /* Enable debug register. */
++    gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os,
++                                      Hardware->core,
++                                      0x00000,
++                                      ((((gctUINT32) (control)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 11:11) - (0 ? 11:11) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 11:11) - (0 ? 11:11) + 1))))))) << (0 ? 11:11))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 11:11) - (0 ? 11:11) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 11:11) - (0 ? 11:11) + 1))))))) << (0 ? 11:11)))));
++
+     /* Reset memory counters. */
+     gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os,
+                                       Hardware->core,
+@@ -941,6 +957,59 @@ gckHARDWARE_InitializeHardware(
+         }
+     }
+ 
++    if (Hardware->identity.chipModel >= gcv400
++    &&  Hardware->identity.chipModel != gcv420)
++    {
++		gctUINT32 data;
++
++        gcmkONERROR(
++            gckOS_ReadRegisterEx(Hardware->os,
++                                 Hardware->core,
++                                 Hardware->powerBaseAddress
++                                 + 0x00104,
++                                 &data));
++
++        /* Disable PA clock gating. */
++        data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 4:4) - (0 ? 4:4) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 4:4) - (0 ? 4:4) + 1))))))) << (0 ? 4:4))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 4:4) - (0 ? 4:4) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 4:4) - (0 ? 4:4) + 1))))))) << (0 ? 4:4)));
++
++        gcmkONERROR(
++            gckOS_WriteRegisterEx(Hardware->os,
++                                  Hardware->core,
++                                  Hardware->powerBaseAddress
++                                  + 0x00104,
++                                  data));
++    }
++
++    /* Limit 2D outstanding request. */
++    if ((Hardware->identity.chipModel == gcv320)
++        && ((Hardware->identity.chipRevision == 0x5007)
++        || (Hardware->identity.chipRevision == 0x5220)))
++    {
++		gctUINT32 data;
++
++        gcmkONERROR(
++            gckOS_ReadRegisterEx(Hardware->os,
++                                 Hardware->core,
++                                 0x0002C,
++                                 &data));
++        if (data != 33956864)
++        {
++            gcmkONERROR(
++                gckOS_ReadRegisterEx(Hardware->os,
++                                     Hardware->core,
++                                     0x00414,
++                                     &data));
++
++            data = ((((gctUINT32) (data)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 7:0) - (0 ? 7:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 7:0) - (0 ? 7:0) + 1))))))) << (0 ? 7:0))) | (((gctUINT32) ((gctUINT32) (Hardware->identity.chipRevision == 0x5220 ? 8 : (Hardware->identity.chipRevision == 0x5007 ? 16 : 0)) & ((gctUINT32) ((((1 ? 7:0) - (0 ? 7:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 7:0) - (0 ? 7:0) + 1))))))) << (0 ? 7:0)));
++
++            gcmkONERROR(
++                gckOS_WriteRegisterEx(Hardware->os,
++                                      Hardware->core,
++                                      0x00414,
++                                      data));
++        }
++    }
++
+     /* Success. */
+     gcmkFOOTER_NO();
+     return gcvSTATUS_OK;
+@@ -1139,6 +1208,7 @@ gckHARDWARE_QueryChipIdentity(
+     Identity->numConstants           = Hardware->identity.numConstants;
+     Identity->bufferSize             = Hardware->identity.bufferSize;
+     Identity->varyingsCount          = Hardware->identity.varyingsCount;
++    Identity->superTileMode          = Hardware->identity.superTileMode;
+ 
+     /* Success. */
+     gcmkFOOTER_NO();
+@@ -1420,9 +1490,7 @@ gckHARDWARE_WaitLink(
+ 
+         /* Send FE-PE stall token. */
+         logical[4]
+-            = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))) | (((gctUINT32) (0x01 & ((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27)))
+-            | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 25:16) - (0 ? 25:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 25:16) - (0 ? 25:16) + 1))))))) << (0 ? 25:16))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 25:16) - (0 ? 25:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 25:16) - (0 ? 25:16) + 1))))))) << (0 ? 25:16)))
+-            | ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 15:0) - (0 ? 15:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:0) - (0 ? 15:0) + 1))))))) << (0 ? 15:0))) | (((gctUINT32) ((gctUINT32) (0x0F00) & ((gctUINT32) ((((1 ? 15:0) - (0 ? 15:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 15:0) - (0 ? 15:0) + 1))))))) << (0 ? 15:0)));
++            = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27))) | (((gctUINT32) (0x09 & ((gctUINT32) ((((1 ? 31:27) - (0 ? 31:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:27) - (0 ? 31:27) + 1))))))) << (0 ? 31:27)));
+ 
+         logical[5]
+             = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 4:0) - (0 ? 4:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 4:0) - (0 ? 4:0) + 1))))))) << (0 ? 4:0))) | (((gctUINT32) (0x01 & ((gctUINT32) ((((1 ? 4:0) - (0 ? 4:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 4:0) - (0 ? 4:0) + 1))))))) << (0 ? 4:0)))
+@@ -2327,6 +2395,7 @@ gckHARDWARE_ConvertPhysical(
+     )
+ {
+     gctUINT32 address;
++    gctUINT32 baseAddress;
+ 
+     gcmkHEADER_ARG("Hardware=0x%x Physical=0x%x", Hardware, Physical);
+ 
+@@ -2337,6 +2406,16 @@ gckHARDWARE_ConvertPhysical(
+ 
+     address = gcmPTR2INT(Physical);
+ 
++    /* For old MMU, get GPU address according to baseAddress. */
++    if (Hardware->mmuVersion == 0)
++    {
++        gcmkVERIFY_OK(gckOS_GetBaseAddress(Hardware->os, &baseAddress));
++
++        /* Subtract base address to get a GPU address. */
++        gcmkASSERT(address >= baseAddress);
++        address -= baseAddress;
++    }
++
+     /* Return hardware specific address. */
+     *Address = (Hardware->mmuVersion == 0)
+              ? ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:31) - (0 ? 31:31) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:31) - (0 ? 31:31) + 1))))))) << (0 ? 31:31))) | (((gctUINT32) (0x0 & ((gctUINT32) ((((1 ? 31:31) - (0 ? 31:31) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:31) - (0 ? 31:31) + 1))))))) << (0 ? 31:31)))
+@@ -2398,98 +2477,6 @@ gckHARDWARE_Interrupt(
+                                  0x00010,
+                                  &data));
+ 
+-        if (data & 0x80000000)
+-        {
+-		gckOS_Print("!!!!!!!!!!!!! AXI BUS ERROR !!!!!!!!!!!!!\n");
+-            gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE, "AXI BUS ERROR");
+-        }
+-
+-        if (data & 0x40000000)
+-        {
+-            gctUINT32 mmu, mmuStatus, address, i;
+-#if gcdDEBUG
+-            gctUINT32 mtlb, stlb, offset;
+-#endif
+-
+-            gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
+-                           "  *** MMU ERROR ***\n");
+-
+-            gcmkVERIFY_OK(
+-                gckOS_ReadRegisterEx(Hardware->os,
+-                                     Hardware->core,
+-                                     0x00188,
+-                                     &mmuStatus));
+-
+-            gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
+-                           "  MMU status = 0x%08X\n",
+-                           mmuStatus);
+-
+-            for (i = 0; i < 4; i += 1)
+-            {
+-                mmu = mmuStatus & 0xF;
+-                mmuStatus >>= 4;
+-
+-                if (mmu == 0)
+-                {
+-                    continue;
+-                }
+-
+-                switch (mmu)
+-                {
+-                case 1:
+-                      gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
+-                                    "  MMU%d: slave not present\n",
+-                                    i);
+-                      break;
+-
+-                case 2:
+-                      gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
+-                                    "  MMU%d: page not present\n",
+-                                    i);
+-                      break;
+-
+-                case 3:
+-                      gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
+-                                    "  MMU%d: write violation\n",
+-                                    i);
+-                      break;
+-
+-                default:
+-                      gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
+-                                    "  MMU%d: unknown state\n",
+-                                    i);
+-                }
+-
+-                gcmkVERIFY_OK(
+-                    gckOS_ReadRegisterEx(Hardware->os,
+-                                         Hardware->core,
+-                                         0x00190 + i,
+-                                         &address));
+-
+-#if gcdDEBUG
+-                mtlb   = (address & gcdMMU_MTLB_MASK) >> gcdMMU_MTLB_SHIFT;
+-                stlb   = (address & gcdMMU_STLB_4K_MASK) >> gcdMMU_STLB_4K_SHIFT;
+-                offset =  address & gcdMMU_OFFSET_4K_MASK;
+-#endif
+-
+-                gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
+-                             "  MMU%d: exception address = 0x%08X\n",
+-                             i, address);
+-
+-                gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
+-                             "    MTLB entry = %d\n",
+-                             mtlb);
+-
+-                gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
+-                             "    STLB entry = %d\n",
+-                             stlb);
+-
+-                gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
+-                             "    Offset = 0x%08X (%d)\n",
+-                             offset, offset);
+-            }
+-        }
+-
+         if (data == 0)
+         {
+             /* Not our interrupt. */
+@@ -2498,7 +2485,7 @@ gckHARDWARE_Interrupt(
+         else
+         {
+             /* Inform gckEVENT of the interrupt. */
+-            status = gckEVENT_Interrupt(eventObj, data & 0x7FFFFFFF);
++            status = gckEVENT_Interrupt(eventObj, data);
+         }
+     }
+     else
+@@ -3003,6 +2990,7 @@ gckHARDWARE_SetMMUv2(
+     gctSIZE_T bufferSize;
+     gctBOOL commitEntered = gcvFALSE;
+     gctPOINTER pointer = gcvNULL;
++    gctBOOL acquired = gcvFALSE;
+ 
+     gcmkHEADER_ARG("Hardware=0x%x Enable=%d", Hardware, Enable);
+ 
+@@ -3079,6 +3067,17 @@ gckHARDWARE_SetMMUv2(
+ 
+     gcmkONERROR(gckCOMMAND_Execute(command, 16));
+ 
++    if (FromPower == gcvFALSE)
++    {
++        /* Acquire global semaphore to suspend power management until MMU
++        ** is enabled. And acquired it before gckCOMMAND_ExitCommit to
++        ** make sure GPU keeps ON. */
++        gcmkONERROR(
++            gckOS_AcquireSemaphore(Hardware->os, Hardware->globalSemaphore));
++
++        acquired = gcvTRUE;
++    }
++
+     /* Release the command queue. */
+     gcmkONERROR(gckCOMMAND_ExitCommit(command, FromPower));
+     commitEntered = gcvFALSE;
+@@ -3098,6 +3097,15 @@ gckHARDWARE_SetMMUv2(
+                               0x0018C,
+                               ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (Enable) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0)))));
+ 
++    if (FromPower == gcvFALSE)
++    {
++        /* Relase global semaphore. */
++        gcmkVERIFY_OK(
++            gckOS_ReleaseSemaphore(Hardware->os, Hardware->globalSemaphore));
++
++        acquired = gcvFALSE;
++    }
++
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+         "call gckCOMMAND_Stall to check MMU available.\n");
+ 
+@@ -3115,7 +3123,13 @@ OnError:
+     {
+         /* Release the command queue mutex. */
+         gcmkVERIFY_OK(gckCOMMAND_ExitCommit(Hardware->kernel->command,
+-                                            gcvFALSE));
++                                            FromPower));
++    }
++
++    if (acquired)
++    {
++        gcmkVERIFY_OK(
++            gckOS_ReleaseSemaphore(Hardware->os, Hardware->globalSemaphore));
+     }
+ 
+     /* Return the status. */
+@@ -3389,25 +3403,6 @@ gckHARDWARE_SetFastClear(
+                        "FastClear=%d Compression=%d", Enable, Compression);
+     }
+ 
+-    /* Special patch for 0x320 0x5220. */
+-    if (Hardware->identity.chipRevision == 0x5220 && Hardware->identity.chipModel == gcv320)
+-    {
+-        gctUINT32 debug;
+-
+-        /* Read AQMemoryDebug register. */
+-        gcmkONERROR(
+-                gckOS_ReadRegisterEx(Hardware->os, Hardware->core, 0x00414, &debug));
+-
+-        debug |= 8;
+-
+-        /* Write back AQMemoryDebug register. */
+-        gcmkONERROR(
+-                gckOS_WriteRegisterEx(Hardware->os,
+-                    Hardware->core,
+-                    0x00414,
+-                    debug));
+-    }
+-
+     /* Success. */
+     gcmkFOOTER_NO();
+     return gcvSTATUS_OK;
+@@ -3766,6 +3761,25 @@ gckHARDWARE_SetPowerManagementState(
+     flag  = flags[Hardware->chipPowerState][State];
+     gcmkONERROR(_GetClock(Hardware, State, &clock));
+ 
++    if (State == gcvPOWER_SUSPEND && Hardware->chipPowerState == gcvPOWER_OFF && broadcast)
++    {
++#if gcdPOWER_SUSNPEND_WHEN_IDLE
++	/* Do nothing */
++
++    	/* Release the power mutex. */
++        gcmkONERROR(gckOS_ReleaseMutex(os, Hardware->powerMutex));
++
++       	gcmkFOOTER_NO();
++        return gcvSTATUS_OK;
++#else
++	/* Clock should be on when switch power from off to suspend */
++        clock = ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
++                ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
++                ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
++                ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) ;
++#endif
++    }
++
+ #if gcdPOWEROFF_TIMEOUT
+     if (timeout)
+     {
+@@ -4091,6 +4105,10 @@ gckHARDWARE_SetPowerManagementState(
+ #ifndef __QNXNTO__
+         /* Start the Isr. */
+         gcmkONERROR(Hardware->startIsr(Hardware->isrContext));
++#else
++        /* XSUN: QNX does not need to attach-dettach ISP that often
++         * with the current release */
++#endif
+ 
+         /* Set NEW MMU. */
+         if (Hardware->mmuVersion != 0 && configMmu)
+@@ -4105,12 +4123,6 @@ gckHARDWARE_SetPowerManagementState(
+                         gcvTRUE
+                         ));
+         }
+-#else
+-        /* XSUN: QNX does not need to attach-dettach ISP that often
+-         * with the current release, MMU is disabled by a mistaken due to
+-         * no 3D core present
+-         * this is to be fixed */
+-#endif
+     }
+ 
+     /* Get time until started. */
+@@ -4872,10 +4884,19 @@ gckHARDWARE_Reset(
+         gcmkONERROR(gckCOMMAND_Stop(command, gcvTRUE));
+     }
+ 
++#ifndef __QNXNTO__
+     /* Stop isr, we will start it again when power on GPU. */
+     gcmkONERROR(Hardware->stopIsr(Hardware->isrContext));
++#endif
+ 
+-    gcmkONERROR(_ResetGPU(Hardware, Hardware->os, Hardware->core));
++    /* Hardware reset. */
++    status = gckOS_ResetGPU(Hardware->os, Hardware->core);
++
++    if (gcmIS_ERROR(status))
++    {
++        /* Soft reset. */
++        gcmkONERROR(_ResetGPU(Hardware, Hardware->os, Hardware->core));
++    }
+ 
+     /* Force an OFF to ON power switch. */
+     Hardware->chipPowerState = gcvPOWER_OFF;
+@@ -5143,6 +5164,119 @@ gckHARDWARE_IsFeatureAvailable(
+     return available ? gcvSTATUS_TRUE : gcvSTATUS_OK;
+ }
+ 
++/*******************************************************************************
++**
++**  gckHARDWARE_DumpMMUException
++**
++**  Dump the MMU debug info on an MMU exception.
++**
++**  INPUT:
++**
++**      gckHARDWARE Harwdare
++**          Pointer to an gckHARDWARE object.
++**
++**  OUTPUT:
++**
++**      Nothing.
++*/
++gceSTATUS
++gckHARDWARE_DumpMMUException(
++    IN gckHARDWARE Hardware
++    )
++{
++    gctUINT32 mmu, mmuStatus, address, i;
++#if gcdDEBUG
++    gctUINT32 mtlb, stlb, offset;
++#endif
++
++    gcmkHEADER_ARG("Hardware=0x%x", Hardware);
++
++    /* Verify the arguments. */
++    gcmkVERIFY_OBJECT(Hardware, gcvOBJ_HARDWARE);
++
++    gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
++                   "  *** MMU ERROR ***\n");
++
++    gcmkVERIFY_OK(
++        gckOS_ReadRegisterEx(Hardware->os,
++                             Hardware->core,
++                             0x00188,
++                             &mmuStatus));
++
++    gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
++                   "  MMU status = 0x%08X\n",
++                   mmuStatus);
++
++    for (i = 0; i < 4; i += 1)
++    {
++        mmu = mmuStatus & 0xF;
++        mmuStatus >>= 4;
++
++        if (mmu == 0)
++        {
++            continue;
++        }
++
++        switch (mmu)
++        {
++        case 1:
++              gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
++                            "  MMU%d: slave not present\n",
++                            i);
++              break;
++
++        case 2:
++              gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
++                            "  MMU%d: page not present\n",
++                            i);
++              break;
++
++        case 3:
++              gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
++                            "  MMU%d: write violation\n",
++                            i);
++              break;
++
++        default:
++              gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
++                            "  MMU%d: unknown state\n",
++                            i);
++        }
++
++        gcmkVERIFY_OK(
++            gckOS_ReadRegisterEx(Hardware->os,
++                                 Hardware->core,
++                                 0x00190 + i,
++                                 &address));
++
++#if gcdDEBUG
++        mtlb   = (address & gcdMMU_MTLB_MASK) >> gcdMMU_MTLB_SHIFT;
++        stlb   = (address & gcdMMU_STLB_4K_MASK) >> gcdMMU_STLB_4K_SHIFT;
++        offset =  address & gcdMMU_OFFSET_4K_MASK;
++#endif
++
++        gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
++                     "  MMU%d: exception address = 0x%08X\n",
++                     i, address);
++
++        gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
++                     "    MTLB entry = %d\n",
++                     mtlb);
++
++        gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
++                     "    STLB entry = %d\n",
++                     stlb);
++
++        gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_HARDWARE,
++                     "    Offset = 0x%08X (%d)\n",
++                     offset, offset);
++    }
++
++	gcmkFOOTER_NO();
++    return gcvSTATUS_OK;
++}
++
++
+ #if gcdFRAME_DB
+ static gceSTATUS
+ gckHARDWARE_ReadPerformanceRegister(
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
+index 2dd6504..4d16d18 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
+@@ -2521,6 +2521,7 @@ gckKERNEL_Recovery(
+     )
+ {
+ #if gcdENABLE_RECOVERY
++#define gcvEVENT_MASK 0x3FFFFFFF
+     gceSTATUS status;
+     gckEVENT eventObj;
+     gckHARDWARE hardware;
+@@ -2544,17 +2545,17 @@ gckKERNEL_Recovery(
+ 
+     /* Handle all outstanding events now. */
+ #if gcdSMP
+-    gcmkONERROR(gckOS_AtomSet(Kernel->os, eventObj->pending, ~0U));
++    gcmkONERROR(gckOS_AtomSet(Kernel->os, eventObj->pending, gcvEVENT_MASK));
+ #else
+-    eventObj->pending = ~0U;
++    eventObj->pending = gcvEVENT_MASK;
+ #endif
+     gcmkONERROR(gckEVENT_Notify(eventObj, 1));
+ 
+     /* Again in case more events got submitted. */
+ #if gcdSMP
+-    gcmkONERROR(gckOS_AtomSet(Kernel->os, eventObj->pending, ~0U));
++    gcmkONERROR(gckOS_AtomSet(Kernel->os, eventObj->pending, gcvEVENT_MASK));
+ #else
+-    eventObj->pending = ~0U;
++    eventObj->pending = gcvEVENT_MASK;
+ #endif
+     gcmkONERROR(gckEVENT_Notify(eventObj, 2));
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
+index a9697a1..b627f3b 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
+@@ -613,24 +613,24 @@ typedef union _gcuVIDMEM_NODE
+         gctSIZE_T               pageCount;
+ 
+         /* Used only when node is not contiguous */
+-        gctPOINTER              pageTables[gcdGPU_COUNT];
++        gctPOINTER              pageTables[gcdMAX_GPU_COUNT];
+         /* Pointer to gckKERNEL object who lock this. */
+-        gckKERNEL               lockKernels[gcdGPU_COUNT];
++        gckKERNEL               lockKernels[gcdMAX_GPU_COUNT];
+         /* Actual physical address */
+-        gctUINT32               addresses[gcdGPU_COUNT];
++        gctUINT32               addresses[gcdMAX_GPU_COUNT];
+ 
+         /* Mutex. */
+         gctPOINTER              mutex;
+ 
+         /* Locked counter. */
+-        gctINT32                lockeds[gcdGPU_COUNT];
++        gctINT32                lockeds[gcdMAX_GPU_COUNT];
+ 
+ #ifdef __QNXNTO__
+         /* Single linked list of nodes. */
+         gcuVIDMEM_NODE_PTR      next;
+ 
+         /* Unlock pending flag. */
+-        gctBOOL                 unlockPendings[gcdGPU_COUNT];
++        gctBOOL                 unlockPendings[gcdMAX_GPU_COUNT];
+ 
+         /* Free pending flag. */
+         gctBOOL                 freePending;
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
+index 7a5e82e..8cf0509 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
+@@ -30,9 +30,6 @@
+ 
+ #define _GC_OBJ_ZONE            gcvZONE_COMMAND
+ 
+-/* When enabled, extra messages needed by the dump parser are left out. */
+-#define gcdSIMPLE_COMMAND_DUMP  1
+-
+ /******************************************************************************\
+ ********************************* Support Code *********************************
+ \******************************************************************************/
+@@ -68,7 +65,7 @@ _NewQueue(
+     newIndex     = (currentIndex + 1) % gcdCOMMAND_QUEUES;
+ 
+     /* Wait for availability. */
+-#if gcdDUMP_COMMAND && !gcdSIMPLE_COMMAND_DUMP
++#if gcdDUMP_COMMAND
+     gcmkPRINT("@[kernel.waitsignal]");
+ #endif
+ 
+@@ -1914,7 +1911,7 @@ gckCOMMAND_Commit(
+         hardware, Command->logical, Command->offset
+         ));
+ 
+-#if gcdDUMP_COMMAND && !gcdSIMPLE_COMMAND_DUMP
++#if gcdDUMP_COMMAND
+     gcmkPRINT("@[kernel.commit]");
+ #endif
+ #endif /* gcdNULL_DRIVER */
+@@ -2309,7 +2306,7 @@ gckCOMMAND_Execute(
+         Command->kernel->hardware, Command->logical, Command->offset
+         ));
+ 
+-#if gcdDUMP_COMMAND && !gcdSIMPLE_COMMAND_DUMP
++#if gcdDUMP_COMMAND
+     gcmkPRINT("@[kernel.execute]");
+ #endif
+ 
+@@ -2386,7 +2383,7 @@ gckCOMMAND_Stall(
+     /* Submit the event queue. */
+     gcmkONERROR(gckEVENT_Submit(eventObject, gcvTRUE, FromPower));
+ 
+-#if gcdDUMP_COMMAND && !gcdSIMPLE_COMMAND_DUMP
++#if gcdDUMP_COMMAND
+     gcmkPRINT("@[kernel.stall]");
+ #endif
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
+index 43363b9..e1b21a0 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
+@@ -1864,6 +1864,20 @@ gckEVENT_Notify(
+             break;
+         }
+ 
++        if (pending & 0x80000000)
++        {
++            gckOS_Print("!!!!!!!!!!!!! AXI BUS ERROR !!!!!!!!!!!!!\n");
++            gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_EVENT, "AXI BUS ERROR");
++            pending &= 0x7FFFFFFF;
++        }
++
++        if (pending & 0x40000000)
++        {
++            gckHARDWARE_DumpMMUException(Event->kernel->hardware);
++
++            pending &= 0xBFFFFFFF;
++        }
++
+         gcmkTRACE_ZONE_N(
+             gcvLEVEL_INFO, gcvZONE_EVENT,
+             gcmSIZEOF(pending),
+@@ -2029,7 +2043,7 @@ gckEVENT_Notify(
+             /* Assign record->processID as the pid for this galcore thread.
+              * Used in OS calls like gckOS_UnlockMemory() which do not take a pid.
+              */
+-            drv_thread_specific_key_assign(record->processID, 0);
++            drv_thread_specific_key_assign(record->processID, 0, Event->kernel->core);
+ #endif
+ 
+ #if gcdSECURE_USER
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
+index 7062dd9..f7a70ac 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
+@@ -68,7 +68,7 @@ typedef struct _gcsSharedPageTable
+     gckMMU          mmu;
+ 
+     /* Hardwares which use this shared pagetable. */
+-    gckHARDWARE     hardwares[gcdGPU_COUNT];
++    gckHARDWARE     hardwares[gcdMAX_GPU_COUNT];
+ 
+     /* Number of cores use this shared pagetable. */
+     gctUINT32       reference;
+@@ -1201,7 +1201,7 @@ gckMMU_Enable(
+         gcmkONERROR(_SetupDynamicSpace(Mmu));
+ 
+ #if gcdSHARED_PAGETABLE
+-        for(i = 0; i < gcdGPU_COUNT; i++)
++        for(i = 0; i < gcdMAX_GPU_COUNT; i++)
+         {
+             hardware = sharedPageTable->hardwares[i];
+             if (hardware != gcvNULL)
+@@ -1402,7 +1402,7 @@ gckMMU_Flush(
+     gckHARDWARE hardware;
+ #if gcdSHARED_PAGETABLE
+     gctINT i;
+-    for (i = 0; i < gcdGPU_COUNT; i++)
++    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+     {
+ #if gcdENABLE_VG
+         if (i == gcvCORE_VG)
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.h b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.h
+index 04fccf4..b86b0c9 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_vg.h
+@@ -22,7 +22,6 @@
+ 
+ 
+ 
+-
+ #ifndef __gc_hal_kernel_vg_h_
+ #define __gc_hal_kernel_vg_h_
+ 
+@@ -34,7 +33,6 @@
+ ********************************** Structures **********************************
+ \******************************************************************************/
+ 
+-
+ /* gckKERNEL object. */
+ struct _gckVGKERNEL
+ {
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
+index 3cf63e2..9d6da63 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
+@@ -245,7 +245,7 @@ gckVIDMEM_ConstructVirtual(
+     node->Virtual.contiguous    = Contiguous;
+     node->Virtual.logical       = gcvNULL;
+ 
+-    for (i = 0; i < gcdGPU_COUNT; i++)
++    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+     {
+         node->Virtual.lockeds[i]        = 0;
+         node->Virtual.pageTables[i]     = gcvNULL;
+@@ -259,7 +259,7 @@ gckVIDMEM_ConstructVirtual(
+ #ifdef __QNXNTO__
+     node->Virtual.next          = gcvNULL;
+     node->Virtual.freePending   = gcvFALSE;
+-    for (i = 0; i < gcdGPU_COUNT; i++)
++    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+     {
+         node->Virtual.unlockPendings[i] = gcvFALSE;
+     }
+@@ -366,7 +366,7 @@ gckVIDMEM_DestroyVirtual(
+     /* Delete the mutex. */
+     gcmkVERIFY_OK(gckOS_DeleteMutex(os, Node->Virtual.mutex));
+ 
+-    for (i = 0; i < gcdGPU_COUNT; i++)
++    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+     {
+         if (Node->Virtual.pageTables[i] != gcvNULL)
+         {
+@@ -1392,7 +1392,7 @@ gckVIDMEM_Free(
+ 
+     acquired = gcvTRUE;
+ 
+-    for (i = 0, totalLocked = 0; i < gcdGPU_COUNT; i++)
++    for (i = 0, totalLocked = 0; i < gcdMAX_GPU_COUNT; i++)
+     {
+         totalLocked += Node->Virtual.lockeds[i];
+     }
+@@ -1590,7 +1590,7 @@ _NeedVirtualMapping(
+     gcmkVERIFY_ARGUMENT(Kernel != gcvNULL);
+     gcmkVERIFY_ARGUMENT(Node != gcvNULL);
+     gcmkVERIFY_ARGUMENT(NeedMapping != gcvNULL);
+-    gcmkVERIFY_ARGUMENT(Core < gcdGPU_COUNT);
++    gcmkVERIFY_ARGUMENT(Core < gcdMAX_GPU_COUNT);
+ 
+     if (Node->Virtual.contiguous)
+     {
+@@ -1690,7 +1690,7 @@ gckVIDMEM_Lock(
+         /* Increment the lock count. */
+         Node->VidMem.locked ++;
+ 
+-        /* Return the address of the node. */
++        /* Return the physical address of the node. */
+ #if !gcdUSE_VIDMEM_PER_PID
+         *Address = Node->VidMem.memory->baseAddress
+                  + Node->VidMem.offset
+@@ -1699,6 +1699,7 @@ gckVIDMEM_Lock(
+         *Address = Node->VidMem.physical;
+ #endif
+ 
++        /* Get hardware specific address. */
+ #if gcdENABLE_VG
+         if (Kernel->vg == gcvNULL)
+ #endif
+@@ -1769,10 +1770,10 @@ gckVIDMEM_Lock(
+ 
+             if (needMapping == gcvFALSE)
+             {
++                /* Get hardware specific address. */
+ #if gcdENABLE_VG
+                 if (Kernel->vg != gcvNULL)
+                 {
+-                    /* Get physical address directly */
+                     gcmkONERROR(gckVGHARDWARE_ConvertLogical(Kernel->vg->hardware,
+                                 Node->Virtual.logical,
+                                 &Node->Virtual.addresses[Kernel->core]));
+@@ -2077,7 +2078,7 @@ gckVIDMEM_Unlock(
+ #endif
+             }
+ 
+-            for (i = 0, totalLocked = 0; i < gcdGPU_COUNT; i++)
++            for (i = 0, totalLocked = 0; i < gcdMAX_GPU_COUNT; i++)
+             {
+                 totalLocked += Node->Virtual.lockeds[i];
+             }
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
+index f986e4e..25ec3ea 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
+@@ -137,7 +137,7 @@ typedef enum _gceCORE
+ }
+ gceCORE;
+ 
+-#define gcdGPU_COUNT               3
++#define gcdMAX_GPU_COUNT               3
+ 
+ /*******************************************************************************
+ **
+@@ -1247,6 +1247,12 @@ gckOS_SetGPUPower(
+     IN gctBOOL Power
+     );
+ 
++gceSTATUS
++gckOS_ResetGPU(
++    IN gckOS Os,
++    IN gceCORE Core
++    );
++
+ /*******************************************************************************
+ ** Semaphores.
+ */
+@@ -2004,6 +2010,11 @@ gckHARDWARE_IsFeatureAvailable(
+     IN gceFEATURE Feature
+     );
+ 
++gceSTATUS
++gckHARDWARE_DumpMMUException(
++    IN gckHARDWARE Hardware
++    );
++
+ #if !gcdENABLE_VG
+ /******************************************************************************\
+ ***************************** gckINTERRUPT Object ******************************
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
+index d015915..d0298ee 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
+@@ -28,7 +28,6 @@
+ #include "gc_hal_types.h"
+ 
+ #include "gc_hal_dump.h"
+-#include "gc_hal_md5.h"
+ 
+ #ifdef __cplusplus
+ extern "C" {
+@@ -96,6 +95,8 @@ typedef struct _gcsPLS
+     /* EGL-specific process-wide objects. */
+     gctPOINTER                  eglDisplayInfo;
+     gctPOINTER                  eglSurfaceInfo;
++    gceSURF_FORMAT              eglConfigFormat;
++
+ }
+ gcsPLS;
+ 
+@@ -140,7 +141,8 @@ gcsTLS;
+ typedef enum _gcePLS_VALUE
+ {
+   gcePLS_VALUE_EGL_DISPLAY_INFO,
+-  gcePLS_VALUE_EGL_SURFACE_INFO
++  gcePLS_VALUE_EGL_SURFACE_INFO,
++  gcePLS_VALUE_EGL_CONFIG_FORMAT_INFO,
+ }
+ gcePLS_VALUE;
+ 
+@@ -632,6 +634,8 @@ gcoHAL_QueryChipFeature(
+     IN gceFEATURE   Feature);
+ 
+ #endif
++
++
+ /******************************************************************************\
+ ********************************** gcoOS Object *********************************
+ \******************************************************************************/
+@@ -2439,6 +2443,7 @@ gcoOS_DebugTrace(
+ #define gcvZONE_API_DFB         (7 << 28)
+ #define gcvZONE_API_GDI         (8 << 28)
+ #define gcvZONE_API_D3D         (9 << 28)
++#define gcvZONE_API_ES30        (10 << 28)
+ 
+ 
+ #define gcmZONE_GET_API(zone)   ((zone) >> 28)
+@@ -2809,9 +2814,10 @@ gcoOS_ProfileDB(
+ #   define gcmkFOOTER_ARG               __dummy_kfooter_arg
+ #endif
+ 
+-#define gcmOPT_VALUE(ptr)           (((ptr) == gcvNULL) ? 0 : *(ptr))
+-#define gcmOPT_POINTER(ptr)         (((ptr) == gcvNULL) ? gcvNULL : *(ptr))
+-#define gcmOPT_STRING(ptr)          (((ptr) == gcvNULL) ? "(nil)" : (ptr))
++#define gcmOPT_VALUE(ptr)               (((ptr) == gcvNULL) ? 0 : *(ptr))
++#define gcmOPT_VALUE_INDEX(ptr, index)  (((ptr) == gcvNULL) ? 0 : ptr[index])
++#define gcmOPT_POINTER(ptr)             (((ptr) == gcvNULL) ? gcvNULL : *(ptr))
++#define gcmOPT_STRING(ptr)              (((ptr) == gcvNULL) ? "(nil)" : (ptr))
+ 
+ void
+ gckOS_Print(
+@@ -3068,12 +3074,8 @@ gcfDumpBuffer(
+ **
+ **      ...         Optional arguments.
+ */
++gceSTATUS gcfDumpApi(IN gctCONST_STRING String, ...);
+ #if gcdDUMP_API
+-    gceSTATUS
+-    gcfDumpApi(
+-        IN gctCONST_STRING String,
+-        ...
+-        );
+ #   define gcmDUMP_API           gcfDumpApi
+ #elif gcdHAS_ELLIPSES
+ #   define gcmDUMP_API(...)
+@@ -3099,12 +3101,8 @@ gcfDumpBuffer(
+ **      gctUINT32_PTR   Pointer to array.
+ **      gctUINT32       Size.
+ */
++gceSTATUS gcfDumpArray(IN gctCONST_POINTER Data, IN gctUINT32 Size);
+ #if gcdDUMP_API
+-    gceSTATUS
+-    gcfDumpArray(
+-        IN gctCONST_POINTER Data,
+-        IN gctUINT32 Size
+-    );
+ #   define gcmDUMP_API_ARRAY        gcfDumpArray
+ #elif gcdHAS_ELLIPSES
+ #   define gcmDUMP_API_ARRAY(...)
+@@ -3130,12 +3128,8 @@ gcfDumpBuffer(
+ **      gctUINT32_PTR   Pointer to array.
+ **      gctUINT32       Termination.
+ */
++gceSTATUS gcfDumpArrayToken(IN gctCONST_POINTER Data, IN gctUINT32 Termination);
+ #if gcdDUMP_API
+-    gceSTATUS
+-    gcfDumpArrayToken(
+-        IN gctCONST_POINTER Data,
+-        IN gctUINT32 Termination
+-    );
+ #   define gcmDUMP_API_ARRAY_TOKEN  gcfDumpArrayToken
+ #elif gcdHAS_ELLIPSES
+ #   define gcmDUMP_API_ARRAY_TOKEN(...)
+@@ -3161,12 +3155,8 @@ gcfDumpBuffer(
+ **      gctCONST_POINTER    Pointer to array.
+ **      gctSIZE_T           Size.
+ */
++gceSTATUS gcfDumpApiData(IN gctCONST_POINTER Data, IN gctSIZE_T Size);
+ #if gcdDUMP_API
+-    gceSTATUS
+-    gcfDumpApiData(
+-        IN gctCONST_POINTER Data,
+-        IN gctSIZE_T Size
+-    );
+ #   define gcmDUMP_API_DATA         gcfDumpApiData
+ #elif gcdHAS_ELLIPSES
+ #   define gcmDUMP_API_DATA(...)
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h
+index faf1de5..8d50c97 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_compiler.h
+@@ -545,6 +545,7 @@ typedef enum _gceUNIFORM_FLAGS
+ 	gcvUNIFORM_KERNEL_ARG_LOCAL_MEM_SIZE	= 0x1000,
+ 	gcvUNIFORM_KERNEL_ARG_PRIVATE		= 0x2000,
+ 	gcvUNIFORM_LOADTIME_CONSTANT		= 0x4000,
++    gcvUNIFORM_IS_ARRAY                 = 0x8000,
+ }
+ gceUNIFORM_FLAGS;
+ 
+@@ -1126,6 +1127,7 @@ gcSHADER_AddUniformEx1(
+ 	IN gcSHADER_TYPE Type,
+     IN gcSHADER_PRECISION precision,
+ 	IN gctSIZE_T Length,
++    IN gctINT    IsArray,
+     IN gcSHADER_VAR_CATEGORY varCategory,
+     IN gctUINT16 numStructureElement,
+     IN gctINT16 parent,
+@@ -2910,6 +2912,26 @@ gcUNIFORM_SetValueF(
+ 	);
+ 
+ /*******************************************************************************
++**						 gcUNIFORM_GetModelViewProjMatrix
++********************************************************************************
++**
++**	Get the value of uniform modelViewProjMatrix ID if present.
++**
++**	INPUT:
++**
++**		gcUNIFORM Uniform
++**			Pointer to a gcUNIFORM object.
++**
++**	OUTPUT:
++**
++**		Nothing.
++*/
++gctUINT
++gcUNIFORM_GetModelViewProjMatrix(
++    IN gcUNIFORM Uniform
++    );
++
++/*******************************************************************************
+ **								gcOUTPUT_GetType
+ ********************************************************************************
+ **
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h
+index c1f204f..898bfb1 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h
+@@ -224,16 +224,19 @@ typedef struct _gcsHAL_QUERY_CHIP_IDENTITY
+     gctUINT32                   pixelPipes;
+ 
+     /* Number of instructions. */
+-	gctUINT32                   instructionCount;
++    gctUINT32                   instructionCount;
+ 
+     /* Number of constants. */
+-	gctUINT32                   numConstants;
++    gctUINT32                   numConstants;
+ 
+-	/* Buffer size */
+-	gctUINT32                   bufferSize;
++    /* Buffer size */
++    gctUINT32                   bufferSize;
+ 
+-	/* Number of varyings */
+-	gctUINT32                   varyingsCount;
++    /* Number of varyings */
++    gctUINT32                   varyingsCount;
++
++    /* Supertile layout style in hardware */
++    gctUINT32                   superTileMode;
+ }
+ gcsHAL_QUERY_CHIP_IDENTITY;
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h
+index 447663f..c447dcf 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h
+@@ -22,7 +22,6 @@
+ 
+ 
+ 
+-
+ #ifndef __gc_hal_driver_vg_h_
+ #define __gc_hal_driver_vg_h_
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h
+index b9bf7c8..d0a98a2 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h
+@@ -254,51 +254,58 @@ typedef struct __BITFIELDINFO{
+ 
+ #if defined(EGL_API_WL)
+ /* Wayland platform. */
+-
++#include "wayland-server.h"
+ #include <wayland-egl.h>
+ 
+ #define WL_EGL_NUM_BACKBUFFERS 2
+ 
+-struct wl_egl_buffer_info
++typedef struct _gcsWL_VIV_BUFFER
++{
++   struct wl_buffer wl_buffer;
++   gcoSURF surface;
++} gcsWL_VIV_BUFFER;
++
++typedef struct _gcsWL_EGL_DISPLAY
++{
++   struct wl_display* wl_display;
++   struct wl_viv* wl_viv;
++} gcsWL_EGL_DISPLAY;
++
++typedef struct _gcsWL_EGL_BUFFER_INFO
+ {
+    gctINT32 width;
+    gctINT32 height;
+    gctINT32 stride;
+-   gctUINT32 physical;
+-   gctPOINTER logical;
+    gceSURF_FORMAT format;
++   gcuVIDMEM_NODE_PTR node;
++   gcePOOL pool;
++   gctUINT bytes;
+    gcoSURF surface;
+-};
++} gcsWL_EGL_BUFFER_INFO;
+ 
+-struct wl_egl_buffer
++typedef struct _gcsWL_EGL_BUFFER
+ {
+    struct wl_buffer* wl_buffer;
+-   struct wl_egl_buffer_info info;
+-};
++   gcsWL_EGL_BUFFER_INFO info;
++} gcsWL_EGL_BUFFER;
+ 
+-struct wl_egl_window_info
++typedef struct _gcsWL_EGL_WINDOW_INFO
+ {
+    gctUINT width;
+    gctUINT height;
+    gceSURF_FORMAT format;
+    gctUINT bpp;
+-};
++} gcsWL_EGL_WINDOW_INFO;
+ 
+ struct wl_egl_window
+ {
+-/*   struct wl_egl_display *display;*/
+-   struct wl_surface* surface;
+-   struct wl_egl_window_info info;
+-   struct wl_egl_buffer backbuffers[WL_EGL_NUM_BACKBUFFERS];
++   gcsWL_EGL_BUFFER backbuffers[WL_EGL_NUM_BACKBUFFERS];
++   gcsWL_EGL_WINDOW_INFO info;
+    gctUINT current;
+-   /*
+-   int backbuffer;
+-   int dx;
+-   int dy;
+-*/
++   struct wl_surface* surface;
++   struct wl_callback* pending;
+ };
+ 
+-
+ typedef void*   HALNativeDisplayType;
+ typedef void*   HALNativeWindowType;
+ typedef void*   HALNativePixmapType;
+@@ -380,13 +387,15 @@ typedef void *  HALNativePixmapType;
+ 
+ gceSTATUS
+ gcoOS_GetDisplay(
+-    OUT HALNativeDisplayType * Display
++    OUT HALNativeDisplayType * Display,
++    IN gctPOINTER Context
+     );
+ 
+ gceSTATUS
+ gcoOS_GetDisplayByIndex(
+     IN gctINT DisplayIndex,
+-    OUT HALNativeDisplayType * Display
++    OUT HALNativeDisplayType * Display,
++    IN gctPOINTER Context
+     );
+ 
+ gceSTATUS
+@@ -422,7 +431,7 @@ typedef struct _halDISPLAY_INFO
+     ** if the address is not known for the specified display. */
+     gctSIZE_T               physical;
+ 
+-    gctBOOL                isCompositor;   /* true if compositor, false otherwise. */
++    gctBOOL                wrapFB;   /* true if compositor, false otherwise. */
+ 
+ #ifndef __QNXNTO__
+     /* 355_FB_MULTI_BUFFER */
+@@ -503,11 +512,13 @@ gcoOS_DestroyDisplay(
+ 
+ gceSTATUS
+ gcoOS_InitLocalDisplayInfo(
++    IN HALNativeDisplayType Display,
+     IN OUT gctPOINTER * localDisplay
+     );
+ 
+ gceSTATUS
+ gcoOS_DeinitLocalDisplayInfo(
++    IN HALNativeDisplayType Display,
+     IN OUT gctPOINTER * localDisplay
+     );
+ 
+@@ -543,6 +554,10 @@ gcoOS_GetNativeVisualId(
+     OUT gctINT* nativeVisualId
+     );
+ 
++gctBOOL
++gcoOS_SynchronousFlip(
++    IN HALNativeDisplayType Display
++    );
+ 
+ /*******************************************************************************
+ ** Windows. ********************************************************************
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
+index 7ad46da..c754307 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
+@@ -883,8 +883,10 @@ typedef struct _gcsSTENCIL_INFO
+ {
+     gceSTENCIL_MODE         mode;
+ 
+-    gctUINT8                mask;
+-    gctUINT8                writeMask;
++    gctUINT8                maskFront;
++	gctUINT8                maskBack;
++    gctUINT8                writeMaskFront;
++    gctUINT8                writeMaskBack;
+ 
+     gctUINT8                referenceFront;
+ 
+@@ -915,6 +917,13 @@ gco3D_SetStencilMask(
+     IN gctUINT8 Mask
+     );
+ 
++/* Set stencil back mask. */
++gceSTATUS
++gco3D_SetStencilMaskBack(
++    IN gco3D Engine,
++    IN gctUINT8 Mask
++    );
++
+ /* Set stencil write mask. */
+ gceSTATUS
+ gco3D_SetStencilWriteMask(
+@@ -922,6 +931,13 @@ gco3D_SetStencilWriteMask(
+     IN gctUINT8 Mask
+     );
+ 
++/* Set stencil back write mask. */
++gceSTATUS
++gco3D_SetStencilWriteMaskBack(
++    IN gco3D Engine,
++    IN gctUINT8 Mask
++    );
++
+ /* Set stencil reference. */
+ gceSTATUS
+ gco3D_SetStencilReference(
+@@ -1173,7 +1189,6 @@ gco3D_InvokeThreadWalker(
+     IN gcsTHREAD_WALKER_INFO_PTR Info
+     );
+ 
+-#if gcdUSE_WCLIP_PATCH
+ /* Set w clip and w plane limit value. */
+ gceSTATUS
+ gco3D_SetWClipEnable(
+@@ -1192,7 +1207,6 @@ gco3D_SetWPlaneLimitX(
+ 	IN gco3D Engine,
+ 	IN gctFIXED_POINT Value
+     );
+-#endif
+ 
+ /*----------------------------------------------------------------------------*/
+ /*-------------------------- gco3D Fragment Processor ------------------------*/
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine_vg.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine_vg.h
+index 571e03e..1526b0c 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine_vg.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine_vg.h
+@@ -22,7 +22,6 @@
+ 
+ 
+ 
+-
+ #ifndef __gc_hal_engine_vg_h_
+ #define __gc_hal_engine_vg_h_
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h
+index 18ddf5b..b2e36a2 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h
+@@ -145,6 +145,7 @@ typedef enum _gceFEATURE
+     gcvFEATURE_2D_FC_SOURCE,
+ 	gcvFEATURE_PE_DITHER_FIX,
+     gcvFEATURE_2D_YUV_SEPARATE_STRIDE,
++    gcvFEATURE_FRUSTUM_CLIP_FIX,
+ }
+ gceFEATURE;
+ 
+@@ -636,6 +637,15 @@ typedef enum _gce2D_TILE_STATUS_CONFIG
+ }
+ gce2D_TILE_STATUS_CONFIG;
+ 
++typedef enum _gce2D_QUERY
++{
++    gcv2D_QUERY_RGB_ADDRESS_MAX_ALIGN       = 0,
++    gcv2D_QUERY_RGB_STRIDE_MAX_ALIGN,
++    gcv2D_QUERY_YUV_ADDRESS_MAX_ALIGN,
++    gcv2D_QUERY_YUV_STRIDE_MAX_ALIGN,
++}
++gce2D_QUERY;
++
+ #ifndef VIVANTE_NO_3D
+ /* Texture functions. */
+ typedef enum _gceTEXTURE_FUNCTION
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_md5.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_md5.h
+deleted file mode 100644
+index bc56d95..0000000
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_md5.h
++++ /dev/null
+@@ -1,112 +0,0 @@
+-/****************************************************************************
+-*
+-*    Copyright (C) 2005 - 2012 by Vivante Corp.
+-*
+-*    This program is free software; you can redistribute it and/or modify
+-*    it under the terms of the GNU General Public License as published by
+-*    the Free Software Foundation; either version 2 of the license, or
+-*    (at your option) any later version.
+-*
+-*    This program is distributed in the hope that it will be useful,
+-*    but WITHOUT ANY WARRANTY; without even the implied warranty of
+-*    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+-*    GNU General Public License for more details.
+-*
+-*    You should have received a copy of the GNU General Public License
+-*    along with this program; if not write to the Free Software
+-*    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+-*
+-*****************************************************************************/
+-
+-
+-/*
+-  Copyright (C) 1999, 2002 Aladdin Enterprises.  All rights reserved.
+-
+-  This software is provided 'as-is', without any express or implied
+-  warranty.  In no event will the authors be held liable for any damages
+-  arising from the use of this software.
+-
+-  Permission is granted to anyone to use this software for any purpose,
+-  including commercial applications, and to alter it and redistribute it
+-  freely, subject to the following restrictions:
+-
+-  1. The origin of this software must not be misrepresented; you must not
+-     claim that you wrote the original software. If you use this software
+-     in a product, an acknowledgment in the product documentation would be
+-     appreciated but is not required.
+-  2. Altered source versions must be plainly marked as such, and must not be
+-     misrepresented as being the original software.
+-  3. This notice may not be removed or altered from any source distribution.
+-
+-  L. Peter Deutsch
+-  ghost@aladdin.com
+-
+- */
+-/* $Id: gc_hal_md5.h,v 1.1.4.1 2012/02/08 23:31:39 semih.demirer Exp $ */
+-/*
+-  Independent implementation of MD5 (RFC 1321).
+-
+-  This code implements the MD5 Algorithm defined in RFC 1321, whose
+-  text is available at
+-	http://www.ietf.org/rfc/rfc1321.txt
+-  The code is derived from the text of the RFC, including the test suite
+-  (section A.5) but excluding the rest of Appendix A.  It does not include
+-  any code or documentation that is identified in the RFC as being
+-  copyrighted.
+-
+-  The original and principal author of md5.h is L. Peter Deutsch
+-  <ghost@aladdin.com>.  Other authors are noted in the change history
+-  that follows (in reverse chronological order):
+-
+-  2002-04-13 lpd Removed support for non-ANSI compilers; removed
+-	references to Ghostscript; clarified derivation from RFC 1321;
+-	now handles byte order either statically or dynamically.
+-  1999-11-04 lpd Edited comments slightly for automatic TOC extraction.
+-  1999-10-18 lpd Fixed typo in header comment (ansi2knr rather than md5);
+-	added conditionalization for C++ compilation from Martin
+-	Purschke <purschke@bnl.gov>.
+-  1999-05-03 lpd Original version.
+- */
+-
+-
+-#ifndef __gc_hal_md5_h_
+-#define __gc_hal_md5_h_
+-
+-#ifdef __cplusplus
+-extern "C" {
+-#endif
+-
+-/*
+- * This package supports both compile-time and run-time determination of CPU
+- * byte order.  If ARCH_IS_BIG_ENDIAN is defined as 0, the code will be
+- * compiled to run only on little-endian CPUs; if ARCH_IS_BIG_ENDIAN is
+- * defined as non-zero, the code will be compiled to run only on big-endian
+- * CPUs; if ARCH_IS_BIG_ENDIAN is not defined, the code will be compiled to
+- * run on either big- or little-endian CPUs, but will run slightly less
+- * efficiently on either one than if ARCH_IS_BIG_ENDIAN is defined.
+- */
+-
+-typedef unsigned char gctMD5_Byte; /* 8-bit byte */
+-typedef unsigned int gctMD5_Word; /* 32-bit word */
+-
+-/* Define the state of the MD5 Algorithm. */
+-typedef struct _gcsMD5_State {
+-    gctMD5_Word count[2];	/* message length in bits, lsw first */
+-    gctMD5_Word abcd[4];		/* digest buffer */
+-    gctMD5_Byte buf[64];		/* accumulate block */
+-} gcsMD5_State;
+-
+-/* Initialize the algorithm. */
+-void gcoMD5_Init(gcsMD5_State *pms);
+-
+-/* Append a string to the message. */
+-void gcoMD5_Append(gcsMD5_State *pms, const gctMD5_Byte *data, int nbytes);
+-
+-/* Finish the message and return the digest. */
+-void gcoMD5_Finish(gcsMD5_State *pms, gctMD5_Byte digest[16]);
+-
+-#ifdef __cplusplus
+-}  /* end extern "C" */
+-#endif
+-
+-#endif /* md5_INCLUDED */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+index 01d2d52..27fbf56 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+@@ -355,7 +355,7 @@
+         otherwise GPU will enter gcvPOWER_IDLE.
+ */
+ #ifndef gcdPOWER_SUSNPEND_WHEN_IDLE
+-#   define gcdPOWER_SUSNPEND_WHEN_IDLE          0
++#   define gcdPOWER_SUSNPEND_WHEN_IDLE          1
+ #endif
+ 
+ /*
+@@ -740,15 +740,8 @@
+ #ifndef gcdSHARED_PAGETABLE
+ #   define gcdSHARED_PAGETABLE                  1
+ #endif
+-
+-/*
+-    gcdBLOB_CACHE_ENABLED
+-        When non-zero, Android blob cache extension will be enabled.
+-        Otherwise, caching will be by-passed.
+- */
+-
+-#ifndef gcdBLOB_CACHE_ENABLED
+-#   define gcdBLOB_CACHE_ENABLED                0
++#ifndef gcdUSE_PVR
++#   define gcdUSE_PVR			                1
+ #endif
+ 
+ /*
+@@ -794,7 +787,7 @@
+ #endif
+ 
+ #ifndef gcdUSE_WCLIP_PATCH
+-#   define gcdUSE_WCLIP_PATCH                   0
++#   define gcdUSE_WCLIP_PATCH                   1
+ #endif
+ 
+ #endif /* __gc_hal_options_h_ */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h
+index 600d2c9..62ebb0d 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_profiler.h
+@@ -361,7 +361,8 @@ extern "C" {
+ #define ES20_GLMAPBUFFEROES                         (ES20_DELETEVERTEXARRAYOES                  +   1)
+ #define ES20_GLUNMAPBUFFEROES                       (ES20_GLMAPBUFFEROES                        +   1)
+ #define ES20_GLGETBUFFERPOINTERVOES                 (ES20_GLUNMAPBUFFEROES                      +   1)
+-#define	ES20_CALLS									(ES20_GLGETBUFFERPOINTERVOES				+	1)
++#define ES20_DISCARDFRAMEBUFFEREXT                  (ES20_GLGETBUFFERPOINTERVOES				+	1)
++#define	ES20_CALLS									(ES20_DISCARDFRAMEBUFFEREXT 				+	1)
+ #define	ES20_DRAWCALLS								(ES20_CALLS									+	1)
+ #define	ES20_STATECHANGECALLS						(ES20_DRAWCALLS								+	1)
+ #define	ES20_POINTCOUNT								(ES20_STATECHANGECALLS						+	1)
+@@ -1181,6 +1182,7 @@ typedef struct _gcsPROFILER
+     gctBOOL         enableHal;
+     gctBOOL         enableHW;
+     gctBOOL         enableSH;
++	gctBOOL         isSyncMode;
+ 
+     gctBOOL         useSocket;
+     gctINT          sockFd;
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_raster.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_raster.h
+index 8fa9582..53e9cc6 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_raster.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_raster.h
+@@ -416,6 +416,14 @@ gco2D_SetTargetEx(
+ 
+ /* Calculate and program the stretch factors. */
+ gceSTATUS
++gco2D_CalcStretchFactor(
++    IN gco2D Engine,
++    IN gctINT32 SrcSize,
++    IN gctINT32 DestSize,
++    OUT gctUINT32_PTR Factor
++    );
++
++gceSTATUS
+ gco2D_SetStretchFactors(
+ 	IN gco2D Engine,
+ 	IN gctUINT32 HorFactor,
+@@ -935,6 +943,13 @@ gco2D_SetSourceTileStatus(
+     IN gctUINT32 GpuAddress
+     );
+ 
++gceSTATUS
++gco2D_QueryU32(
++    IN gco2D Engine,
++    IN gce2D_QUERY Item,
++    OUT gctUINT32_PTR Value
++    );
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
+index 0bc1ffc..f98742e 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
+@@ -28,9 +28,9 @@
+ 
+ #define gcvVERSION_MINOR        6
+ 
+-#define gcvVERSION_PATCH        8
++#define gcvVERSION_PATCH        9
+ 
+-#define gcvVERSION_BUILD        1443
++#define gcvVERSION_BUILD        1478
+ 
+ #define gcvVERSION_DATE      __DATE__
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h
+index 2060170..372c8ac 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_vg.h
+@@ -22,7 +22,6 @@
+ 
+ 
+ 
+-
+ #ifndef __gc_hal_vg_h_
+ #define __gc_hal_vg_h_
+ 
+@@ -249,32 +248,6 @@ typedef gctTHREADFUNCRESULT (gctTHREADFUNCTYPE * gctTHREADFUNC) (
+ )
+ 
+ /* some platforms need to fix the physical address for HW to access*/
+-#ifdef __QNXNTO__
+-
+-gcmINLINE static gctUINT32 _qnxFixAddress(gctUINT32 Address)
+-{
+-    gctUINT32 baseAddress = 0;
+-
+-    if (gcmIS_ERROR(gcoOS_GetBaseAddress(gcvNULL, &baseAddress)))
+-    {
+-        baseAddress = 0;
+-    }
+-
+-    return Address + baseAddress;
+-}
+-
+-#define gcmFIXADDRESS       _qnxFixAddress
+-
+-gcmINLINE static gctUINT32 _qnxkFixAddress(gctUINT32 Address)
+-{
+-    extern unsigned long baseAddress;
+-    return Address + baseAddress;
+-}
+-
+-#define gcmkFIXADDRESS      _qnxkFixAddress
+-
+-#else
+-
+ #define gcmFIXADDRESS(address) \
+ (\
+     (address)\
+@@ -285,8 +258,6 @@ gcmINLINE static gctUINT32 _qnxkFixAddress(gctUINT32 Address)
+     (address)\
+ )
+ 
+-#endif
+-
+ /******************************************************************************\
+ ****************************** Kernel Debug Macro ******************************
+ \******************************************************************************/
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_debug.h b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_debug.h
+index 5bbc893..a6754fe 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_debug.h
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_debug.h
+@@ -71,9 +71,13 @@ typedef va_list gctARGUMENTS;
+ #endif
+ 
+ #define gcmkOUTPUT_STRING(String) \
+-    printk(String); \
++   if(gckDebugFileSystemIsEnabled()) \
++   	gckDebugFileSystemPrint(String);\
++   else\
++   	printk(String); \
+     touch_softlockup_watchdog()
+ 
++
+ #define gcmkSPRINTF(Destination, Size, Message, Value) \
+     snprintf(Destination, Size, Message, Value)
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_debugfs.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_debugfs.c
+new file mode 100644
+index 0000000..cff2448
+--- /dev/null
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_debugfs.c
+@@ -0,0 +1,795 @@
++/****************************************************************************
++*
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
++*
++*    This program is free software; you can redistribute it and/or modify
++*    it under the terms of the GNU General Public License as published by
++*    the Free Software Foundation; either version 2 of the license, or
++*    (at your option) any later version.
++*
++*    This program is distributed in the hope that it will be useful,
++*    but WITHOUT ANY WARRANTY; without even the implied warranty of
++*    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++*    GNU General Public License for more details.
++*
++*    You should have received a copy of the GNU General Public License
++*    along with this program; if not write to the Free Software
++*    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++*
++*****************************************************************************/
++
++
++#ifdef MODULE
++#include <linux/module.h>
++#endif
++#include <linux/init.h>
++#include <linux/debugfs.h>
++#include <linux/slab.h>
++#ifdef MODVERSIONS
++#include <linux/modversions.h>
++#endif
++#include <linux/stddef.h>
++#include <linux/sched.h>
++#include <linux/kernel.h>
++#include <linux/timer.h>
++#include <linux/delay.h>
++#include <linux/errno.h>
++#include <linux/mutex.h>
++#include <linux/vmalloc.h>
++#include <linux/types.h>
++#include <linux/fs.h>
++#include <linux/poll.h>
++#include <asm/uaccess.h>
++#include <linux/completion.h>
++#include "gc_hal_kernel_linux.h"
++
++/* 
++   Prequsite:
++
++   1) Debugfs feature must be enabled in the kernel.
++       1.a) You can enable this, in the compilation of the uImage, all you have to do is, In the "make menuconfig" part,
++       you have to enable the debugfs in the kernel hacking part of the menu.
++  
++   HOW TO USE:
++   1) insert the driver with the following option logFileSize, Ex: insmod galcore.ko ...... logFileSize=10240 
++   This gives a circular buffer of 10 MB
++   
++   2)Usually after inserting the driver, the debug file system is mounted under /sys/kernel/debug/
++
++        2.a)If the debugfs is not mounted, you must do "mount -t debugfs none /sys/kernel/debug"
++   	
++   3) To read what is being printed in the debugfs file system:
++        Ex : cat /sys/kernel/debug/gpu/galcore_trace
++
++   4)To write into the debug file system from user side :
++        Ex: echo "hello" > cat /sys/kernel/debug/gpu/galcore_trace
++
++   5)To write into debugfs from kernel side, Use the function called gckDebugFileSystemPrint
++
++
++   USECASE Kernel Dump:
++
++   1) Go to /hal/inc/gc_hal_options.h, and enable the following flags:
++        - #   define gcdDUMP                              1
++        - #   define gcdDUMP_IN_KERNEL          1
++        - #   define gcdDUMP_COMMAND          1
++
++    2) Go to /hal/kernel/gc_hal_kernel_command.c and disable the following flag
++        -#define gcdSIMPLE_COMMAND_DUMP  0
++
++    3) Compile the driver
++    4) insmod it with the logFileSize option
++    5) Run an application
++    6) You can get the dump by cat /sys/kernel/debug/gpu/galcore_trace
++   
++ */
++
++/**/
++typedef va_list gctDBGARGS ;
++#define gcmkARGS_START(argument, pointer)   va_start(argument, pointer)
++#define gcmkARGS_END(argument)              	      va_end(argument)
++
++#define gcmkDBGFSPRINT(ArgumentSize, Message) \
++  { \
++	  gctDBGARGS __arguments__; \
++	  gcmkARGS_START(__arguments__, Message); \
++	  _DebugFSPrint(ArgumentSize, Message, __arguments__);\
++	  gcmkARGS_END(__arguments__); \
++  }
++
++/*Debug File System Node Struct*/
++struct _gcsDebugFileSystemNode
++{
++    /*wait queues for read and write operations*/
++#if defined(DECLARE_WAIT_QUEUE_HEAD)
++    wait_queue_head_t read_q , write_q ;
++#else
++    struct wait_queue *read_q , *write_q ;
++#endif
++    struct dentry *parent ; /*parent directory*/
++    struct dentry *filen ; /*filename*/
++    struct semaphore sem ; /* mutual exclusion semaphore */
++    char *data ; /* The circular buffer data */
++    int size ; /* Size of the buffer pointed to by 'data' */
++    int refcount ; /* Files that have this buffer open */
++    int read_point ; /* Offset in circ. buffer of oldest data */
++    int write_point ; /* Offset in circ. buffer of newest data */
++    int offset ; /* Byte number of read_point in the stream */
++    struct _gcsDebugFileSystemNode *next ;
++} ;
++
++/* amount of data in the queue */
++#define gcmkNODE_QLEN(node) ( (node)->write_point >= (node)->read_point ? \
++         (node)->write_point - (node)->read_point : \
++         (node)->size - (node)->read_point + (node)->write_point)
++
++/* byte number of the last byte in the queue */
++#define gcmkNODE_FIRST_EMPTY_BYTE(node) ((node)->offset + gcmkNODE_QLEN(node))
++
++/*Synchronization primitives*/
++#define gcmkNODE_READQ(node) (&((node)->read_q))
++#define gcmkNODE_WRITEQ(node) (&((node)->write_q))
++#define gcmkNODE_SEM(node) (&((node)->sem))
++
++/*Utilities*/
++#define gcmkMIN(x, y) ((x) < (y) ? (x) : y)
++
++/*Debug File System Struct*/
++typedef struct _gcsDebugFileSystem
++{
++    gcsDebugFileSystemNode* linkedlist ;
++    gcsDebugFileSystemNode* currentNode ;
++    int isInited ;
++} gcsDebugFileSystem ;
++
++
++/*debug file system*/
++static gcsDebugFileSystem gc_dbgfs ;
++
++
++
++/*******************************************************************************
++ **
++ **		READ & WRITE FUNCTIONS (START)
++ **		  
++ *******************************************************************************/
++
++/*******************************************************************************
++ **
++ **  _ReadFromNode
++ **
++ **	1) reading bytes out of a circular buffer with wraparound.
++ **	2)returns caddr_t, pointer to data read, which the caller must free.  
++ **	3) length is (a pointer to) the number of bytes to be read, which will be set by this function to
++ **	    be the number of bytes actually returned 
++ **
++ *******************************************************************************/
++static caddr_t
++_ReadFromNode (
++                gcsDebugFileSystemNode* Node ,
++                int *Length ,
++                loff_t *Offset
++                )
++{
++    caddr_t retval ;
++    int bytes_copied = 0 , n , start_point , remaining ;
++
++    /* is the user trying to read data that has already scrolled off? */
++    if ( *Offset < Node->offset )
++    {
++        *Offset = Node->offset ;
++    }
++
++    /* is the user trying to read past EOF? */
++    if ( *Offset >= gcmkNODE_FIRST_EMPTY_BYTE ( Node ) )
++    {
++        return NULL ;
++    }
++
++    /* find the smaller of the total bytes we have available and what
++     * the user is asking for */
++
++    *Length = gcmkMIN ( *Length , gcmkNODE_FIRST_EMPTY_BYTE ( Node ) - *Offset ) ;
++
++    remaining = * Length ;
++
++    /* figure out where to start based on user's Offset */
++    start_point = Node->read_point + ( *Offset - Node->offset ) ;
++
++    start_point = start_point % Node->size ;
++
++    /* allocate memory to return */
++    if ( ( retval = kmalloc ( sizeof (char ) * remaining , GFP_KERNEL ) ) == NULL )
++        return NULL ;
++
++    /* copy the (possibly noncontiguous) data to our buffer */
++    while ( remaining )
++    {
++        n = gcmkMIN ( remaining , Node->size - start_point ) ;
++        memcpy ( retval + bytes_copied , Node->data + start_point , n ) ;
++        bytes_copied += n ;
++        remaining -= n ;
++        start_point = ( start_point + n ) % Node->size ;
++    }
++
++    /* advance user's file pointer */
++    *Offset += * Length ;
++
++    return retval ;
++}
++
++/*******************************************************************************
++ **
++ **  _WriteToNode
++ **
++ ** 1) writes to a circular buffer with wraparound. 
++ ** 2)in case of an overflow, it overwrites the oldest unread data.
++ **
++ *********************************************************************************/
++static void
++_WriteToNode (
++               gcsDebugFileSystemNode* Node ,
++               caddr_t Buf ,
++               int Length
++               )
++{
++    int bytes_copied = 0 ;
++    int overflow = 0 ;
++    int n ;
++
++    if ( Length + gcmkNODE_QLEN ( Node ) >= ( Node->size - 1 ) )
++    {
++        overflow = 1 ;
++
++        /* in case of overflow, figure out where the new buffer will
++         * begin.  we start by figuring out where the current buffer ENDS:
++         * node->parent->offset +  gcmkNODE_QLEN.	we then advance the end-offset
++         * by the Length of the current write, and work backwards to
++         * figure out what the oldest unoverwritten data will be (i.e.,
++         * size of the buffer). */
++        Node->offset = Node->offset + gcmkNODE_QLEN ( Node ) + Length
++                - Node->size + 1 ;
++    }
++
++    while ( Length )
++    {
++        /* how many contiguous bytes are available from the write point to
++         * the end of the circular buffer? */
++        n = gcmkMIN ( Length , Node->size - Node->write_point ) ;
++        memcpy ( Node->data + Node->write_point , Buf + bytes_copied , n ) ;
++        bytes_copied += n ;
++        Length -= n ;
++        Node->write_point = ( Node->write_point + n ) % Node->size ;
++    }
++
++    /* if there is an overflow, reset the read point to read whatever is
++     * the oldest data that we have, that has not yet been
++     * overwritten. */
++    if ( overflow )
++    {
++        Node->read_point = ( Node->write_point + 1 ) % Node->size ;
++    }
++}
++
++
++/*******************************************************************************
++ **
++ ** 		PRINTING UTILITY (START)
++ ** 		
++ *******************************************************************************/
++
++/*******************************************************************************
++ **
++ **  _GetArgumentSize
++ **
++ **
++ *******************************************************************************/
++static gctINT
++_GetArgumentSize (
++                   IN gctCONST_STRING Message
++                   )
++{
++    gctINT i , count ;
++
++    for ( i = 0 , count = 0 ; Message[i] ; i += 1 )
++    {
++        if ( Message[i] == '%' )
++        {
++            count += 1 ;
++        }
++    }
++    return count * sizeof (unsigned int ) ;
++}
++
++/*******************************************************************************
++ **
++ ** _AppendString
++ **
++ **
++ *******************************************************************************/
++static ssize_t
++_AppendString (
++                IN gcsDebugFileSystemNode* Node ,
++                IN gctCONST_STRING String ,
++                IN int Length
++                )
++{
++    caddr_t message = NULL ;
++    int n ;
++
++    /* if the message is longer than the buffer, just take the beginning
++     * of it, in hopes that the reader (if any) will have time to read
++     * before we wrap around and obliterate it */
++    n = gcmkMIN ( Length , Node->size - 1 ) ;
++
++    /* make sure we have the memory for it */
++    if ( ( message = kmalloc ( n , GFP_KERNEL ) ) == NULL )
++        return - ENOMEM ;
++
++    /* copy into our temp buffer */
++    memcpy ( message , String , n ) ;
++
++    /* now copy it into the circular buffer and free our temp copy */
++    _WriteToNode ( Node , message , n ) ;
++    kfree ( message ) ;
++    return n ;
++}
++
++/*******************************************************************************
++ **
++ ** _DebugFSPrint
++ **
++ **
++ *******************************************************************************/
++static void
++_DebugFSPrint (
++                IN unsigned int ArgumentSize ,
++                IN const char* Message ,
++                IN gctDBGARGS Arguments
++
++                )
++{
++    char buffer[MAX_LINE_SIZE] ;
++    int len ;
++    down ( gcmkNODE_SEM ( gc_dbgfs.currentNode ) ) ;
++    len = vsnprintf ( buffer , sizeof (buffer ) , Message , *( va_list * ) & Arguments ) ;
++    buffer[len] = '\0' ;
++
++    /* Add end-of-line if missing. */
++    if ( buffer[len - 1] != '\n' )
++    {
++        buffer[len ++] = '\n' ;
++        buffer[len] = '\0' ;
++    }
++    _AppendString ( gc_dbgfs.currentNode , buffer , len ) ;
++    up ( gcmkNODE_SEM ( gc_dbgfs.currentNode ) ) ;
++    wake_up_interruptible ( gcmkNODE_READQ ( gc_dbgfs.currentNode ) ) ; /* blocked in read*/
++}
++
++/*******************************************************************************
++ **
++ **                     LINUX SYSTEM FUNCTIONS (START)
++ **		  
++ *******************************************************************************/
++
++/*******************************************************************************
++ **
++ **  find the vivlog structure associated with an inode.
++ **  	returns a	pointer to the structure if found, NULL if not found
++ **
++ *******************************************************************************/
++static gcsDebugFileSystemNode*
++_GetNodeInfo (
++               IN struct inode *Inode
++               )
++{
++    gcsDebugFileSystemNode* node ;
++
++    if ( Inode == NULL )
++        return NULL ;
++
++    for ( node = gc_dbgfs.linkedlist ; node != NULL ; node = node->next )
++        if ( node->filen->d_inode->i_ino == Inode->i_ino )
++            return node ;
++
++    return NULL ;
++}
++
++/*******************************************************************************
++ **
++ **   _DebugFSRead
++ **
++ *******************************************************************************/
++static ssize_t
++_DebugFSRead (
++               struct file *file ,
++               char __user * buffer ,
++               size_t length ,
++               loff_t * offset
++               )
++{
++    int retval ;
++    caddr_t data_to_return ;
++    gcsDebugFileSystemNode* node ;
++    /* get the metadata about this emlog */
++    if ( ( node = _GetNodeInfo ( file->f_dentry->d_inode ) ) == NULL )
++    {
++        printk ( "debugfs_read: record not found\n" ) ;
++        return - EIO ;
++    }
++
++    if ( down_interruptible ( gcmkNODE_SEM ( node ) ) )
++    {
++        return - ERESTARTSYS ;
++    }
++
++    /* wait until there's data available (unless we do nonblocking reads) */
++    while ( *offset >= gcmkNODE_FIRST_EMPTY_BYTE ( node ) )
++    {
++        up ( gcmkNODE_SEM ( node ) ) ;
++        if ( file->f_flags & O_NONBLOCK )
++        {
++            return - EAGAIN ;
++        }
++        if ( wait_event_interruptible ( ( *( gcmkNODE_READQ ( node ) ) ) , ( *offset < gcmkNODE_FIRST_EMPTY_BYTE ( node ) ) ) )
++        {
++            return - ERESTARTSYS ; /* signal: tell the fs layer to handle it */
++        }
++        /* otherwise loop, but first reacquire the lock */
++        if ( down_interruptible ( gcmkNODE_SEM ( node ) ) )
++        {
++            return - ERESTARTSYS ;
++        }
++    }
++    data_to_return = _ReadFromNode ( node , &length , offset ) ;
++    if ( data_to_return == NULL )
++    {
++        retval = 0 ;
++        goto unlock ;
++    }
++    if ( copy_to_user ( buffer , data_to_return , length ) > 0 )
++    {
++        retval = - EFAULT ;
++    }
++    else
++    {
++        retval = length ;
++    }
++    kfree ( data_to_return ) ;
++unlock:
++    up ( gcmkNODE_SEM ( node ) ) ;
++    wake_up_interruptible ( gcmkNODE_WRITEQ ( node ) ) ;
++    return retval ;
++}
++
++/*******************************************************************************
++ **
++ **_DebugFSWrite
++ **
++ *******************************************************************************/
++static ssize_t
++_DebugFSWrite (
++                struct file *file ,
++                const char __user * buffer ,
++                size_t length ,
++                loff_t * offset
++                )
++{
++    caddr_t message = NULL ;
++    int n ;
++    gcsDebugFileSystemNode*node ;
++
++    /* get the metadata about this log */
++    if ( ( node = _GetNodeInfo ( file->f_dentry->d_inode ) ) == NULL )
++    {
++        return - EIO ;
++    }
++
++    if ( down_interruptible ( gcmkNODE_SEM ( node ) ) )
++    {
++        return - ERESTARTSYS ;
++    }
++
++    /* if the message is longer than the buffer, just take the beginning
++     * of it, in hopes that the reader (if any) will have time to read
++     * before we wrap around and obliterate it */
++    n = gcmkMIN ( length , node->size - 1 ) ;
++
++    /* make sure we have the memory for it */
++    if ( ( message = kmalloc ( n , GFP_KERNEL ) ) == NULL )
++    {
++        up ( gcmkNODE_SEM ( node ) ) ;
++        return - ENOMEM ;
++    }
++
++    /* copy into our temp buffer */
++    if ( copy_from_user ( message , buffer , n ) > 0 )
++    {
++        up ( gcmkNODE_SEM ( node ) ) ;
++        kfree ( message ) ;
++        return - EFAULT ;
++    }
++
++    /* now copy it into the circular buffer and free our temp copy */
++    _WriteToNode ( node , message , n ) ;
++
++    kfree ( message ) ;
++    up ( gcmkNODE_SEM ( node ) ) ;
++
++    /* wake up any readers that might be waiting for the data.  we call
++     * schedule in the vague hope that a reader will run before the
++     * writer's next write, to avoid losing data. */
++    wake_up_interruptible ( gcmkNODE_READQ ( node ) ) ;
++
++    return n ;
++}
++
++/*******************************************************************************
++ **
++ ** File Operations Table
++ **
++ *******************************************************************************/
++static const struct file_operations debugfs_operations = {
++                                                          .owner = THIS_MODULE ,
++                                                          .read = _DebugFSRead ,
++                                                          .write = _DebugFSWrite ,
++} ;
++
++/*******************************************************************************
++ **
++ **                             INTERFACE FUNCTIONS (START)
++ **		  
++ *******************************************************************************/
++
++/*******************************************************************************
++ **
++ **  gckDebugFileSystemIsEnabled
++ **
++ **
++ **  INPUT:
++ **
++ **  OUTPUT:
++ **
++ *******************************************************************************/
++
++
++gctINT
++gckDebugFileSystemIsEnabled ( void )
++{
++    return gc_dbgfs.isInited ;
++}
++/*******************************************************************************
++ **
++ **  gckDebugFileSystemInitialize
++ **
++ **
++ **  INPUT:
++ **
++ **  OUTPUT:
++ **
++ *******************************************************************************/
++
++gctINT
++gckDebugFileSystemInitialize ( void )
++{
++    if ( ! gc_dbgfs.isInited )
++    {
++        gc_dbgfs.linkedlist = gcvNULL ;
++        gc_dbgfs.currentNode = gcvNULL ;
++        gc_dbgfs.isInited = 1 ;
++    }
++    return gc_dbgfs.isInited ;
++}
++/*******************************************************************************
++ **
++ **  gckDebugFileSystemTerminate
++ **
++ **
++ **  INPUT:
++ **
++ **  OUTPUT:
++ **
++ *******************************************************************************/
++
++gctINT
++gckDebugFileSystemTerminate ( void )
++{
++    gcsDebugFileSystemNode * next = gcvNULL ;
++    gcsDebugFileSystemNode * temp = gcvNULL ;
++    if ( gc_dbgfs.isInited )
++    {
++        temp = gc_dbgfs.linkedlist ;
++        while ( temp != gcvNULL )
++        {
++            next = temp->next ;
++            gckDebugFileSystemFreeNode ( temp ) ;
++            kfree ( temp ) ;
++            temp = next ;
++        }
++        gc_dbgfs.isInited = 0 ;
++    }
++    return 0 ;
++}
++
++
++/*******************************************************************************
++ **
++ **  gckDebugFileSystemCreateNode
++ **
++ **
++ **  INPUT:
++ **
++ **  OUTPUT:
++ **
++ **	 gckDebugFileSystemFreeNode * Device
++ **		  Pointer to a variable receiving the gcsDebugFileSystemNode object pointer on
++ **		  success.
++ *********************************************************************************/
++
++gctINT
++gckDebugFileSystemCreateNode (
++                               IN gctINT SizeInKB ,
++                               IN gctCONST_STRING ParentName ,
++                               IN gctCONST_STRING NodeName ,
++                               OUT gcsDebugFileSystemNode **Node
++                               )
++{
++    gcsDebugFileSystemNode*node ;
++    /* allocate space for our metadata and initialize it */
++    if ( ( node = kmalloc ( sizeof (gcsDebugFileSystemNode ) , GFP_KERNEL ) ) == NULL )
++        goto struct_malloc_failed ;
++
++    /*Zero it out*/
++    memset ( node , 0 , sizeof (gcsDebugFileSystemNode ) ) ;
++
++    /*Init the sync primitives*/
++#if defined(DECLARE_WAIT_QUEUE_HEAD)
++    init_waitqueue_head ( gcmkNODE_READQ ( node ) ) ;
++#else
++    init_waitqueue ( gcmkNODE_READQ ( node ) ) ;
++#endif
++
++#if defined(DECLARE_WAIT_QUEUE_HEAD)
++    init_waitqueue_head ( gcmkNODE_WRITEQ ( node ) ) ;
++#else
++    init_waitqueue ( gcmkNODE_WRITEQ ( node ) ) ;
++#endif
++    sema_init ( gcmkNODE_SEM ( node ) , 1 ) ;
++    /*End the sync primitives*/
++
++
++    /* figure out how much of a buffer this should be and allocate the buffer */
++    node->size = 1024 * SizeInKB ;
++    if ( ( node->data = ( char * ) vmalloc ( sizeof (char ) * node->size ) ) == NULL )
++        goto data_malloc_failed ;
++
++    /*creating the debug file system*/
++    node->parent = debugfs_create_dir ( ParentName , NULL ) ;
++
++    /*creating the file*/
++    node->filen = debugfs_create_file ( NodeName , S_IRUGO | S_IWUSR , node->parent , NULL ,
++                                        &debugfs_operations ) ;
++
++    /* add it to our linked list */
++    node->next = gc_dbgfs.linkedlist ;
++    gc_dbgfs.linkedlist = node ;
++
++    /* pass the struct back */
++    *Node = node ;
++    return 0 ;
++
++    vfree ( node->data ) ;
++data_malloc_failed:
++    kfree ( node ) ;
++struct_malloc_failed:
++    return - ENOMEM ;
++}
++
++/*******************************************************************************
++ **
++ **  gckDebugFileSystemFreeNode
++ **
++ **
++ **  INPUT:
++ **
++ **  OUTPUT:
++ **
++ *******************************************************************************/
++void
++gckDebugFileSystemFreeNode (
++                             IN gcsDebugFileSystemNode * Node
++                             )
++{
++
++    gcsDebugFileSystemNode **ptr ;
++
++    if ( Node == NULL )
++    {
++        printk ( "null passed to free_vinfo\n" ) ;
++        return ;
++    }
++
++    down ( gcmkNODE_SEM ( Node ) ) ;
++    /*free data*/
++    vfree ( Node->data ) ;
++
++    /*Close Debug fs*/
++    if ( Node->filen )
++    {
++        debugfs_remove ( Node->filen ) ;
++    }
++    if ( Node->parent )
++    {
++        debugfs_remove ( Node->parent ) ;
++    }
++
++    /* now delete the node from the linked list */
++    ptr = & ( gc_dbgfs.linkedlist ) ;
++    while ( *ptr != Node )
++    {
++        if ( ! *ptr )
++        {
++            printk ( "corrupt info list!\n" ) ;
++            break ;
++        }
++        else
++            ptr = & ( ( **ptr ).next ) ;
++    }
++    *ptr = Node->next ;
++    up ( gcmkNODE_SEM ( Node ) ) ;
++}
++
++/*******************************************************************************
++ **
++ **   gckDebugFileSystemSetCurrentNode
++ **
++ **
++ **  INPUT:
++ **
++ **  OUTPUT:
++ **
++ *******************************************************************************/
++void
++gckDebugFileSystemSetCurrentNode (
++                                   IN gcsDebugFileSystemNode * Node
++                                   )
++{
++    gc_dbgfs.currentNode = Node ;
++}
++
++/*******************************************************************************
++ **
++ **   gckDebugFileSystemGetCurrentNode
++ **
++ **
++ **  INPUT:
++ **
++ **  OUTPUT:
++ **
++ *******************************************************************************/
++void
++gckDebugFileSystemGetCurrentNode (
++                                   OUT gcsDebugFileSystemNode ** Node
++                                   )
++{
++    *Node = gc_dbgfs.currentNode ;
++}
++
++/*******************************************************************************
++ **
++ **   gckDebugFileSystemPrint
++ **
++ **
++ **  INPUT:
++ **
++ **  OUTPUT:
++ **
++ *******************************************************************************/
++void
++gckDebugFileSystemPrint (
++                          IN gctCONST_STRING Message ,
++                          ...
++                          )
++{
++    gcmkDBGFSPRINT ( _GetArgumentSize ( Message ) , Message ) ;
++}
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_debugfs.h b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_debugfs.h
+new file mode 100644
+index 0000000..b0031a8
+--- /dev/null
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_debugfs.h
+@@ -0,0 +1,86 @@
++/****************************************************************************
++*
++*    Copyright (C) 2005 - 2012 by Vivante Corp.
++*
++*    This program is free software; you can redistribute it and/or modify
++*    it under the terms of the GNU General Public License as published by
++*    the Free Software Foundation; either version 2 of the license, or
++*    (at your option) any later version.
++*
++*    This program is distributed in the hope that it will be useful,
++*    but WITHOUT ANY WARRANTY; without even the implied warranty of
++*    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
++*    GNU General Public License for more details.
++*
++*    You should have received a copy of the GNU General Public License
++*    along with this program; if not write to the Free Software
++*    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
++*
++*****************************************************************************/
++
++
++
++
++#include <stdarg.h>
++
++#ifndef __gc_hal_kernel_debugfs_h_
++#define __gc_hal_kernel_debugfs_h_
++
++ #define MAX_LINE_SIZE 768  	     /* Max bytes for a line of debug info */
++
++
++ typedef struct _gcsDebugFileSystemNode gcsDebugFileSystemNode ;
++
++
++/*******************************************************************************
++ **
++ **                             System Related
++ **		  
++ *******************************************************************************/
++
++gctINT    gckDebugFileSystemIsEnabled(void);
++
++gctINT   gckDebugFileSystemInitialize(void);
++
++gctINT   gckDebugFileSystemTerminate(void);
++
++
++/*******************************************************************************
++ **
++ **                             Node Related
++ **		  
++ *******************************************************************************/
++
++gctINT gckDebugFileSystemCreateNode(
++ 			IN gctINT SizeInKB,
++                        IN gctCONST_STRING  ParentName ,
++                        IN gctCONST_STRING  NodeName,
++                        OUT gcsDebugFileSystemNode  **Node
++                        );
++
++
++void gckDebugFileSystemFreeNode(
++			IN gcsDebugFileSystemNode  * Node
++			);
++
++
++
++void gckDebugFileSystemSetCurrentNode(
++			IN gcsDebugFileSystemNode  * Node
++			);
++
++
++
++void gckDebugFileSystemGetCurrentNode(
++			OUT gcsDebugFileSystemNode  ** Node
++			);
++
++
++void gckDebugFileSystemPrint(
++    			IN gctCONST_STRING  Message,
++    			...
++   			 );
++
++#endif
++
++
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+index 173bd4d..890d13e 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+@@ -31,6 +31,10 @@
+ 
+ #define _GC_OBJ_ZONE    gcvZONE_DEVICE
+ 
++#define DEBUG_FILE 			"galcore_trace"
++#define PARENT_FILE 		"gpu"
++
++
+ #ifdef FLAREON
+     static struct dove_gpio_irq_handler gc500_handle;
+ #endif
+@@ -299,6 +303,7 @@ gckGALDEVICE_Construct(
+     IN gctUINT32 PhysBaseAddr,
+     IN gctUINT32 PhysSize,
+     IN gctINT Signal,
++    IN gctUINT LogFileSize,
+     OUT gckGALDEVICE *Device
+     )
+ {
+@@ -335,6 +340,25 @@ gckGALDEVICE_Construct(
+ 
+     memset(device, 0, sizeof(struct _gckGALDEVICE));
+ 
++   device->dbgnode = gcvNULL;
++   if(LogFileSize != 0)
++   {
++	if(gckDebugFileSystemCreateNode(LogFileSize,PARENT_FILE,DEBUG_FILE,&(device->dbgnode)) != 0)
++	{
++		gcmkTRACE_ZONE(
++		gcvLEVEL_ERROR, gcvZONE_DRIVER,
++		"%s(%d): Failed to create  the debug file system  %s/%s \n",
++		__FUNCTION__, __LINE__,
++		PARENT_FILE, DEBUG_FILE
++		);
++	}
++	else
++	{
++		/*Everything is OK*/
++	 	gckDebugFileSystemSetCurrentNode(device->dbgnode);
++	}
++    }
++
+     /*Initialize the clock structure*/
+     if (IrqLine != -1) {
+         device->clk_3d_core = clk_get(NULL, "gpu3d_clk");
+@@ -404,7 +428,7 @@ gckGALDEVICE_Construct(
+     device->requestedContiguousSize  = 0;
+ 
+ 
+-    for (i = 0; i < gcdGPU_COUNT; i++)
++    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+     {
+         physical = device->requestedRegisterMemBases[i];
+ 
+@@ -582,19 +606,22 @@ gckGALDEVICE_Construct(
+     device->irqLines[gcvCORE_VG]    = IrqLineVG;
+ 
+     /* Initialize the kernel thread semaphores. */
+-    for (i = 0; i < gcdGPU_COUNT; i++)
++    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+     {
+         if (device->irqLines[i] != -1) sema_init(&device->semas[i], 0);
+     }
+ 
+     device->signal = Signal;
+ 
+-    for (i = 0; i < gcdGPU_COUNT; i++)
++    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+     {
+         if (device->kernels[i] != gcvNULL) break;
+     }
+ 
+-    if (i == gcdGPU_COUNT) gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
++    if (i == gcdMAX_GPU_COUNT)
++	{
++		gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
++	}
+ 
+ #if gcdENABLE_VG
+     if (i == gcvCORE_VG)
+@@ -854,7 +881,7 @@ gckGALDEVICE_Destroy(
+ 
+     if (Device != gcvNULL)
+     {
+-        for (i = 0; i < gcdGPU_COUNT; i++)
++        for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+         {
+             if (Device->kernels[i] != gcvNULL)
+             {
+@@ -937,7 +964,16 @@ gckGALDEVICE_Destroy(
+             }
+         }
+ 
+-        for (i = 0; i < gcdGPU_COUNT; i++)
++	{
++	    if(gckDebugFileSystemIsEnabled())
++	    {
++		 gckDebugFileSystemFreeNode(Device->dbgnode);
++		 kfree(Device->dbgnode);
++		 Device->dbgnode = gcvNULL;
++	    }
++	}
++
++        for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+         {
+             if (Device->registerBases[i] != gcvNULL)
+             {
+@@ -1428,7 +1464,7 @@ gckGALDEVICE_Stop_Threads(
+ 
+     gcmkVERIFY_ARGUMENT(Device != NULL);
+ 
+-    for (i = 0; i < gcdGPU_COUNT; i++)
++    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+     {
+         /* Stop the kernel threads. */
+         if (Device->threadInitializeds[i])
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
+index 9e4f5b4..03f7f9b 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
+@@ -24,12 +24,6 @@
+ #ifndef __gc_hal_kernel_device_h_
+ #define __gc_hal_kernel_device_h_
+ 
+-#ifdef ANDROID
+-#define gcdkREPORT_VIDMEM_LEAK      0
+-#else
+-#define gcdkREPORT_VIDMEM_LEAK      1
+-#endif
+-
+ /******************************************************************************\
+ ******************************* gckGALDEVICE Structure *******************************
+ \******************************************************************************/
+@@ -38,7 +32,7 @@ typedef struct _gckGALDEVICE
+ {
+     /* Objects. */
+     gckOS               os;
+-    gckKERNEL           kernels[gcdGPU_COUNT];
++    gckKERNEL           kernels[gcdMAX_GPU_COUNT];
+ 
+     /* Attributes. */
+     gctSIZE_T           internalSize;
+@@ -57,23 +51,23 @@ typedef struct _gckGALDEVICE
+     gctPOINTER          contiguousMappedUser;
+     gctSIZE_T           systemMemorySize;
+     gctUINT32           systemMemoryBaseAddress;
+-    gctPOINTER          registerBases[gcdGPU_COUNT];
+-    gctSIZE_T           registerSizes[gcdGPU_COUNT];
++    gctPOINTER          registerBases[gcdMAX_GPU_COUNT];
++    gctSIZE_T           registerSizes[gcdMAX_GPU_COUNT];
+     gctUINT32           baseAddress;
+-    gctUINT32           requestedRegisterMemBases[gcdGPU_COUNT];
+-    gctSIZE_T           requestedRegisterMemSizes[gcdGPU_COUNT];
++    gctUINT32           requestedRegisterMemBases[gcdMAX_GPU_COUNT];
++    gctSIZE_T           requestedRegisterMemSizes[gcdMAX_GPU_COUNT];
+     gctUINT32           requestedContiguousBase;
+     gctSIZE_T           requestedContiguousSize;
+ 
+     /* IRQ management. */
+-    gctINT              irqLines[gcdGPU_COUNT];
+-    gctBOOL             isrInitializeds[gcdGPU_COUNT];
+-    gctBOOL             dataReadys[gcdGPU_COUNT];
++    gctINT              irqLines[gcdMAX_GPU_COUNT];
++    gctBOOL             isrInitializeds[gcdMAX_GPU_COUNT];
++    gctBOOL             dataReadys[gcdMAX_GPU_COUNT];
+ 
+     /* Thread management. */
+-    struct task_struct  *threadCtxts[gcdGPU_COUNT];
+-    struct semaphore    semas[gcdGPU_COUNT];
+-    gctBOOL             threadInitializeds[gcdGPU_COUNT];
++    struct task_struct  *threadCtxts[gcdMAX_GPU_COUNT];
++    struct semaphore    semas[gcdMAX_GPU_COUNT];
++    gctBOOL             threadInitializeds[gcdMAX_GPU_COUNT];
+     gctBOOL             killThread;
+ 
+     /* Signal management. */
+@@ -83,7 +77,10 @@ typedef struct _gckGALDEVICE
+     gceCORE             coreMapping[8];
+ 
+     /* States before suspend. */
+-    gceCHIPPOWERSTATE   statesStored[gcdGPU_COUNT];
++    gceCHIPPOWERSTATE   statesStored[gcdMAX_GPU_COUNT];
++
++    /*Device Debug File System Entry in Kernel*/
++   struct _gcsDebugFileSystemNode * dbgnode;
+ 
+     /* Clock management.*/
+     struct clk         *clk_3d_core;
+@@ -163,6 +160,7 @@ gceSTATUS gckGALDEVICE_Construct(
+     IN gctUINT32 PhysBaseAddr,
+     IN gctUINT32 PhysSize,
+     IN gctINT Signal,
++    IN gctUINT LogFileSize,
+     OUT gckGALDEVICE *Device
+     );
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+index 24775ad..cd40904 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+@@ -39,11 +39,6 @@
+ #endif
+ 
+ 
+-#ifdef CONFIG_ANDROID_RESERVED_MEMORY_ACCOUNT
+-#    include <linux/resmem_account.h>
+-#endif
+-
+-
+ /* Zone used for header/footer. */
+ #define _GC_OBJ_ZONE    gcvZONE_DRIVER
+ 
+@@ -108,6 +103,9 @@ module_param(baseAddress, ulong, 0644);
+ static ulong physSize = 0;
+ module_param(physSize, ulong, 0644);
+ 
++static uint logFileSize=0;
++module_param(logFileSize,uint, 0644);
++
+ static int showArgs = 0;
+ module_param(showArgs, int, 0644);
+ 
+@@ -139,36 +137,13 @@ static int drv_mmap(
+ 
+ static struct file_operations driver_fops =
+ {
++    .owner      = THIS_MODULE,
+     .open       = drv_open,
+     .release    = drv_release,
+     .unlocked_ioctl = drv_ioctl,
+     .mmap       = drv_mmap,
+ };
+ 
+-#ifdef CONFIG_ANDROID_RESERVED_MEMORY_ACCOUNT
+-static size_t viv_gpu_resmem_query(struct task_struct *p, struct reserved_memory_account *m);
+-static struct reserved_memory_account viv_gpu_resmem_handler = {
+-    .name = "viv_gpu",
+-    .get_page_used_by_process = viv_gpu_resmem_query,
+-};
+-
+-size_t viv_gpu_resmem_query(struct task_struct *p, struct reserved_memory_account *m)
+-{
+-    gcuDATABASE_INFO info;
+-    unsigned int processid = p->pid;
+-    gckKERNEL gpukernel = m->data;
+-
+-    /* ignore error happens in this api. */
+-    if (gckKERNEL_QueryProcessDB(gpukernel, processid, false, gcvDB_VIDEO_MEMORY, &info) != gcvSTATUS_OK)
+-	return 0;
+-
+-    /* we return pages. */
+-    if (info.counters.bytes > 0)
+-	return info.counters.bytes / PAGE_SIZE;
+-    return 0;
+-}
+-#endif
+-
+ int drv_open(
+     struct inode* inode,
+     struct file* filp
+@@ -211,7 +186,7 @@ int drv_open(
+     gcmkONERROR(gckOS_GetProcessID(&data->pidOpen));
+ 
+     /* Attached the process. */
+-    for (i = 0; i < gcdGPU_COUNT; i++)
++    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+     {
+         if (galDevice->kernels[i] != gcvNULL)
+         {
+@@ -254,7 +229,7 @@ OnError:
+ 
+     if (attached)
+     {
+-        for (i = 0; i < gcdGPU_COUNT; i++)
++        for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+         {
+             if (galDevice->kernels[i] != gcvNULL)
+             {
+@@ -333,7 +308,7 @@ int drv_release(
+     }
+ 
+     /* A process gets detached. */
+-    for (i = 0; i < gcdGPU_COUNT; i++)
++    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+     {
+         if (galDevice->kernels[i] != gcvNULL)
+         {
+@@ -471,7 +446,7 @@ long drv_ioctl(
+     if (iface.command == gcvHAL_CHIP_INFO)
+     {
+         count = 0;
+-        for (i = 0; i < gcdGPU_COUNT; i++)
++        for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+         {
+             if (device->kernels[i] != gcvNULL)
+             {
+@@ -630,8 +605,20 @@ static int drv_mmap(
+     if (device->contiguousMapped)
+     {
+         unsigned long size = vma->vm_end - vma->vm_start;
++        int ret = 0;
+ 
+-        int ret = io_remap_pfn_range(
++        if (size > device->contiguousSize)
++        {
++            gcmkTRACE_ZONE(
++                gcvLEVEL_ERROR, gcvZONE_DRIVER,
++                "%s(%d): Invalid mapping size.\n",
++                __FUNCTION__, __LINE__
++                );
++
++            gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
++        }
++
++        ret = io_remap_pfn_range(
+             vma,
+             vma->vm_start,
+             (gctUINT32) device->contiguousPhysical >> PAGE_SHIFT,
+@@ -754,11 +741,17 @@ static int drv_init(void)
+         printk("  signal            = %d\n",      signal);
+         printk("  baseAddress       = 0x%08lX\n", baseAddress);
+         printk("  physSize          = 0x%08lX\n", physSize);
++	printk(" logFileSize         = %d KB \n",     logFileSize);
+ #if ENABLE_GPU_CLOCK_BY_DRIVER
+         printk("  coreClock       = %lu\n",     coreClock);
+ #endif
+     }
+ 
++    if(logFileSize != 0)
++    {
++    	gckDebugFileSystemInitialize();
++    }
++
+     /* Create the GAL device. */
+     gcmkONERROR(gckGALDEVICE_Construct(
+         irqLine,
+@@ -769,6 +762,7 @@ static int drv_init(void)
+         registerMemBaseVG, registerMemSizeVG,
+         contiguousBase, contiguousSize,
+         bankSize, fastClear, compression, baseAddress, physSize, signal,
++        logFileSize,
+         &device
+         ));
+ 
+@@ -795,12 +789,6 @@ static int drv_init(void)
+         device->baseAddress = 0;
+     }
+ 
+-#ifdef CONFIG_ANDROID_RESERVED_MEMORY_ACCOUNT
+-    viv_gpu_resmem_handler.data = device->kernels[gcvCORE_MAJOR];
+-    register_reserved_memory_account(&viv_gpu_resmem_handler);
+-#endif
+-
+-
+     /* Register the character device. */
+     ret = register_chrdev(major, DRV_NAME, &driver_fops);
+ 
+@@ -880,10 +868,6 @@ static void drv_exit(void)
+ {
+     gcmkHEADER();
+ 
+-#ifdef CONFIG_ANDROID_RESERVED_MEMORY_ACCOUNT
+-    unregister_reserved_memory_account(&viv_gpu_resmem_handler);
+-#endif
+-
+     gcmkASSERT(gpuClass != gcvNULL);
+     device_destroy(gpuClass, MKDEV(major, 0));
+     class_destroy(gpuClass);
+@@ -893,6 +877,11 @@ static void drv_exit(void)
+     gcmkVERIFY_OK(gckGALDEVICE_Stop(galDevice));
+     gcmkVERIFY_OK(gckGALDEVICE_Destroy(galDevice));
+ 
++   if(gckDebugFileSystemIsEnabled())
++   {
++   	 gckDebugFileSystemTerminate();
++   }
++
+ #if ENABLE_GPU_CLOCK_BY_DRIVER && LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,28)
+     {
+ # if 0
+@@ -1002,7 +991,7 @@ static int __devinit gpu_suspend(struct platform_device *dev, pm_message_t state
+ 
+     device = platform_get_drvdata(dev);
+ 
+-    for (i = 0; i < gcdGPU_COUNT; i++)
++    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+     {
+         if (device->kernels[i] != gcvNULL)
+         {
+@@ -1053,7 +1042,7 @@ static int __devinit gpu_resume(struct platform_device *dev)
+ 
+     device = platform_get_drvdata(dev);
+ 
+-    for (i = 0; i < gcdGPU_COUNT; i++)
++    for (i = 0; i < gcdMAX_GPU_COUNT; i++)
+     {
+         if (device->kernels[i] != gcvNULL)
+         {
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.h b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.h
+index 6b69f0c..30fb135 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.h
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.h
+@@ -55,6 +55,7 @@
+ #include "gc_hal_kernel.h"
+ #include "gc_hal_kernel_device.h"
+ #include "gc_hal_kernel_os.h"
++#include "gc_hal_kernel_debugfs.h"
+ 
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,31)
+ #define FIND_TASK_BY_PID(x) pid_task(find_vpid(x), PIDTYPE_PID)
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index 30b44a2..21e6a22 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -287,6 +287,19 @@ _DumpDebugRegisters(
+ 
+     gcmkPRINT_N(4, "  %s debug registers:\n", Descriptor->module);
+ 
++    for (i = 0; i < Descriptor->count; i += 1)
++    {
++        select = i << Descriptor->shift;
++
++        gcmkONERROR(gckOS_WriteRegister(Os, Descriptor->index, select));
++#if !gcdENABLE_RECOVERY
++        gcmkONERROR(gckOS_Delay(Os, 1000));
++#endif
++        gcmkONERROR(gckOS_ReadRegister(Os, Descriptor->data, &data));
++
++        gcmkPRINT_N(12, "    [0x%02X] 0x%08X\n", i, data);
++    }
++
+     select = 0xF << Descriptor->shift;
+ 
+     for (i = 0; i < 500; i += 1)
+@@ -312,19 +325,6 @@ _DumpDebugRegisters(
+         gcmkPRINT_N(8, "    signature = 0x%08X (%d read attempt(s))\n", data, i + 1);
+     }
+ 
+-    for (i = 0; i < Descriptor->count; i += 1)
+-    {
+-        select = i << Descriptor->shift;
+-
+-        gcmkONERROR(gckOS_WriteRegister(Os, Descriptor->index, select));
+-#if !gcdENABLE_RECOVERY
+-        gcmkONERROR(gckOS_Delay(Os, 1000));
+-#endif
+-        gcmkONERROR(gckOS_ReadRegister(Os, Descriptor->data, &data));
+-
+-        gcmkPRINT_N(12, "    [0x%02X] 0x%08X\n", i, data);
+-    }
+-
+ OnError:
+     /* Return the error. */
+     gcmkFOOTER();
+@@ -414,7 +414,7 @@ _DumpGPUState(
+ 
+     /* TODO: Kernel shortcut. */
+     kernel = device->kernels[Core];
+-    gcmkPRINT_N(4, "Core = 0x%d\n",Core);
++    gcmkPRINT_N(4, "GPU[%d]:\n",Core);
+ 
+     if (kernel == gcvNULL)
+     {
+@@ -531,6 +531,9 @@ _DumpGPUState(
+         gcmkPRINT_N(12, "    [0x%04X] 0x%08X\n", _otherRegs[i], read);
+     }
+ 
++    /* Dump call stack. */
++    dump_stack();
++
+ OnError:
+     if (acquired)
+     {
+@@ -2064,6 +2067,7 @@ gckOS_AllocateNonPagedMemory(
+     addr = _GetNonPagedMemoryCache(Os,
+                 mdl->numPages * PAGE_SIZE,
+                 &mdl->dmaHandle);
++
+     if (addr == gcvNULL)
+ #endif
+     {
+@@ -2121,6 +2125,7 @@ gckOS_AllocateNonPagedMemory(
+         mdl->dmaHandle = (mdl->dmaHandle & ~0x80000000)
+                        | (Os->device->baseAddress & 0x80000000);
+     }
++
+     mdl->addr = addr;
+ 
+     /* Return allocated memory. */
+@@ -4445,6 +4450,15 @@ gckOS_LockPages(
+ 
+     MEMORY_UNLOCK(Os);
+ 
++    gcmkVERIFY_OK(gckOS_CacheFlush(
++        Os,
++        _GetProcessID(),
++        Physical,
++        gcvNULL,
++        (gctPOINTER)mdlMap->vmaAddr,
++        mdl->numPages * PAGE_SIZE
++        ));
++
+     /* Success. */
+     gcmkFOOTER_ARG("*Logical=0x%X *PageCount=%lu", *Logical, *PageCount);
+     return gcvSTATUS_OK;
+@@ -5384,7 +5398,7 @@ OnError:
+     gctSIZE_T pageCount, i, j;
+     gctUINT32_PTR pageTable;
+     gctUINT32 address = 0, physical = ~0U;
+-    gctUINT32 memory;
++    gctUINT32 start, end, memory;
+     gctUINT32 offset;
+     gctINT result = 0;
+ 
+@@ -5402,7 +5416,10 @@ OnError:
+     {
+         memory = (gctUINT32) Memory;
+ 
+-        pageCount = GetPageCount(Size, 0);
++        /* Get the number of required pages. */
++        end = (memory + Size + PAGE_SIZE - 1) >> PAGE_SHIFT;
++        start = memory >> PAGE_SHIFT;
++        pageCount = end - start;
+ 
+         gcmkTRACE_ZONE(
+             gcvLEVEL_INFO, gcvZONE_OS,
+@@ -5791,7 +5808,7 @@ OnError:
+     return status;
+ #else
+ {
+-    gctUINT32 memory;
++    gctUINT32 memory, start, end;
+     gcsPageInfo_PTR info;
+     gctSIZE_T pageCount, i;
+     struct page **pages;
+@@ -5825,7 +5842,9 @@ OnError:
+         }
+ 
+         memory = (gctUINT32) Memory;
+-        pageCount = GetPageCount(Size, 0);
++        end = (memory + Size + PAGE_SIZE - 1) >> PAGE_SHIFT;
++        start = memory >> PAGE_SHIFT;
++        pageCount = end - start;
+ 
+         /* Overflow. */
+         if ((memory + Size) < memory)
+@@ -6498,13 +6517,13 @@ gckOS_Broadcast(
+ 
+     case gcvBROADCAST_GPU_STUCK:
+         gcmkTRACE_N(gcvLEVEL_ERROR, 0, "gcvBROADCAST_GPU_STUCK\n");
+-        gcmkONERROR(_DumpGPUState(Os, gcvCORE_MAJOR));
++        gcmkONERROR(_DumpGPUState(Os, Hardware->core));
+         gcmkONERROR(gckKERNEL_Recovery(Hardware->kernel));
+         break;
+ 
+     case gcvBROADCAST_AXI_BUS_ERROR:
+         gcmkTRACE_N(gcvLEVEL_ERROR, 0, "gcvBROADCAST_AXI_BUS_ERROR\n");
+-        gcmkONERROR(_DumpGPUState(Os, gcvCORE_MAJOR));
++        gcmkONERROR(_DumpGPUState(Os, Hardware->core));
+         gcmkONERROR(gckKERNEL_Recovery(Hardware->kernel));
+         break;
+     }
+@@ -6923,45 +6942,122 @@ gckOS_SetGPUPower(
+     struct clk *clk_2d_axi = Os->device->clk_2d_axi;
+     struct clk *clk_vg_axi = Os->device->clk_vg_axi;
+ 
++    gctBOOL oldClockState = gcvFALSE;
++
+     gcmkHEADER_ARG("Os=0x%X Core=%d Clock=%d Power=%d", Os, Core, Clock, Power);
++
++    if (Os->device->kernels[Core] != NULL)
++    {
++#if gcdENABLE_VG
++        if (Core == gcvCORE_VG)
++        {
++            oldClockState = Os->device->kernels[Core]->vg->hardware->clockState;
++        }
++        else
++        {
++#endif
++            oldClockState = Os->device->kernels[Core]->hardware->clockState;
++#if gcdENABLE_VG
++        }
++#endif
++    }
++
+     if (Clock == gcvTRUE) {
+-        switch (Core) {
+-        case gcvCORE_MAJOR:
+-            clk_enable(clk_3dcore);
+-            if (cpu_is_mx6q())
+-                clk_enable(clk_3dshader);
+-            break;
+-        case gcvCORE_2D:
+-            clk_enable(clk_2dcore);
+-            clk_enable(clk_2d_axi);
+-            break;
+-        case gcvCORE_VG:
+-            clk_enable(clk_2dcore);
+-            clk_enable(clk_vg_axi);
+-            break;
+-        default:
+-            break;
++        if (oldClockState == gcvFALSE) {
++            switch (Core) {
++            case gcvCORE_MAJOR:
++                clk_enable(clk_3dcore);
++                if (cpu_is_mx6q())
++                    clk_enable(clk_3dshader);
++                break;
++            case gcvCORE_2D:
++                clk_enable(clk_2dcore);
++                clk_enable(clk_2d_axi);
++                break;
++            case gcvCORE_VG:
++                clk_enable(clk_2dcore);
++                clk_enable(clk_vg_axi);
++                break;
++            default:
++                break;
++            }
+         }
+     } else {
+-        switch (Core) {
+-        case gcvCORE_MAJOR:
+-            if (cpu_is_mx6q())
+-                clk_disable(clk_3dshader);
+-            clk_disable(clk_3dcore);
+-            break;
+-        case gcvCORE_2D:
+-            clk_disable(clk_2dcore);
+-            clk_disable(clk_2d_axi);
+-            break;
+-        case gcvCORE_VG:
+-            clk_disable(clk_2dcore);
+-            clk_disable(clk_vg_axi);
+-            break;
+-        default:
+-            break;
++        if (oldClockState == gcvTRUE) {
++            switch (Core) {
++            case gcvCORE_MAJOR:
++                if (cpu_is_mx6q())
++                    clk_disable(clk_3dshader);
++                clk_disable(clk_3dcore);
++                break;
++           case gcvCORE_2D:
++                clk_disable(clk_2dcore);
++                clk_disable(clk_2d_axi);
++                break;
++            case gcvCORE_VG:
++                clk_disable(clk_2dcore);
++                clk_disable(clk_vg_axi);
++                break;
++            default:
++                break;
++            }
+         }
+     }
+-    /* TODO: Put your code here. */
++
++
++    gcmkFOOTER_NO();
++    return gcvSTATUS_OK;
++}
++
++/*******************************************************************************
++**
++**  gckOS_ResetGPU
++**
++**  Reset the GPU.
++**
++**  INPUT:
++**
++**      gckOS Os
++**          Pointer to a gckOS object.
++**
++**      gckCORE Core
++**          GPU whose power is set.
++**
++**  OUTPUT:
++**
++**      Nothing.
++*/
++gceSTATUS
++gckOS_ResetGPU(
++    IN gckOS Os,
++    IN gceCORE Core
++    )
++{
++#define SRC_SCR_OFFSET 0
++#define BP_SRC_SCR_GPU3D_RST 1
++#define BP_SRC_SCR_GPU2D_RST 4
++
++    void __iomem *src_base = IO_ADDRESS(SRC_BASE_ADDR);
++    gctUINT32 bit_offset,val;
++
++    gcmkHEADER_ARG("Os=0x%X Core=%d", Os, Core);
++
++    if(Core == gcvCORE_MAJOR) {
++        bit_offset = BP_SRC_SCR_GPU3D_RST;
++    } else if((Core == gcvCORE_VG)
++            ||(Core == gcvCORE_2D)) {
++        bit_offset = BP_SRC_SCR_GPU2D_RST;
++    } else {
++        return gcvSTATUS_INVALID_CONFIG;
++    }
++    val = __raw_readl(src_base + SRC_SCR_OFFSET);
++    val &= ~(1 << (bit_offset));
++    val |= (1 << (bit_offset));
++    __raw_writel(val, src_base + SRC_SCR_OFFSET);
++
++    while ((__raw_readl(src_base + SRC_SCR_OFFSET) &
++                (1 << (bit_offset))) != 0) {
++    }
+ 
+     gcmkFOOTER_NO();
+     return gcvSTATUS_OK;
+-- 
+1.7.7.4
+

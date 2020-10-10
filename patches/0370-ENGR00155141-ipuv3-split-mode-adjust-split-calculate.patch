@@ -1,0 +1,47 @@
+From 3c937a70435a57c07f3ebae335529429b7d64235 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Mon, 22 Aug 2011 11:21:59 +0800
+Subject: [PATCH 0370/2463] ENGR00155141 ipuv3 split mode: adjust split
+ calculate function
+
+One issue was found in split mode: For input 1024x600, output 1360x768,
+after stripe calculation, input width and input column are not right.
+This patch fix this issue.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_calc_stripes_sizes.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c b/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c
+index 473772a..8c13a36 100644
+--- a/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c
++++ b/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c
+@@ -214,14 +214,14 @@ int ipu_calc_stripes_sizes(const unsigned int input_frame_width,
+ 	/* M, F calculations */
+ 	/* read back pfs from params */
+ 
+-	input_f = f_calc(input_pixelformat, 0, NULL);
++	input_f = 16;
+ 	input_m = 16;
+ 	/* BPP should be used in the out_F calc */
+ 	/* Temporarily not used */
+ 	/* out_F = F_calc(idmac->pfs, idmac->bpp, NULL); */
+ 
+ 	output_f = 16;
+-	output_m = m_calc(output_pixelformat);
++	output_m = 16;
+ 
+ 
+ 	if ((input_frame_width < 4) || (output_frame_width < 4))
+@@ -370,6 +370,7 @@ int ipu_calc_stripes_sizes(const unsigned int input_frame_width,
+ 		left->output_column = 0;
+ 		right->output_column = onw;
+ 	}
++
+ 	return status;
+ }
+ EXPORT_SYMBOL(ipu_calc_stripes_sizes);
+-- 
+1.7.7.4
+

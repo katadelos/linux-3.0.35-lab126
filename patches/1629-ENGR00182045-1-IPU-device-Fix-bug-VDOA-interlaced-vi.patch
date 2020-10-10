@@ -1,0 +1,74 @@
+From e4ab8e67ca86afe599f022cf0ad861a56b0f7698 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Thu, 21 Jun 2012 13:49:46 +0800
+Subject: [PATCH 1629/2463] ENGR00182045-1 IPU device: Fix bug: VDOA
+ interlaced video can't play normally
+
+Add IPU_MAX_VDI_IN_WIDTH for I.MX IPUv3 hardware
+For chrome buffer address(uoff) should be offset from luma buffer address
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_device.c |   10 +++++++---
+ drivers/mxc/ipu3/ipu_regs.h   |    3 +++
+ 2 files changed, 10 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_device.c b/drivers/mxc/ipu3/ipu_device.c
+index 8de791b..3899b89 100644
+--- a/drivers/mxc/ipu3/ipu_device.c
++++ b/drivers/mxc/ipu3/ipu_device.c
+@@ -497,6 +497,10 @@ static int soc_max_in_width(u32 is_vdoa)
+ 	return is_vdoa ? 8192 : 4096;
+ }
+ 
++static int soc_max_vdi_in_width(void)
++{
++	return IPU_MAX_VDI_IN_WIDTH;
++}
+ static int soc_max_in_height(void)
+ {
+ 	return 4096;
+@@ -760,7 +764,7 @@ static void update_offset(unsigned int fmt,
+ 		 * = line * stride + pixel * 16
+ 		 */
+ 		*off = pos_y * width + (pos_x << 4);
+-		*uoff = ALIGN(width * height, SZ_4K) + (*off >> 1);
++		*uoff = ALIGN(width * height, SZ_4K) + (*off >> 1) - *off;
+ 		break;
+ 	case IPU_PIX_FMT_TILED_NV12F:
+ 		/*
+@@ -769,7 +773,7 @@ static void update_offset(unsigned int fmt,
+ 		 * instead of 256
+ 		 */
+ 		*off = (pos_y >> 1) * width + (pos_x << 3);
+-		*uoff = ALIGN(width * height/2, SZ_4K) + (*off >> 1);
++		*uoff = ALIGN(width * height/2, SZ_4K) + (*off >> 1) - *off;
+ 		break;
+ 	default:
+ 		*off = (pos_y * width + pos_x) * fmt_to_bpp(fmt)/8;
+@@ -2816,7 +2820,7 @@ static void get_res_do_task(struct ipu_task_entry *t)
+ 			do_task_vdoa_only(t);
+ 		else if ((IPU_PIX_FMT_TILED_NV12F == t->input.format) &&
+ 				(t->set.mode & VDOA_BAND_MODE) &&
+-				(t->input.crop.w > soc_max_out_width()))
++				(t->input.crop.w > soc_max_vdi_in_width()))
+ 			do_task_vdoa_vdi(t);
+ 		else
+ 			do_task(t);
+diff --git a/drivers/mxc/ipu3/ipu_regs.h b/drivers/mxc/ipu3/ipu_regs.h
+index c06ac9f..f6dff36 100644
+--- a/drivers/mxc/ipu3/ipu_regs.h
++++ b/drivers/mxc/ipu3/ipu_regs.h
+@@ -28,6 +28,9 @@
+  */
+ extern int g_ipu_hw_rev;
+ 
++#define IPU_MAX_VDI_IN_WIDTH	({g_ipu_hw_rev >= 3 ? \
++				   (968) : \
++				   (720); })
+ #define IPU_DISP0_BASE		0x00000000
+ #define IPU_MCU_T_DEFAULT	8
+ #define IPU_DISP1_BASE		({g_ipu_hw_rev < 4 ? \
+-- 
+1.7.7.4
+

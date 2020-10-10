@@ -1,0 +1,63 @@
+From 35cde7a40f2176ced04cf464d29663bbe7df4019 Mon Sep 17 00:00:00 2001
+From: Lionel Xu <Lionel.Xu@freescale.com>
+Date: Wed, 31 Oct 2012 16:40:37 +0800
+Subject: [PATCH 2211/2463] ENGR00231778 MX6 ESAI: Adjust channel support
+ capability of cpu/codec dai
+
+To adjust the channel support capability, codec dai does not support mono
+playback and record, while esai dai does, thus making the whole audio
+codec only support stereo and above channel playback/record.
+
+Signed-off-by: Lionel Xu <R63889@freescale.com>
+---
+ sound/soc/codecs/cs42888.c |    6 +++---
+ sound/soc/imx/imx-esai.c   |    2 +-
+ 2 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/sound/soc/codecs/cs42888.c b/sound/soc/codecs/cs42888.c
+index ce24083..698ff4b 100644
+--- a/sound/soc/codecs/cs42888.c
++++ b/sound/soc/codecs/cs42888.c
+@@ -793,7 +793,7 @@ struct snd_soc_dai_driver cs42888_dai[] = {
+ 	.name = "CS42888",
+ 	.playback = {
+ 		.stream_name = "Playback",
+-		.channels_min = 1,
++		.channels_min = 2,
+ 		.channels_max = 8,
+ 		.rates = (SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_96000 |
+ 			SNDRV_PCM_RATE_192000),
+@@ -801,7 +801,7 @@ struct snd_soc_dai_driver cs42888_dai[] = {
+ 	},
+ 	.capture = {
+ 		.stream_name = "Capture",
+-		.channels_min = 1,
++		.channels_min = 2,
+ 		.channels_max = 4,
+ 		.rates = (SNDRV_PCM_RATE_48000 | SNDRV_PCM_RATE_96000 |
+ 			SNDRV_PCM_RATE_192000),
+@@ -813,7 +813,7 @@ struct snd_soc_dai_driver cs42888_dai[] = {
+ 		.name = "CS42888_ASRC",
+ 		.playback = {
+ 			.stream_name = "Playback",
+-			.channels_min = 1,
++			.channels_min = 2,
+ 			.channels_max = 8,
+ 			.rates = SNDRV_PCM_RATE_8000_192000,
+ 			.formats = CS42888_FORMATS,
+diff --git a/sound/soc/imx/imx-esai.c b/sound/soc/imx/imx-esai.c
+index 359cb2a..8951a81 100644
+--- a/sound/soc/imx/imx-esai.c
++++ b/sound/soc/imx/imx-esai.c
+@@ -579,7 +579,7 @@ static struct snd_soc_dai_driver imx_esai_dai = {
+ 	 .suspend = imx_esai_suspend,
+ 	 .resume = imx_esai_resume,
+ 	 .playback = {
+-		      .channels_min = 2,
++		      .channels_min = 1,
+ 		      .channels_max = 12,
+ 		      .rates = IMX_ESAI_RATES,
+ 		      .formats = IMX_ESAI_FORMATS,
+-- 
+1.7.7.4
+

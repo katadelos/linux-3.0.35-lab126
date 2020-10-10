@@ -1,0 +1,39 @@
+From ab96223de40ff080fe6c862240a7ae120289188b Mon Sep 17 00:00:00 2001
+From: Robin Gong <b38343@freescale.com>
+Date: Thu, 22 Nov 2012 13:45:54 +0800
+Subject: [PATCH 2280/2463] ENGR00234411-2 CPUFREQ: fix one code bug on
+ regulator restore when fail
+
+Didn't care about pu_regulator is enabled or not when regulator restore if some
+regulator set failed.
+
+Signed-off-by: Robin Gong <b38343@freescale.com>
+---
+ arch/arm/plat-mxc/cpufreq.c |   11 +++++++----
+ 1 files changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index 304e5c7..3d450e0 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -184,10 +184,13 @@ err4:
+ 	}
+ 
+ err3:
+-	ret = regulator_set_voltage(pu_regulator, org_pu_volt, org_pu_volt);
+-	if (ret < 0) {
+-		printk(KERN_ERR "COULD NOT RESTORE PU VOLTAGE!!!!\n");
+-		goto err3;
++	if (!IS_ERR(pu_regulator) &&
++		regulator_is_enabled(pu_regulator)) {
++		ret = regulator_set_voltage(pu_regulator, org_pu_volt, org_pu_volt);
++		if (ret < 0) {
++			printk(KERN_ERR "COULD NOT RESTORE PU VOLTAGE!!!!\n");
++			goto err3;
++		}
+ 	}
+ err2:
+ 	ret = regulator_set_voltage(soc_regulator, org_soc_volt,
+-- 
+1.7.7.4
+

@@ -1,0 +1,59 @@
+From 60bad509d7060775a370d70e843ab12f6b50c5c5 Mon Sep 17 00:00:00 2001
+From: Loren HUANG <b02279@freescale.com>
+Date: Fri, 24 Aug 2012 10:05:30 +0800
+Subject: [PATCH 1972/2463] ENGR00221197-2 Update gpu driver to check Soc
+ temperature
+
+-Update gpu driver to check the SoC temperature, if the thermal_hot flag
+is set by thermal driver. GPU3D clock will be slown down to the minimum
+ value, the clock will be recovery when the flag is cleared by thermal driver.
+-This patch depends on ENGR00220848, without it, kernel build can't pass.
+
+Signed-off-by: Loren HUANG <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c |   21 ++++++++++++++++++++
+ 1 files changed, 21 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
+index 8cf0509..e05a143 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
+@@ -30,6 +30,9 @@
+ 
+ #define _GC_OBJ_ZONE            gcvZONE_COMMAND
+ 
++#if gcdENABLE_FSCALE_VAL_ADJUST
++extern int thermal_hot;
++#endif
+ /******************************************************************************\
+ ********************************* Support Code *********************************
+ \******************************************************************************/
+@@ -1080,6 +1083,24 @@ gckCOMMAND_Commit(
+     /* Extract the gckHARDWARE and gckEVENT objects. */
+     hardware = Command->kernel->hardware;
+ 
++#if gcdENABLE_FSCALE_VAL_ADJUST
++    if(hardware->core == gcvCORE_MAJOR){
++        static gctUINT orgFscale,minFscale,maxFscale;
++        static gctBOOL bAlreadyTooHot = gcvFALSE;
++        if((thermal_hot > 0) && (!bAlreadyTooHot)) {
++            gckHARDWARE_GetFscaleValue(hardware,&orgFscale,&minFscale, &maxFscale);
++            gckHARDWARE_SetFscaleValue(hardware, minFscale);
++            bAlreadyTooHot = gcvTRUE;
++            gckOS_Print("System is too hot. GPU3D will work at %d/64 clock.\n", minFscale);
++        } else if((!(thermal_hot > 0)) && bAlreadyTooHot) {
++            gckHARDWARE_SetFscaleValue(hardware, orgFscale);
++            gckOS_Print("Hot alarm is canceled. GPU3D clock will return to %d/64\n", orgFscale);
++            bAlreadyTooHot = gcvFALSE;
++        }
++
++    }
++#endif
++
+     /* Check wehther we need to copy the structures or not. */
+     gcmkONERROR(gckOS_QueryNeedCopy(Command->os, ProcessID, &needCopy));
+ 
+-- 
+1.7.7.4
+

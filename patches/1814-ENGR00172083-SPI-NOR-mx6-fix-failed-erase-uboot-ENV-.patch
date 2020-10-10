@@ -1,0 +1,88 @@
+From deaa87ba531ca28a99c8edf3409729e5a9cb2ced Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Thu, 26 Jul 2012 17:00:48 +0800
+Subject: [PATCH 1814/2463] ENGR00172083 SPI-NOR mx6: fix  failed erase uboot
+ ENV on SPI-NOR by MFG tool
+
+In MFG tool will use "flash_eraseall /dev/mtd0" command to erase whole mtd0
+partition, but u-boot environment params are stored  in offset 0xc0000 which
+exceed the u-boot patition 0x40000, it means the "flash_eraseall" command only
+erase u-boot partition, but not environment area. So we need increase the size
+of u-boot partition  to 0x100000 as what we remain 1MB for u-boot.
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c      |    2 +-
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    2 +-
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |    2 +-
+ arch/arm/mach-mx6/board-mx6q_sabresd.c   |    2 +-
+ arch/arm/mach-mx6/board-mx6sl_arm2.c     |    2 +-
+ 5 files changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 8b500c7..6b7aa51 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -389,7 +389,7 @@ static struct mtd_partition m25p32_partitions[] = {
+ 	{
+ 		.name	= "bootloader",
+ 		.offset	= 0,
+-		.size	= 0x00040000,
++		.size	= 0x00100000,
+ 	}, {
+ 		.name	= "kernel",
+ 		.offset	= MTDPART_OFS_APPEND,
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index d57badc..967904f 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -400,7 +400,7 @@ static struct mtd_partition m25p32_partitions[] = {
+ 	{
+ 		.name	= "bootloader",
+ 		.offset	= 0,
+-		.size	= 0x00040000,
++		.size	= 0x00100000,
+ 	}, {
+ 		.name	= "kernel",
+ 		.offset	= MTDPART_OFS_APPEND,
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index bb334fb..9526de2 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -481,7 +481,7 @@ static struct mtd_partition imx6_sabrelite_spi_nor_partitions[] = {
+ 	{
+ 	 .name = "bootloader",
+ 	 .offset = 0,
+-	 .size = 0x00040000,
++	 .size = 0x00100000,
+ 	},
+ 	{
+ 	 .name = "kernel",
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index a9a516f..99ce637 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -295,7 +295,7 @@ static struct mtd_partition imx6_sabresd_spi_nor_partitions[] = {
+ 	{
+ 	 .name = "bootloader",
+ 	 .offset = 0,
+-	 .size = 0x00040000,
++	 .size = 0x00100000,
+ 	},
+ 	{
+ 	 .name = "kernel",
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 4c146c6..b190ff6 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -458,7 +458,7 @@ static struct mtd_partition m25p32_partitions[] = {
+ 	{
+ 		.name	= "bootloader",
+ 		.offset	= 0,
+-		.size	= 0x00040000,
++		.size	= 0x00100000,
+ 	}, {
+ 		.name	= "kernel",
+ 		.offset	= MTDPART_OFS_APPEND,
+-- 
+1.7.7.4
+

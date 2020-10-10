@@ -1,0 +1,43 @@
+From 30f7cdc5280b23b50a49c988061b231a1eddc548 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Thu, 16 Feb 2012 15:45:36 +0800
+Subject: [PATCH 1049/2463] ENGR00174652 i.mx6: explicitly set the LPM mode to
+ run mode during early bootup
+
+the reset value of LPM[1:0] in CCM_CLPCR register is b'01, which means
+system will enter into wait mode on next assertion of dsm_request signal.
+
+In order to avoid the system unexpectly enter the wait mode during bootup
+we need set the LPM mode to run mode explicity during early boot up phase,
+
+Anytime, we want system to enter the wait mode, the sw procedure is:
+
+mxc_cpu_lp_set(LP_MODE) -> set CCM_CLPCR register -> system enter wait mode
+
+This patch also fix linux kernel reboot stress test on i.mx6dl, without this
+patch linux kernel reboot test will fail random with error like this:
+
+[   12.091220] Bad mode in interrupt handler detected
+[   12.096056] Bad mode in interrupt handler detected
+[   12.100851] Internal error: Oops - bad mode: 0 [#1] PREEMPT SMP
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx6/mm.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mm.c b/arch/arm/mach-mx6/mm.c
+index e4daaf1..6e80f0a 100644
+--- a/arch/arm/mach-mx6/mm.c
++++ b/arch/arm/mach-mx6/mm.c
+@@ -81,6 +81,7 @@ void __init mx6_map_io(void)
+ 	mxc_iomux_v3_init(IO_ADDRESS(MX6Q_IOMUXC_BASE_ADDR));
+ 	mxc_arch_reset_init(IO_ADDRESS(MX6Q_WDOG1_BASE_ADDR));
+ 	mx6_set_cpu_type();
++	mxc_cpu_lp_set(WAIT_CLOCKED);
+ }
+ #ifdef CONFIG_CACHE_L2X0
+ int mxc_init_l2x0(void)
+-- 
+1.7.7.4
+

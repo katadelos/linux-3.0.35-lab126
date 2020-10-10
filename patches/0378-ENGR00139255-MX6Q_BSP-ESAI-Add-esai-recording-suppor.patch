@@ -1,0 +1,35 @@
+From 20bcd2300a7aed3a4e6a9f309fe44268f9cc5b0a Mon Sep 17 00:00:00 2001
+From: Lionel Xu <Lionel.Xu@freescale.com>
+Date: Mon, 29 Aug 2011 14:01:16 +0800
+Subject: [PATCH 0378/2463] ENGR00139255 MX6Q_BSP ESAI: Add esai recording
+ support
+
+Add ESAI recording to mx6q platform.
+To differentiate mx6q and mx53 in codec machine layer code.
+
+Signed-off-by: Lionel Xu <R63889@freescale.com>
+---
+ sound/soc/imx/imx-cs42888.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/sound/soc/imx/imx-cs42888.c b/sound/soc/imx/imx-cs42888.c
+index 87c2115..e9f6633 100644
+--- a/sound/soc/imx/imx-cs42888.c
++++ b/sound/soc/imx/imx-cs42888.c
+@@ -154,8 +154,12 @@ static int imx_3stack_surround_hw_params(struct snd_pcm_substream *substream,
+ 	else if (cpu_is_mx6q())
+ 		snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_PM, 2);
+ 	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_TX_DIV_FP, lrclk_ratio);
++
+ 	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_PSR, 1);
+-	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_PM, 2);
++	if (cpu_is_mx53())
++		snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_PM, 0);
++	else if (cpu_is_mx6q())
++		snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_PM, 2);
+ 	snd_soc_dai_set_clkdiv(cpu_dai, ESAI_RX_DIV_FP, lrclk_ratio);
+ 
+ 	/* set codec DAI configuration */
+-- 
+1.7.7.4
+

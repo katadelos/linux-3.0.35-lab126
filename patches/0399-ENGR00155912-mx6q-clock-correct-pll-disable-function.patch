@@ -1,0 +1,35 @@
+From 3227293269ae4181a3dc9d028ba955dacec5952a Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Fri, 2 Sep 2011 17:22:26 +0800
+Subject: [PATCH 0399/2463] ENGR00155912 [mx6q]clock: correct pll disable
+ function
+
+pll3 and pll7 have opposite power down bit definition comparing
+with other plls.
+so reverse the bit when setting these two plls
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 5848440..cfc5f1b 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -391,7 +391,11 @@ static void _clk_pll_disable(struct clk *clk)
+ 	reg &= ~ANADIG_PLL_ENABLE;
+ 	reg |= ANADIG_PLL_BYPASS;
+ 	reg |= ANADIG_PLL_POWER_DOWN;
+-	if (clk == &pll3_usb_otg_main_clk)
++
++	/* The 480MHz PLLs, pll3 & pll7, have the opposite
++	 * definition for power bit.
++	 */
++	if (clk == &pll3_usb_otg_main_clk || clk == &pll7_usb_host_main_clk)
+ 		reg &= ~ANADIG_PLL_POWER_DOWN;
+ 	__raw_writel(reg, pllbase);
+ }
+-- 
+1.7.7.4
+

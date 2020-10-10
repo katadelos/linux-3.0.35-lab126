@@ -1,0 +1,129 @@
+From e2cb64c5ee3173dda8c9927ec5dad18c77ef0ebf Mon Sep 17 00:00:00 2001
+From: Robin Gong <b38343@freescale.com>
+Date: Thu, 22 Nov 2012 13:31:05 +0800
+Subject: [PATCH 2279/2463] ENGR00234411-1 Sabreauto: fix error print COULD
+ NOT SET GP VOLTAGE.
+
+Didn't take more care about non-pfuze board, and there is two place in BSP will
+call "mx6_cpu_regulator_init". It means regulator_get will be called twice on
+every vddcore/vddsoc regulator. Then one value need set twice ,because from
+regulator core view, there is two regulators share the same regulator. The non-
+validate one will return error and print "COULD NOT SET GP VOLTAGE!!!!." on
+Sabreauto board. The same as Sabrelite and ARM2 board.
+
+Meanwhile, Sabreauto need be configured LDO bypass default.
+Signed-off-by: Robin Gong <b38343@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c              |    2 --
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c         |    7 ++-----
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c         |    2 --
+ arch/arm/mach-mx6/mx6q_sabreauto_pmic_pfuze100.c |    9 +++++++--
+ 4 files changed, 9 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 27c4045..85f9389 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -173,7 +173,6 @@ extern char *gp_reg_id;
+ extern char *soc_reg_id;
+ extern char *pu_reg_id;
+ extern int epdc_enabled;
+-extern void mx6_cpu_regulator_init(void);
+ static int max17135_regulator_init(struct max17135 *max17135);
+ 
+ enum sd_pad_mode {
+@@ -2164,7 +2163,6 @@ static void __init mx6_arm2_init(void)
+ 	mx6_arm2_init_usb();
+ 	mx6_arm2_init_audio();
+ 	platform_device_register(&arm2_vmmc_reg_devices);
+-	mx6_cpu_regulator_init();
+ 
+ 	imx_asrc_data.asrc_core_clk = clk_get(NULL, "asrc_clk");
+ 	imx_asrc_data.asrc_audio_clk = clk_get(NULL, "asrc_serial_clk");
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 95b9e0a..e191e1d 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -1285,9 +1285,8 @@ static struct mxc_mlb_platform_data mx6_sabreauto_mlb150_data = {
+ };
+ 
+ static struct mxc_dvfs_platform_data sabreauto_dvfscore_data = {
+-	.reg_id			= "cpu_vddgp",
+-	.soc_id			= "cpu_vddsoc",
+-	.pu_id			= "cpu_vddvpu",
++	.reg_id			= "VDDCORE",
++	.soc_id			= "VDDSOC",
+ 	.clk1_id		= "cpu_clk",
+ 	.clk2_id 		= "gpc_dvfs_clk",
+ 	.gpc_cntr_offset 	= MXC_GPC_CNTR_OFFSET,
+@@ -1525,7 +1524,6 @@ static void __init mx6_board_init(void)
+ 
+ 	gp_reg_id = sabreauto_dvfscore_data.reg_id;
+ 	soc_reg_id = sabreauto_dvfscore_data.soc_id;
+-	pu_reg_id = sabreauto_dvfscore_data.pu_id;
+ 	mx6q_sabreauto_init_uart();
+ 	imx6q_add_mipi_csi2(&mipi_csi2_pdata);
+ 	if (cpu_is_mx6dl()) {
+@@ -1603,7 +1601,6 @@ static void __init mx6_board_init(void)
+ 	imx6q_add_vpu();
+ 	imx6q_init_audio();
+ 	platform_device_register(&sabreauto_vmmc_reg_devices);
+-	mx6_cpu_regulator_init();
+ 	imx_asrc_data.asrc_core_clk = clk_get(NULL, "asrc_clk");
+ 	imx_asrc_data.asrc_audio_clk = clk_get(NULL, "asrc_serial_clk");
+ 	imx6q_add_asrc(&imx_asrc_data);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index cec9bf0..736b423 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -107,7 +107,6 @@ static int caam_enabled;
+ 
+ extern struct regulator *(*get_cpu_regulator)(void);
+ extern void (*put_cpu_regulator)(void);
+-extern void mx6_cpu_regulator_init(void);
+ 
+ static iomux_v3_cfg_t mx6q_sabrelite_pads[] = {
+ 	/* AUDMUX */
+@@ -1215,7 +1214,6 @@ static void __init mx6_sabrelite_board_init(void)
+ 	imx6q_add_dma();
+ 
+ 	imx6q_add_dvfs_core(&sabrelite_dvfscore_data);
+-	mx6_cpu_regulator_init();
+ 
+ 	sabrelite_add_device_buttons();
+ 
+diff --git a/arch/arm/mach-mx6/mx6q_sabreauto_pmic_pfuze100.c b/arch/arm/mach-mx6/mx6q_sabreauto_pmic_pfuze100.c
+index b0ca5a3..fe6d4b3 100644
+--- a/arch/arm/mach-mx6/mx6q_sabreauto_pmic_pfuze100.c
++++ b/arch/arm/mach-mx6/mx6q_sabreauto_pmic_pfuze100.c
+@@ -62,13 +62,13 @@ extern u32 enable_ldo_mode;
+ 
+ static struct regulator_consumer_supply sw1a_consumers[] = {
+ 	{
+-	 .supply = "P1V325_VDDARM_SW1AB",
++	 .supply = "VDDCORE",
+ 	 }
+ };
+ 
+ static struct regulator_consumer_supply sw1c_consumers[] = {
+ 	{
+-	 .supply = "P1V325_VDDSOC_SW1C",
++	 .supply = "VDDSOC",
+ 	 }
+ };
+ 
+@@ -400,6 +400,11 @@ static int pfuze100_init(struct mc_pfuze *pfuze)
+ {
+ 	int ret, i;
+ 	unsigned char value;
++
++	/*use default mode(ldo bypass) if no param from cmdline*/
++	if (enable_ldo_mode == LDO_MODE_DEFAULT)
++		enable_ldo_mode = LDO_MODE_BYPASSED;
++
+ 	/*read Device ID*/
+ 	ret = pfuze_reg_read(pfuze, PFUZE100_DEVICEID, &value);
+ 	if (ret)
+-- 
+1.7.7.4
+

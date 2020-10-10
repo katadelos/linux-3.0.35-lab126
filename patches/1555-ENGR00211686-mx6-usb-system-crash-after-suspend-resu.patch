@@ -1,0 +1,56 @@
+From 7416fe2ef7e6359a0a9208d7640024299ea87696 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Wed, 30 May 2012 13:56:38 +0800
+Subject: [PATCH 1555/2463] ENGR00211686 mx6 usb: system crash after
+ suspend/resume
+
+- the pre-condition of this issue is:
+  1. usb gadget must be probed before usb host
+  2. usb otg must be in host mode
+
+- the root cause of this issue is
+  because of the issue of week 2p5, a vbus change interrupt will
+  be issued when system enter into DSM, which will cause system
+  exit DSM, so we have a walk aroud to disable usb vbus change
+  interrupt when system enter into DSM.
+
+  But this walk around just provent the interrupt generating, the
+  vbus change status is still on. When usb gadget is probed, the
+  vbus change interrupt will be enabled by its resume interface by
+  mistake, and then continuous interrupt will be generated because
+  usb otg is in host mode, it can't clear the vbus change status.
+
+  The system have a protect mechanism that when one IRQ's handler
+  return IRQ_NONE more than 99000 times, it will through a exception
+  to inform such situation. That's the reason why system crash.
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index ea81802..842c54e 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -3432,7 +3432,6 @@ static int fsl_udc_resume(struct platform_device *pdev)
+ 		/* if in host mode, we need to do nothing */
+ 		if ((fsl_readl(&dr_regs->otgsc) & OTGSC_STS_USB_ID) == 0) {
+ 			dr_phy_low_power_mode(udc_controller, true);
+-			dr_wake_up_enable(udc_controller, true);
+ 			goto end;
+ 		}
+ 		dr_controller_setup(udc_controller);
+@@ -3452,7 +3451,8 @@ end:
+ 		 * subsystem will not leave from low power mode.
+ 		 */
+ 		if (!udc_can_wakeup_system() &&
+-			(pdata->pmflags == 0)) {
++			(pdata->pmflags == 0) &&
++			(fsl_readl(&dr_regs->otgsc) & OTGSC_STS_USB_ID)) {
+ 			dr_wake_up_enable(udc_controller, true);
+ 		}
+ 
+-- 
+1.7.7.4
+

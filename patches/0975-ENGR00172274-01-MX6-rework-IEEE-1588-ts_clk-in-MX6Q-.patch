@@ -1,0 +1,138 @@
+From f8be5ffb1f330fe29bbaf009eac9bf2d0619dc25 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Wed, 8 Feb 2012 11:26:58 +0800
+Subject: [PATCH 0975/2463] ENGR00172274-01 - [MX6]: rework IEEE-1588 ts_clk
+ in MX6Q ARIK CPU board.
+
+- Fix GPIO_16 IOMUX config.
+- Config GPIO_16 pad to ENET_ANATOP_ETHERNET_REF_OUT.
+- IEEE-1588 ts_clk, S/PDIF in and i2c3 are mutually exclusive,
+  because all of them use GPIO_16, so it only for one function
+  work at a moment.
+- Test result:
+   	Enet work fine at 100/1000Mbps in TO1.1.
+	IEEE 1588 timestamp is convergent.
+
+Signed-off-by: Fugang Duan <B38611@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6dl_arm2.h         |    3 +++
+ arch/arm/mach-mx6/board-mx6q_arm2.c          |   13 +++++++++++--
+ arch/arm/mach-mx6/board-mx6q_arm2.h          |    3 +++
+ arch/arm/mach-mx6/clock.c                    |    4 ++--
+ arch/arm/plat-mxc/include/mach/iomux-mx6dl.h |    2 +-
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h  |    2 +-
+ 6 files changed, 21 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6dl_arm2.h b/arch/arm/mach-mx6/board-mx6dl_arm2.h
+index 1ba2e57..9261a28 100644
+--- a/arch/arm/mach-mx6/board-mx6dl_arm2.h
++++ b/arch/arm/mach-mx6/board-mx6dl_arm2.h
+@@ -49,6 +49,9 @@ static iomux_v3_cfg_t mx6dl_arm2_pads[] = {
+ 	MX6DL_PAD_RGMII_RD2__ENET_RGMII_RD2,
+ 	MX6DL_PAD_RGMII_RD3__ENET_RGMII_RD3,
+ 	MX6DL_PAD_RGMII_RX_CTL__ENET_RGMII_RX_CTL,
++#ifdef CONFIG_FEC_1588
++	MX6DL_PAD_GPIO_16__ENET_ANATOP_ETHERNET_REF_OUT,
++#endif
+ #endif
+ 	/* MCLK for csi0 */
+ 	MX6DL_PAD_GPIO_0__CCM_CLKO,
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index dc7698b..4865649 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -1409,11 +1409,12 @@ static void __init mx6_arm2_init(void)
+ 	}
+ 
+ 	/*
+-	 * S/PDIF in and i2c3 are mutually exclusive because both
+-	 * use GPIO_16.
++	 * IEEE-1588 ts_clk, S/PDIF in and i2c3 are mutually exclusive
++	 * because all of them use GPIO_16.
+ 	 * S/PDIF out and can1 stby are mutually exclusive because both
+ 	 * use GPIO_17.
+ 	 */
++#ifndef CONFIG_FEC_1588
+ 	if (spdif_en) {
+ 		BUG_ON(!spdif_pads);
+ 		mxc_iomux_v3_setup_multiple_pads(spdif_pads, spdif_pads_cnt);
+@@ -1421,6 +1422,14 @@ static void __init mx6_arm2_init(void)
+ 		BUG_ON(!i2c3_pads);
+ 		mxc_iomux_v3_setup_multiple_pads(i2c3_pads, i2c3_pads_cnt);
+ 	}
++#else
++	/* Set GPIO_16 input for IEEE-1588 ts_clk and RMII reference clock
++	 * For MX6 GPR1 bit21 meaning:
++	 * Bit21:       0 - GPIO_16 pad output
++	 *              1 - GPIO_16 pad input
++	 */
++	mxc_iomux_set_gpr_register(1, 21, 1, 1);
++#endif
+ 
+ 	if (!spdif_en && flexcan_en) {
+ 		BUG_ON(!flexcan_pads);
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.h b/arch/arm/mach-mx6/board-mx6q_arm2.h
+index 9e3ef81..8c3277d 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.h
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.h
+@@ -49,6 +49,9 @@ static iomux_v3_cfg_t mx6q_arm2_pads[] = {
+ 	MX6Q_PAD_RGMII_RD2__ENET_RGMII_RD2,
+ 	MX6Q_PAD_RGMII_RD3__ENET_RGMII_RD3,
+ 	MX6Q_PAD_RGMII_RX_CTL__ENET_RGMII_RX_CTL,
++#ifdef CONFIG_FEC_1588
++	MX6Q_PAD_GPIO_16__ENET_ANATOP_ETHERNET_REF_OUT,
++#endif
+ #endif
+ 	/* MCLK for csi0 */
+ 	MX6Q_PAD_GPIO_0__CCM_CLKO,
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 5adb335..c508b41 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -3489,7 +3489,7 @@ static int _clk_enet_enable(struct clk *clk)
+ 	/* Enable ENET ref clock */
+ 	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+ 	reg &= ~ANADIG_PLL_BYPASS;
+-	reg &= ~ANADIG_PLL_ENABLE;
++	reg |= ANADIG_PLL_ENABLE;
+ 	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
+ 
+ 	_clk_enable(clk);
+@@ -3505,7 +3505,7 @@ static void _clk_enet_disable(struct clk *clk)
+ 	/* Enable ENET ref clock */
+ 	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+ 	reg |= ANADIG_PLL_BYPASS;
+-	reg |= ANADIG_PLL_ENABLE;
++	reg &= ~ANADIG_PLL_ENABLE;
+ 	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
+ }
+ 
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6dl.h b/arch/arm/plat-mxc/include/mach/iomux-mx6dl.h
+index cb37c21..b32cc00 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6dl.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6dl.h
+@@ -2380,7 +2380,7 @@
+ #define MX6DL_PAD_GPIO_16__ENET_1588_EVENT2_IN                                 \
+ 		IOMUX_PAD(0x05E4, 0x0214, 1, 0x0000, 0, NO_PAD_CTRL)
+ #define MX6DL_PAD_GPIO_16__ENET_ANATOP_ETHERNET_REF_OUT                        \
+-		IOMUX_PAD(0x05E4, 0x0214, 2, 0x080C, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x05E4, 0x0214, 0x12, 0x080C, 0, NO_PAD_CTRL)
+ #define MX6DL_PAD_GPIO_16__USDHC1_LCTL                                         \
+ 		IOMUX_PAD(0x05E4, 0x0214, 3, 0x0000, 0, MX6DL_USDHC_PAD_CTRL)
+ #define MX6DL_PAD_GPIO_16__SPDIF_IN1                                           \
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index ca94008..3345cca 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -2429,7 +2429,7 @@ typedef enum iomux_config {
+ #define _MX6Q_PAD_GPIO_16__ENET_1588_EVENT2_IN		\
+ 		IOMUX_PAD(0x0618, 0x0248, 1, 0x0000, 0, 0)
+ #define _MX6Q_PAD_GPIO_16__ENET_ANATOP_ETHERNET_REF_OUT		\
+-		IOMUX_PAD(0x0618, 0x0248, 2, 0x083C, 1, 0)
++		IOMUX_PAD(0x0618, 0x0248, 0x12, 0x083C, 1, 0)
+ #define _MX6Q_PAD_GPIO_16__USDHC1_LCTL			\
+ 		IOMUX_PAD(0x0618, 0x0248, 3, 0x0000, 0, 0)
+ #define _MX6Q_PAD_GPIO_16__SPDIF_IN1			\
+-- 
+1.7.7.4
+

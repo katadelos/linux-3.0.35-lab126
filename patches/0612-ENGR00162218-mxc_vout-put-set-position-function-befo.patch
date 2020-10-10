@@ -1,0 +1,43 @@
+From 6ab147fa064569e802bbda672fed93593deb10d0 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Tue, 15 Nov 2011 17:57:46 +0800
+Subject: [PATCH 0612/2463] ENGR00162218 mxc_vout: put set position function
+ before set var
+
+fb set var will check the window position with window size, so the
+correct way is setting position before fb_set_var.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_vout.c |    8 ++++----
+ 1 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_vout.c b/drivers/media/video/mxc/output/mxc_vout.c
+index b55abbe..1cacbd6 100644
+--- a/drivers/media/video/mxc/output/mxc_vout.c
++++ b/drivers/media/video/mxc/output/mxc_vout.c
+@@ -1256,6 +1256,10 @@ static int config_disp_output(struct mxc_vout_output *vout)
+ 			"set display fb to %d %d\n",
+ 			var.xres, var.yres);
+ 
++	ret = set_window_position(vout);
++	if (ret < 0)
++		return ret;
++
+ 	/* Init display channel through fb API */
+ 	var.yoffset = 0;
+ 	var.activate |= FB_ACTIVATE_FORCE;
+@@ -1271,10 +1275,6 @@ static int config_disp_output(struct mxc_vout_output *vout)
+ 	for (i = 0; i < fb_num; i++)
+ 		vout->disp_bufs[i] = fbi->fix.smem_start + i * display_buf_size;
+ 
+-	ret = set_window_position(vout);
+-	if (ret < 0)
+-		return ret;
+-
+ 	console_lock();
+ 	ret = fb_blank(fbi, FB_BLANK_UNBLANK);
+ 	console_unlock();
+-- 
+1.7.7.4
+

@@ -1,0 +1,40 @@
+From 3a64cce1b3563c2369273ef6e540756430b9855d Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Wed, 5 Dec 2012 14:31:41 +0800
+Subject: [PATCH 2302/2463] ENGR00235630 MX6 USB :fix USB does not work when
+ plug in device during suspend
+
+USB does not work when plug in a usb device during system suspend. Under this
+case, USB driver will be in low power mode, but WIE bit not be set if usb wake
+up is not enabled.So there are only ID change interrupt no USB wakeup interrupt
+after system resume.In current bsp, after system resume ID change status not be
+clear,and ID change interrupt will continue happen, which cause the system busy.
+No checking WIR bit if ID change interrupt happen when USB in low power mode to
+fix this issue.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ arch/arm/mach-mx6/usb_dr.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index cf84cf2..8f90932 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -513,10 +513,10 @@ static enum usb_wakeup_event _is_host_wakeup(struct fsl_usb2_platform_data *pdat
+ 		pr_debug("the otgsc is 0x%x, usbsts is 0x%x, portsc is 0x%x, wakeup_irq is 0x%x\n", UOG_OTGSC, UOG_USBSTS, UOG_PORTSC1, wakeup_req);
+ 	}
+ 	/* if ID change sts, it is a host wakeup event */
+-	if (wakeup_req && (otgsc & OTGSC_IS_USB_ID)) {
++	if (otgsc & OTGSC_IS_USB_ID) {
+ 		pr_debug("otg host ID wakeup\n");
+-		/* if host ID wakeup, we must clear the b session change sts */
+-		otgsc &= (~OTGSC_IS_USB_ID);
++		/* if host ID wakeup, we must clear the ID change sts */
++		otgsc |= OTGSC_IS_USB_ID;
+ 		return WAKEUP_EVENT_ID;
+ 	}
+ 	if (wakeup_req  && (!(otgsc & OTGSC_STS_USB_ID))) {
+-- 
+1.7.7.4
+

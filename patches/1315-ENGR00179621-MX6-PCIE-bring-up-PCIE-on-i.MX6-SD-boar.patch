@@ -1,0 +1,826 @@
+From f98d621450c5a003b06e8eec07b739a0ac959caa Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Thu, 12 Apr 2012 09:54:30 +0800
+Subject: [PATCH 1315/2463] ENGR00179621 MX6 PCIE: bring up PCIE on i.MX6 SD
+ board
+
+* Bring up the PCIE on i.MX6 SD board
+* Add the PCIE PHY access routines
+* Wrapper the board related codes by register one
+  platform driver and data
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig                       |    2 +
+ arch/arm/mach-mx6/board-mx6q_arm2.c             |   11 +
+ arch/arm/mach-mx6/board-mx6q_sabresd.c          |   12 +-
+ arch/arm/mach-mx6/board-mx6q_sabresd.h          |    7 +-
+ arch/arm/mach-mx6/devices-imx6q.h               |    3 +
+ arch/arm/mach-mx6/pcie.c                        |  393 +++++++++++++++++++++--
+ arch/arm/plat-mxc/devices/Kconfig               |    3 +
+ arch/arm/plat-mxc/devices/Makefile              |    1 +
+ arch/arm/plat-mxc/devices/platform-imx-pcie.c   |   61 ++++
+ arch/arm/plat-mxc/include/mach/devices-common.h |   12 +
+ arch/arm/plat-mxc/include/mach/pcie.h           |   39 +++
+ 11 files changed, 507 insertions(+), 37 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 1df2421..1db924a 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -60,6 +60,7 @@ config MACH_MX6Q_ARM2
+ 	select IMX_HAVE_PLATFORM_MXC_MLB
+ 	select IMX_HAVE_PLATFORM_IMX_EPDC
+ 	select IMX_HAVE_PLATFORM_IMX_PXP
++	select IMX_HAVE_PLATFORM_IMX_PCIE
+ 	help
+ 	  Include support for i.MX 6Quad Armadillo2 platform. This includes specific
+ 	  configurations for the board and its peripherals.
+@@ -124,6 +125,7 @@ config MACH_MX6Q_SABRESD
+ 	select IMX_HAVE_PLATFORM_MXC_HDMI
+ 	select IMX_HAVE_PLATFORM_IMX_ASRC
+ 	select IMX_HAVE_PLATFORM_FLEXCAN
++	select IMX_HAVE_PLATFORM_IMX_PCIE
+ 	help
+ 	  Include support for i.MX 6Quad SABRE SD platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 2318f76..d71c6e2 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -147,6 +147,9 @@
+ #define MX6_ARM2_IO_EXP_GPIO1(x)	(MX6_ARM2_MAX7310_1_BASE_ADDR + (x))
+ #define MX6_ARM2_IO_EXP_GPIO2(x)	(MX6_ARM2_MAX7310_2_BASE_ADDR + (x))
+ 
++#define MX6_ARM2_PCIE_PWR_EN		MX6_ARM2_IO_EXP_GPIO1(2)
++#define MX6_ARM2_PCIE_RESET		MX6_ARM2_IO_EXP_GPIO2(2)
++
+ #define MX6_ARM2_CAN2_STBY		MX6_ARM2_IO_EXP_GPIO2(1)
+ 
+ 
+@@ -1929,6 +1932,13 @@ static struct mxc_spdif_platform_data mxc_spdif_data = {
+ 	.spdif_clk		= NULL, /* spdif bus clk */
+ };
+ 
++static const struct imx_pcie_platform_data mx6_arm2_pcie_data  __initconst = {
++	.pcie_pwr_en	= MX6_ARM2_PCIE_PWR_EN,
++	.pcie_rst	= MX6_ARM2_PCIE_RESET,
++	.pcie_wake_up	= -EINVAL,
++	.pcie_dis	= -EINVAL,
++};
++
+ static int __init early_disable_mipi_dsi(char *p)
+ {
+ 	/*enable on board HDMI*/
+@@ -2164,6 +2174,7 @@ static void __init mx6_arm2_init(void)
+ 		mxc_register_device(&max17135_sensor_device, NULL);
+ 		imx6dl_add_imx_epdc(&epdc_data);
+ 	}
++	imx6q_add_pcie(&mx6_arm2_pcie_data);
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index d0d8254..fba11a5 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -143,7 +143,6 @@
+ #define SABRESD_DI1_D0_CS	IMX_GPIO_NR(6, 31)
+ 
+ #define SABRESD_HEADPHONE_DET	IMX_GPIO_NR(7, 8)
+-#define SABRESD_USB_HUB_RESET	IMX_GPIO_NR(7, 12)
+ #define SABRESD_PCIE_RST_B_REVB	IMX_GPIO_NR(7, 12)
+ #define SABRESD_PMIC_INT_B	IMX_GPIO_NR(7, 13)
+ #define SABRESD_PFUZE_INT	IMX_GPIO_NR(7, 13)
+@@ -1433,6 +1432,13 @@ static void mx6_snvs_poweroff(void)
+ 	writel(value | 0x60, mx6_snvs_base + SNVS_LPCR);
+ }
+ 
++static const struct imx_pcie_platform_data mx6_sabresd_pcie_data __initconst = {
++	.pcie_pwr_en	= SABRESD_PCIE_PWR_EN,
++	.pcie_rst	= SABRESD_PCIE_RST_B_REVB,
++	.pcie_wake_up	= SABRESD_PCIE_WAKE_B,
++	.pcie_dis	= SABRESD_PCIE_DIS_B,
++};
++
+ /*!
+  * Board specific initialization.
+  */
+@@ -1549,9 +1555,6 @@ static void __init mx6_sabresd_board_init(void)
+ 	imx_asrc_data.asrc_audio_clk = clk_get(NULL, "asrc_serial_clk");
+ 	imx6q_add_asrc(&imx_asrc_data);
+ 
+-	/* release USB Hub reset */
+-	gpio_set_value(SABRESD_USB_HUB_RESET, 1);
+-
+ 	imx6q_add_mxc_pwm(0);
+ 	imx6q_add_mxc_pwm(1);
+ 	imx6q_add_mxc_pwm(2);
+@@ -1622,6 +1625,7 @@ static void __init mx6_sabresd_board_init(void)
+ 	platform_device_register(&sabresd_max8903_charger_1);
+ 	pm_power_off = mx6_snvs_poweroff;
+ 
++	imx6q_add_pcie(&mx6_sabresd_pcie_data);
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.h b/arch/arm/mach-mx6/board-mx6q_sabresd.h
+index 1b8bd70..d84a606 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.h
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.h
+@@ -123,9 +123,6 @@ static iomux_v3_cfg_t mx6q_sabresd_pads[] = {
+ 	MX6Q_PAD_EIM_A23__GPIO_6_6,	/* J12 - Boot Mode Select */
+ 	MX6Q_PAD_NANDF_RB0__GPIO_6_10, /* AUX_5V Enable */
+ 
+-	/* GPIO7 */
+-	MX6Q_PAD_GPIO_17__GPIO_7_12,	/* USB Hub Reset */
+-
+ 	/* I2C1, WM8958 */
+ 	MX6Q_PAD_CSI0_DAT8__I2C1_SDA,
+ 	MX6Q_PAD_CSI0_DAT9__I2C1_SCL,
+@@ -251,7 +248,11 @@ static iomux_v3_cfg_t mx6q_sabresd_pads[] = {
+ 	/*GPS AUX_3V15_EN*/
+ 	MX6Q_PAD_NANDF_WP_B__GPIO_6_9,
+ 
++	/* PCIE */
+ 	MX6Q_PAD_EIM_D19__GPIO_3_19, /* PCIE_PWR_EN */
++
++	MX6Q_PAD_GPIO_17__GPIO_7_12, /* PCIE_RST */
++	MX6Q_PAD_KEY_COL4__GPIO_4_14, /* PCIE_DIS */
+ };
+ 
+ static iomux_v3_cfg_t mx6q_sabresd_csi0_sensor_pads[] = {
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 02ac1f4..df5e72c 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -210,3 +210,6 @@ extern const struct imx_epdc_data imx6dl_epdc_data __initconst;
+ 	imx_add_imx_epdc(&imx6dl_epdc_data, pdata)
+ extern const struct imx_vdoa_data imx6q_vdoa_data __initconst;
+ #define imx6q_add_vdoa() imx_add_vdoa(&imx6q_vdoa_data)
++
++extern const struct imx_pcie_data imx6q_pcie_data __initconst;
++#define imx6q_add_pcie(pdata) imx_add_pcie(&imx6q_pcie_data, pdata)
+diff --git a/arch/arm/mach-mx6/pcie.c b/arch/arm/mach-mx6/pcie.c
+index 985e625..3fcb115 100644
+--- a/arch/arm/mach-mx6/pcie.c
++++ b/arch/arm/mach-mx6/pcie.c
+@@ -29,6 +29,9 @@
+ #include <linux/clk.h>
+ #include <linux/delay.h>
+ #include <linux/gpio.h>
++#include <linux/platform_device.h>
++
++#include <mach/pcie.h>
+ 
+ #include <asm/sizes.h>
+ 
+@@ -86,6 +89,75 @@
+ /* GPR8: iomuxc_gpr8_tx_swing_low(iomuxc_gpr8[31:25]) */
+ #define iomuxc_gpr8_tx_swing_low		(0x7F << 25)
+ 
++/* Registers of PHY */
++/* Register PHY_STS_R */
++/* PHY Status Register */
++#define PHY_STS_R (PRT_LOG_R_BaseAddress + 0x110)
++
++/* Register PHY_CTRL_R */
++/* PHY Control Register */
++#define PHY_CTRL_R (PRT_LOG_R_BaseAddress + 0x114)
++
++#define SSP_CR_SUP_DIG_MPLL_OVRD_IN_LO 0x0011
++/* FIELD: RES_ACK_IN_OVRD [15:15]
++// FIELD: RES_ACK_IN [14:14]
++// FIELD: RES_REQ_IN_OVRD [13:13]
++// FIELD: RES_REQ_IN [12:12]
++// FIELD: RTUNE_REQ_OVRD [11:11]
++// FIELD: RTUNE_REQ [10:10]
++// FIELD: MPLL_MULTIPLIER_OVRD [9:9]
++// FIELD: MPLL_MULTIPLIER [8:2]
++// FIELD: MPLL_EN_OVRD [1:1]
++// FIELD: MPLL_EN [0:0]
++*/
++
++#define SSP_CR_SUP_DIG_ATEOVRD 0x0010
++/* FIELD: ateovrd_en [2:2]
++// FIELD: ref_usb2_en [1:1]
++// FIELD: ref_clkdiv2 [0:0]
++*/
++
++#define SSP_CR_LANE0_DIG_RX_OVRD_IN_LO 0x1005
++/* FIELD: RX_LOS_EN_OVRD [13:13]
++// FIELD: RX_LOS_EN [12:12]
++// FIELD: RX_TERM_EN_OVRD [11:11]
++// FIELD: RX_TERM_EN [10:10]
++// FIELD: RX_BIT_SHIFT_OVRD [9:9]
++// FIELD: RX_BIT_SHIFT [8:8]
++// FIELD: RX_ALIGN_EN_OVRD [7:7]
++// FIELD: RX_ALIGN_EN [6:6]
++// FIELD: RX_DATA_EN_OVRD [5:5]
++// FIELD: RX_DATA_EN [4:4]
++// FIELD: RX_PLL_EN_OVRD [3:3]
++// FIELD: RX_PLL_EN [2:2]
++// FIELD: RX_INVERT_OVRD [1:1]
++// FIELD: RX_INVERT [0:0]
++*/
++
++#define SSP_CR_LANE0_DIG_RX_ASIC_OUT 0x100D
++/* FIELD: LOS [2:2]
++// FIELD: PLL_STATE [1:1]
++// FIELD: VALID [0:0]
++*/
++
++/* control bus bit definition */
++#define PCIE_CR_CTL_DATA_LOC 0
++#define PCIE_CR_CTL_CAP_ADR_LOC 16
++#define PCIE_CR_CTL_CAP_DAT_LOC 17
++#define PCIE_CR_CTL_WR_LOC 18
++#define PCIE_CR_CTL_RD_LOC 19
++#define PCIE_CR_STAT_DATA_LOC 0
++#define PCIE_CR_STAT_ACK_LOC 16
++
++#define PCIE_CAP_STRUC_BaseAddress 0x70
++
++/* Register LNK_CAP */
++/* PCIE Link cap */
++#define LNK_CAP (PCIE_CAP_STRUC_BaseAddress + 0xc)
++#define LNK_CAP_RegisterSize 32
++#define LNK_CAP_RegisterResetValue 0x011cc12
++#define LNK_CAP_RegisterResetMask 0xffffffff
++
+ /* End of Register Definitions */
+ 
+ #define PCIE_DBI_BASE_ADDR	(PCIE_ARB_END_ADDR - SZ_16K + 1)
+@@ -95,9 +167,6 @@
+ #define  PCIE_CONF_FUNC(f)		(((f) & 0x7) << 8)
+ #define  PCIE_CONF_REG(r)		((r) & ~0x3)
+ 
+-#define MX6_ARM2_PCIE_PWR_EN		(IMX_GPIO_NR(8, 0) + 2)
+-#define MX6_ARM2_PCIE_RESET		(IMX_GPIO_NR(8, 8) + 2)
+-
+ static void __iomem *base;
+ static void __iomem *dbi_base;
+ 
+@@ -125,6 +194,10 @@ struct imx_pcie_port {
+ static struct imx_pcie_port imx_pcie_port[1];
+ static int num_pcie_ports;
+ 
++static int pcie_phy_cr_read(int addr, int *data);
++static int pcie_phy_cr_write(int addr, int data);
++static void change_field(int *in, int start, int end, int val);
++
+ /* IMX PCIE GPR configure routines */
+ static inline void imx_pcie_clrset(u32 mask, u32 val, void __iomem *addr)
+ {
+@@ -194,13 +267,39 @@ static int __init imx_pcie_setup(int nr, struct pci_sys_data *sys)
+ static int imx_pcie_link_up(void __iomem *dbi_base)
+ {
+ 	/* Check the pcie link up or link down */
+-	u32 rc, iterations = 0x100000;
++	int iterations = 200;
++	u32 rc, ltssm, rx_valid, temp;
+ 
+ 	do {
+ 		/* link is debug bit 36 debug 1 start in bit 32 */
+-		rc = readl(dbi_base + DB_R1) & (0x1 << (36-32)) ;
++		rc = readl(dbi_base + DB_R1) & (0x1 << (36 - 32)) ;
+ 		iterations--;
+-		if ((iterations % 0x100000) == 0)
++		usleep_range(2000, 3000);
++
++		/* From L0, initiate MAC entry to gen2 if EP/RC supports gen2.
++		 * Wait 2ms (LTSSM timeout is 24ms, PHY lock is ~5us in gen2).
++		 * If (MAC/LTSSM.state == Recovery.RcvrLock)
++		 * && (PHY/rx_valid==0) then pulse PHY/rx_reset. Transition
++		 * to gen2 is stuck
++		 */
++		pcie_phy_cr_read(SSP_CR_LANE0_DIG_RX_ASIC_OUT, &rx_valid);
++		ltssm = readl(dbi_base + DB_R0) & 0x3F;
++		if ((ltssm == 0x0D) && ((rx_valid & 0x01) == 0)) {
++			pr_info("Transition to gen2 is stuck, reset PHY!\n");
++			pcie_phy_cr_read(SSP_CR_LANE0_DIG_RX_OVRD_IN_LO, &temp);
++			change_field(&temp, 3, 3, 0x1);
++			change_field(&temp, 5, 5, 0x1);
++			pcie_phy_cr_write(SSP_CR_LANE0_DIG_RX_OVRD_IN_LO,
++					0x0028);
++			usleep_range(2000, 3000);
++			pcie_phy_cr_read(SSP_CR_LANE0_DIG_RX_OVRD_IN_LO, &temp);
++			change_field(&temp, 3, 3, 0x0);
++			change_field(&temp, 5, 5, 0x0);
++			pcie_phy_cr_write(SSP_CR_LANE0_DIG_RX_OVRD_IN_LO,
++					0x0000);
++		}
++
++		if ((iterations < 0))
+ 			pr_info("link up failed, DB_R0:0x%08x, DB_R1:0x%08x!\n"
+ 					, readl(dbi_base + DB_R0)
+ 					, readl(dbi_base + DB_R1));
+@@ -351,15 +450,151 @@ static struct hw_pci imx_pci __initdata = {
+ 	.map_irq	= imx_pcie_map_irq,
+ };
+ 
+-static void imx_pcie_enable_controller(void)
++/* PHY CR bus acess routines */
++static int pcie_phy_cr_ack_polling(int max_iterations, int exp_val)
++{
++	u32 temp_rd_data, wait_counter = 0;
++
++	do {
++		temp_rd_data = readl(dbi_base + PHY_STS_R);
++		temp_rd_data = (temp_rd_data >> PCIE_CR_STAT_ACK_LOC) & 0x1;
++		wait_counter++;
++	} while ((wait_counter < max_iterations) && (temp_rd_data != exp_val));
++
++	if (temp_rd_data != exp_val)
++		return 0 ;
++	return 1 ;
++}
++
++static int pcie_phy_cr_cap_addr(int addr)
++{
++	u32 temp_wr_data;
++
++	/* write addr */
++	temp_wr_data = addr << PCIE_CR_CTL_DATA_LOC ;
++	writel(temp_wr_data, dbi_base + PHY_CTRL_R);
++
++	/* capture addr */
++	temp_wr_data |= (0x1 << PCIE_CR_CTL_CAP_ADR_LOC);
++	writel(temp_wr_data, dbi_base + PHY_CTRL_R);
++
++	/* wait for ack */
++	if (!pcie_phy_cr_ack_polling(100, 1))
++		return 0;
++
++	/* deassert cap addr */
++	temp_wr_data = addr << PCIE_CR_CTL_DATA_LOC;
++	writel(temp_wr_data, dbi_base + PHY_CTRL_R);
++
++	/* wait for ack de-assetion */
++	if (!pcie_phy_cr_ack_polling(100, 0))
++		return 0 ;
++
++	return 1 ;
++}
++
++static int pcie_phy_cr_read(int addr , int *data)
++{
++	u32 temp_rd_data, temp_wr_data;
++
++	/*  write addr */
++	/* cap addr */
++	if (!pcie_phy_cr_cap_addr(addr))
++		return 0;
++
++	/* assert rd signal */
++	temp_wr_data = 0x1 << PCIE_CR_CTL_RD_LOC;
++	writel(temp_wr_data, dbi_base + PHY_CTRL_R);
++
++	/* wait for ack */
++	if (!pcie_phy_cr_ack_polling(100, 1))
++		return 0;
++
++	/* after got ack return data */
++	temp_rd_data = readl(dbi_base + PHY_STS_R);
++	*data = (temp_rd_data & (0xffff << PCIE_CR_STAT_DATA_LOC)) ;
++
++	/* deassert rd signal */
++	temp_wr_data = 0x0;
++	writel(temp_wr_data, dbi_base + PHY_CTRL_R);
++
++	/* wait for ack de-assetion */
++	if (!pcie_phy_cr_ack_polling(100, 0))
++		return 0 ;
++
++	return 1 ;
++
++}
++
++static int pcie_phy_cr_write(int addr, int data)
++{
++	u32 temp_wr_data;
++
++	/* write addr */
++	/* cap addr */
++	if (!pcie_phy_cr_cap_addr(addr))
++		return 0 ;
++
++	temp_wr_data = data << PCIE_CR_CTL_DATA_LOC;
++	writel(temp_wr_data, dbi_base + PHY_CTRL_R);
++
++	/* capture data */
++	temp_wr_data |= (0x1 << PCIE_CR_CTL_CAP_DAT_LOC);
++	writel(temp_wr_data, dbi_base + PHY_CTRL_R);
++
++	/* wait for ack */
++	if (!pcie_phy_cr_ack_polling(100, 1))
++		return 0 ;
++
++	/* deassert cap data */
++	temp_wr_data = data << PCIE_CR_CTL_DATA_LOC;
++	writel(temp_wr_data, dbi_base + PHY_CTRL_R);
++
++	/* wait for ack de-assetion */
++	if (!pcie_phy_cr_ack_polling(100, 0))
++		return 0;
++
++	/* assert wr signal */
++	temp_wr_data = 0x1 << PCIE_CR_CTL_WR_LOC;
++	writel(temp_wr_data, dbi_base + PHY_CTRL_R);
++
++	/* wait for ack */
++	if (!pcie_phy_cr_ack_polling(100, 1))
++		return 0;
++
++	/* deassert wr signal */
++	temp_wr_data = data << PCIE_CR_CTL_DATA_LOC;
++	writel(temp_wr_data, dbi_base + PHY_CTRL_R);
++
++	/* wait for ack de-assetion */
++	if (!pcie_phy_cr_ack_polling(100, 0))
++		return 0;
++
++	temp_wr_data = 0x0 ;
++	writel(temp_wr_data, dbi_base + PHY_CTRL_R);
++
++	return 1 ;
++}
++
++static void change_field(int *in, int start, int end, int val)
++{
++	int mask;
++
++	mask = ((0xFFFFFFFF << start) ^ (0xFFFFFFFF << (end + 1))) & 0xFFFFFFFF;
++	*in = (*in & ~mask) | (val << start);
++}
++
++static void imx_pcie_enable_controller(struct device *dev)
+ {
+ 	struct clk *pcie_clk;
++	struct imx_pcie_platform_data *pdata = dev->platform_data;
+ 
+-	/* PCIE PWR_EN: EXP_IO2 of MAX7310_1 */
+-	gpio_request(MX6_ARM2_PCIE_PWR_EN, "PCIE POWER_EN");
++	/* Enable PCIE power */
++	gpio_request(pdata->pcie_pwr_en, "PCIE POWER_EN");
++
++	/* activate PCIE_PWR_EN */
++	gpio_direction_output(pdata->pcie_pwr_en, 1);
+ 
+-	/* activate PCIE_PWR_EN CTRL_2 */
+-	gpio_direction_output(MX6_ARM2_PCIE_PWR_EN, 1);
+ 	imx_pcie_clrset(iomuxc_gpr1_test_powerdown, 0 << 18, IOMUXC_GPR1);
+ 
+ 	/* enable the clks */
+@@ -373,23 +608,28 @@ static void imx_pcie_enable_controller(void)
+ 	}
+ }
+ 
+-static void card_reset(void)
++static void card_reset(struct device *dev)
+ {
+-	/* PCIE RESET: EXP_IO2 of MAX7310_2 */
+-	gpio_request(MX6_ARM2_PCIE_RESET, "PCIE RESET");
++	struct imx_pcie_platform_data *pdata = dev->platform_data;
++
++	/* PCIE RESET */
++	gpio_request(pdata->pcie_rst, "PCIE RESET");
+ 
+ 	/* activate PERST_B */
+-	gpio_direction_output(MX6_ARM2_PCIE_RESET, 0);
++	gpio_direction_output(pdata->pcie_rst, 0);
+ 
+ 	/* Add one reset to the pcie external device */
+ 	msleep(100);
+ 
+ 	/* deactive PERST_B */
+-	gpio_direction_output(MX6_ARM2_PCIE_RESET, 1);
++	gpio_direction_output(pdata->pcie_rst, 1);
+ }
+ 
+-static void __init add_pcie_port(void __iomem *base, void __iomem *dbi_base)
++static void __init add_pcie_port(void __iomem *base, void __iomem *dbi_base,
++		struct imx_pcie_platform_data *pdata)
+ {
++	struct clk *pcie_clk;
++
+ 	if (imx_pcie_link_up(dbi_base)) {
+ 		struct imx_pcie_port *pp = &imx_pcie_port[num_pcie_ports++];
+ 
+@@ -401,23 +641,51 @@ static void __init add_pcie_port(void __iomem *base, void __iomem *dbi_base)
+ 		pp->dbi_base = dbi_base;
+ 		spin_lock_init(&pp->conf_lock);
+ 		memset(pp->res, 0, sizeof(pp->res));
+-	} else
++	} else {
+ 		pr_info("IMX PCIe port: link down!\n");
++		/* Release the clocks, and disable the power */
++
++		pcie_clk = clk_get(NULL, "pcie_clk");
++		if (IS_ERR(pcie_clk))
++			pr_err("no pcie clock.\n");
++
++		clk_disable(pcie_clk);
++		clk_put(pcie_clk);
++
++		/* Disable PCIE power */
++		gpio_request(pdata->pcie_pwr_en, "PCIE POWER_EN");
++
++		/* activate PCIE_PWR_EN */
++		gpio_direction_output(pdata->pcie_pwr_en, 0);
++
++		imx_pcie_clrset(iomuxc_gpr1_test_powerdown, 1 << 18,
++				IOMUXC_GPR1);
++	}
+ }
+ 
+-static int __init imx_pcie_init(void)
++static int __devinit imx_pcie_pltfm_probe(struct platform_device *pdev)
+ {
++	struct resource *mem;
++	struct device *dev = &pdev->dev;
++	struct imx_pcie_platform_data *pdata = dev->platform_data;
++
++
++	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!mem) {
++		dev_err(dev, "no mmio space\n");
++		return -EINVAL;
++	}
++
+ 	base = ioremap_nocache(PCIE_ARB_END_ADDR - SZ_1M + 1, SZ_1M - SZ_16K);
+ 	if (!base) {
+ 		pr_err("error with ioremap in function %s\n", __func__);
+ 		return -EIO;
+ 	}
+ 
+-	dbi_base = ioremap_nocache(PCIE_DBI_BASE_ADDR, SZ_16K);
++	dbi_base = devm_ioremap(dev, mem->start, resource_size(mem));
+ 	if (!dbi_base) {
+-		pr_err("error with ioremap in function %s\n", __func__);
+-		iounmap(base);
+-		return -EIO;
++		dev_err(dev, "can't map %pR\n", mem);
++		return -ENOMEM;
+ 	}
+ 
+ 	/* FIXME the field name should be aligned to RM */
+@@ -427,6 +695,7 @@ static int __init imx_pcie_init(void)
+ 	imx_pcie_clrset(iomuxc_gpr12_device_type, PCI_EXP_TYPE_ROOT_PORT << 12,
+ 			IOMUXC_GPR12);
+ 	imx_pcie_clrset(iomuxc_gpr12_los_level, 9 << 4, IOMUXC_GPR12);
++
+ 	imx_pcie_clrset(iomuxc_gpr8_tx_deemph_gen1, 21 << 0, IOMUXC_GPR8);
+ 	imx_pcie_clrset(iomuxc_gpr8_tx_deemph_gen2_3p5db, 21 << 6, IOMUXC_GPR8);
+ 	imx_pcie_clrset(iomuxc_gpr8_tx_deemph_gen2_6db, 32 << 12, IOMUXC_GPR8);
+@@ -434,24 +703,88 @@ static int __init imx_pcie_init(void)
+ 	imx_pcie_clrset(iomuxc_gpr8_tx_swing_low, 115 << 25, IOMUXC_GPR8);
+ 
+ 	/* Enable the pwr, clks and so on */
+-	imx_pcie_enable_controller();
++	imx_pcie_enable_controller(dev);
+ 
+ 	imx_pcie_clrset(iomuxc_gpr1_pcie_ref_clk_en, 1 << 16, IOMUXC_GPR1);
+ 
+ 	/* togle the external card's reset */
+-	card_reset() ;
++	card_reset(dev) ;
++
++	usleep_range(3000, 4000);
++	imx_pcie_regions_setup(dbi_base);
++	usleep_range(3000, 4000);
+ 
+ 	/* start link up */
+ 	imx_pcie_clrset(iomuxc_gpr12_app_ltssm_enable, 1 << 10, IOMUXC_GPR12);
+ 
+ 	/* add the pcie port */
+-	add_pcie_port(base, dbi_base);
++	add_pcie_port(base, dbi_base, pdata);
+ 
+-	usleep_range(3000, 4000);
+-	imx_pcie_regions_setup(dbi_base);
+-	usleep_range(3000, 4000);
+ 
+ 	pci_common_init(&imx_pci);
+ 	return 0;
+ }
+-device_initcall(imx_pcie_init);
++
++static int __devexit imx_pcie_pltfm_remove(struct platform_device *pdev)
++{
++	struct clk *pcie_clk;
++	struct device *dev = &pdev->dev;
++	struct imx_pcie_platform_data *pdata = dev->platform_data;
++	struct resource *iomem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++
++	/* Release clocks, and disable power  */
++	pcie_clk = clk_get(NULL, "pcie_clk");
++	if (IS_ERR(pcie_clk))
++		pr_err("no pcie clock.\n");
++
++	if (pcie_clk) {
++		clk_disable(pcie_clk);
++		clk_put(pcie_clk);
++	}
++
++	/* Disable PCIE power */
++	gpio_request(pdata->pcie_pwr_en, "PCIE POWER_EN");
++
++	/* activate PCIE_PWR_EN */
++	gpio_direction_output(pdata->pcie_pwr_en, 0);
++
++	imx_pcie_clrset(iomuxc_gpr1_test_powerdown, 1 << 18, IOMUXC_GPR1);
++
++	iounmap(base);
++	iounmap(dbi_base);
++	release_mem_region(iomem->start, resource_size(iomem));
++	platform_set_drvdata(pdev, NULL);
++
++	return 0;
++}
++
++static struct platform_driver imx_pcie_pltfm_driver = {
++	.driver = {
++		.name	= "imx-pcie",
++		.owner	= THIS_MODULE,
++	},
++	.probe		= imx_pcie_pltfm_probe,
++	.remove		= __devexit_p(imx_pcie_pltfm_remove),
++};
++
++/*****************************************************************************\
++ *                                                                           *
++ * Driver init/exit                                                          *
++ *                                                                           *
++\*****************************************************************************/
++
++static int __init imx_pcie_drv_init(void)
++{
++	return platform_driver_register(&imx_pcie_pltfm_driver);
++}
++
++static void __exit imx_pcie_drv_exit(void)
++{
++	platform_driver_unregister(&imx_pcie_pltfm_driver);
++}
++
++module_init(imx_pcie_drv_init);
++module_exit(imx_pcie_drv_exit);
++
++MODULE_DESCRIPTION("i.MX PCIE platform driver");
++MODULE_LICENSE("GPL v2");
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index 350845e..47d1992 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -172,3 +172,6 @@ config IMX_HAVE_PLATFORM_IMX_MIPI_CSI2
+ 
+ config IMX_HAVE_PLATFORM_IMX_VDOA
+ 	bool
++
++config IMX_HAVE_PLATFORM_IMX_PCIE
++	bool
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index f2741ca..be2b0a6 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -62,3 +62,4 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_ASRC) += platform-imx-asrc.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_DSI) += platform-imx-mipi_dsi.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_CSI2) += platform-imx-mipi_csi2.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_VDOA) += platform-imx-vdoa.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_PCIE) += platform-imx-pcie.o
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-pcie.c b/arch/arm/plat-mxc/devices/platform-imx-pcie.c
+new file mode 100644
+index 0000000..cf36093
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx-pcie.c
+@@ -0,0 +1,61 @@
++/*
++ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++
++#define imx_pcie_data_entry_single(soc, _id, _hwid, size)		\
++	{								\
++		.id = _id,						\
++		.iobase = soc ## _PCIE ## _hwid ## _BASE_ADDR,	\
++		.iosize = size,						\
++		.irq	= soc ## _INT_PCIE ## _hwid,			\
++	}
++
++#define imx_pcie_data_entry(soc, _id, _hwid, _size)			\
++	[_id] = imx_pcie_data_entry_single(soc, _id, _hwid, _size)
++
++#ifdef CONFIG_SOC_IMX6Q
++#define MX6Q_PCIE_BASE_ADDR (PCIE_ARB_END_ADDR - SZ_16K + 1)
++#define MX6Q_INT_PCIE MXC_INT_PCIE_3
++const struct imx_pcie_data imx6q_pcie_data __initconst =
++			imx_pcie_data_entry_single(MX6Q, 0, , SZ_16K);
++#endif
++
++struct platform_device *__init imx_add_pcie(
++		const struct imx_pcie_data *data,
++		const struct imx_pcie_platform_data *pdata)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + data->iosize - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.start = data->irq,
++			.end = data->irq,
++			.flags = IORESOURCE_IRQ,
++		},
++	};
++
++	return imx_add_platform_device("imx-pcie", -1,
++			res, ARRAY_SIZE(res),
++			pdata, sizeof(*pdata));
++}
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 9f87b00..6fce8c4 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -642,3 +642,15 @@ struct imx_vdoa_data {
+ };
+ struct platform_device *__init imx_add_vdoa(
+ 		const struct imx_vdoa_data *data);
++
++#include <mach/pcie.h>
++struct imx_pcie_data {
++	int id;
++	resource_size_t iobase;
++	resource_size_t iosize;
++	resource_size_t irq;
++};
++
++struct platform_device *__init imx_add_pcie(
++		const struct imx_pcie_data *data,
++		const struct imx_pcie_platform_data *pdata);
+diff --git a/arch/arm/plat-mxc/include/mach/pcie.h b/arch/arm/plat-mxc/include/mach/pcie.h
+new file mode 100644
+index 0000000..775f651
+--- /dev/null
++++ b/arch/arm/plat-mxc/include/mach/pcie.h
+@@ -0,0 +1,39 @@
++/*
++ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#ifndef __ASM_ARCH_IMX_PCIE_H
++#define __ASM_ARCH_IMX_PCIE_H
++
++/**
++ * struct imx_pcie_platform_data - optional platform data for pcie on i.MX
++ *
++ * @pcie_pwr_en:	used for enable/disable pcie power (-EINVAL if unused)
++ * @pcie_rst:		used for reset pcie ep (-EINVAL if unused)
++ * @pcie_wake_up:	used for wake up (-EINVAL if unused)
++ * @pcie_dis:		used for disable pcie ep (-EINVAL if unused)
++ */
++
++struct imx_pcie_platform_data {
++	unsigned int pcie_pwr_en;
++	unsigned int pcie_rst;
++	unsigned int pcie_wake_up;
++	unsigned int pcie_dis;
++};
++#endif /* __ASM_ARCH_IMX_PCIE_H */
+-- 
+1.7.7.4
+

@@ -1,0 +1,38 @@
+From 3a4b608a1a37da7345667914330c706e3dedffa6 Mon Sep 17 00:00:00 2001
+From: Russell King <rmk+kernel@arm.linux.org.uk>
+Date: Thu, 19 Jan 2012 15:20:58 +0000
+Subject: [PATCH 1776/2463] ARM: fix rcu stalls on SMP platforms
+
+commit 7deabca0acfe02b8e18f59a4c95676012f49a304 upstream.
+
+We can stall RCU processing on SMP platforms if a CPU sits in its idle
+loop for a long time.  This happens because we don't call irq_enter()
+and irq_exit() around generic_smp_call_function_interrupt() and
+friends.  Add the necessary calls, and remove the one from within
+ipi_timer(), so that they're all in a common place.
+
+Signed-off-by: Russell King <rmk+kernel@arm.linux.org.uk>
+[add irq_enter()/irq_exit() in do_local_timer]
+Signed-off-by: UCHINO Satoshi <satoshi.uchino@toshiba.co.jp>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ arch/arm/kernel/smp.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/kernel/smp.c b/arch/arm/kernel/smp.c
+index 32ce353..a9f157b 100644
+--- a/arch/arm/kernel/smp.c
++++ b/arch/arm/kernel/smp.c
+@@ -447,7 +447,9 @@ asmlinkage void __exception_irq_entry do_local_timer(struct pt_regs *regs)
+ 
+ 	if (local_timer_ack()) {
+ 		__inc_irq_stat(cpu, local_timer_irqs);
++		irq_enter();
+ 		ipi_timer();
++		irq_exit();
+ 	}
+ 
+ 	set_irq_regs(old_regs);
+-- 
+1.7.7.4
+

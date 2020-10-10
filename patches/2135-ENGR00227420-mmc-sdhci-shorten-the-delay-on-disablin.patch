@@ -1,0 +1,49 @@
+From a311ef8c8f9845d06d65c03c0a596df6cb10d3b7 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Tue, 9 Oct 2012 07:44:34 +0800
+Subject: [PATCH 2135/2463] ENGR00227420 mmc: sdhci: shorten the delay on
+ disabling clk
+
+- change the delay from 10 * HZ to 1 * HZ, though (1 * HZ) might not be the
+best, just as a base.
+1. Since the request has been moved out of interrupt context, there will be no
+more calling enable_clk in interrupt context. So it's not necessary to keep
+such a long delay on disabling clock in order to save power.
+2. Still keeping the 1*HZ of delay is to avoid frequently enabling/disabling
+clock.
+
+eMMC card performance test result with bonnie++:
+(512M RAM, 1GB data, 1K buffer)
+------------------------------------------------------------------------------
+|             |           1*HZ               |            10 * HZ            |
+------------------------------------------------------------------------------
+|    Read     |          ~24.1MB/s           |            ~23.9MB/s          |
+------------------------------------------------------------------------------
+|    Write    |          ~10.5MB/s           |            ~10.5MB/s          |
+------------------------------------------------------------------------------
+
+WiFi card performance test result with iperf is quite same: ~21Mbps
+(AR6003@2.4G, TCP, TCP window size option 1MB both for server and client)
+
+Acked-by: Robby CAI <r63905@freescale.com>
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/host/sdhci.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci.c b/drivers/mmc/host/sdhci.c
+index 49bbaa5..e8f78ae 100755
+--- a/drivers/mmc/host/sdhci.c
++++ b/drivers/mmc/host/sdhci.c
+@@ -30,7 +30,7 @@
+ #include "sdhci.h"
+ 
+ #define DRIVER_NAME "sdhci"
+-#define CLK_TIMEOUT    (10 * HZ)
++#define CLK_TIMEOUT    (1 * HZ)
+ 
+ #define DBG(f, x...) \
+ 	pr_debug(DRIVER_NAME " [%s()]: " f, __func__,## x)
+-- 
+1.7.7.4
+

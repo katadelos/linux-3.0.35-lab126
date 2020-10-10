@@ -1,0 +1,381 @@
+From 3f249b147e035b6a4293fe19e904bd516beb9b3a Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Wed, 13 Jul 2011 12:18:11 +0800
+Subject: [PATCH 0229/2463] ENGR00152845-7 header file: support mult ipu and
+ dispdrv.
+
+Head files changes for mult ipu and dispdrv.
+
+Signed-off-by: Jason Chen <jason.chen@freescale.com>
+---
+ include/linux/fsl_devices.h |   26 ++++++++-----
+ include/linux/ipu.h         |   90 ++++++++++++++++++++++---------------------
+ include/linux/ldb.h         |   88 ------------------------------------------
+ include/linux/mxcfb.h       |   12 ------
+ 4 files changed, 62 insertions(+), 154 deletions(-)
+
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index 35e5ff7..25a1970 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -186,9 +186,6 @@ struct fsl_spi_platform_data {
+ struct fsl_mxc_tve_platform_data {
+ 	char *dac_reg;
+ 	char *dig_reg;
+-#define MXC_TVE_TVOUT	0x1
+-#define MXC_TVE_VGA	0x2
+-	int boot_enable;
+ };
+ 
+ struct fsl_mxc_lightsensor_platform_data {
+@@ -199,9 +196,16 @@ struct fsl_mxc_lightsensor_platform_data {
+ struct fsl_mxc_ldb_platform_data {
+ 	char *lvds_bg_reg;
+ 	u32 ext_ref;
+-#define MXC_LDBDI0	0x1
+-#define MXC_LDBDI1	0x2
+-	int boot_enable;
++#define LDB_SPL_DI0	1
++#define LDB_SPL_DI1	2
++#define LDB_DUL_DI0	3
++#define LDB_DUL_DI1	4
++#define LDB_SIN_DI0	5
++#define LDB_SIN_DI1	6
++#define LDB_SEP		7
++	int mode;
++	int ipu_id;
++	int disp_id;
+ };
+ 
+ struct fsl_mxc_lcd_platform_data {
+@@ -209,15 +213,17 @@ struct fsl_mxc_lcd_platform_data {
+ 	char *core_reg;
+ 	char *analog_reg;
+ 	void (*reset) (void);
+-	int boot_enable;
++	int default_ifmt;
++	int ipu_id;
++	int disp_id;
+ };
+ 
+-struct fsl_mxc_ddc_platform_data {
+-	u32 di;
++struct fsl_mxc_dvi_platform_data {
+ 	void (*init) (void);
+ 	int (*update) (void);
+ 	char *analog_regulator;
+-	int boot_enable;
++	int ipu_id;
++	int disp_id;
+ };
+ 
+ struct fsl_mxc_camera_platform_data {
+diff --git a/include/linux/ipu.h b/include/linux/ipu.h
+index 64428ab..b386b86 100644
+--- a/include/linux/ipu.h
++++ b/include/linux/ipu.h
+@@ -868,9 +868,11 @@ typedef struct {
+ #define CSI_MCLK_RAW 4
+ #define CSI_MCLK_I2C 8
+ 
++struct ipu_soc;
+ /* Common IPU API */
+-int32_t ipu_init_channel(ipu_channel_t channel, ipu_channel_params_t *params);
+-void ipu_uninit_channel(ipu_channel_t channel);
++struct ipu_soc *ipu_get_soc(int id);
++int32_t ipu_init_channel(struct ipu_soc *ipu, ipu_channel_t channel, ipu_channel_params_t *params);
++void ipu_uninit_channel(struct ipu_soc *ipu, ipu_channel_t channel);
+ 
+ static inline bool ipu_can_rotate_in_place(ipu_rotate_mode_t rot)
+ {
+@@ -881,7 +883,7 @@ static inline bool ipu_can_rotate_in_place(ipu_rotate_mode_t rot)
+ #endif
+ }
+ 
+-int32_t ipu_init_channel_buffer(ipu_channel_t channel, ipu_buffer_t type,
++int32_t ipu_init_channel_buffer(struct ipu_soc *ipu, ipu_channel_t channel, ipu_buffer_t type,
+ 				uint32_t pixel_fmt,
+ 				uint16_t width, uint16_t height,
+ 				uint32_t stride,
+@@ -890,48 +892,48 @@ int32_t ipu_init_channel_buffer(ipu_channel_t channel, ipu_buffer_t type,
+ 				dma_addr_t phyaddr_2,
+ 				uint32_t u_offset, uint32_t v_offset);
+ 
+-int32_t ipu_update_channel_buffer(ipu_channel_t channel, ipu_buffer_t type,
++int32_t ipu_update_channel_buffer(struct ipu_soc *ipu, ipu_channel_t channel, ipu_buffer_t type,
+ 				  uint32_t bufNum, dma_addr_t phyaddr);
+ 
+-int32_t ipu_update_channel_offset(ipu_channel_t channel, ipu_buffer_t type,
++int32_t ipu_update_channel_offset(struct ipu_soc *ipu, ipu_channel_t channel, ipu_buffer_t type,
+ 				uint32_t pixel_fmt,
+ 				uint16_t width, uint16_t height,
+ 				uint32_t stride,
+ 				uint32_t u, uint32_t v,
+ 				uint32_t vertical_offset, uint32_t horizontal_offset);
+ 
+-int32_t ipu_select_buffer(ipu_channel_t channel,
++int32_t ipu_select_buffer(struct ipu_soc *ipu, ipu_channel_t channel,
+ 			  ipu_buffer_t type, uint32_t bufNum);
+-int32_t ipu_select_multi_vdi_buffer(uint32_t bufNum);
++int32_t ipu_select_multi_vdi_buffer(struct ipu_soc *ipu, uint32_t bufNum);
+ 
+-int32_t ipu_link_channels(ipu_channel_t src_ch, ipu_channel_t dest_ch);
+-int32_t ipu_unlink_channels(ipu_channel_t src_ch, ipu_channel_t dest_ch);
++int32_t ipu_link_channels(struct ipu_soc *ipu, ipu_channel_t src_ch, ipu_channel_t dest_ch);
++int32_t ipu_unlink_channels(struct ipu_soc *ipu, ipu_channel_t src_ch, ipu_channel_t dest_ch);
+ 
+-int32_t ipu_is_channel_busy(ipu_channel_t channel);
+-int32_t ipu_check_buffer_ready(ipu_channel_t channel, ipu_buffer_t type,
++int32_t ipu_is_channel_busy(struct ipu_soc *ipu, ipu_channel_t channel);
++int32_t ipu_check_buffer_ready(struct ipu_soc *ipu, ipu_channel_t channel, ipu_buffer_t type,
+ 		uint32_t bufNum);
+-void ipu_clear_buffer_ready(ipu_channel_t channel, ipu_buffer_t type,
++void ipu_clear_buffer_ready(struct ipu_soc *ipu, ipu_channel_t channel, ipu_buffer_t type,
+ 		uint32_t bufNum);
+-uint32_t ipu_get_cur_buffer_idx(ipu_channel_t channel, ipu_buffer_t type);
+-int32_t ipu_enable_channel(ipu_channel_t channel);
+-int32_t ipu_disable_channel(ipu_channel_t channel, bool wait_for_stop);
+-int32_t ipu_swap_channel(ipu_channel_t from_ch, ipu_channel_t to_ch);
++uint32_t ipu_get_cur_buffer_idx(struct ipu_soc *ipu, ipu_channel_t channel, ipu_buffer_t type);
++int32_t ipu_enable_channel(struct ipu_soc *ipu, ipu_channel_t channel);
++int32_t ipu_disable_channel(struct ipu_soc *ipu, ipu_channel_t channel, bool wait_for_stop);
++int32_t ipu_swap_channel(struct ipu_soc *ipu, ipu_channel_t from_ch, ipu_channel_t to_ch);
+ 
+-int32_t ipu_enable_csi(uint32_t csi);
+-int32_t ipu_disable_csi(uint32_t csi);
++int32_t ipu_enable_csi(struct ipu_soc *ipu, uint32_t csi);
++int32_t ipu_disable_csi(struct ipu_soc *ipu, uint32_t csi);
+ 
+ int ipu_lowpwr_display_enable(void);
+ int ipu_lowpwr_display_disable(void);
+ 
+-void ipu_enable_irq(uint32_t irq);
+-void ipu_disable_irq(uint32_t irq);
+-void ipu_clear_irq(uint32_t irq);
+-int ipu_request_irq(uint32_t irq,
++void ipu_enable_irq(struct ipu_soc *ipu, uint32_t irq);
++void ipu_disable_irq(struct ipu_soc *ipu, uint32_t irq);
++void ipu_clear_irq(struct ipu_soc *ipu, uint32_t irq);
++int ipu_request_irq(struct ipu_soc *ipu, uint32_t irq,
+ 		    irqreturn_t(*handler) (int, void *),
+ 		    uint32_t irq_flags, const char *devname, void *dev_id);
+-void ipu_free_irq(uint32_t irq, void *dev_id);
+-bool ipu_get_irq_status(uint32_t irq);
+-void ipu_set_csc_coefficients(ipu_channel_t channel, int32_t param[][3]);
++void ipu_free_irq(struct ipu_soc *ipu, uint32_t irq, void *dev_id);
++bool ipu_get_irq_status(struct ipu_soc *ipu, uint32_t irq);
++void ipu_set_csc_coefficients(struct ipu_soc *ipu, ipu_channel_t channel, int32_t param[][3]);
+ 
+ /* SDC API */
+ int32_t ipu_sdc_init_panel(ipu_panel_t panel,
+@@ -948,7 +950,7 @@ int32_t ipu_sdc_set_color_key(ipu_channel_t channel, bool enable,
+ 			      uint32_t colorKey);
+ int32_t ipu_sdc_set_brightness(uint8_t value);
+ 
+-int32_t ipu_init_sync_panel(int disp,
++int32_t ipu_init_sync_panel(struct ipu_soc *ipu, int disp,
+ 			    uint32_t pixel_clk,
+ 			    uint16_t width, uint16_t height,
+ 			    uint32_t pixel_fmt,
+@@ -957,23 +959,23 @@ int32_t ipu_init_sync_panel(int disp,
+ 			    uint16_t v_sync_width, uint16_t v_end_width,
+ 			    uint32_t v_to_h_sync, ipu_di_signal_cfg_t sig);
+ 
+-void ipu_uninit_sync_panel(int disp);
++void ipu_uninit_sync_panel(struct ipu_soc *ipu, int disp);
+ 
+-int32_t ipu_disp_set_window_pos(ipu_channel_t channel, int16_t x_pos,
++int32_t ipu_disp_set_window_pos(struct ipu_soc *ipu, ipu_channel_t channel, int16_t x_pos,
+ 				int16_t y_pos);
+-int32_t ipu_disp_get_window_pos(ipu_channel_t channel, int16_t *x_pos,
++int32_t ipu_disp_get_window_pos(struct ipu_soc *ipu, ipu_channel_t channel, int16_t *x_pos,
+ 				int16_t *y_pos);
+-int32_t ipu_disp_set_global_alpha(ipu_channel_t channel, bool enable,
++int32_t ipu_disp_set_global_alpha(struct ipu_soc *ipu, ipu_channel_t channel, bool enable,
+ 				  uint8_t alpha);
+-int32_t ipu_disp_set_color_key(ipu_channel_t channel, bool enable,
++int32_t ipu_disp_set_color_key(struct ipu_soc *ipu, ipu_channel_t channel, bool enable,
+ 			       uint32_t colorKey);
+-int32_t ipu_disp_set_gamma_correction(ipu_channel_t channel, bool enable,
++int32_t ipu_disp_set_gamma_correction(struct ipu_soc *ipu, ipu_channel_t channel, bool enable,
+ 				int constk[], int slopek[]);
+ 
+-int ipu_init_async_panel(int disp, int type, uint32_t cycle_time,
++int ipu_init_async_panel(struct ipu_soc *ipu, int disp, int type, uint32_t cycle_time,
+ 			 uint32_t pixel_fmt, ipu_adc_sig_cfg_t sig);
+-void ipu_disp_direct_write(ipu_channel_t channel, u32 value, u32 offset);
+-void ipu_reset_disp_panel(void);
++void ipu_disp_direct_write(struct ipu_soc *ipu, ipu_channel_t channel, u32 value, u32 offset);
++void ipu_reset_disp_panel(struct ipu_soc *ipu);
+ 
+ /* ADC API */
+ int32_t ipu_adc_write_template(display_port_t disp, uint32_t *pCmd,
+@@ -1005,20 +1007,20 @@ int32_t ipu_adc_init_ifc_timing(display_port_t disp, bool read,
+ 				uint32_t read_latch_time, uint32_t pixel_clk);
+ 
+ /* CMOS Sensor Interface API */
+-int32_t ipu_csi_init_interface(uint16_t width, uint16_t height,
++int32_t ipu_csi_init_interface(struct ipu_soc *ipu, uint16_t width, uint16_t height,
+ 			       uint32_t pixel_fmt, ipu_csi_signal_cfg_t sig);
+ 
+-int32_t ipu_csi_get_sensor_protocol(uint32_t csi);
++int32_t ipu_csi_get_sensor_protocol(struct ipu_soc *ipu, uint32_t csi);
+ 
+-int32_t ipu_csi_enable_mclk(int src, bool flag, bool wait);
++int32_t ipu_csi_enable_mclk(struct ipu_soc *ipu, int src, bool flag, bool wait);
+ 
+-static inline int32_t ipu_csi_enable_mclk_if(int src, uint32_t csi,
++static inline int32_t ipu_csi_enable_mclk_if(struct ipu_soc *ipu, int src, uint32_t csi,
+ 		bool flag, bool wait)
+ {
+ #ifdef CONFIG_MXC_IPU_V1
+-	return ipu_csi_enable_mclk(src, flag, wait);
++	return ipu_csi_enable_mclk(ipu, src, flag, wait);
+ #else
+-	return ipu_csi_enable_mclk(csi, flag, wait);
++	return ipu_csi_enable_mclk(ipu, csi, flag, wait);
+ #endif
+ }
+ 
+@@ -1026,11 +1028,11 @@ int ipu_csi_read_mclk_flag(void);
+ 
+ void ipu_csi_flash_strobe(bool flag);
+ 
+-void ipu_csi_get_window_size(uint32_t *width, uint32_t *height, uint32_t csi);
++void ipu_csi_get_window_size(struct ipu_soc *ipu, uint32_t *width, uint32_t *height, uint32_t csi);
+ 
+-void ipu_csi_set_window_size(uint32_t width, uint32_t height, uint32_t csi);
++void ipu_csi_set_window_size(struct ipu_soc *ipu, uint32_t width, uint32_t height, uint32_t csi);
+ 
+-void ipu_csi_set_window_pos(uint32_t left, uint32_t top, uint32_t csi);
++void ipu_csi_set_window_pos(struct ipu_soc *ipu, uint32_t left, uint32_t top, uint32_t csi);
+ 
+ /* Post Filter functions */
+ int32_t ipu_pf_set_pause_row(uint32_t pause_row);
+diff --git a/include/linux/ldb.h b/include/linux/ldb.h
+deleted file mode 100644
+index 1745e2b..0000000
+--- a/include/linux/ldb.h
++++ /dev/null
+@@ -1,88 +0,0 @@
+-/*
+- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
+- */
+-
+-/*
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published by
+- * the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+-
+- * This program is distributed in the hope that it will be useful,
+- * but WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+- * GNU General Public License for more details.
+-
+- * You should have received a copy of the GNU General Public License along
+- * with this program; if not, write to the Free Software Foundation, Inc.,
+- * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+- */
+-
+-/*!
+- * @file include/linux/ldb.h
+- *
+- * @brief This file contains the LDB driver API declarations.
+- *
+- * @ingroup LDB
+- */
+-
+-#ifndef __MXC_LDB_H__
+-#define __MXC_LDB_H__
+-
+-#include <linux/types.h>
+-
+-typedef enum {
+-	LDB_INT_REF = 0,
+-	LDB_EXT_REF = 1,
+-} ldb_bgref_t;
+-
+-typedef enum {
+-	LDB_VS_ACT_H = 0,
+-	LDB_VS_ACT_L = 1,
+-} ldb_vsync_t;
+-
+-typedef enum {
+-	LDB_BIT_MAP_SPWG = 0,
+-	LDB_BIT_MAP_JEIDA = 1,
+-} ldb_bitmap_t;
+-
+-typedef enum {
+-	LDB_CHAN_MODE_SIN = 0,
+-	LDB_CHAN_MODE_SEP = 1,
+-	LDB_CHAN_MODE_DUL = 2,
+-	LDB_CHAN_MODE_SPL = 3,
+-} ldb_channel_mode_t;
+-
+-typedef struct _ldb_bgref_parm {
+-	ldb_bgref_t		bgref_mode;
+-} ldb_bgref_parm;
+-
+-typedef struct _ldb_vsync_parm {
+-	int			di;
+-	ldb_vsync_t		vsync_mode;
+-} ldb_vsync_parm;
+-
+-typedef struct _ldb_bitmap_parm {
+-	int			channel;
+-	ldb_bitmap_t		bitmap_mode;
+-} ldb_bitmap_parm;
+-
+-typedef struct _ldb_data_width_parm {
+-	int			channel;
+-	int			data_width;
+-} ldb_data_width_parm;
+-
+-typedef struct _ldb_chan_mode_parm {
+-	int				di;
+-	ldb_channel_mode_t		channel_mode;
+-} ldb_chan_mode_parm;
+-
+-/* IOCTL commands */
+-#define LDB_BGREF_RMODE			_IOW('L', 0x1, ldb_bgref_parm)
+-#define LDB_VSYNC_POL			_IOW('L', 0x2, ldb_vsync_parm)
+-#define LDB_BIT_MAP			_IOW('L', 0x3, ldb_bitmap_parm)
+-#define LDB_DATA_WIDTH			_IOW('L', 0x4, ldb_data_width_parm)
+-#define LDB_CHAN_MODE			_IOW('L', 0x5, ldb_chan_mode_parm)
+-#define LDB_ENABLE			_IOW('L', 0x6, int)
+-#define LDB_DISABLE			_IOW('L', 0x7, int)
+-#endif
+diff --git a/include/linux/mxcfb.h b/include/linux/mxcfb.h
+index c7c555b..817bda9 100644
+--- a/include/linux/mxcfb.h
++++ b/include/linux/mxcfb.h
+@@ -149,11 +149,6 @@ extern struct fb_videomode mxcfb_modedb[];
+ extern int mxcfb_modedb_sz;
+ 
+ enum {
+-	MXC_DISP_SPEC_DEV = 0,
+-	MXC_DISP_DDC_DEV = 1,
+-};
+-
+-enum {
+ 	MXCFB_REFRESH_OFF,
+ 	MXCFB_REFRESH_AUTO,
+ 	MXCFB_REFRESH_PARTIAL,
+@@ -161,13 +156,6 @@ enum {
+ 
+ int mxcfb_set_refresh_mode(struct fb_info *fbi, int mode,
+ 			   struct mxcfb_rect *update_region);
+-void mxcfb_register_mode(int disp_port,
+-		const struct fb_videomode *modedb,
+-		int num_modes, int dev_mode);
+-
+-void mxcfb_register_presetup(int disp_port,
+-		int (*pre_setup)(struct fb_info *info));
+-
+ int mxc_elcdif_frame_addr_setup(dma_addr_t phys);
+ #endif				/* __KERNEL__ */
+ #endif
+-- 
+1.7.7.4
+

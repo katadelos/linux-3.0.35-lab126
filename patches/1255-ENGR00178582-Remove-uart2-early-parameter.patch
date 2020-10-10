@@ -1,0 +1,60 @@
+From fb23a2051dbca2bcd2d09468b51c81838be9fc48 Mon Sep 17 00:00:00 2001
+From: Alejandro Sierra <b18039@freescale.com>
+Date: Fri, 30 Mar 2012 20:08:21 -0600
+Subject: [PATCH 1255/2463] ENGR00178582 Remove uart2 early parameter
+
+UART2 and CAN interface do not have pins in common.
+Therefore uart2 early parameter is not required.
+
+Signed-off-by: Alejandro Sierra <b18039@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   23 +++++++----------------
+ 1 files changed, 7 insertions(+), 16 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 56ebaa6..7ca00f3 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -135,16 +135,8 @@
+ static int mma8451_position = 3;
+ static struct clk *sata_clk;
+ static int mipi_sensor;
+-static int uart2_en;
+ static int can0_enable;
+ 
+-static int __init uart2_enable(char *p)
+-{
+-	uart2_en = 1;
+-	return 0;
+-}
+-early_param("uart2", uart2_enable);
+-
+ enum sd_pad_mode {
+ 	SD_PAD_MODE_LOW_SPEED,
+ 	SD_PAD_MODE_MED_SPEED,
+@@ -1287,15 +1279,14 @@ static void __init mx6_board_init(void)
+ 	BUG_ON(!i2c3_pads);
+ 	mxc_iomux_v3_setup_multiple_pads(i2c3_pads, i2c3_pads_cnt);
+ 
+-	if (!uart2_en) {
+-		if (can0_enable) {
+-			BUG_ON(!can0_pads);
+-			mxc_iomux_v3_setup_multiple_pads(can0_pads,
+-							can0_pads_cnt);
+-		}
+-		BUG_ON(!can1_pads);
+-		mxc_iomux_v3_setup_multiple_pads(can1_pads, can1_pads_cnt);
++	if (can0_enable) {
++		BUG_ON(!can0_pads);
++		mxc_iomux_v3_setup_multiple_pads(can0_pads,
++						can0_pads_cnt);
+ 	}
++	BUG_ON(!can1_pads);
++	mxc_iomux_v3_setup_multiple_pads(can1_pads, can1_pads_cnt);
++
+ 
+ 	/* assert i2c-rst  */
+ 	gpio_request(SABREAUTO_I2C_EXP_RST, "i2c-rst");
+-- 
+1.7.7.4
+

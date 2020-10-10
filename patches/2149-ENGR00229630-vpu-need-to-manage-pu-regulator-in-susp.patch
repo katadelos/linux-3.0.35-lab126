@@ -1,0 +1,51 @@
+From e29ecfd09fc4d808b5dd0dc5a2d1b2d27a6063b9 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Mon, 15 Oct 2012 19:01:17 -0400
+Subject: [PATCH 2149/2463] ENGR00229630 vpu: need to manage pu regulator in
+ suspend/resume
+
+If VPU is working before suspend, we need to disable its regulator
+to make sure regulator can be off before suspend, then enable
+its regulator before resume to work, we check vpu's open_count
+to determine whether to disable/enable its regulator.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ drivers/mxc/vpu/mxc_vpu.c |   14 ++++++++++++++
+ 1 files changed, 14 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/vpu/mxc_vpu.c b/drivers/mxc/vpu/mxc_vpu.c
+index 8178824..6d77afb 100644
+--- a/drivers/mxc/vpu/mxc_vpu.c
++++ b/drivers/mxc/vpu/mxc_vpu.c
+@@ -812,6 +812,13 @@ static int vpu_suspend(struct platform_device *pdev, pm_message_t state)
+ 	if (vpu_plat->pg)
+ 		vpu_plat->pg(1);
+ 
++	/* If VPU is working before suspend, disable
++	 * regulator to make usecount right. */
++	if (open_count > 0) {
++		if (!IS_ERR(vpu_regulator))
++			regulator_disable(vpu_regulator);
++	}
++
+ 	if (!IS_ERR(vpu_regulator))
+ 		regulator_disable(vpu_regulator);
+ 	return 0;
+@@ -836,6 +843,13 @@ static int vpu_resume(struct platform_device *pdev)
+ 	if (vpu_plat->pg)
+ 		vpu_plat->pg(0);
+ 
++	/* If VPU is working before suspend, enable
++	 * regulator to make usecount right. */
++	if (open_count > 0) {
++		if (!IS_ERR(vpu_regulator))
++			regulator_enable(vpu_regulator);
++	}
++
+ 	if (bitwork_mem.cpu_addr != 0) {
+ 		u32 *p = (u32 *) bitwork_mem.cpu_addr;
+ 		u32 data, pc;
+-- 
+1.7.7.4
+

@@ -1,0 +1,130 @@
+From 153082cd949c43e71c8b56a5c0ce7fc9897827c5 Mon Sep 17 00:00:00 2001
+From: Dong Aisheng <b29396@freescale.com>
+Date: Tue, 26 Jul 2011 21:54:49 +0800
+Subject: [PATCH 0299/2463] ENGR00153740-5 mx6: add asrc support
+
+Add asrc support for mx6.
+
+Signed-off-by: Dong Aisheng <b29396@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig                |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   10 ++++++++++
+ arch/arm/mach-mx6/clock.c                |   12 ++++++++++--
+ arch/arm/mach-mx6/devices-imx6q.h        |    4 ++++
+ arch/arm/plat-mxc/include/mach/mx6.h     |    4 ++--
+ 5 files changed, 27 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 8b716eb..2fe652f 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -42,6 +42,7 @@ config MACH_MX6Q_SABREAUTO
+ 	select IMX_HAVE_PLATFORM_IMX_SNVS_RTC
+ 	select IMX_HAVE_PLATFORM_IMX_PM
+ 	select IMX_HAVE_PLATFORM_MXC_HDMI
++	select IMX_HAVE_PLATFORM_IMX_ASRC
+ 	help
+ 	  Include support for i.MX 6Quad SABRE Automotive Infotainment platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 043623f..b78b7dd 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -60,6 +60,7 @@
+ #include <mach/ahci_sata.h>
+ #include <mach/ipu-v3.h>
+ #include <mach/mxc_hdmi.h>
++#include <mach/mxc_asrc.h>
+ #include <linux/gpio.h>
+ #include <linux/etherdevice.h>
+ 
+@@ -529,6 +530,11 @@ static struct ahci_platform_data mx6q_sabreauto_sata_data = {
+ 	.exit = mx6q_sabreauto_sata_exit,
+ };
+ 
++static struct imx_asrc_platform_data imx_asrc_data = {
++	.channel_bits = 4,
++	.clk_map_ver = 2,
++};
++
+ static struct ipuv3_fb_platform_data sabr_fb_data[] = {
+ 	{ /*fb0*/
+ 	.disp_dev = "lcd",
+@@ -666,6 +672,10 @@ static void __init mx6_board_init(void)
+ 	imx6q_add_vpu();
+ 	imx6q_init_audio();
+ 
++	imx_asrc_data.asrc_core_clk = clk_get(NULL, "asrc_clk");
++	imx_asrc_data.asrc_audio_clk = clk_get(NULL, "mxc_alsa_spdif.1");
++	imx6q_add_asrc(&imx_asrc_data);
++
+ 	/* DISP0 Detect */
+ 	gpio_request(MX6Q_SABREAUTO_DISP0_DET_INT, "disp0-detect");
+ 	gpio_direction_input(MX6Q_SABREAUTO_DISP0_DET_INT);
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 0335058..a76c57f 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4019,8 +4019,8 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK("FlexCAN.1", "can_clk", can2_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "ldb_di0_clk", ldb_di0_clk),
+ 	_REGISTER_CLOCK(NULL, "ldb_di1_clk", ldb_di1_clk),
+-	_REGISTER_CLOCK("mxc_alsa_spdif.0", NULL, spdif0_clk[0]),
+-	_REGISTER_CLOCK("mxc_alsa_spdif.1", NULL, spdif1_clk[0]),
++	_REGISTER_CLOCK(NULL, "mxc_alsa_spdif.0", spdif0_clk[0]),
++	_REGISTER_CLOCK(NULL, "mxc_alsa_spdif.1", spdif1_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "esai_clk", esai_clk),
+ 	_REGISTER_CLOCK("mxc_spi.0", NULL, ecspi_clk[0]),
+ 	_REGISTER_CLOCK("mxc_spi.1", NULL, ecspi_clk[1]),
+@@ -4100,6 +4100,14 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	clk_set_parent(&gpu3d_core_clk, &mmdc_ch0_axi_clk);
+ 	clk_set_rate(&gpu3d_core_clk, 528000000);
+ 
++	/*
++	 * FIXME: asrc needs to use spdif1 clock to do sample rate convertion,
++	 * however we found it only works when set to 1.5M clock and the
++	 * parent is pll3_sw_clk.
++	 */
++	clk_set_parent(&spdif1_clk[0], &pll3_sw_clk);
++	clk_set_rate(&spdif1_clk[0], 1500000);
++
+ 	/* Make sure all clocks are ON initially */
+ 	__raw_writel(0xFFFFFFFF, MXC_CCM_CCGR0);
+ 	__raw_writel(0xFFFFFFFF, MXC_CCM_CCGR1);
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 6753e7f..57f12dc 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -123,3 +123,7 @@ extern const struct imx_imx2_wdt_data imx6q_imx2_wdt_data[] __initconst;
+ extern const struct imx_pm_imx_data imx6q_pm_imx_data __initconst;
+ #define imx6q_add_pm_imx(id, pdata)	\
+ 	imx_add_pm_imx(&imx6q_pm_imx_data, pdata)
++
++extern const struct imx_imx_asrc_data imx6q_imx_asrc_data[] __initconst;
++#define imx6q_add_asrc(pdata)	\
++	imx_add_imx_asrc(imx6q_imx_asrc_data, pdata)
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 7ff17ad..7aa3b2b 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -139,7 +139,7 @@
+ #define SSI1_BASE_ADDR              (ATZ1_BASE_ADDR + 0x28000) /* slot 10 */
+ #define SSI2_BASE_ADDR              (ATZ1_BASE_ADDR + 0x2C000) /* slot 11 */
+ #define SSI3_BASE_ADDR              (ATZ1_BASE_ADDR + 0x30000) /* slot 12 */
+-#define ASRC_BASE_ADDR              (ATZ1_BASE_ADDR + 0x34000) /* slot 13 */
++#define MX6Q_ASRC_BASE_ADDR	    (ATZ1_BASE_ADDR + 0x34000) /* slot 13 */
+ #define SPBA_BASE_ADDR              (ATZ1_BASE_ADDR + 0x3C000) /* slot 15 */
+ #define MX6Q_VPU_BASE_ADDR          (ATZ1_BASE_ADDR + 0x40000) /* slot 33,
+ 					global en[1], til 0x7BFFF */
+@@ -319,7 +319,7 @@
+ #define MXC_INT_SSI2                               79
+ #define MXC_INT_SSI3                               80
+ #define MXC_INT_ANATOP_TEMPSNSR                    81
+-#define MXC_INT_ASRC                               82
++#define MX6Q_INT_ASRC                               82
+ #define MXC_INT_ESAI                              83
+ #define MXC_INT_SPDIF                              84
+ #define MXC_INT_MLB                                85
+-- 
+1.7.7.4
+

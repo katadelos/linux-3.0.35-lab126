@@ -1,0 +1,107 @@
+From b675f7bfd7b21ab27f2a6ae5e7b0dab010386d3e Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Wed, 5 Sep 2012 13:47:43 +0800
+Subject: [PATCH 2010/2463] ENGR00223058 [MX6]Fix build warning
+
+Fix below build warning:
+
+arch/arm/mach-mx6/irq.c: In function 'mx6_init_irq':
+arch/arm/mach-mx6/irq.c:106: warning: unused variable 'reg'
+
+arch/arm/mach-mx6/clock_mx6sl.c:1807:
+	warning: function declaration isn't a prototype
+arch/arm/mach-mx6/clock_mx6sl.c:1535:
+	warning: 'tzasc1_clk' defined but not used
+arch/arm/mach-mx6/clock_mx6sl.c:1576:
+	warning: 'mx6per2_clk' defined but not used
+arch/arm/mach-mx6/clock_mx6sl.c:1708:
+	warning: 'ocram_clk' defined but not used
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/clock_mx6sl.c |   26 +++-----------------------
+ arch/arm/mach-mx6/irq.c         |    2 ++
+ 2 files changed, 5 insertions(+), 23 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 08212c3..6160991 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -1532,16 +1532,6 @@ static struct clk ipg_clk = {
+ 	.get_rate = _clk_ipg_get_rate,
+ };
+ 
+-static struct clk tzasc1_clk = {
+-	__INIT_CLK_DEBUG(tzasc1_clk)
+-	.id = 0,
+-	.parent = &ipg_clk,
+-	.enable_reg = MXC_CCM_CCGR2,
+-	.enable_shift = MXC_CCM_CCGRx_CG11_OFFSET,
+-	.enable = _clk_enable,
+-	.disable = _clk_disable_inwait,
+-};
+-
+ static struct clk tzasc2_clk = {
+ 	__INIT_CLK_DEBUG(tzasc2_clk)
+ 	.id = 0,
+@@ -1573,16 +1563,6 @@ static struct clk mx6per1_clk = {
+ 	.disable = _clk_disable_inwait,
+ };
+ 
+-static struct clk mx6per2_clk = {
+-	__INIT_CLK_DEBUG(mx6per2_clk)
+-	.id = 0,
+-	.parent = &ahb_clk,
+-	.enable_reg = MXC_CCM_CCGR4,
+-	.enable_shift = MXC_CCM_CCGRx_CG7_OFFSET,
+-	.enable = _clk_enable,
+-	.disable = _clk_disable_inwait,
+-};
+-
+ static int _clk_mmdc_ch1_axi_set_parent(struct clk *clk,
+ 					       struct clk *parent)
+ {
+@@ -1704,7 +1684,7 @@ static struct clk mmdc_ch1_axi_clk[] = {
+ 	.secondary = &tzasc2_clk,
+ 	},
+ };
+-
++#if defined(CONFIG_SDMA_IRAM) || defined(CONFIG_SND_MXC_SOC_IRAM)
+ static struct clk ocram_clk = {
+ 	__INIT_CLK_DEBUG(ocram_clk)
+ 	.id = 0,
+@@ -1714,7 +1694,7 @@ static struct clk ocram_clk = {
+ 	.enable = _clk_enable,
+ 	.disable = _clk_disable_inwait,
+ };
+-
++#endif
+ static unsigned long _clk_ipg_perclk_get_rate(struct clk *clk)
+ {
+ 	u32 reg, div;
+@@ -1803,7 +1783,7 @@ static struct clk sdma_clk[] = {
+ 	},
+ };
+ 
+-static unsigned long mx6_timer_rate()
++static unsigned long mx6_timer_rate(void)
+ {
+ 	u32 parent_rate = clk_get_rate(&osc_clk);
+ 
+diff --git a/arch/arm/mach-mx6/irq.c b/arch/arm/mach-mx6/irq.c
+index a079c37..e865b45 100644
+--- a/arch/arm/mach-mx6/irq.c
++++ b/arch/arm/mach-mx6/irq.c
+@@ -103,7 +103,9 @@ void mx6_init_irq(void)
+ 	void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ 	struct irq_desc *desc;
+ 	unsigned int i;
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	u32 reg;
++#endif
+ 
+ 	/* start offset if private timer irq id, which is 29.
+ 	 * ID table:
+-- 
+1.7.7.4
+

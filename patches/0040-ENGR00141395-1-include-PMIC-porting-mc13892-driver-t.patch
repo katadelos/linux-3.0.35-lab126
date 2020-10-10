@@ -1,0 +1,1092 @@
+From 7d17b040881ad396f7923253bf6dfd40064ef049 Mon Sep 17 00:00:00 2001
+From: Zhou Jingyu <b02241@freescale.com>
+Date: Thu, 3 Mar 2011 14:16:26 +0800
+Subject: [PATCH 0040/2463] ENGR00141395-1 include: PMIC: porting mc13892
+ driver to 2.6.38
+
+add some missing headers
+
+Signed-off-by: Zhou Jingyu <Jingyu.Zhou@freescale.com>
+---
+ include/linux/mfd/mc13892/core.h |   77 +++++++
+ include/linux/pmic_adc.h         |  455 ++++++++++++++++++++++++++++++++++++++
+ include/linux/pmic_external.h    |  435 ++++++++++++++++++++++++++++++++++++
+ include/linux/pmic_status.h      |   82 +++++++
+ 4 files changed, 1049 insertions(+), 0 deletions(-)
+
+diff --git a/include/linux/mfd/mc13892/core.h b/include/linux/mfd/mc13892/core.h
+new file mode 100644
+index 0000000..7cf115d
+--- /dev/null
++++ b/include/linux/mfd/mc13892/core.h
+@@ -0,0 +1,77 @@
++/*
++ * Copyright 2009-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#ifndef __LINUX_MFD_MC13892_CORE_H_
++#define __LINUX_MFD_MC13892_CORE_H_
++
++#include <linux/kernel.h>
++#include <linux/mutex.h>
++#include <linux/workqueue.h>
++
++#define MC13892_SW1 0
++#define MC13892_SW2 1
++#define MC13892_SW3 2
++#define MC13892_SW4 3
++#define MC13892_SWBST 4
++#define MC13892_VIOHI 5
++#define MC13892_VPLL 6
++#define MC13892_VDIG 7
++#define MC13892_VSD 8
++#define MC13892_VUSB2 9
++#define MC13892_VVIDEO 10
++#define MC13892_VAUDIO 11
++#define MC13892_VCAM 12
++#define MC13892_VGEN1 13
++#define MC13892_VGEN2 14
++#define MC13892_VGEN3 15
++#define MC13892_VUSB 16
++#define MC13892_GPO1 17
++#define MC13892_GPO2 18
++#define MC13892_GPO3 19
++#define MC13892_GPO4 20
++#define MC13892_PWGT1 21
++#define MC13892_PWGT2 22
++#define MC13892_REG_NUM 23
++
++struct mc13892;
++struct regulator_init_data;
++
++struct mc13892_platform_data {
++	int (*init)(struct mc13892 *);
++};
++
++struct mc13892_pmic {
++	/* regulator devices */
++	struct platform_device *pdev[MC13892_REG_NUM];
++};
++
++struct mc13892 {
++	int rev;		/* chip revision */
++
++	struct device *dev;
++
++	/* device IO */
++	union {
++		struct i2c_client *i2c_client;
++		struct spi_device *spi_device;
++	};
++	u16 *reg_cache;
++
++	/* Client devices */
++	struct mc13892_pmic pmic;
++};
++
++int mc13892_register_regulator(struct mc13892 *mc13892, int reg,
++			      struct regulator_init_data *initdata);
++
++#endif
+diff --git a/include/linux/pmic_adc.h b/include/linux/pmic_adc.h
+new file mode 100644
+index 0000000..eecd2d5
+--- /dev/null
++++ b/include/linux/pmic_adc.h
+@@ -0,0 +1,455 @@
++/*
++ * Copyright 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU Lesser General
++ * Public License.  You may obtain a copy of the GNU Lesser General
++ * Public License Version 2.1 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/lgpl-license.html
++ * http://www.gnu.org/copyleft/lgpl.html
++ */
++
++#ifndef __ASM_ARCH_MXC_PMIC_ADC_H__
++#define __ASM_ARCH_MXC_PMIC_ADC_H__
++
++/*!
++ * @defgroup PMIC_ADC PMIC Digitizer Driver
++ * @ingroup PMIC_DRVRS
++ */
++
++/*!
++ * @file arch-mxc/pmic_adc.h
++ * @brief This is the header of PMIC ADC driver.
++ *
++ * @ingroup PMIC_ADC
++ */
++
++#include <linux/ioctl.h>
++#include <linux/pmic_status.h>
++#include <linux/pmic_external.h>
++
++/*!
++ * @name IOCTL user space interface
++ */
++
++/*! @{ */
++/*!
++ * Initialize ADC.
++ * Argument type: none.
++ */
++#define PMIC_ADC_INIT                   _IO('p', 0xb0)
++/*!
++ * De-initialize ADC.
++ * Argument type: none.
++ */
++#define PMIC_ADC_DEINIT                 _IO('p', 0xb1)
++/*!
++ * Convert one channel.
++ * Argument type: pointer to t_adc_convert_param.
++ */
++#define PMIC_ADC_CONVERT                _IOWR('p', 0xb2, int)
++/*!
++ * Convert one channel eight samples.
++ * Argument type: pointer to t_adc_convert_param.
++ */
++#define PMIC_ADC_CONVERT_8X             _IOWR('p', 0xb3, int)
++/*!
++ * Convert multiple channels.
++ * Argument type: pointer to t_adc_convert_param.
++ */
++#define PMIC_ADC_CONVERT_MULTICHANNEL   _IOWR('p', 0xb4, int)
++/*!
++ * Set touch screen operation mode.
++ * Argument type: t_touch_mode.
++ */
++#define PMIC_ADC_SET_TOUCH_MODE         _IOW('p', 0xb5, int)
++/*!
++ * Get touch screen operation mode.
++ * Argument type: pointer to t_touch_mode.
++ */
++#define PMIC_ADC_GET_TOUCH_MODE         _IOR('p', 0xb6, int)
++/*!
++ * Get touch screen sample.
++ * Argument type: pointer to t_touch_sample.
++ */
++#define PMIC_ADC_GET_TOUCH_SAMPLE       _IOWR('p', 0xb7, int)
++/*!
++ * Get battery current.
++ * Argument type: pointer to unsigned short.
++ */
++#define PMIC_ADC_GET_BATTERY_CURRENT    _IOR('p', 0xb8, int)
++/*!
++ * Activate comparator.
++ * Argument type: pointer to t_adc_comp_param.
++ */
++#define PMIC_ADC_ACTIVATE_COMPARATOR    _IOW('p', 0xb9, int)
++/*!
++ * De-active comparator.
++ * Argument type: none.
++ */
++#define PMIC_ADC_DEACTIVE_COMPARATOR    _IOW('p', 0xba, int)
++
++/*!
++ * Install touch screen read interface.
++ */
++#define TOUCH_SCREEN_READ_INSTALL       _IOWR('D', 4, int)
++/*!
++ * Remove touch screen read interface.
++ */
++#define TOUCH_SCREEN_READ_UNINSTALL     _IOWR('D', 5, int)
++
++/*! @{ */
++/*!
++ * @name Touch Screen minimum and maximum values
++ */
++#define TS_X_MIN                80	/*! < Minimum X */
++#define TS_Y_MIN                80	/*! < Minimum Y */
++
++#define TS_X_MAX                1000	/*! < Maximum X */
++#define TS_Y_MAX                1000	/*! < Maximum Y */
++/*! @} */
++/*!
++ * This enumeration defines input channels for PMIC ADC
++ */
++
++typedef enum {
++	BATTERY_VOLTAGE,
++	BATTERY_CURRENT,
++	CHARGE_VOLTAGE,
++	CHARGE_CURRENT,
++	APPLICATION_SUPPLY,
++	TS_X_POS1,
++	TS_X_POS2,
++	TS_Y_POS1,
++	TS_Y_POS2,
++	GEN_PURPOSE_AD4,
++	GEN_PURPOSE_AD5,
++	GEN_PURPOSE_AD6,
++	GEN_PURPOSE_AD7,
++	GEN_PURPOSE_AD8,
++	GEN_PURPOSE_AD9,
++	GEN_PURPOSE_AD10,
++	GEN_PURPOSE_AD11,
++	USB_ID,
++	LICELL,
++	RAWEXTBPLUSSENSE,
++	MPBSENSE,
++	BATSENSE,
++	GND,
++	THERMISTOR,
++	DIE_TEMP
++} t_channel;
++
++/*!
++ * This enumeration defines reason of ADC Comparator interrupt.
++ */
++typedef enum {
++	/*!
++	 * Greater than WHIGH
++	 */
++	GTWHIGH,
++	/*!
++	 * Less than WLOW
++	 */
++	LTWLOW,
++} t_comp_exception;
++
++/*!
++ * ADC comparator callback function type
++ */
++typedef void (*t_comparator_cb) (t_comp_exception reason);
++
++/*!
++ * This enumeration defines the touch screen operation modes.
++ */
++typedef enum {
++	/*!
++	 * Touch Screen X position
++	 */
++	TS_X_POSITION = 0,
++	/*!
++	 * Touch Screen Y position
++	 */
++	TS_Y_POSITION = 1,
++	/*!
++	 * Pressure
++	 */
++	TS_PRESSURE = 2,
++	/*!
++	 * Plate X
++	 */
++	TS_PLATE_X = 3,
++	/*!
++	 * Plate Y
++	 */
++	TS_PLATE_Y = 4,
++	/*!
++	 * Standby
++	 */
++	TS_STANDBY = 5,
++	/*!
++	 * No touch screen, TSX1, TSX2, TSY1 and TSY2 are used as  general
++	 * purpose A/D inputs.
++	 */
++	TS_NONE = 6,
++} t_touch_mode;
++/*!
++ * This structure is used to report touch screen value.
++ */
++typedef struct {
++/*!
++	 * Touch Screen X position
++	 */
++	unsigned int x_position;
++	/*!
++	 * Touch Screen X position1
++	 */
++	unsigned int x_position1;
++	/*!
++	 * Touch Screen X position2
++	 */
++	unsigned int x_position2;
++	/*!
++	 * Touch Screen X position3
++	 */
++	unsigned int x_position3;
++	/*!
++	 * Touch Screen Y position
++	 */
++	unsigned int y_position;
++	/*!
++	 * Touch Screen Y position1
++	 */
++	unsigned int y_position1;
++	/*!
++	 * Touch Screen Y position2
++	 */
++	unsigned int y_position2;
++	/*!
++	 * Touch Screen Y position3
++	 */
++	unsigned int y_position3;
++	/*!
++	 * Touch Screen contact value
++	 */
++	unsigned int contact_resistance;
++} t_touch_screen;
++
++/*!
++ * This enumeration defines ADC conversion modes.
++ */
++typedef enum {
++	/*!
++	 * Sample 8 channels, 1 sample per channel
++	 */
++	ADC_8CHAN_1X = 0,
++	/*!
++	 * Sample 1 channel 8 times
++	 */
++	ADC_1CHAN_8X,
++} t_conversion_mode;
++
++/*!
++ * This structure is used with IOCTL code \a PMIC_ADC_CONVERT,
++ * \a PMIC_ADC_CONVERT_8X and \a PMIC_ADC_CONVERT_MULTICHANNEL.
++ */
++
++typedef struct {
++	/*!
++	 * channel or channels to be sampled.
++	 */
++	t_channel channel;
++	/*!
++	 * holds up to 16 sampling results
++	 */
++	unsigned short result[16];
++} t_adc_convert_param;
++
++/*!
++ * This structure is used to activate/deactivate ADC comparator.
++ */
++typedef struct {
++	/*!
++	 * wlow.
++	 */
++	unsigned char wlow;
++	/*!
++	 * whigh.
++	 */
++	unsigned char whigh;
++	/*!
++	 * channel to monitor
++	 */
++	t_channel channel;
++	/*!
++	 * callback function.
++	 */
++	t_comparator_cb callback;
++} t_adc_comp_param;
++
++/* EXPORTED FUNCTIONS */
++
++#ifdef __KERNEL__
++/*!
++ * This function initializes all ADC registers with default values. This
++ * function also registers the interrupt events.
++ *
++ * @return       This function returns PMIC_SUCCESS if successful.
++ */
++PMIC_STATUS pmic_adc_init(void);
++
++/*!
++ * This function disables the ADC, de-registers the interrupt events.
++ *
++ * @return       This function returns PMIC_SUCCESS if successful.
++ */
++PMIC_STATUS pmic_adc_deinit(void);
++
++/*!
++ * This function triggers a conversion and returns one sampling result of one
++ * channel.
++ *
++ * @param        channel   The channel to be sampled
++ * @param        result    The pointer to the conversion result. The memory
++ *                         should be allocated by the caller of this function.
++ *
++ * @return       This function returns PMIC_SUCCESS if successful.
++ */
++
++PMIC_STATUS pmic_adc_convert(t_channel channel, unsigned short *result);
++
++/*!
++ * This function triggers a conversion and returns eight sampling results of
++ * one channel.
++ *
++ * @param        channel   The channel to be sampled
++ * @param        result    The pointer to array to store eight sampling results.
++ *                         The memory should be allocated by the caller of this
++ *                         function.
++ *
++ * @return       This function returns PMIC_SUCCESS if successful.
++ */
++
++PMIC_STATUS pmic_adc_convert_8x(t_channel channel, unsigned short *result);
++
++/*!
++ * This function triggers a conversion and returns sampling results of each
++ * specified channel.
++ *
++ * @param        channels  This input parameter is bitmap to specify channels
++ *                         to be sampled.
++ * @param        result    The pointer to array to store sampling result.
++ *                         The order of the result in the array is from lowest
++ *                         channel number to highest channel number of the
++ *                         sampled channels.
++ *                         The memory should be allocated by the caller of this
++ *                         function.
++ *			   Note that the behavior of this function might differ
++ *			   from one platform to another regarding especially
++ *			   channels order.
++ *
++ * @return       This function returns PMIC_SUCCESS if successful.
++ */
++
++PMIC_STATUS pmic_adc_convert_multichnnel(t_channel channels,
++					 unsigned short *result);
++
++/*!
++ * This function sets touch screen operation mode.
++ *
++ * @param        touch_mode   Touch screen operation mode.
++ *
++ * @return       This function returns PMIC_SUCCESS if successful.
++ */
++PMIC_STATUS pmic_adc_set_touch_mode(t_touch_mode touch_mode);
++
++/*!
++ * This function retrieves the current touch screen operation mode.
++ *
++ * @param        touch_mode   Pointer to the retrieved touch screen operation
++ *                            mode.
++ *
++ * @return       This function returns PMIC_SUCCESS if successful.
++ */
++PMIC_STATUS pmic_adc_get_touch_mode(t_touch_mode *touch_mode);
++
++/*!
++ * This function retrieves the current touch screen operation mode.
++ *
++ * @param        touch_sample Pointer to touch sample.
++ * @param        wait	Indicates if this function needs to block or not.
++ *
++ * @return       This function returns PMIC_SUCCESS if successful.
++ */
++PMIC_STATUS pmic_adc_get_touch_sample(t_touch_screen *ts_value, int wait);
++
++/*!
++ * This function starts a Battery Current mode conversion.
++ *
++ * @param        mode      Conversion mode.
++ * @param        result    Battery Current measurement result.
++ *                         if \a mode = ADC_8CHAN_1X, the result is \n
++ *                             result[0] = (BATTP - BATT_I) \n
++ *                         if \a mode = ADC_1CHAN_8X, the result is \n
++ *                             result[0] = BATTP \n
++ *                             result[1] = BATT_I \n
++ *                             result[2] = BATTP \n
++ *                             result[3] = BATT_I \n
++ *                             result[4] = BATTP \n
++ *                             result[5] = BATT_I \n
++ *                             result[6] = BATTP \n
++ *                             result[7] = BATT_I
++ *
++ * @return       This function returns PMIC_SUCCESS if successful.
++ */
++PMIC_STATUS pmic_adc_get_battery_current(t_conversion_mode mode,
++					 unsigned short *result);
++
++/*!
++ * This function actives the comparator.  When comparator is activated and ADC
++ * is enabled, the 8th converted value will be digitally compared against the
++ * window defined by WLOW and WHIGH registers.
++ *
++ * @param        low      Comparison window low threshold (WLOW).
++ * @param        high     Comparison window high threshold (WHIGH).
++ * @param        callback Callback function to be called when the converted
++ *                        value is beyond the comparison window.  The callback
++ *                        function will pass a parameter of type
++ *                        \b t_comp_expection to indicate the reason of
++ *                        comparator exception.
++ *
++ * @return       This function returns PMIC_SUCCESS if successful.
++ */
++
++PMIC_STATUS pmic_adc_active_comparator(unsigned char low,
++				       unsigned char high,
++				       t_channel channel,
++				       t_comparator_cb callback);
++
++/*!
++ * This function de-actives the comparator.
++ *
++ * @return       This function returns PMIC_SUCCESS if successful.
++ */
++PMIC_STATUS pmic_adc_deactive_comparator(void);
++
++/*!
++ * This function enables the touch screen read interface.
++ *
++ * @return       This function returns 0 if successful.
++ */
++PMIC_STATUS pmic_adc_install_ts(void);
++
++/*!
++ * This function disables the touch screen read interface.
++ *
++ * @return       This function returns 0 if successful.
++ */
++PMIC_STATUS pmic_adc_remove_ts(void);
++
++int is_pmic_adc_ready(void);
++
++#endif				/* _KERNEL */
++#endif				/* __ASM_ARCH_MXC_PMIC_ADC_H__ */
+diff --git a/include/linux/pmic_external.h b/include/linux/pmic_external.h
+new file mode 100644
+index 0000000..55427a5
+--- /dev/null
++++ b/include/linux/pmic_external.h
+@@ -0,0 +1,435 @@
++/*
++ * Copyright 2008-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++#ifndef __ASM_ARCH_MXC_PMIC_EXTERNAL_H__
++#define __ASM_ARCH_MXC_PMIC_EXTERNAL_H__
++
++#ifdef __KERNEL__
++#include <linux/list.h>
++#endif
++
++/*!
++ * @defgroup PMIC_DRVRS PMIC Drivers
++ */
++
++/*!
++ * @defgroup PMIC_CORE PMIC Protocol Drivers
++ * @ingroup PMIC_DRVRS
++ */
++
++/*!
++ * @file arch-mxc/pmic_external.h
++ * @brief This file contains interface of PMIC protocol driver.
++ *
++ * @ingroup PMIC_CORE
++ */
++
++#include <linux/ioctl.h>
++#include <linux/pmic_status.h>
++
++/*!
++ * This is the enumeration of versions of PMIC
++ */
++typedef enum {
++	PMIC_MC13783 = 1,	/*!< MC13783 */
++	PMIC_SC55112 = 2,	/*!< SC55112 */
++	PMIC_MC13892 = 3,
++	PMIC_MC34704 = 4
++} pmic_id_t;
++
++/*!
++ * @struct pmic_version_t
++ * @brief PMIC version and revision
++ */
++typedef struct {
++	/*!
++	 * PMIC version identifier.
++	 */
++	pmic_id_t id;
++	/*!
++	 * Revision of the PMIC.
++	 */
++	int revision;
++} pmic_version_t;
++
++/*!
++ * struct pmic_event_callback_t
++ * @brief This structure contains callback function pointer and its
++ * parameter to be used when un/registering and launching a callback
++ * for an event.
++ */
++typedef struct {
++	/*!
++	 * call back function
++	 */
++	void (*func) (void *);
++
++	/*!
++	 * call back function parameter
++	 */
++	void *param;
++} pmic_event_callback_t;
++
++/*!
++ * This structure is used with IOCTL.
++ * It defines register, register value, register mask and event number
++ */
++typedef struct {
++	/*!
++	 * register number
++	 */
++	int reg;
++	/*!
++	 * value of register
++	 */
++	unsigned int reg_value;
++	/*!
++	 * mask of bits, only used with PMIC_WRITE_REG
++	 */
++	unsigned int reg_mask;
++} register_info;
++
++/*!
++ * @name IOCTL definitions for sc55112 core driver
++ */
++/*! @{ */
++/*! Read a PMIC register */
++#define PMIC_READ_REG          _IOWR('P', 0xa0, register_info*)
++/*! Write a PMIC register */
++#define PMIC_WRITE_REG         _IOWR('P', 0xa1, register_info*)
++/*! Subscribe a PMIC interrupt event */
++#define PMIC_SUBSCRIBE         _IOR('P', 0xa2, int)
++/*! Unsubscribe a PMIC interrupt event */
++#define PMIC_UNSUBSCRIBE       _IOR('P', 0xa3, int)
++/*! Subscribe a PMIC event for user notification*/
++#define PMIC_NOTIFY_USER       _IOR('P', 0xa4, int)
++/*! Get the PMIC event occured for which user recieved notification */
++#define PMIC_GET_NOTIFY	       _IOW('P', 0xa5, int)
++/*! @} */
++
++/*!
++ * This is PMIC registers valid bits
++ */
++#define PMIC_ALL_BITS           0xFFFFFF
++#define PMIC_MAX_EVENTS		48
++
++#define PMIC_ARBITRATION	"NULL"
++
++
++#if defined(CONFIG_MXC_PMIC_MC13892_MODULE) || defined(CONFIG_MXC_PMIC_MC13892)
++enum {
++	REG_INT_STATUS0 = 0,
++	REG_INT_MASK0,
++	REG_INT_SENSE0,
++	REG_INT_STATUS1,
++	REG_INT_MASK1,
++	REG_INT_SENSE1,
++	REG_PU_MODE_S,
++	REG_IDENTIFICATION,
++	REG_UNUSED0,
++	REG_ACC0,
++	REG_ACC1,		/*10 */
++	REG_UNUSED1,
++	REG_UNUSED2,
++	REG_POWER_CTL0,
++	REG_POWER_CTL1,
++	REG_POWER_CTL2,
++	REG_REGEN_ASSIGN,
++	REG_UNUSED3,
++	REG_MEM_A,
++	REG_MEM_B,
++	REG_RTC_TIME,		/*20 */
++	REG_RTC_ALARM,
++	REG_RTC_DAY,
++	REG_RTC_DAY_ALARM,
++	REG_SW_0,
++	REG_SW_1,
++	REG_SW_2,
++	REG_SW_3,
++	REG_SW_4,
++	REG_SW_5,
++	REG_SETTING_0,		/*30 */
++	REG_SETTING_1,
++	REG_MODE_0,
++	REG_MODE_1,
++	REG_POWER_MISC,
++	REG_UNUSED4,
++	REG_UNUSED5,
++	REG_UNUSED6,
++	REG_UNUSED7,
++	REG_UNUSED8,
++	REG_UNUSED9,		/*40 */
++	REG_UNUSED10,
++	REG_UNUSED11,
++	REG_ADC0,
++	REG_ADC1,
++	REG_ADC2,
++	REG_ADC3,
++	REG_ADC4,
++	REG_CHARGE,
++	REG_USB0,
++	REG_USB1,		/*50 */
++	REG_LED_CTL0,
++	REG_LED_CTL1,
++	REG_LED_CTL2,
++	REG_LED_CTL3,
++	REG_UNUSED12,
++	REG_UNUSED13,
++	REG_TRIM0,
++	REG_TRIM1,
++	REG_TEST0,
++	REG_TEST1,		/*60 */
++	REG_TEST2,
++	REG_TEST3,
++	REG_TEST4,
++};
++
++typedef enum {
++	EVENT_ADCDONEI = 0,
++	EVENT_ADCBISDONEI = 1,
++	EVENT_TSI = 2,
++	EVENT_VBUSVI = 3,
++	EVENT_IDFACI = 4,
++	EVENT_USBOVI = 5,
++	EVENT_CHGDETI = 6,
++	EVENT_CHGFAULTI = 7,
++	EVENT_CHGREVI = 8,
++	EVENT_CHGRSHORTI = 9,
++	EVENT_CCCVI = 10,
++	EVENT_CHGCURRI = 11,
++	EVENT_BPONI = 12,
++	EVENT_LOBATLI = 13,
++	EVENT_LOBATHI = 14,
++	EVENT_IDFLOATI = 19,
++	EVENT_IDGNDI = 20,
++	EVENT_SE1I = 21,
++	EVENT_CKDETI = 22,
++	EVENT_1HZI = 24,
++	EVENT_TODAI = 25,
++	EVENT_PWRON3I = 26,
++	EVENT_PWRONI = 27,
++	EVENT_WDIRESETI = 29,
++	EVENT_SYSRSTI = 30,
++	EVENT_RTCRSTI = 31,
++	EVENT_PCI = 32,
++	EVENT_WARMI = 33,
++	EVENT_MEMHLDI = 34,
++	EVENT_THWARNLI = 36,
++	EVENT_THWARNHI = 37,
++	EVENT_CLKI = 38,
++	EVENT_SCPI = 40,
++	EVENT_LBPI = 44,
++	EVENT_NB,
++} type_event;
++
++typedef enum {
++	SENSE_VBUSVS = 3,
++	SENSE_IDFACS = 4,
++	SENSE_USBOVS = 5,
++	SENSE_CHGDETS = 6,
++	SENSE_CHGREVS = 8,
++	SENSE_CHGRSHORTS = 9,
++	SENSE_CCCVS = 10,
++	SENSE_CHGCURRS = 11,
++	SENSE_BPONS = 12,
++	SENSE_LOBATLS = 13,
++	SENSE_LOBATHS = 14,
++	SENSE_IDFLOATS = 19,
++	SENSE_IDGNDS = 20,
++	SENSE_SE1S = 21,
++	SENSE_PWRONS = 27,
++	SENSE_THWARNLS = 36,
++	SENSE_THWARNHS = 37,
++	SENSE_CLKS = 38,
++	SENSE_LBPS = 44,
++	SENSE_NB,
++} t_sensor;
++
++typedef struct {
++	bool sense_vbusvs;
++	bool sense_idfacs;
++	bool sense_usbovs;
++	bool sense_chgdets;
++	bool sense_chgrevs;
++	bool sense_chgrshorts;
++	bool sense_cccvs;
++	bool sense_chgcurrs;
++	bool sense_bpons;
++	bool sense_lobatls;
++	bool sense_lobaths;
++	bool sense_idfloats;
++	bool sense_idgnds;
++	bool sense_se1s;
++	bool sense_pwrons;
++	bool sense_thwarnls;
++	bool sense_thwarnhs;
++	bool sense_clks;
++	bool sense_lbps;
++} t_sensor_bits;
++
++extern struct i2c_client *mc13892_client;
++int pmic_i2c_24bit_read(struct i2c_client *client, unsigned int reg_num,
++			unsigned int *value);
++int pmic_read(int reg_num, unsigned int *reg_val);
++int pmic_write(int reg_num, const unsigned int reg_val);
++void gpio_pmic_active(void);
++void pmic_event_list_init(void);
++void mc13892_power_off(void);
++
++#elif defined(CONFIG_MXC_PMIC_MC34704_MODULE) || defined(CONFIG_MXC_PMIC_MC34704)
++
++typedef enum {
++	/* register names for mc34704 */
++	REG_MC34704_GENERAL1 = 0x01,
++	REG_MC34704_GENERAL2 = 0x02,
++	REG_MC34704_GENERAL3 = 0x03,
++	REG_MC34704_VGSET1 = 0x04,
++	REG_MC34704_VGSET2 = 0x05,
++	REG_MC34704_REG2SET1 = 0x06,
++	REG_MC34704_REG2SET2 = 0x07,
++	REG_MC34704_REG3SET1 = 0x08,
++	REG_MC34704_REG3SET2 = 0x09,
++	REG_MC34704_REG4SET1 = 0x0A,
++	REG_MC34704_REG4SET2 = 0x0B,
++	REG_MC34704_REG5SET1 = 0x0C,
++	REG_MC34704_REG5SET2 = 0x0D,
++	REG_MC34704_REG5SET3 = 0x0E,
++	REG_MC34704_REG6SET1 = 0x0F,
++	REG_MC34704_REG6SET2 = 0x10,
++	REG_MC34704_REG6SET3 = 0x11,
++	REG_MC34704_REG7SET1 = 0x12,
++	REG_MC34704_REG7SET2 = 0x13,
++	REG_MC34704_REG7SET3 = 0x14,
++	REG_MC34704_REG8SET1 = 0x15,
++	REG_MC34704_REG8SET2 = 0x16,
++	REG_MC34704_REG8SET3 = 0x17,
++	REG_MC34704_FAULTS = 0x18,
++	REG_MC34704_I2CSET1 = 0x19,
++	REG_MC34704_REG3DAC = 0x49,
++	REG_MC34704_REG7CR0 = 0x58,
++	REG_MC34704_REG7DAC = 0x59,
++	REG_NB = 0x60,
++} pmic_reg;
++
++typedef enum {
++	/* events for mc34704 */
++	EVENT_FLT1 = 0,
++	EVENT_FLT2,
++	EVENT_FLT3,
++	EVENT_FLT4,
++	EVENT_FLT5,
++	EVENT_FLT6,
++	EVENT_FLT7,
++	EVENT_FLT8,
++	EVENT_NB,
++} type_event;
++
++typedef enum {
++	MCU_SENSOR_NOT_SUPPORT
++} t_sensor;
++
++typedef enum {
++	MCU_SENSOR_BIT_NOT_SUPPORT
++} t_sensor_bits;
++
++#else
++typedef int type_event;
++typedef int t_sensor;
++typedef int t_sensor_bits;
++
++#endif				/* MXC_PMIC_MC34704 */
++
++/* EXPORTED FUNCTIONS */
++#ifdef __KERNEL__
++
++#if defined(CONFIG_MXC_PMIC)
++/*!
++ * This function is used to determine the PMIC type and its revision.
++ *
++ * @return      Returns the PMIC type and its revision.
++ */
++pmic_version_t pmic_get_version(void);
++
++/*!
++ * This function is called by PMIC clients to read a register on PMIC.
++ *
++ * @param        priority   priority of access
++ * @param        reg        number of register
++ * @param        reg_value   return value of register
++ *
++ * @return       This function returns PMIC_SUCCESS if successful.
++ */
++PMIC_STATUS pmic_read_reg(int reg, unsigned int *reg_value,
++			  unsigned int reg_mask);
++/*!
++ * This function is called by PMIC clients to write a register on MC13783.
++ *
++ * @param        priority   priority of access
++ * @param        reg        number of register
++ * @param        reg_value  New value of register
++ * @param        reg_mask   Bitmap mask indicating which bits to modify
++ *
++ * @return       This function returns PMIC_SUCCESS if successful.
++ */
++PMIC_STATUS pmic_write_reg(int reg, unsigned int reg_value,
++			   unsigned int reg_mask);
++
++/*!
++ * This function is called by PMIC clients to subscribe on an event.
++ *
++ * @param        event_sub   structure of event, it contains type of event and callback
++ *
++ * @return       This function returns PMIC_SUCCESS if successful.
++ */
++PMIC_STATUS pmic_event_subscribe(type_event event,
++				 pmic_event_callback_t callback);
++/*!
++* This function is called by PMIC clients to un-subscribe on an event.
++*
++* @param        event_unsub   structure of event, it contains type of event and callback
++*
++* @return       This function returns PMIC_SUCCESS if successful.
++*/
++PMIC_STATUS pmic_event_unsubscribe(type_event event,
++				   pmic_event_callback_t callback);
++/*!
++* This function is called to read all sensor bits of PMIC.
++*
++* @param        sensor    Sensor to be checked.
++*
++* @return       This function returns true if the sensor bit is high;
++*               or returns false if the sensor bit is low.
++*/
++bool pmic_check_sensor(t_sensor sensor);
++
++/*!
++* This function checks one sensor of PMIC.
++*
++* @param        sensor_bits  structure of all sensor bits.
++*
++* @return       This function returns PMIC_SUCCESS if successful.
++*/
++PMIC_STATUS pmic_get_sensors(t_sensor_bits *sensor_bits);
++
++void pmic_event_callback(type_event event);
++void pmic_event_list_init(void);
++
++#endif				/*CONFIG_MXC_PMIC*/
++#endif				/* __KERNEL__ */
++/* CONFIG_MXC_PMIC_MC13783 || CONFIG_MXC_PMIC_MC9SDZ60 */
++
++struct pmic_platform_data {
++	int (*init)(void *);
++	int power_key_irq;
++};
++
++#endif				/* __ASM_ARCH_MXC_PMIC_EXTERNAL_H__ */
+diff --git a/include/linux/pmic_status.h b/include/linux/pmic_status.h
+new file mode 100644
+index 0000000..0e54483
+--- /dev/null
++++ b/include/linux/pmic_status.h
+@@ -0,0 +1,82 @@
++/*
++ * Copyright 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU Lesser General
++ * Public License.  You may obtain a copy of the GNU Lesser General
++ * Public License Version 2.1 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/lgpl-license.html
++ * http://www.gnu.org/copyleft/lgpl.html
++ */
++#ifndef __ASM_ARCH_MXC_PMIC_STATUS_H__
++#define __ASM_ARCH_MXC_PMIC_STATUS_H__
++#include <asm-generic/errno-base.h>
++#ifdef __KERNEL__
++#include <asm/uaccess.h>	/* copy_{from,to}_user() */
++#endif
++/*!
++ * @file arch-mxc/pmic_status.h
++ * @brief PMIC APIs return code definition.
++ *
++ * @ingroup PMIC_CORE
++ */
++
++/*!
++ * @enum PMIC_STATUS
++ * @brief Define return values for all PMIC APIs.
++ *
++ * These return values are used by all of the PMIC APIs.
++ *
++ * @ingroup PMIC
++ */
++typedef enum {
++	PMIC_SUCCESS = 0,	/*!< The requested operation was successfully
++				   completed.                                     */
++	PMIC_ERROR = -1,	/*!< The requested operation could not be completed
++				   due to an error.                               */
++	PMIC_PARAMETER_ERROR = -2,	/*!< The requested operation failed because
++					   one or more of the parameters was
++					   invalid.                             */
++	PMIC_NOT_SUPPORTED = -3,	/*!< The requested operation could not be
++					   completed because the PMIC hardware
++					   does not support it. */
++	PMIC_SYSTEM_ERROR_EINTR = -EINTR,
++
++	PMIC_MALLOC_ERROR = -5,	/*!< Error in malloc function             */
++	PMIC_UNSUBSCRIBE_ERROR = -6,	/*!< Error in un-subscribe event          */
++	PMIC_EVENT_NOT_SUBSCRIBED = -7,	/*!< Event occur and not subscribed       */
++	PMIC_EVENT_CALL_BACK = -8,	/*!< Error - bad call back                */
++	PMIC_CLIENT_NBOVERFLOW = -9,	/*!< The requested operation could not be
++					   completed because there are too many
++					   PMIC client requests */
++} PMIC_STATUS;
++
++/*
++ * Bitfield macros that use rely on bitfield width/shift information.
++ */
++#define BITFMASK(field) (((1U << (field ## _WID)) - 1) << (field ## _LSH))
++#define BITFVAL(field, val) ((val) << (field ## _LSH))
++#define BITFEXT(var, bit) ((var & BITFMASK(bit)) >> (bit ## _LSH))
++
++/*
++ * Macros implementing error handling
++ */
++#define CHECK_ERROR(a)			\
++do {					\
++		int ret = (a); 			\
++		if (ret != PMIC_SUCCESS)	\
++	return ret; 			\
++} while (0)
++
++#define CHECK_ERROR_KFREE(func, freeptrs) \
++do { \
++	int ret = (func); \
++	if (ret != PMIC_SUCCESS) { \
++		freeptrs;	\
++		return ret;	\
++	}	\
++} while (0);
++
++#endif				/* __ASM_ARCH_MXC_PMIC_STATUS_H__ */
+-- 
+1.7.7.4
+

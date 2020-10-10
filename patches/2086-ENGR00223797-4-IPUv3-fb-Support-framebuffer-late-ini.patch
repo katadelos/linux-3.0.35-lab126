@@ -1,0 +1,209 @@
+From f074e7c45717c5434fbf23b5d0134f1b75a2b44a Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.liu@freescale.com>
+Date: Tue, 11 Sep 2012 18:10:11 +0800
+Subject: [PATCH 2086/2463] ENGR00223797-4 IPUv3 fb:Support framebuffer late
+ init
+
+This patch adds late init support in IPUv3 fb driver
+to avoid IPUv3 fb being re-initialized during probe if
+a platform supports smooth transition from bootloader
+splashimage to system UI. The re-initialization will
+be delayed to the first time the user triggers
+mxcfb_set_par() and unblank the framebuffer.
+The following items are done to support this:
+1) Move global alpha and color key setting in probe
+   after framebuffer is registered(before registering
+   we enable IPU hsp clock), because the 2 APIs enable
+   and disable IPU hsp clock which may cause IPU stops
+   running in ipuv3 fb probe function.
+2) Do not clear framebuffer content in probe function
+   if late init is set. This is to avoid bootloader
+   splashimage content is cleared.
+3) If late init is set, do not re-initialize and
+   unblank framebuffer in probe function, but initialize
+   and enable ipu display channel instead to enable
+   the ipu hsp clock. Refer to the code comment for
+   detail.
+4) Delay register IPU interrupts used by framebuffer
+   until IPU hsp clock is enabled by 3). As the APIs
+   to register IPU interrupts may enable and disable
+   IPU hsp clock as well.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit 926a6187d89afb5a37dc3b1f3c7bc5225742d09b)
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |  105 ++++++++++++++++++++++++++++----------
+ 1 files changed, 78 insertions(+), 27 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index a6b191b..8038f3d 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -71,6 +71,8 @@ struct mxcfb_info {
+ 	bool ipu_int_clk;
+ 	bool overlay;
+ 	bool alpha_chan_en;
++	bool late_init;
++	bool first_set_par;
+ 	dma_addr_t alpha_phy_addr0;
+ 	dma_addr_t alpha_phy_addr1;
+ 	void *alpha_virt_addr0;
+@@ -490,6 +492,17 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 			return -ENOMEM;
+ 	}
+ 
++	if (mxc_fbi->first_set_par) {
++		/*
++		 * Clear the screen in case uboot fb pixel format is not
++		 * the same to kernel fb pixel format.
++		 */
++		if (mxc_fbi->late_init)
++			memset((char *)fbi->screen_base, 0, fbi->fix.smem_len);
++
++		mxc_fbi->first_set_par = false;
++	}
++
+ 	if (mxc_fbi->alpha_chan_en) {
+ 		alpha_mem_len = fbi->var.xres * fbi->var.yres;
+ 		if ((!mxc_fbi->alpha_phy_addr0 && !mxc_fbi->alpha_phy_addr1) ||
+@@ -1995,6 +2008,51 @@ static int mxcfb_register(struct fb_info *fbi)
+ 		strcpy(fbi->fix.id, fg_id);
+ 	}
+ 
++	mxcfb_check_var(&fbi->var, fbi);
++
++	mxcfb_set_fix(fbi);
++
++	/* Added first mode to fbi modelist. */
++	if (!fbi->modelist.next || !fbi->modelist.prev)
++		INIT_LIST_HEAD(&fbi->modelist);
++	fb_var_to_videomode(&m, &fbi->var);
++	fb_add_videomode(&m, &fbi->modelist);
++
++	if (!mxcfbi->late_init) {
++		fbi->var.activate |= FB_ACTIVATE_FORCE;
++		console_lock();
++		fbi->flags |= FBINFO_MISC_USEREVENT;
++		ret = fb_set_var(fbi, &fbi->var);
++		fbi->flags &= ~FBINFO_MISC_USEREVENT;
++		console_unlock();
++
++		if (mxcfbi->next_blank == FB_BLANK_UNBLANK) {
++			console_lock();
++			fb_blank(fbi, FB_BLANK_UNBLANK);
++			console_unlock();
++		}
++	} else {
++		/*
++		 * Setup the channel again though bootloader
++		 * has done this, then set_par() can stop the
++		 * channel and re-initialize it. Moreover,
++		 * ipu_init_channel() enables ipu hsp clock,
++		 * so we may keep the clock on until user
++		 * space triggers set_par(), i.e., any ipu
++		 * interface which enables/disables ipu hsp
++		 * clock with pair(called in IPUv3 fb driver
++		 * or mxc v4l2 driver<probed after fb driver>)
++		 * cannot eventually disables the clock to
++		 * damage the channel.
++		 */
++		if (mxcfbi->next_blank == FB_BLANK_UNBLANK) {
++			console_lock();
++			_setup_disp_channel1(fbi);
++			ipu_enable_channel(mxcfbi->ipu, mxcfbi->ipu_ch);
++			console_unlock();
++		}
++	}
++
+ 	if (ipu_request_irq(mxcfbi->ipu, mxcfbi->ipu_ch_irq,
+ 		mxcfb_irq_handler, IPU_IRQF_ONESHOT, MXCFB_NAME, fbi) != 0) {
+ 		dev_err(fbi->device, "Error registering EOF irq handler.\n");
+@@ -2020,29 +2078,6 @@ static int mxcfb_register(struct fb_info *fbi)
+ 			goto err2;
+ 		}
+ 
+-	mxcfb_check_var(&fbi->var, fbi);
+-
+-	mxcfb_set_fix(fbi);
+-
+-	/*added first mode to fbi modelist*/
+-	if (!fbi->modelist.next || !fbi->modelist.prev)
+-		INIT_LIST_HEAD(&fbi->modelist);
+-	fb_var_to_videomode(&m, &fbi->var);
+-	fb_add_videomode(&m, &fbi->modelist);
+-
+-	fbi->var.activate |= FB_ACTIVATE_FORCE;
+-	console_lock();
+-	fbi->flags |= FBINFO_MISC_USEREVENT;
+-	ret = fb_set_var(fbi, &fbi->var);
+-	fbi->flags &= ~FBINFO_MISC_USEREVENT;
+-	console_unlock();
+-
+-	if (mxcfbi->next_blank == FB_BLANK_UNBLANK) {
+-		console_lock();
+-		fb_blank(fbi, FB_BLANK_UNBLANK);
+-		console_unlock();
+-	}
+-
+ 	ret = register_framebuffer(fbi);
+ 	if (ret < 0)
+ 		goto err3;
+@@ -2056,6 +2091,17 @@ err2:
+ err1:
+ 	ipu_free_irq(mxcfbi->ipu, mxcfbi->ipu_ch_irq, fbi);
+ err0:
++	if (mxcfbi->next_blank == FB_BLANK_UNBLANK) {
++		console_lock();
++		if (!mxcfbi->late_init)
++			fb_blank(fbi, FB_BLANK_POWERDOWN);
++		else {
++			ipu_disable_channel(mxcfbi->ipu, mxcfbi->ipu_ch,
++					    true);
++			ipu_uninit_channel(mxcfbi->ipu, mxcfbi->ipu_ch);
++		}
++		console_unlock();
++	}
+ 	return ret;
+ }
+ 
+@@ -2187,6 +2233,8 @@ static int mxcfb_probe(struct platform_device *pdev)
+ 
+ 	mxcfbi = (struct mxcfb_info *)fbi->par;
+ 	mxcfbi->ipu_int_clk = plat_data->int_clk;
++	mxcfbi->late_init = plat_data->late_init;
++	mxcfbi->first_set_par = true;
+ 	ret = mxcfb_dispdrv_init(pdev, fbi);
+ 	if (ret < 0)
+ 		goto init_dispdrv_failed;
+@@ -2203,7 +2251,9 @@ static int mxcfb_probe(struct platform_device *pdev)
+ 		fbi->fix.smem_len = res->end - res->start + 1;
+ 		fbi->fix.smem_start = res->start;
+ 		fbi->screen_base = ioremap(fbi->fix.smem_start, fbi->fix.smem_len);
+-		memset(fbi->screen_base, 0, fbi->fix.smem_len);
++		/* Do not clear the fb content drawn in bootloader. */
++		if (!mxcfbi->late_init)
++			memset(fbi->screen_base, 0, fbi->fix.smem_len);
+ 	}
+ 
+ 	mxcfbi->ipu = ipu_get_soc(mxcfbi->ipu_id);
+@@ -2224,13 +2274,14 @@ static int mxcfb_probe(struct platform_device *pdev)
+ 		else
+ 			mxcfbi->cur_blank = mxcfbi->next_blank = FB_BLANK_POWERDOWN;
+ 
+-		ipu_disp_set_global_alpha(mxcfbi->ipu, mxcfbi->ipu_ch, true, 0x80);
+-		ipu_disp_set_color_key(mxcfbi->ipu, mxcfbi->ipu_ch, false, 0);
+-
+ 		ret = mxcfb_register(fbi);
+ 		if (ret < 0)
+ 			goto mxcfb_register_failed;
+ 
++		ipu_disp_set_global_alpha(mxcfbi->ipu, mxcfbi->ipu_ch,
++					  true, 0x80);
++		ipu_disp_set_color_key(mxcfbi->ipu, mxcfbi->ipu_ch, false, 0);
++
+ 		res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
+ 		ret = mxcfb_setup_overlay(pdev, fbi, res);
+ 
+-- 
+1.7.7.4
+

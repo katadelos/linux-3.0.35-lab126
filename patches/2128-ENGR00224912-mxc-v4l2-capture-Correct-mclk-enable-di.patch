@@ -1,0 +1,409 @@
+From f9877d97cfa7b17ce5d4ac3df66b909376f2a16e Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Mon, 8 Oct 2012 13:53:46 +0800
+Subject: [PATCH 2128/2463] ENGR00224912 mxc v4l2 capture:Correct mclk
+ enable/disable
+
+1) Change to enable/disable mclk only in open, release,
+suspend and resume functions, since we may simply think that
+sensor or mclk will be used soon after cam->open_count is non-zero.
+2) Fix a bug when calling ipu_csi_enable_mclk_if() with wrong
+parameter(cam->csi should be cam->mclk_source) in mxc_v4l2_close()
+and in mxc_v4l2_s_ctrl() with V4L2_CID_MXC_SWITCH_CAM control id.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit be689b81ac24c0a4373a989664ec51ad77db0ced)
+---
+ .../media/video/mxc/capture/ipu_bg_overlay_sdc.c   |    3 -
+ drivers/media/video/mxc/capture/ipu_csi_enc.c      |    6 +-
+ .../media/video/mxc/capture/ipu_fg_overlay_sdc.c   |    3 -
+ drivers/media/video/mxc/capture/ipu_prp_enc.c      |    5 -
+ drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c   |    4 -
+ .../media/video/mxc/capture/ipu_prp_vf_sdc_bg.c    |    4 -
+ drivers/media/video/mxc/capture/ipu_still.c        |    5 +-
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |   80 ++++++++++---------
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.h |    1 +
+ 9 files changed, 45 insertions(+), 66 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ipu_bg_overlay_sdc.c b/drivers/media/video/mxc/capture/ipu_bg_overlay_sdc.c
+index 1a02297..6823e00 100644
+--- a/drivers/media/video/mxc/capture/ipu_bg_overlay_sdc.c
++++ b/drivers/media/video/mxc/capture/ipu_bg_overlay_sdc.c
+@@ -161,8 +161,6 @@ static int csi_enc_setup(cam_data *cam)
+ 		return -EINVAL;
+ 	}
+ 
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_ENC, cam->csi, true, true);
+-
+ #ifdef CONFIG_MXC_MIPI_CSI2
+ 	mipi_csi2_info = mipi_csi2_get_info();
+ 
+@@ -420,7 +418,6 @@ static int bg_overlay_stop(void *private)
+ 
+ 	flush_work_sync(&cam->csi_work_struct);
+ 	cancel_work_sync(&cam->csi_work_struct);
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_VF, cam->csi, false, false);
+ 
+ 	if (cam->vf_bufs_vaddr[0]) {
+ 		dma_free_coherent(0, cam->vf_bufs_size[0],
+diff --git a/drivers/media/video/mxc/capture/ipu_csi_enc.c b/drivers/media/video/mxc/capture/ipu_csi_enc.c
+index 0261a7e..80ef812 100644
+--- a/drivers/media/video/mxc/capture/ipu_csi_enc.c
++++ b/drivers/media/video/mxc/capture/ipu_csi_enc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2009-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2009-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -127,8 +127,6 @@ static int csi_enc_setup(cam_data *cam)
+ 		return -EINVAL;
+ 	}
+ 
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_ENC, cam->csi, true, true);
+-
+ #ifdef CONFIG_MXC_MIPI_CSI2
+ 	mipi_csi2_info = mipi_csi2_get_info();
+ 
+@@ -313,8 +311,6 @@ static int csi_enc_disabling_tasks(void *private)
+ 	}
+ #endif
+ 
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_ENC, cam->csi, false, false);
+-
+ 	return err;
+ }
+ 
+diff --git a/drivers/media/video/mxc/capture/ipu_fg_overlay_sdc.c b/drivers/media/video/mxc/capture/ipu_fg_overlay_sdc.c
+index 312462a..4f91311d 100644
+--- a/drivers/media/video/mxc/capture/ipu_fg_overlay_sdc.c
++++ b/drivers/media/video/mxc/capture/ipu_fg_overlay_sdc.c
+@@ -170,8 +170,6 @@ static int csi_enc_setup(cam_data *cam)
+ 		return -EINVAL;
+ 	}
+ 
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_ENC, cam->csi, true, true);
+-
+ #ifdef CONFIG_MXC_MIPI_CSI2
+ 	mipi_csi2_info = mipi_csi2_get_info();
+ 
+@@ -510,7 +508,6 @@ static int foreground_stop(void *private)
+ 
+ 	flush_work_sync(&cam->csi_work_struct);
+ 	cancel_work_sync(&cam->csi_work_struct);
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_VF, cam->csi, false, false);
+ 
+ 	if (cam->vf_bufs_vaddr[0]) {
+ 		dma_free_coherent(0, cam->vf_bufs_size[0],
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_enc.c b/drivers/media/video/mxc/capture/ipu_prp_enc.c
+index 02515b3..576442f 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_enc.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_enc.c
+@@ -170,9 +170,6 @@ static int prp_enc_setup(cam_data *cam)
+ 		return err;
+ 	}
+ 
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_ENC,
+-				cam->mclk_source, true, true);
+-
+ 	grotation = cam->rotation;
+ 	if (cam->rotation >= IPU_ROTATE_90_RIGHT) {
+ 		if (cam->rot_enc_bufs_vaddr[0]) {
+@@ -476,8 +473,6 @@ static int prp_enc_disabling_tasks(void *private)
+ 	}
+ #endif
+ 
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_ENC, cam->csi, false, false);
+-
+ 	return err;
+ }
+ 
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c
+index 80129ca..305c447 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc.c
+@@ -203,8 +203,6 @@ static int prpvf_start(void *private)
+ 	if (err != 0)
+ 		goto out_5;
+ 
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_VF, cam->csi, true, true);
+-
+ 	if (cam->vf_bufs_vaddr[0]) {
+ 		dma_free_coherent(0, cam->vf_bufs_size[0],
+ 				  cam->vf_bufs_vaddr[0],
+@@ -455,8 +453,6 @@ static int prpvf_stop(void *private)
+ 	}
+ #endif
+ 
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_VF, cam->csi, false, false);
+-
+ 	if (cam->vf_bufs_vaddr[0]) {
+ 		dma_free_coherent(0, cam->vf_bufs_size[0],
+ 				  cam->vf_bufs_vaddr[0],
+diff --git a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
+index ed99d95..0df4661 100644
+--- a/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
++++ b/drivers/media/video/mxc/capture/ipu_prp_vf_sdc_bg.c
+@@ -188,8 +188,6 @@ static int prpvf_start(void *private)
+ 	if (err != 0)
+ 		goto out_4;
+ 
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_VF, cam->csi, true, true);
+-
+ 	if (cam->vf_bufs_vaddr[0]) {
+ 		dma_free_coherent(0, cam->vf_bufs_size[0],
+ 				  cam->vf_bufs_vaddr[0], cam->vf_bufs[0]);
+@@ -387,8 +385,6 @@ static int prpvf_stop(void *private)
+ 	}
+ #endif
+ 
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_VF, cam->csi, false, false);
+-
+ 	if (cam->vf_bufs_vaddr[0]) {
+ 		dma_free_coherent(0, cam->vf_bufs_size[0],
+ 				  cam->vf_bufs_vaddr[0], cam->vf_bufs[0]);
+diff --git a/drivers/media/video/mxc/capture/ipu_still.c b/drivers/media/video/mxc/capture/ipu_still.c
+index f74d540..a219f3b 100644
+--- a/drivers/media/video/mxc/capture/ipu_still.c
++++ b/drivers/media/video/mxc/capture/ipu_still.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -120,8 +120,6 @@ static int prp_still_start(void *private)
+ 		return -EINVAL;
+ 	}
+ 
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_RAW, cam->csi, true, true);
+-
+ 	memset(&params, 0, sizeof(params));
+ 	err = ipu_init_channel(cam->ipu, CSI_MEM, &params);
+ 	if (err != 0)
+@@ -194,7 +192,6 @@ static int prp_still_stop(void *private)
+ 	ipu_disable_csi(cam->ipu, cam->csi);
+ 	ipu_disable_channel(cam->ipu, CSI_MEM, true);
+ 	ipu_uninit_channel(cam->ipu, CSI_MEM);
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_RAW, cam->csi, false, false);
+ 
+ 	return err;
+ }
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index 14b73b8..a451dfb 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -1149,11 +1149,7 @@ static int mxc_v4l2_s_ctrl(cam_data *cam, struct v4l2_control *c)
+ 	case V4L2_CID_HUE:
+ 		if (cam->sensor) {
+ 			cam->hue = c->value;
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-					       true, true);
+ 			ret = vidioc_int_s_ctrl(cam->sensor, c);
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-					       false, false);
+ 		} else {
+ 			pr_err("ERROR: v4l2 capture: slave not found!\n");
+ 			ret = -ENODEV;
+@@ -1162,11 +1158,7 @@ static int mxc_v4l2_s_ctrl(cam_data *cam, struct v4l2_control *c)
+ 	case V4L2_CID_CONTRAST:
+ 		if (cam->sensor) {
+ 			cam->contrast = c->value;
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-					       true, true);
+ 			ret = vidioc_int_s_ctrl(cam->sensor, c);
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-					       false, false);
+ 		} else {
+ 			pr_err("ERROR: v4l2 capture: slave not found!\n");
+ 			ret = -ENODEV;
+@@ -1175,11 +1167,7 @@ static int mxc_v4l2_s_ctrl(cam_data *cam, struct v4l2_control *c)
+ 	case V4L2_CID_BRIGHTNESS:
+ 		if (cam->sensor) {
+ 			cam->bright = c->value;
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-					       true, true);
+ 			ret = vidioc_int_s_ctrl(cam->sensor, c);
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-					       false, false);
+ 		} else {
+ 			pr_err("ERROR: v4l2 capture: slave not found!\n");
+ 			ret = -ENODEV;
+@@ -1188,11 +1176,7 @@ static int mxc_v4l2_s_ctrl(cam_data *cam, struct v4l2_control *c)
+ 	case V4L2_CID_SATURATION:
+ 		if (cam->sensor) {
+ 			cam->saturation = c->value;
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-					       true, true);
+ 			ret = vidioc_int_s_ctrl(cam->sensor, c);
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-					       false, false);
+ 		} else {
+ 			pr_err("ERROR: v4l2 capture: slave not found!\n");
+ 			ret = -ENODEV;
+@@ -1201,11 +1185,7 @@ static int mxc_v4l2_s_ctrl(cam_data *cam, struct v4l2_control *c)
+ 	case V4L2_CID_RED_BALANCE:
+ 		if (cam->sensor) {
+ 			cam->red = c->value;
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-					       true, true);
+ 			ret = vidioc_int_s_ctrl(cam->sensor, c);
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-					       false, false);
+ 		} else {
+ 			pr_err("ERROR: v4l2 capture: slave not found!\n");
+ 			ret = -ENODEV;
+@@ -1214,11 +1194,7 @@ static int mxc_v4l2_s_ctrl(cam_data *cam, struct v4l2_control *c)
+ 	case V4L2_CID_BLUE_BALANCE:
+ 		if (cam->sensor) {
+ 			cam->blue = c->value;
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-					       true, true);
+ 			ret = vidioc_int_s_ctrl(cam->sensor, c);
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-					       false, false);
+ 		} else {
+ 			pr_err("ERROR: v4l2 capture: slave not found!\n");
+ 			ret = -ENODEV;
+@@ -1227,11 +1203,7 @@ static int mxc_v4l2_s_ctrl(cam_data *cam, struct v4l2_control *c)
+ 	case V4L2_CID_EXPOSURE:
+ 		if (cam->sensor) {
+ 			cam->ae_mode = c->value;
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-					       true, true);
+ 			ret = vidioc_int_s_ctrl(cam->sensor, c);
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-					       false, false);
+ 		} else {
+ 			pr_err("ERROR: v4l2 capture: slave not found!\n");
+ 			ret = -ENODEV;
+@@ -1249,16 +1221,26 @@ static int mxc_v4l2_s_ctrl(cam_data *cam, struct v4l2_control *c)
+ 				if (i != c->value) {
+ 					vidioc_int_dev_exit(cam->all_sensors[i]);
+ 					vidioc_int_s_power(cam->all_sensors[i], 0);
++					if (cam->mclk_on[cam->mclk_source]) {
++						ipu_csi_enable_mclk_if(cam->ipu,
++								CSI_MCLK_I2C,
++								cam->mclk_source,
++								false, false);
++						cam->mclk_on[cam->mclk_source] =
++									false;
++					}
+ 				}
+ 			}
+ 			sensor_data = cam->all_sensors[c->value]->priv;
+ 			if (sensor_data->io_init)
+ 				sensor_data->io_init();
+ 			cam->sensor = cam->all_sensors[c->value];
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi, true, true);
++			cam->mclk_source = sensor_data->mclk_source;
++			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C,
++					       cam->mclk_source, true, true);
++			cam->mclk_on[cam->mclk_source] = true;
+ 			vidioc_int_s_power(cam->sensor, 1);
+ 			vidioc_int_dev_init(cam->sensor);
+-			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi, false, false);
+ 		}
+ 		break;
+ 	default:
+@@ -1324,9 +1306,7 @@ static int mxc_v4l2_s_param(cam_data *cam, struct v4l2_streamparm *parm)
+ 			current_fps, parm_fps);
+ 
+ 	/* This will change any camera settings needed. */
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi, true, true);
+ 	err = vidioc_int_s_parm(cam->sensor, parm);
+-	ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi, false, false);
+ 	if (err) {
+ 		pr_err("%s: vidioc_int_s_parm returned an error %d\n",
+ 			__func__, err);
+@@ -1697,8 +1677,12 @@ static int mxc_v4l_open(struct file *file)
+ 					cam_fmt.fmt.pix.pixelformat,
+ 					csi_param);
+ 
+-		ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->mclk_source,
+-				       true, true);
++		if (!cam->mclk_on[cam->mclk_source]) {
++			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C,
++					       cam->mclk_source,
++					       true, true);
++			cam->mclk_on[cam->mclk_source] = true;
++		}
+ 		vidioc_int_s_power(cam->sensor, 1);
+ 		vidioc_int_init(cam->sensor);
+ 		vidioc_int_dev_init(cam->sensor);
+@@ -1746,8 +1730,12 @@ static int mxc_v4l_close(struct file *file)
+ 
+ 	if (--cam->open_count == 0) {
+ 		vidioc_int_s_power(cam->sensor, 0);
+-		ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-			false, false);
++		if (cam->mclk_on[cam->mclk_source]) {
++			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C,
++					       cam->mclk_source,
++					       false, false);
++			cam->mclk_on[cam->mclk_source] = false;
++		}
+ 
+ 		wait_event_interruptible(cam->power_queue,
+ 					 cam->low_power == false);
+@@ -2654,6 +2642,7 @@ static void init_camera_struct(cam_data *cam, struct platform_device *pdev)
+ 
+ 	cam->csi = pdata->csi;
+ 	cam->mclk_source = pdata->mclk_source;
++	cam->mclk_on[cam->mclk_source] = false;
+ 
+ 	cam->enc_callback = camera_callback;
+ 	init_waitqueue_head(&cam->power_queue);
+@@ -2807,8 +2796,15 @@ static int mxc_v4l2_suspend(struct platform_device *pdev, pm_message_t state)
+ 		cam->enc_disable(cam);
+ 	}
+ 
+-	if (cam->sensor && cam->open_count)
++	if (cam->sensor && cam->open_count) {
++		if (cam->mclk_on[cam->mclk_source]) {
++			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C,
++					       cam->mclk_source,
++					       false, false);
++			cam->mclk_on[cam->mclk_source] = false;
++		}
+ 		vidioc_int_s_power(cam->sensor, 0);
++	}
+ 
+ 	up(&cam->busy_lock);
+ 
+@@ -2839,9 +2835,17 @@ static int mxc_v4l2_resume(struct platform_device *pdev)
+ 	cam->low_power = false;
+ 	wake_up_interruptible(&cam->power_queue);
+ 
+-	if (cam->sensor && cam->open_count)
++	if (cam->sensor && cam->open_count) {
+ 		vidioc_int_s_power(cam->sensor, 1);
+ 
++		if (!cam->mclk_on[cam->mclk_source]) {
++			ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C,
++					       cam->mclk_source,
++					       true, true);
++			cam->mclk_on[cam->mclk_source] = true;
++		}
++	}
++
+ 	if (cam->overlay_on == true)
+ 		start_preview(cam);
+ 	if (cam->capture_on == true)
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+index 034fd16..d2efbe8 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.h
+@@ -198,6 +198,7 @@ typedef struct _cam_data {
+ 	wait_queue_head_t power_queue;
+ 	unsigned int csi;
+ 	u8 mclk_source;
++	bool mclk_on[2];	/* two mclk sources at most now */
+ 	int current_input;
+ 
+ 	int local_buf_num;
+-- 
+1.7.7.4
+

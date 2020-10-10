@@ -1,0 +1,141 @@
+From b03145e1eb0c7dbc90918518114577bf33943a18 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Mon, 14 May 2012 21:11:40 +0800
+Subject: [PATCH 1454/2463] ENGR00182324-2 - MX6SL MSL: Add Support for
+ i.MX6SoloLite SoC revision
+
+Add i.MX 6SoloLite SoC revision support
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx6/cpu.c              |   22 +++++++++++++++++++++-
+ arch/arm/mach-mx6/mm.c               |   11 ++++++++++-
+ arch/arm/plat-mxc/include/mach/mx6.h |    1 +
+ arch/arm/plat-mxc/include/mach/mxc.h |    5 ++++-
+ 4 files changed, 36 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index 0635367..0f1b032 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -46,13 +46,17 @@ void __iomem *ccm_base;
+ 
+ static int cpu_silicon_rev = -1;
+ #define MX6_USB_ANALOG_DIGPROG  0x260
++#define MX6SL_USB_ANALOG_DIGPROG  0x280
+ 
+ static int mx6_get_srev(void)
+ {
+ 	void __iomem *anatop = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
+ 	u32 rev;
++	if (cpu_is_mx6sl())
++		rev = __raw_readl(anatop + MX6SL_USB_ANALOG_DIGPROG);
++	else
++		rev = __raw_readl(anatop + MX6_USB_ANALOG_DIGPROG);
+ 
+-	rev = __raw_readl(anatop + MX6_USB_ANALOG_DIGPROG);
+ 	rev &= 0xff;
+ 
+ 	if (rev == 0)
+@@ -95,6 +99,22 @@ int mx6dl_revision(void)
+ }
+ EXPORT_SYMBOL(mx6dl_revision);
+ 
++/*
++ * Returns:
++ *	the silicon revision of the cpu
++ */
++int mx6sl_revision(void)
++{
++	if (!cpu_is_mx6sl())
++		return -EINVAL;
++
++	if (cpu_silicon_rev == -1)
++		cpu_silicon_rev = mx6_get_srev();
++
++	return cpu_silicon_rev;
++}
++EXPORT_SYMBOL(mx6sl_revision);
++
+ static int __init post_cpu_init(void)
+ {
+ 	unsigned int reg;
+diff --git a/arch/arm/mach-mx6/mm.c b/arch/arm/mach-mx6/mm.c
+index c706c49..2671020 100644
+--- a/arch/arm/mach-mx6/mm.c
++++ b/arch/arm/mach-mx6/mm.c
+@@ -30,6 +30,7 @@
+ #include <mach/common.h>
+ #include <mach/iomux-v3.h>
+ #include <asm/hardware/cache-l2x0.h>
++#include "crm_regs.h"
+ 
+ /*!
+  * This structure defines the MX6 memory map.
+@@ -59,9 +60,17 @@ static struct map_desc mx6_io_desc[] __initdata = {
+ 
+ static void mx6_set_cpu_type(void)
+ {
+-	u32 cpu_type = readl(IO_ADDRESS(ANATOP_BASE_ADDR + 0x260));
++	u32 cpu_type = readl(IO_ADDRESS(ANATOP_BASE_ADDR + 0x280));
+ 
+ 	cpu_type >>= 16;
++	if (cpu_type == 0x60) {
++		mxc_set_cpu_type(MXC_CPU_MX6SL);
++		imx_print_silicon_rev("i.MX6SoloLite", mx6sl_revision());
++		return;
++	}
++
++	cpu_type = readl(IO_ADDRESS(ANATOP_BASE_ADDR + 0x260));
++	cpu_type >>= 16;
+ 	if (cpu_type == 0x63) {
+ 		mxc_set_cpu_type(MXC_CPU_MX6Q);
+ 		imx_print_silicon_rev("i.MX6Q", mx6q_revision());
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index cc2eb7f..ca4daec 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -551,6 +551,7 @@
+ #if !defined(__ASSEMBLY__) && !defined(__MXC_BOOT_UNCOMPRESS)
+ extern int mx6q_revision(void);
+ extern int mx6dl_revision(void);
++extern int mx6sl_revision(void);
+ #endif
+ 
+ #endif				/*  __ASM_ARCH_MXC_MX6_H__ */
+diff --git a/arch/arm/plat-mxc/include/mach/mxc.h b/arch/arm/plat-mxc/include/mach/mxc.h
+index 7c2fa99..2f23c72 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc.h
++++ b/arch/arm/plat-mxc/include/mach/mxc.h
+@@ -38,6 +38,7 @@
+ #define MXC_CPU_MX53		53
+ #define MXC_CPU_MX6Q		63
+ #define MXC_CPU_MX6DL		61
++#define MXC_CPU_MX6SL		60
+ 
+ #define IMX_CHIP_REVISION_1_0		0x10
+ #define IMX_CHIP_REVISION_1_1		0x11
+@@ -234,9 +235,11 @@ extern unsigned int __mxc_cpu_type;
+ #  define mxc_cpu_type __mxc_cpu_type
+ # define cpu_is_mx6q()		(mxc_cpu_type == MXC_CPU_MX6Q)
+ # define cpu_is_mx6dl()		(mxc_cpu_type == MXC_CPU_MX6DL)
++# define cpu_is_mx6sl()		(mxc_cpu_type == MXC_CPU_MX6SL)
+ #else
+ # define cpu_is_mx6q()		(0)
+ # define cpu_is_mx6dl()		(0)
++# define cpu_is_mx6sl()		(0)
+ #endif
+ 
+ #ifndef __ASSEMBLY__
+@@ -279,7 +282,7 @@ extern int tzic_enable_wake(int is_idle);
+ #define cpu_is_mx5()    (cpu_is_mx51() || cpu_is_mx53() || cpu_is_mx50())
+ #define cpu_is_mx3()	(cpu_is_mx31() || cpu_is_mx35())
+ #define cpu_is_mx2()	(cpu_is_mx21() || cpu_is_mx27())
+-#define cpu_is_mx6()	(cpu_is_mx6q() || cpu_is_mx6dl())
++#define cpu_is_mx6()	(cpu_is_mx6q() || cpu_is_mx6dl() || cpu_is_mx6sl())
+ 
+ #define MXC_PGCR_PCR		1
+ #define MXC_SRPGCR_PCR		1
+-- 
+1.7.7.4
+

@@ -1,0 +1,82 @@
+From 9a827fa85170d4a29244c29b4fed33dbfa7503a8 Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Tue, 1 Nov 2011 14:48:44 -0500
+Subject: [PATCH 0527/2463] ENGR00161192 [MX6 Sabre-lite] Add dummy regulators
+ for MMC and SD drivers
+
+Add dummy regulators for MMC and SD drivers.
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c      |    3 +--
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |   26 ++++++++++++++++++++++++++
+ 2 files changed, 27 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 1ef4557..14bc8f2 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -1130,7 +1130,6 @@ static int imx6q_init_audio(void)
+ 	clk_set_parent(esai_clk, pll3_pfd);
+ 	clk_set_rate(esai_clk, 101647058);
+ 
+-	platform_device_register(&arm2_vmmc_reg_devices);
+ #ifdef CONFIG_SND_SOC_SGTL5000
+ 	platform_device_register(&sgtl5000_arm2_vdda_reg_devices);
+ 	platform_device_register(&sgtl5000_arm2_vddio_reg_devices);
+@@ -1299,7 +1298,7 @@ static void __init mx6_board_init(void)
+ 	imx6q_add_ahci(0, &mx6q_arm2_sata_data);
+ 	imx6q_add_vpu();
+ 	imx6q_init_audio();
+-
++	platform_device_register(&arm2_vmmc_reg_devices);
+ 	imx_asrc_data.asrc_core_clk = clk_get(NULL, "asrc_clk");
+ 	imx_asrc_data.asrc_audio_clk = clk_get(NULL, "asrc_serial_clk");
+ 	imx6q_add_asrc(&imx_asrc_data);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index be0a55b..c39d94b 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -641,6 +641,31 @@ static const struct pm_platform_data mx6q_sabrelite_pm_data __initconst = {
+ 	.suspend_exit = sabrelite_suspend_exit,
+ };
+ 
++static struct regulator_consumer_supply sabrelite_vmmc_consumers[] = {
++	REGULATOR_SUPPLY("vmmc", "sdhci-esdhc-imx.2"),
++	REGULATOR_SUPPLY("vmmc", "sdhci-esdhc-imx.3"),
++};
++
++static struct regulator_init_data sabrelite_vmmc_init = {
++	.num_consumer_supplies = ARRAY_SIZE(sabrelite_vmmc_consumers),
++	.consumer_supplies = sabrelite_vmmc_consumers,
++};
++
++static struct fixed_voltage_config sabrelite_vmmc_reg_config = {
++	.supply_name		= "vmmc",
++	.microvolts		= 3300000,
++	.gpio			= -1,
++	.init_data		= &sabrelite_vmmc_init,
++};
++
++static struct platform_device sabrelite_vmmc_reg_devices = {
++	.name	= "reg-fixed-voltage",
++	.id	= 3,
++	.dev	= {
++		.platform_data = &sabrelite_vmmc_reg_config,
++	},
++};
++
+ #ifdef CONFIG_SND_SOC_SGTL5000
+ 
+ static struct regulator_consumer_supply sgtl5000_sabrelite_consumer_vdda = {
+@@ -820,6 +845,7 @@ static void __init mx6_sabrelite_board_init(void)
+ 	imx6q_sabrelite_init_usb();
+ 	imx6q_add_vpu();
+ 	imx6q_init_audio();
++	platform_device_register(&sabrelite_vmmc_reg_devices);
+ 	/* release USB Hub reset */
+ 	gpio_set_value(MX6Q_SABRELITE_USB_HUB_RESET, 1);
+ 
+-- 
+1.7.7.4
+

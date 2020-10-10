@@ -1,0 +1,41 @@
+From fa80f2ae8179214e0e7210815a2974a47d7b9daa Mon Sep 17 00:00:00 2001
+From: Adrian Alonso <aalonso@freescale.com>
+Date: Wed, 25 Apr 2012 18:03:50 -0500
+Subject: [PATCH 1374/2463] ENGR00180236: mxc_spdif add spdif_clk error check
+
+* Add get_clk clock error check
+  abort driver probe if wrong clock.
+
+Signed-off-by: Adrian Alonso <aalonso@freescale.com>
+---
+ sound/soc/codecs/mxc_spdif.c |    7 ++++++-
+ 1 files changed, 6 insertions(+), 1 deletions(-)
+
+diff --git a/sound/soc/codecs/mxc_spdif.c b/sound/soc/codecs/mxc_spdif.c
+index 4d8e83b..9a538c7 100644
+--- a/sound/soc/codecs/mxc_spdif.c
++++ b/sound/soc/codecs/mxc_spdif.c
+@@ -1244,6 +1244,11 @@ static int __devinit mxc_spdif_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	plat_data->spdif_clk = clk_get(&pdev->dev, NULL);
++	if (IS_ERR(plat_data->spdif_clk)) {
++		ret = PTR_ERR(plat_data->spdif_clk);
++		dev_err(&pdev->dev, "can't get clock: %d\n", ret);
++		goto failed_clk;
++	}
+ 
+ 	atomic_set(&spdif_priv->dpll_locked, 0);
+ 
+@@ -1277,7 +1282,7 @@ static int __devinit mxc_spdif_probe(struct platform_device *pdev)
+ card_err:
+ 	clk_put(plat_data->spdif_clk);
+ 	clk_disable(plat_data->spdif_core_clk);
+-
++failed_clk:
+ 	platform_set_drvdata(pdev, NULL);
+ 	kfree(spdif_priv);
+ 
+-- 
+1.7.7.4
+

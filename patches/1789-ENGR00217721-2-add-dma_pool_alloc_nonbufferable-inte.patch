@@ -1,0 +1,46 @@
+From be3c277b896011da1b1be5aff4103d5f3ac99253 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Fri, 20 Jul 2012 17:51:22 +0800
+Subject: [PATCH 1789/2463] ENGR00217721-2 add dma_pool_alloc_nonbufferable
+ interface
+
+include/linux head file part
+
+- After USB driver prime a bulk transfer(whatever IN or OUT, take
+  OUT for example) on ep1, only one dTD is primed, an USB Interrupt
+  (bit 0 of USBSTS) will be issued, and find that endptcomplete
+  register is 0x2 which means an OUT transfer on ep1 is completed,
+  at this time the ep1 out queue head status is 0x1e18000, and next
+  dtd pointer is 0x1 which means transfer is done and everything is
+  OK, while the dTD token status is 0x2008080 which means this dTD
+  is still active, not completed yet.
+- Audio SDMA and Ethernet have the similar issue
+- root cause is not found yet
+- work around:
+  change the non-cacheable bufferable memory to non-cacheable
+  non-bufferable memory to make this issue disappear.
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ include/linux/dmapool.h |    5 +++++
+ 1 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/include/linux/dmapool.h b/include/linux/dmapool.h
+index 022e34f..4509501 100644
+--- a/include/linux/dmapool.h
++++ b/include/linux/dmapool.h
+@@ -22,6 +22,11 @@ void dma_pool_destroy(struct dma_pool *pool);
+ void *dma_pool_alloc(struct dma_pool *pool, gfp_t mem_flags,
+ 		     dma_addr_t *handle);
+ 
++#ifdef CONFIG_FSL_UTP
++void *dma_pool_alloc_nonbufferable(struct dma_pool *pool, gfp_t mem_flags,
++		     dma_addr_t *handle);
++#endif
++
+ void dma_pool_free(struct dma_pool *pool, void *vaddr, dma_addr_t addr);
+ 
+ /*
+-- 
+1.7.7.4
+

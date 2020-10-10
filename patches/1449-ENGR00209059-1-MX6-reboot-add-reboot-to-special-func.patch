@@ -1,0 +1,193 @@
+From a1c0e62f7d4a270924762fda1f5753a05416c7d9 Mon Sep 17 00:00:00 2001
+From: Zhang Jiejing <jiejing.zhang@freescale.com>
+Date: Mon, 14 May 2012 14:22:11 +0800
+Subject: [PATCH 1449/2463] ENGR00209059-1 MX6: reboot: add reboot to special
+ function
+
+add reboot to special function like mfg download mode,
+android fastboot, recovery mode.
+
+It use ASRC register to enter mfgtool download mode and other function.
+For android fastboot, recovery function it use ASRC_GPR10 bit 7-8 bit,
+it will checked in uboot and clear after read.
+
+Add this feature to improve recovery function, to avoid infinit looping
+enter recovery mode if some thing goes wrong in fastboot mode.
+Also add convient function for developer.
+
+usage:
+
+download mode: "reboot download"
+fastboot     : "reboot fastboot"
+recovery mode: "reboot recovery"
+
+Signed-off-by: Zhang Jiejing <jiejing.zhang@freescale.com>
+---
+ arch/arm/mach-mx6/system.c           |   66 ++++++++++++++++++++++++++++++++++
+ arch/arm/plat-mxc/Kconfig            |   11 ++++++
+ arch/arm/plat-mxc/include/mach/mx6.h |    3 ++
+ arch/arm/plat-mxc/system.c           |   28 ++++++++++++++
+ 4 files changed, 108 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 37f1b2e..fe9ab8e 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -268,6 +268,72 @@ static int _mxs_reset_block(void __iomem *hwreg, int just_enable)
+ 	return r;
+ }
+ 
++
++#define BOOT_MODE_SERIAL_ROM			(0x00000030)
++#define PERSIST_WATCHDOG_RESET_BOOT		(0x10000000)
++/*BOOT_CFG1[7..4] = 0x3 Boot from Serial ROM (I2C/SPI)*/
++
++#ifdef CONFIG_MXC_REBOOT_MFGMODE
++void do_switch_mfgmode(void)
++{
++	u32 reg;
++
++	/*
++	 * During reset, if GPR10[28] is 1, ROM will copy GPR9[25:0]
++	 * to SBMR1, which will determine what is the boot device.
++	 * Here SERIAL_ROM mode is selected
++	 */
++	reg = __raw_readl(SRC_BASE_ADDR + SRC_GPR9);
++	reg |= BOOT_MODE_SERIAL_ROM;
++	__raw_writel(reg, SRC_BASE_ADDR + SRC_GPR9);
++
++	reg = __raw_readl(SRC_BASE_ADDR + SRC_GPR10);
++	reg |= PERSIST_WATCHDOG_RESET_BOOT;
++	__raw_writel(reg, SRC_BASE_ADDR + SRC_GPR10);
++
++}
++
++void mxc_clear_mfgmode(void)
++{
++	u32 reg;
++	reg = __raw_readl(SRC_BASE_ADDR + SRC_GPR9);
++
++	reg &= ~BOOT_MODE_SERIAL_ROM;
++	__raw_writel(reg, SRC_BASE_ADDR + SRC_GPR9);
++
++	reg = __raw_readl(SRC_BASE_ADDR + SRC_GPR10);
++	reg &= ~PERSIST_WATCHDOG_RESET_BOOT;
++	__raw_writel(reg, SRC_BASE_ADDR + SRC_GPR10);
++}
++#endif
++
++#ifdef CONFIG_MXC_REBOOT_ANDROID_CMD
++/* This function will set a bit on SRC_GPR10[7-8] bits to enter
++ * special boot mode.  These bits will not clear by watchdog reset, so
++ * it can be checked by bootloader to choose enter different mode.*/
++
++#define ANDROID_RECOVERY_BOOT  (1 << 7)
++#define ANDROID_FASTBOOT_BOOT  (1 << 8)
++
++void do_switch_recovery(void)
++{
++	u32 reg;
++
++	reg = __raw_readl(SRC_BASE_ADDR + SRC_GPR10);
++	reg |= ANDROID_RECOVERY_BOOT;
++	__raw_writel(reg, SRC_BASE_ADDR + SRC_GPR10);
++}
++
++void do_switch_fastboot(void)
++{
++	u32 reg;
++
++	reg = __raw_readl(SRC_BASE_ADDR + SRC_GPR10);
++	reg |= ANDROID_FASTBOOT_BOOT;
++	__raw_writel(reg, SRC_BASE_ADDR + SRC_GPR10);
++}
++#endif
++
+ int mxs_reset_block(void __iomem *hwreg)
+ {
+ 	return _mxs_reset_block(hwreg, false);
+diff --git a/arch/arm/plat-mxc/Kconfig b/arch/arm/plat-mxc/Kconfig
+index e708ed4..32408ed 100755
+--- a/arch/arm/plat-mxc/Kconfig
++++ b/arch/arm/plat-mxc/Kconfig
+@@ -109,6 +109,17 @@ config MXC_DEBUG_BOARD
+ config HAVE_EPIT
+ 	bool
+ 
++config MXC_REBOOT_MFGMODE
++       bool "Enable reboot to MFG mode function"
++       help
++          Enable this config to perform "reboot download" to enter download mode.
++
++config MXC_REBOOT_ANDROID_CMD
++       bool "Enable reboot to android recovery and android fastboot"
++       help
++           Enable this config to use "reboot fastboot", "reboot recovery" to
++	   enter fastboot and recovery mode.
++
+ config MXC_USE_EPIT
+ 	bool "Use EPIT instead of GPT"
+ 	depends on HAVE_EPIT
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 79093aa..3424c54 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -269,6 +269,9 @@
+ #define AIPS2_SIZE			SZ_1M
+ #define ARM_PERIPHBASE_SIZE		(SZ_8K + SZ_4K)
+ 
++#define SRC_GPR9			0x40
++#define SRC_GPR10			0x44
++
+ /* GPC offsets */
+ #define MXC_GPC_CNTR_OFFSET		0x0
+ 
+diff --git a/arch/arm/plat-mxc/system.c b/arch/arm/plat-mxc/system.c
+index d3b77ab..a2830bd 100644
+--- a/arch/arm/plat-mxc/system.c
++++ b/arch/arm/plat-mxc/system.c
+@@ -32,6 +32,32 @@
+ 
+ static void __iomem *wdog_base;
+ 
++#ifdef CONFIG_MXC_REBOOT_MFGMODE
++void do_switch_mfgmode(void);
++void mxc_clear_mfgmode(void);
++#else
++void do_switch_mfgmode() {}
++void mxc_clear_mfgmode() {}
++#endif
++
++#ifdef CONFIG_MXC_REBOOT_ANDROID_CMD
++void do_switch_recovery(void);
++void do_switch_fastboot(void);
++#else
++void do_switch_recovery() {}
++void do_switch_fastboot() {}
++#endif
++
++static void arch_reset_special_mode(char mode, const char *cmd)
++{
++	if (strcmp(cmd, "download") == 0)
++		do_switch_mfgmode();
++	else if (strcmp(cmd, "recovery") == 0)
++		do_switch_recovery();
++	else if (strcmp(cmd, "fastboot") == 0)
++		do_switch_fastboot();
++}
++
+ /*
+  * Reset the system. It is called by machine_restart().
+  */
+@@ -39,6 +65,8 @@ void arch_reset(char mode, const char *cmd)
+ {
+ 	unsigned int wcr_enable;
+ 
++	arch_reset_special_mode(mode, cmd);
++
+ #ifdef CONFIG_ARCH_MX6
+ 	/* wait for reset to assert... */
+ 	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+-- 
+1.7.7.4
+

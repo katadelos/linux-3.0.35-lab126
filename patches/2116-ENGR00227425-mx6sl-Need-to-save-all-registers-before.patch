@@ -1,0 +1,36 @@
+From f261311de816d67a60599714dbf454765764d5a4 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 9 Oct 2012 11:04:42 -0400
+Subject: [PATCH 2116/2463] ENGR00227425 mx6sl: Need to save all registers
+ before calling C function
+
+Different linker may use r12, we should save/restore all
+registers(r0-r12) before calling C function to prevent
+these registers from corruption in C code.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/mx6_suspend.S |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mx6_suspend.S b/arch/arm/mach-mx6/mx6_suspend.S
+index a5815ef..683ba38 100644
+--- a/arch/arm/mach-mx6/mx6_suspend.S
++++ b/arch/arm/mach-mx6/mx6_suspend.S
+@@ -1519,11 +1519,11 @@ restore control register to enable cache
+ #endif
+ 
+ 	mov	r8, lr
+-	push	{r0}
++	push	{r0-r12}
+ 
+ 	/* Set up the per-CPU stacks */
+ 	bl	cpu_init
+-	pop	{r0}
++	pop	{r0-r12}
+ 
+ 	/*
+ 	 * Restore the MMU table entry that was modified for
+-- 
+1.7.7.4
+

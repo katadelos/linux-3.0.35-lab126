@@ -1,0 +1,34 @@
+From 473ad2b1fa2c1441db562a58859be5a7eb18ce93 Mon Sep 17 00:00:00 2001
+From: Eric Sun <jian.sun@freescale.com>
+Date: Fri, 6 Jul 2012 17:40:34 +0800
+Subject: [PATCH 1723/2463] ENGR00216001 MX6 Kernel : Fix a typo when defining
+ "IO_ADDRESS" macro
+
+When defining macro "IO_ADDRESS", the address is checked against PERIPH
+address.
+     ((x) <= (unsigned long)(ARM_PERIPHBASE + ARM_PERIPHBASE)) ...
+The second "ARM_PERIPHBASE" is obviously a typo, should changed to
+ARM_PERIPHBASE_SIZE
+
+Signed-off-by: Eric Sun <jian.sun@freescale.com>
+Signed-off-by: Garg Nitin <b37173@freescale.com>
+---
+ arch/arm/plat-mxc/include/mach/mx6.h |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 95a211c..76458a0 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -308,7 +308,7 @@
+ 	(((((x) >= (unsigned long)AIPS1_ARB_BASE_ADDR) && \
+ 	  ((x) <= (unsigned long)AIPS2_ARB_END_ADDR)) || \
+ 	  ((x) >= (unsigned long)ARM_PERIPHBASE && \
+-	  ((x) <= (unsigned long)(ARM_PERIPHBASE + ARM_PERIPHBASE)))) ? \
++	  ((x) <= (unsigned long)(ARM_PERIPHBASE + ARM_PERIPHBASE_SIZE)))) ? \
+ 	   MX6_IO_ADDRESS(x) : (void __force __iomem *)0xDEADBEEF)
+ 
+ /*
+-- 
+1.7.7.4
+

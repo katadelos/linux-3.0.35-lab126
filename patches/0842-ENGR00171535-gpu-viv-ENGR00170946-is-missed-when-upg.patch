@@ -1,0 +1,111 @@
+From 41d2dc6d12aaa48538c52c04445239a40d02f0ed Mon Sep 17 00:00:00 2001
+From: wu guoxing <b39297@freescale.com>
+Date: Mon, 9 Jan 2012 09:56:37 +0800
+Subject: [PATCH 0842/2463] ENGR00171535:gpu-viv: ENGR00170946 is missed when
+ upgrading to viv 4.6.4
+
+rmmod fix for gpu is missed, add it back.
+and also, change from manual reset to auto reset when gckOS_CreateSignal
+
+Signed-off-by: Wu Guoxing <b39297@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../GC350/hal/kernel/gc_hal_kernel_hardware_vg.c   |   25 ++++++++------------
+ .../GC350/hal/kernel/gc_hal_kernel_hardware_vg.h   |    2 +-
+ 2 files changed, 11 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+index a9aec14..b43e8af 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+@@ -139,21 +139,16 @@ _TimeIdleThread(
+     /* Cast the object. */
+     gckVGHARDWARE hardware = (gckVGHARDWARE) ThreadParameter;
+ 
+-    gcmkVERIFY_OK(gckOS_AcquireSemaphore(
+-        hardware->os,
+-        hardware->idleSemaphore));
+-
+     while(gcvTRUE)
+     {
++        gcmkVERIFY_OK(gckOS_WaitSignal(hardware->os,
++            hardware->idleSignal, gcvINFINITE));
++
+         if (hardware->killThread)
+         {
+             break;
+         }
+ 
+-        gcmkVERIFY_OK(gckOS_AcquireSemaphore(
+-            hardware->os,
+-            hardware->idleSemaphore));
+-
+         do
+         {
+             gcmkVERIFY_OK(gckOS_GetTicks(&currentTime));
+@@ -245,7 +240,7 @@ gckVGHARDWARE_Construct(
+         hardware->chipMinorFeatures2 = chipMinorFeatures2;
+ 
+         hardware->powerMutex            = gcvNULL;
+-        hardware->idleSemaphore         = gcvNULL;
++        hardware->idleSignal            = gcvNULL;
+         hardware->chipPowerState        = gcvPOWER_OFF;
+         hardware->chipPowerStateGlobal  = gcvPOWER_ON;
+         hardware->clockState            = gcvTRUE;
+@@ -270,8 +265,7 @@ gckVGHARDWARE_Construct(
+         gcmkVERIFY_OK(gckVGHARDWARE_SetFastClear(hardware, -1));
+ 
+         gcmkERR_BREAK(gckOS_CreateMutex(Os, &hardware->powerMutex));
+-
+-        gcmkERR_BREAK(gckOS_CreateSemaphore(Os, &hardware->idleSemaphore));
++        gcmkERR_BREAK(gckOS_CreateSignal(Os, gcvFALSE, &hardware->idleSignal));
+ #if gcdPOWER_MANAGEMENT
+         gcmkERR_BREAK(gckOS_StartThread(
+             hardware->os,
+@@ -326,6 +320,7 @@ gckVGHARDWARE_Destroy(
+ 
+ #if gcdPOWER_MANAGEMENT
+     Hardware->killThread  = gcvTRUE;
++    gcmkVERIFY_OK(gckOS_Signal(Hardware->os, Hardware->idleSignal, gcvTRUE));
+     gcmkVERIFY_OK(gckOS_StopThread(Hardware->os, Hardware->timeIdleThread));
+ #endif
+     /* Mark the object as unknown. */
+@@ -337,10 +332,10 @@ gckVGHARDWARE_Destroy(
+             Hardware->os, Hardware->powerMutex));
+     }
+ 
+-    if (Hardware->idleSemaphore != gcvNULL)
++    if (Hardware->idleSignal != gcvNULL)
+     {
+-        gcmkVERIFY_OK(gckOS_DestroySemaphore(
+-            Hardware->os, Hardware->idleSemaphore));
++        gcmkVERIFY_OK(gckOS_DestroySignal(
++            Hardware->os, Hardware->idleSignal));
+     }
+ 
+     /* Free the object. */
+@@ -1790,7 +1785,7 @@ gckVGHARDWARE_SetPowerManagementState(
+ 
+     if (State == gcvPOWER_IDLE)
+     {
+-        gcmkONERROR(gckOS_ReleaseSemaphore(os, Hardware->idleSemaphore));
++        gcmkVERIFY_OK(gckOS_Signal(os, Hardware->idleSignal, gcvTRUE));
+     }
+         /* Reset power off time */
+     gcmkVERIFY_OK(gckOS_GetTicks(&currentTime));
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
+index a4ec3eb..cff634f 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.h
+@@ -57,7 +57,7 @@ struct _gckVGHARDWARE
+     gctBOOL                     clockState;
+     gctBOOL                     powerState;
+     gctPOINTER                  powerMutex;
+-    gctSEMAPHORE                idleSemaphore;
++    gctSIGNAL                   idleSignal;
+     gctUINT32                   powerProcess;
+     gctUINT32                   powerThread;
+     gceCHIPPOWERSTATE           chipPowerState;
+-- 
+1.7.7.4
+

@@ -1,0 +1,90 @@
+From c2d22d3dda9c621331ddf06d6ab1290a90b94089 Mon Sep 17 00:00:00 2001
+From: Peter Zijlstra <peterz@infradead.org>
+Date: Thu, 15 Dec 2011 17:09:22 +0100
+Subject: [PATCH 1435/2463] sched: Cleanup cpu_active madness
+
+Stepan found:
+
+CPU0		CPUn
+
+_cpu_up()
+  __cpu_up()
+
+		boostrap()
+		  notify_cpu_starting()
+		  set_cpu_online()
+		  while (!cpu_active())
+		    cpu_relax()
+
+<PREEMPT-out>
+
+smp_call_function(.wait=1)
+  /* we find cpu_online() is true */
+  arch_send_call_function_ipi_mask()
+
+  /* wait-forever-more */
+
+<PREEMPT-in>
+		  local_irq_enable()
+
+  cpu_notify(CPU_ONLINE)
+    sched_cpu_active()
+      set_cpu_active()
+
+Now the purpose of cpu_active is mostly with bringing down a cpu, where
+we mark it !active to avoid the load-balancer from moving tasks to it
+while we tear down the cpu. This is required because we only update the
+sched_domain tree after we brought the cpu-down. And this is needed so
+that some tasks can still run while we bring it down, we just don't want
+new tasks to appear.
+
+On cpu-up however the sched_domain tree doesn't yet include the new cpu,
+so its invisible to the load-balancer, regardless of the active state.
+So instead of setting the active state after we boot the new cpu (and
+consequently having to wait for it before enabling interrupts) set the
+cpu active before we set it online and avoid the whole mess.
+
+Reported-by: Stepan Moskovchenko <stepanm@codeaurora.org>
+Signed-off-by: Peter Zijlstra <a.p.zijlstra@chello.nl>
+Acked-by: Thomas Gleixner <tglx@linutronix.de>
+Link: http://lkml.kernel.org/r/1323965362.18942.71.camel@twins
+Signed-off-by: Ingo Molnar <mingo@elte.hu>
+---
+ arch/arm/kernel/smp.c |    7 -------
+ kernel/sched.c        |    2 +-
+ 2 files changed, 1 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/kernel/smp.c b/arch/arm/kernel/smp.c
+index 5a01940..69ee510 100644
+--- a/arch/arm/kernel/smp.c
++++ b/arch/arm/kernel/smp.c
+@@ -319,13 +319,6 @@ asmlinkage void __cpuinit secondary_start_kernel(void)
+ 	 */
+ 	percpu_timer_setup();
+ 
+-	while (!cpu_active(cpu))
+-		cpu_relax();
+-
+-	/*
+-	 * cpu_active bit is set, so it's safe to enable interrupts
+-	 * now.
+-	 */
+ 	local_irq_enable();
+ 	local_fiq_enable();
+ 
+diff --git a/kernel/sched.c b/kernel/sched.c
+index 25e36ad7..5a033e4 100644
+--- a/kernel/sched.c
++++ b/kernel/sched.c
+@@ -6479,7 +6479,7 @@ static int __cpuinit sched_cpu_active(struct notifier_block *nfb,
+ 				      unsigned long action, void *hcpu)
+ {
+ 	switch (action & ~CPU_TASKS_FROZEN) {
+-	case CPU_ONLINE:
++	case CPU_STARTING:
+ 	case CPU_DOWN_FAILED:
+ 		set_cpu_active((long)hcpu, true);
+ 		return NOTIFY_OK;
+-- 
+1.7.7.4
+

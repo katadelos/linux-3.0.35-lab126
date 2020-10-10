@@ -1,0 +1,93 @@
+From 3042d8dc17461942f03a9acf7f98f2f25c4cc05f Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Thu, 15 Nov 2012 11:36:37 +0800
+Subject: [PATCH 2252/2463] ENGR00233728 mx6 usb: change usb driver load from
+ arch_initcall to module_init
+
+We should use module_init as usb driver initialization entry point.
+To avoid the following crash when sabreauto board bootup:
+Unable to handle kernel NULL pointer dereference at virtual address 00000030
+pgd = 80004000
+[00000030] *pgd=00000000
+Internal error: Oops: 5 [#1] PREEMPT SMP
+Modules linked in:
+CPU: 0    Not tainted  (3.0.35-02249-g6493632-dirty #3070)
+PC is at gpio_set_value_cansleep+0x20/0x34
+LR is at mx6_usb_h1_init+0x68/0x188
+pc : [<80251638>]    lr : [<80010bd4>]    psr: 20000013
+sp : e4049f60  ip : 000000ef  fp : 00000000
+r10: 00000000  r9 : 00000000  r8 : e4049f8c
+r7 : 80521f04  r6 : e4049f80  r5 : 80521f10  r4 : 80af53cc
+r3 : 00000000  r2 : 00000001  r1 : 00000001  r0 : 00000000
+Flags: nzCv  IRQs on  FIQs on  Mode SVC_32  ISA ARM  Segment kernel
+Control: 10c53c7d  Table: 1000404a  DAC: 00000015
+Process swapper (pid: 1, stack limit = 0xe40482f0)
+Stack: (0xe4049f60 to 0xe404a000)
+9f60: 80af53cc 80010bd4 00000001 02184200 0000004a 00000001 02184200 00000048
+9f80: 00000001 0000004d 0000004a 00000001 0000004d 00000048 8002e020 80af4ac0
+9fa0: 00000000 80010b6c 00000000 8003b4c4 00000000 80130000 00000000 80abf898
+9fc0: 000001f0 8002e020 8002e564 80042040 00000013 00000000 00000000 00000000
+9fe0: 00000000 800083cc 00000000 80008334 80042040 80042040 5104b14a f0e00000
+[<80251638>] (gpio_set_value_cansleep+0x20/0x34) from [<80010bd4>]
+(mx6_usb_h1_init+0x68/0x188)
+[<80010bd4>] (mx6_usb_h1_init+0x68/0x188) from [<8003b4c4>]
+(do_one_initcall+0x30/0x16c)
+[<8003b4c4>] (do_one_initcall+0x30/0x16c) from [<800083cc>]
+(kernel_init+0x98/0x144)
+[<800083cc>] (kernel_init+0x98/0x144) from [<80042040>]
+(kernel_thread_exit+0x0/0x8)
+Code: e92d4010 e7933100 e1a02001 e1a00003 (e5931030)
+---[ end trace 1b75b31a2719ed1c ]---
+Kernel panic - not syncing: Attempted to kill init!
+[<8004823c>] (unwind_backtrace+0x0/0xfc) from [<8051d790>]
+(panic+0x74/0x19c)
+[<8051d790>] (panic+0x74/0x19c) from [<80078ba8>] (do_exit+0x664/0x718)
+[<80078ba8>] (do_exit+0x664/0x718) from [<80044fcc>] (die+0x250/0x2c8)
+[<80044fcc>] (die+0x250/0x2c8) from [<8004ba74>]
+(__do_kernel_fault+0x64/0x84)
+[<8004ba74>] (__do_kernel_fault+0x64/0x84) from [<8004bc14>]
+(do_page_fault+0x180/0x2e0)
+[<8004bc14>] (do_page_fault+0x180/0x2e0) from [<8003b400>]
+(do_DataAbort+0x34/0x98)
+[<8003b400>] (do_DataAbort+0x34/0x98) from [<80040f10>]
+(__dabt_svc+0x70/0xa0)
+
+Some board for example sabreauto board usb power gpio is use a io
+i2c expander gpio, gpio i2c driver load use subsys_initcall as driver
+initialization entry point, so gpio is not accessible at early bootup.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ arch/arm/mach-mx6/usb_dr.c |    2 +-
+ arch/arm/mach-mx6/usb_h1.c |    2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index 3c66f17..cf84cf2 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -690,7 +690,7 @@ static int  __init mx6_usb_dr_init(void)
+ 
+ 	return 0;
+ }
+-arch_initcall(mx6_usb_dr_init);
++module_init(mx6_usb_dr_init);
+ 
+ static void __exit mx6_usb_dr_exit(void)
+ {
+diff --git a/arch/arm/mach-mx6/usb_h1.c b/arch/arm/mach-mx6/usb_h1.c
+index eeac0c4..eb79bf3 100644
+--- a/arch/arm/mach-mx6/usb_h1.c
++++ b/arch/arm/mach-mx6/usb_h1.c
+@@ -443,7 +443,7 @@ static int  __init mx6_usb_h1_init(void)
+ 		(struct fsl_usb2_wakeup_platform_data *)(pdev_wakeup->dev.platform_data);
+ 	return 0;
+ }
+-arch_initcall(mx6_usb_h1_init);
++module_init(mx6_usb_h1_init);
+ 
+ static void __exit mx6_usb_h1_exit(void)
+ {
+-- 
+1.7.7.4
+

@@ -1,0 +1,75 @@
+From 4e9e75a04101418e6e91a93b3c5f3c4e822b2231 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Thu, 1 Nov 2012 10:15:18 +0800
+Subject: [PATCH 2206/2463] ENGR00231965 MX6 USB CV 3.0 test fail
+
+- For USB CV 3.0 test, the gap between the ACK of set_address and
+  the subsequent setup packet may be very little, say 500us, and
+  if the latency we handle the ep completion is greater than this
+  gap, there is no response to the subsequent packet. It will
+  cause CV test fail
+
+- There is another way to set the address, it should set the bit 24
+  to 1 with the right address, and then IC controller will set the
+  address when the IN req complete instead of SW do it. It is more
+  fast so it can fix the CV 3.0 test fail issue
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |   20 +++++++++++++-------
+ drivers/usb/gadget/arcotg_udc.h |    1 +
+ 2 files changed, 14 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 484e62e..127e929 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -1550,6 +1550,19 @@ static void ch9setaddress(struct fsl_udc *udc, u16 value, u16 index, u16 length)
+ 	udc->device_address = (u8) value;
+ 	/* Update usb state */
+ 	udc->usb_state = USB_STATE_ADDRESS;
++
++	/* for USB CV 3.0 test, the gap between the ACK of the set_address
++	 * and the subsequently setup packet may be very little, say 500us,
++	 * and if the latency we handle the ep completion is greater than
++	 * this gap, there is no response to the subsequent setup packet.
++	 * It will cause the CV test fail */
++	/* There is another way to set address, we can set the bit 24 to
++	 * 1 to make IC set this address instead of SW, it is more fast
++	 * and safe than SW way */
++	fsl_writel(udc->device_address << USB_DEVICE_ADDRESS_BIT_POS |
++			1 << USB_DEVICE_ADDRESS_ADV_BIT_POS,
++			&dr_regs->deviceaddr);
++
+ 	/* Status phase */
+ 	if (ep0_prime_status(udc, EP_DIR_IN))
+ 		ep0stall(udc);
+@@ -1762,13 +1775,6 @@ static void setup_received_irq(struct fsl_udc *udc,
+ static void ep0_req_complete(struct fsl_udc *udc, struct fsl_ep *ep0,
+ 		struct fsl_req *req)
+ {
+-	if (udc->usb_state == USB_STATE_ADDRESS) {
+-		/* Set the new address */
+-		u32 new_address = (u32) udc->device_address;
+-		fsl_writel(new_address << USB_DEVICE_ADDRESS_BIT_POS,
+-				&dr_regs->deviceaddr);
+-	}
+-
+ 	done(ep0, req, 0);
+ }
+ 
+diff --git a/drivers/usb/gadget/arcotg_udc.h b/drivers/usb/gadget/arcotg_udc.h
+index 35a2790..bd2afbf 100755
+--- a/drivers/usb/gadget/arcotg_udc.h
++++ b/drivers/usb/gadget/arcotg_udc.h
+@@ -202,6 +202,7 @@ struct usb_sys_interface {
+ /* Device Address bit masks */
+ #define  USB_DEVICE_ADDRESS_MASK              (0xFE000000)
+ #define  USB_DEVICE_ADDRESS_BIT_POS           (25)
++#define  USB_DEVICE_ADDRESS_ADV_BIT_POS       (24)
+ 
+ /* endpoint list address bit masks */
+ #define USB_EP_LIST_ADDRESS_MASK              (0xfffff800)
+-- 
+1.7.7.4
+

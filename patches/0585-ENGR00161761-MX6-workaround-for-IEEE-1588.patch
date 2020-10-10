@@ -1,0 +1,35 @@
+From fd1a73c327da261a5f812b30fb93e387e18a9ac9 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Wed, 9 Nov 2011 14:39:14 +0800
+Subject: [PATCH 0585/2463] ENGR00161761 - [MX6] : workaround for IEEE 1588.
+
+- IEEE 1588 use 40MHz divided from pll3 480MHz. And use 480M ddr
+  init script. So, cannot disable pll3 in clock.c file.
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index d3c352c..f5c7ba0 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4808,12 +4808,14 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	pll2_pfd_352M.disable(&pll2_pfd_352M);
+ 	pll2_pfd_594M.disable(&pll2_pfd_594M);
+ 
++#if !defined(CONFIG_FEC_1588)
+ 	pll3_pfd_454M.disable(&pll3_pfd_454M);
+ 	pll3_pfd_508M.disable(&pll3_pfd_508M);
+ 	pll3_pfd_540M.disable(&pll3_pfd_540M);
+ 	pll3_pfd_720M.disable(&pll3_pfd_720M);
+ 
+ 	pll3_usb_otg_main_clk.disable(&pll3_usb_otg_main_clk);
++#endif
+ 	pll4_audio_main_clk.disable(&pll4_audio_main_clk);
+ 	pll5_video_main_clk.disable(&pll5_video_main_clk);
+ 	pll6_MLB_main_clk.disable(&pll6_MLB_main_clk);
+-- 
+1.7.7.4
+

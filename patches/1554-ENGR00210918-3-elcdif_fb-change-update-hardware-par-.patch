@@ -1,0 +1,56 @@
+From e2e0ed3dadf8248090edd61030a079dbdd3b3168 Mon Sep 17 00:00:00 2001
+From: Zhang Jiejing <jiejing.zhang@freescale.com>
+Date: Mon, 28 May 2012 19:35:46 +0800
+Subject: [PATCH 1554/2463] ENGR00210918-3 elcdif_fb: change update hardware
+ par method.
+
+update the screen var info compare method, it should:
+- should update the hardware parameter when  FB_ACTIVATE_FORCE
+- use bool as return type.
+- return true if the new and old var are same.
+
+Signed-off-by Zhang Jiejing <jiejing.zhang@freescale.com>
+---
+ drivers/video/mxc/mxc_elcdif_fb.c |   10 +++++++---
+ 1 files changed, 7 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_elcdif_fb.c b/drivers/video/mxc/mxc_elcdif_fb.c
+index 50c23e4..d127ff4 100644
+--- a/drivers/video/mxc/mxc_elcdif_fb.c
++++ b/drivers/video/mxc/mxc_elcdif_fb.c
+@@ -781,17 +781,21 @@ static int mxc_elcdif_fb_setcolreg(u_int regno, u_int red, u_int green,
+    parameter for hardware, if it was different parameter, the hardware
+    will reinitialize. All will compared except x/y offset.
+  */
+-static int mxc_fb_par_equal(struct fb_info *fbi, struct mxc_elcdif_fb_data *data)
++static bool mxc_elcdif_fb_par_equal(struct fb_info *fbi, struct mxc_elcdif_fb_data *data)
+ {
+ 	/* Here we set the xoffset, yoffset to zero, and compare two
+ 	 * var see have different or not. */
+ 	struct fb_var_screeninfo oldvar = data->var;
+ 	struct fb_var_screeninfo newvar = fbi->var;
+ 
++	if ((fbi->var.activate & FB_ACTIVATE_MASK) == FB_ACTIVATE_NOW &&
++	    fbi->var.activate & FB_ACTIVATE_FORCE)
++		return false;
++
+ 	oldvar.xoffset = newvar.xoffset = 0;
+ 	oldvar.yoffset = newvar.yoffset = 0;
+ 
+-	return memcmp(&oldvar, &newvar, sizeof(struct fb_var_screeninfo));
++	return memcmp(&oldvar, &newvar, sizeof(struct fb_var_screeninfo)) == 0;
+ }
+ 
+ /*
+@@ -809,7 +813,7 @@ static int mxc_elcdif_fb_set_par(struct fb_info *fbi)
+ 	dev_dbg(fbi->device, "Reconfiguring framebuffer\n");
+ 
+ 	/* If parameter no change, don't reconfigure. */
+-	if (mxc_fb_par_equal(fbi, data))
++	if (mxc_elcdif_fb_par_equal(fbi, data))
+ 	    return 0;
+ 
+ 	sema_init(&data->flip_sem, 1);
+-- 
+1.7.7.4
+

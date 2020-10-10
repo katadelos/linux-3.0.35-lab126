@@ -1,0 +1,193 @@
+From c6cd7b018da381a33ea934a4d9e00b63fed5fa50 Mon Sep 17 00:00:00 2001
+From: Larry Li <b20787@freescale.com>
+Date: Tue, 12 Jun 2012 17:11:45 +0800
+Subject: [PATCH 1605/2463] ENGR00213170-2 [MX6SL] Enable GPU driver
+
+Use allocated GPU resource to enable GPU.
+Memroy address on imx6sl board starts from 0x80000000
+and GC320 can access [baseAddress, baseAddress + 2G) only without MMU.
+So to make GC320 work, baseAddres must be set to 0x80000000, and all
+address sent to GC320 must be a offset to baseAddress. GC355 doesn't
+need this baseAddress, that means it needs a real physcial adress,
+rather than the offset to baseAddress.
+Original code always change phsysical address to 'offset' before use it,
+no matter it is used by GC355 or GC320, so only one of them can work.
+Solution is to move address adjustion to arch specific part. So each
+core can get what it wants.
+
+Signed-off-by: Larry Li <b20787@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c  |   11 ++++++
+ .../hal/kernel/gc_hal_kernel_video_memory.c        |   35 +++++++++++++++++---
+ .../hal/os/linux/kernel/gc_hal_kernel_device.c     |    4 +-
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |   14 +-------
+ 4 files changed, 44 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+index 6f50742..9710c82 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+@@ -2256,6 +2256,7 @@ gckHARDWARE_ConvertLogical(
+ {
+     gctUINT32 address;
+     gceSTATUS status;
++    gctUINT32 baseAddress;
+ 
+     gcmkHEADER_ARG("Hardware=0x%x Logical=0x%x", Hardware, Logical);
+ 
+@@ -2268,6 +2269,16 @@ gckHARDWARE_ConvertLogical(
+     gcmkONERROR(
+         gckOS_GetPhysicalAddress(Hardware->os, Logical, &address));
+ 
++    /* For old MMU, get GPU address according to baseAddress. */
++    if (Hardware->mmuVersion == 0)
++    {
++        gcmkONERROR(gckOS_GetBaseAddress(Hardware->os, &baseAddress));
++
++        /* Subtract base address to get a GPU address. */
++        gcmkASSERT(address >= baseAddress);
++        address -= baseAddress;
++    }
++
+     /* Return hardware specific address. */
+     *Address = (Hardware->mmuVersion == 0)
+              ? ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 31:31) - (0 ? 31:31) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:31) - (0 ? 31:31) + 1))))))) << (0 ? 31:31))) | (((gctUINT32) (0x0 & ((gctUINT32) ((((1 ? 31:31) - (0 ? 31:31) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 31:31) - (0 ? 31:31) + 1))))))) << (0 ? 31:31)))
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
+index 89a86a8..3cf63e2 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
+@@ -1603,7 +1603,7 @@ _NeedVirtualMapping(
+ #endif
+         {
+             /* For cores which can't access all physical address. */
+-            gcmkONERROR(gckOS_GetPhysicalAddress(Kernel->os,
++            gcmkONERROR(gckHARDWARE_ConvertLogical(Kernel->hardware,
+                         Node->Virtual.logical,
+                         &phys));
+ 
+@@ -1663,6 +1663,7 @@ gckVIDMEM_Lock(
+     gctBOOL locked = gcvFALSE;
+     gckOS os = gcvNULL;
+     gctBOOL needMapping;
++    gctUINT32 baseAddress;
+ 
+     gcmkHEADER_ARG("Node=0x%x", Node);
+ 
+@@ -1698,6 +1699,19 @@ gckVIDMEM_Lock(
+         *Address = Node->VidMem.physical;
+ #endif
+ 
++#if gcdENABLE_VG
++        if (Kernel->vg == gcvNULL)
++#endif
++        {
++            if (Kernel->hardware->mmuVersion == 0)
++            {
++                /* Convert physical to GPU address for old mmu. */
++                gcmkONERROR(gckOS_GetBaseAddress(Kernel->os, &baseAddress));
++                gcmkASSERT(*Address > baseAddress);
++                *Address -= baseAddress;
++            }
++        }
++
+         gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_VIDMEM,
+                       "Locked node 0x%x (%d) @ 0x%08X",
+                       Node,
+@@ -1755,10 +1769,21 @@ gckVIDMEM_Lock(
+ 
+             if (needMapping == gcvFALSE)
+             {
+-                /* Get physical address directly */
+-                 gcmkONERROR(gckOS_GetPhysicalAddress(os,
+-                             Node->Virtual.logical,
+-                             &Node->Virtual.addresses[Kernel->core]));
++#if gcdENABLE_VG
++                if (Kernel->vg != gcvNULL)
++                {
++                    /* Get physical address directly */
++                    gcmkONERROR(gckVGHARDWARE_ConvertLogical(Kernel->vg->hardware,
++                                Node->Virtual.logical,
++                                &Node->Virtual.addresses[Kernel->core]));
++                }
++                else
++#endif
++                {
++                    gcmkONERROR(gckHARDWARE_ConvertLogical(Kernel->hardware,
++                                Node->Virtual.logical,
++                                &Node->Virtual.addresses[Kernel->core]));
++                }
+             }
+             else
+             {
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+index 305b1cc..173bd4d 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+@@ -752,8 +752,8 @@ gckGALDEVICE_Construct(
+             /* Create the contiguous memory heap. */
+             status = gckVIDMEM_Construct(
+                 device->os,
+-                (ContiguousBase - device->baseAddress) | device->systemMemoryBaseAddress,
+-                 ContiguousSize,
++                ContiguousBase | device->systemMemoryBaseAddress,
++                ContiguousSize,
+                 64, BankSize,
+                 &device->contiguousVidMem
+                 );
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index 399234a..30b44a2 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -2064,7 +2064,6 @@ gckOS_AllocateNonPagedMemory(
+     addr = _GetNonPagedMemoryCache(Os,
+                 mdl->numPages * PAGE_SIZE,
+                 &mdl->dmaHandle);
+-
+     if (addr == gcvNULL)
+ #endif
+     {
+@@ -2122,7 +2121,6 @@ gckOS_AllocateNonPagedMemory(
+         mdl->dmaHandle = (mdl->dmaHandle & ~0x80000000)
+                        | (Os->device->baseAddress & 0x80000000);
+     }
+-
+     mdl->addr = addr;
+ 
+     /* Return allocated memory. */
+@@ -2863,13 +2861,6 @@ gckOS_GetPhysicalAddressProcess(
+ 
+     gcmkONERROR(status);
+ 
+-    if (Os->device->baseAddress != 0)
+-    {
+-        /* Subtract base address to get a GPU physical address. */
+-        gcmkASSERT(*Address >= Os->device->baseAddress);
+-        *Address -= Os->device->baseAddress;
+-    }
+-
+     /* Success. */
+     gcmkFOOTER_ARG("*Address=0x%08x", *Address);
+     return gcvSTATUS_OK;
+@@ -2913,7 +2904,7 @@ gckOS_MapPhysical(
+ {
+     gctPOINTER logical;
+     PLINUX_MDL mdl;
+-    gctUINT32 physical;
++    gctUINT32 physical = Physical;
+ 
+     gcmkHEADER_ARG("Os=0x%X Physical=0x%X Bytes=%lu", Os, Physical, Bytes);
+ 
+@@ -2924,9 +2915,6 @@ gckOS_MapPhysical(
+ 
+     MEMORY_LOCK(Os);
+ 
+-    /* Compute true physical address (before subtraction of the baseAddress). */
+-    physical = Physical + Os->device->baseAddress;
+-
+     /* Go through our mapping to see if we know this physical address already. */
+     mdl = Os->mdlHead;
+ 
+-- 
+1.7.7.4
+

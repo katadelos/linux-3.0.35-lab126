@@ -1,0 +1,572 @@
+From b8ee7558dca70f7db6a93c0d18d8c7a2bf87476b Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Thu, 8 Nov 2012 15:26:22 +0800
+Subject: [PATCH 2248/2463] ENGR00233051-03 Mx6 USB: msl implementation for
+ USB OTG modulization
+
+ - remove mx6_usb_dr_init() in board specific initialization files
+ - Add module_init(mx6_usb_dr_init) and module_exit(mx6_usb_dr_exit)
+   in usb_dr.c to support the usb_dr modulization
+ - Export necessary function which is used in usb_dr.c
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c               |    2 +-
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c          |    1 -
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c          |    1 -
+ arch/arm/mach-mx6/board-mx6q_sabresd.c            |    2 +-
+ arch/arm/mach-mx6/board-mx6sl_arm2.c              |    1 -
+ arch/arm/mach-mx6/board-mx6sl_evk.c               |    2 +-
+ arch/arm/mach-mx6/usb_dr.c                        |  108 ++++++++++++++-------
+ arch/arm/mach-mx6/usb_h1.c                        |    5 +-
+ arch/arm/mach-mx6/usb_h2.c                        |    1 +
+ arch/arm/mach-mx6/usb_h3.c                        |    1 +
+ arch/arm/plat-mxc/devices/platform-fsl-usb2-otg.c |   52 +++++++++-
+ arch/arm/plat-mxc/devices/platform-fsl-usb2-udc.c |   53 +++++++++-
+ arch/arm/plat-mxc/devices/platform-mxc-ehci.c     |   50 +++++++++-
+ arch/arm/plat-mxc/usb_common.c                    |   23 ++++-
+ 14 files changed, 244 insertions(+), 58 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 50f26dd..27c4045 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -1244,7 +1244,7 @@ static void __init mx6_arm2_init_usb(void)
+ 	mxc_iomux_set_gpr_register(1, 13, 1, 1);
+ 
+ 	mx6_set_otghost_vbus_func(imx6_arm2_usbotg_vbus);
+-	mx6_usb_dr_init();
++
+ #ifdef CONFIG_USB_EHCI_ARC_HSIC
+ 	mx6_usb_h2_init();
+ 	mx6_usb_h3_init();
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 649ead2..146adad 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -769,7 +769,6 @@ static void __init imx6q_sabreauto_init_usb(void)
+ 
+ 	mxc_iomux_set_gpr_register(1, 13, 1, 0);
+ 	mx6_set_otghost_vbus_func(imx6q_sabreauto_usbotg_vbus);
+-	mx6_usb_dr_init();
+ 	mx6_set_host1_vbus_func(imx6q_sabreauto_usbhost1_vbus);
+ #ifdef CONFIG_USB_EHCI_ARC_HSIC
+ 	mx6_usb_h2_init();
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index eff81ac..3289b1a 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -670,7 +670,6 @@ static void __init imx6q_sabrelite_init_usb(void)
+ 	mxc_iomux_set_gpr_register(1, 13, 1, 1);
+ 
+ 	mx6_set_otghost_vbus_func(imx6q_sabrelite_usbotg_vbus);
+-	mx6_usb_dr_init();
+ }
+ 
+ /* HW Initialization, if return 0, initialization is successful. */
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index ab24bb4..863b2b1 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1113,7 +1113,7 @@ static void __init imx6q_sabresd_init_usb(void)
+ 		mxc_iomux_set_gpr_register(1, 13, 1, 0);
+ 
+ 	mx6_set_otghost_vbus_func(imx6q_sabresd_usbotg_vbus);
+-	mx6_usb_dr_init();
++
+ }
+ 
+ /* HW Initialization, if return 0, initialization is successful. */
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index a7f20ed..f62a97f5 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -1079,7 +1079,6 @@ static void __init mx6_arm2_init_usb(void)
+ 	gpio_direction_output(MX6_BRD_USBOTG2_PWR, 1);
+ 
+ 	mx6_set_otghost_vbus_func(imx6_arm2_usbotg_vbus);
+-	mx6_usb_dr_init();
+ #ifdef CONFIG_USB_EHCI_ARC_HSIC
+ 	mxc_iomux_set_specialbits_register(MX6SL_PAD_HSIC_DAT,
+ 		PAD_CTL_DDR_SEL_DDR3, PAD_CTL_DDR_SEL_MASK);
+diff --git a/arch/arm/mach-mx6/board-mx6sl_evk.c b/arch/arm/mach-mx6/board-mx6sl_evk.c
+index 47e8a89..6836310 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_evk.c
++++ b/arch/arm/mach-mx6/board-mx6sl_evk.c
+@@ -1264,7 +1264,7 @@ static void __init mx6_evk_init_usb(void)
+ 	gpio_direction_output(MX6_BRD_USBOTG2_PWR, 1);
+ 
+ 	mx6_set_otghost_vbus_func(imx6_evk_usbotg_vbus);
+-	mx6_usb_dr_init();
++
+ #ifdef CONFIG_USB_EHCI_ARC_HSIC
+ 	mx6_usb_h2_init();
+ #endif
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index 7b79d98..3c66f17 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -35,6 +35,8 @@ static void usbotg_uninit_ext(struct platform_device *pdev);
+ static void usbotg_clock_gate(bool on);
+ static void _dr_discharge_line(bool enable);
+ extern bool usb_icbug_swfix_need(void);
++static void enter_phy_lowpower_suspend(struct fsl_usb2_platform_data *pdata, \
++								bool enable);
+ 
+ /* The usb_phy1_clk do not have enable/disable function at clock.c
+  * and PLL output for usb1's phy should be always enabled.
+@@ -190,8 +192,8 @@ static int usbotg_init_ext(struct platform_device *pdev)
+ 		return ret;
+ 	}
+ 	if (!otg_used) {
+-		usbotg_internal_phy_clock_gate(true);
+ 		usb_phy_enable(pdev->dev.platform_data);
++		enter_phy_lowpower_suspend(pdev->dev.platform_data, false);
+ 		/*after the phy reset,can not read the readingvalue for id/vbus at
+ 		* the register of otgsc ,cannot  read at once ,need delay 3 ms
+ 		*/
+@@ -204,16 +206,17 @@ static int usbotg_init_ext(struct platform_device *pdev)
+ 
+ static void usbotg_uninit_ext(struct platform_device *pdev)
+ {
+-	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
+-
+-	clk_disable(usb_phy1_clk);
+-	clk_put(usb_phy1_clk);
++	otg_used--;
++	if (!otg_used) {
++		enter_phy_lowpower_suspend(pdev->dev.platform_data, true);
++		mdelay(3);
+ 
+-	clk_disable(usb_oh3_clk);
+-	clk_put(usb_oh3_clk);
++		clk_disable(usb_phy1_clk);
++		clk_put(usb_phy1_clk);
+ 
+-	usbotg_uninit(pdata);
+-	otg_used--;
++		clk_disable(usb_oh3_clk);
++		clk_put(usb_oh3_clk);
++	}
+ }
+ 
+ static void usbotg_clock_gate(bool on)
+@@ -236,10 +239,6 @@ static void dr_platform_phy_power_on(void)
+ 				anatop_base_addr + HW_ANADIG_ANA_MISC0_SET);
+ }
+ 
+-void mx6_set_otghost_vbus_func(driver_vbus_func driver_vbus)
+-{
+-	dr_utmi_config.platform_driver_vbus = driver_vbus;
+-}
+ 
+ static void _dr_discharge_line(bool enable)
+ {
+@@ -604,18 +603,45 @@ static void device_wakeup_handler(struct fsl_usb2_platform_data *pdata)
+ /* end of device related operation for DR port */
+ #endif /* CONFIG_USB_GADGET_ARC */
+ 
+-void __init mx6_usb_dr_init(void)
++static struct platform_device *pdev[3], *pdev_wakeup;
++static driver_vbus_func  mx6_set_usb_otg_vbus;
++static int devnum;
++static int  __init mx6_usb_dr_init(void)
+ {
+-	struct platform_device *pdev, *pdev_wakeup;
++	int i = 0;
+ 	void __iomem *anatop_base_addr = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
++	struct imx_fsl_usb2_wakeup_data imx6q_fsl_otg_wakeup_data =
++		imx_fsl_usb2_wakeup_data_entry_single(MX6Q, 0, OTG);
++	struct imx_mxc_ehci_data imx6q_mxc_ehci_otg_data =
++		imx_mxc_ehci_data_entry_single(MX6Q, 0, OTG);
++	struct imx_fsl_usb2_udc_data imx6q_fsl_usb2_udc_data =
++		imx_fsl_usb2_udc_data_entry_single(MX6Q);
++	struct imx_fsl_usb2_otg_data imx6q_fsl_usb2_otg_data  =
++		imx_fsl_usb2_otg_data_entry_single(MX6Q);
++
++	/* Some phy and power's special controls for otg
++	 * 1. The external charger detector needs to be disabled
++	 * or the signal at DP will be poor
++	 * 2. The EN_USB_CLKS is always enabled.
++	 * The PLL's power is controlled by usb and others who
++	 * use pll3 too.
++	 */
++	__raw_writel(BM_ANADIG_USB1_CHRG_DETECT_EN_B  \
++			| BM_ANADIG_USB1_CHRG_DETECT_CHK_CHRG_B,  \
++			anatop_base_addr + HW_ANADIG_USB1_CHRG_DETECT);
++	__raw_writel(BM_ANADIG_USB1_PLL_480_CTRL_EN_USB_CLKS,
++			anatop_base_addr + HW_ANADIG_USB1_PLL_480_CTRL_SET);
++	mx6_get_otghost_vbus_func(&mx6_set_usb_otg_vbus);
++	dr_utmi_config.platform_driver_vbus = mx6_set_usb_otg_vbus;
+ 
+ #ifdef CONFIG_USB_OTG
+ 	/* wake_up_enable is useless, just for usb_register_remote_wakeup execution*/
+ 	dr_utmi_config.wake_up_enable = _device_wakeup_enable;
+ 	dr_utmi_config.operating_mode = FSL_USB2_DR_OTG;
+ 	dr_utmi_config.wakeup_pdata = &dr_wakeup_config;
+-	pdev = imx6q_add_fsl_usb2_otg(&dr_utmi_config);
+-	dr_wakeup_config.usb_pdata[0] = pdev->dev.platform_data;
++	pdev[i] = imx6q_add_fsl_usb2_otg(&dr_utmi_config);
++	dr_wakeup_config.usb_pdata[i] = pdev[i]->dev.platform_data;
++	i++;
+ #endif
+ #ifdef CONFIG_USB_EHCI_ARC_OTG
+ 	dr_utmi_config.operating_mode = DR_HOST_MODE;
+@@ -633,8 +659,9 @@ void __init mx6_usb_dr_init(void)
+ 	dr_utmi_config.wakeup_pdata = &dr_wakeup_config;
+ 	dr_utmi_config.wakeup_handler = host_wakeup_handler;
+ 	dr_utmi_config.platform_phy_power_on = dr_platform_phy_power_on;
+-	pdev = imx6q_add_fsl_ehci_otg(&dr_utmi_config);
+-	dr_wakeup_config.usb_pdata[1] = pdev->dev.platform_data;
++	pdev[i] = imx6q_add_fsl_ehci_otg(&dr_utmi_config);
++	dr_wakeup_config.usb_pdata[i] = pdev[i]->dev.platform_data;
++	i++;
+ #endif
+ #ifdef CONFIG_USB_GADGET_ARC
+ 	dr_utmi_config.operating_mode = DR_UDC_MODE;
+@@ -648,25 +675,38 @@ void __init mx6_usb_dr_init(void)
+ 	dr_utmi_config.wakeup_handler = device_wakeup_handler;
+ 	dr_utmi_config.charger_base_addr = anatop_base_addr;
+ 	dr_utmi_config.platform_phy_power_on = dr_platform_phy_power_on;
+-	pdev = imx6q_add_fsl_usb2_udc(&dr_utmi_config);
+-	dr_wakeup_config.usb_pdata[2] = pdev->dev.platform_data;
++	pdev[i] = imx6q_add_fsl_usb2_udc(&dr_utmi_config);
++	dr_wakeup_config.usb_pdata[i] = pdev[i]->dev.platform_data;
++	i++;
+ #endif
++	devnum = i;
+ 	/* register wakeup device */
+ 	pdev_wakeup = imx6q_add_fsl_usb2_otg_wakeup(&dr_wakeup_config);
+-	if (pdev != NULL)
+-		((struct fsl_usb2_platform_data *)(pdev->dev.platform_data))->wakeup_pdata =
++	for (i = 0; i < devnum; i++) {
++		platform_device_add(pdev[i]);
++		((struct fsl_usb2_platform_data *)(pdev[i]->dev.platform_data))->wakeup_pdata =
+ 			(struct fsl_usb2_wakeup_platform_data *)(pdev_wakeup->dev.platform_data);
++	}
++
++	return 0;
++}
++arch_initcall(mx6_usb_dr_init);
++
++static void __exit mx6_usb_dr_exit(void)
++{
++	int i;
++	void __iomem *anatop_base_addr = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
++
++	for (i = 0; i < devnum; i++)
++		platform_device_del(pdev[devnum-i-1]);
++	platform_device_unregister(pdev_wakeup);
++	otg_used = 0;
+ 
+-	/* Some phy and power's special controls for otg
+-	 * 1. The external charger detector needs to be disabled
+-	 * or the signal at DP will be poor
+-	 * 2. The EN_USB_CLKS is always enabled.
+-	 * The PLL's power is controlled by usb and others who
+-	 * use pll3 too.
+-	 */
+-	__raw_writel(BM_ANADIG_USB1_CHRG_DETECT_EN_B  \
+-			| BM_ANADIG_USB1_CHRG_DETECT_CHK_CHRG_B,  \
+-			anatop_base_addr + HW_ANADIG_USB1_CHRG_DETECT);
+ 	__raw_writel(BM_ANADIG_USB1_PLL_480_CTRL_EN_USB_CLKS,
+-			anatop_base_addr + HW_ANADIG_USB1_PLL_480_CTRL_SET);
++			anatop_base_addr + HW_ANADIG_USB1_PLL_480_CTRL_CLR);
++	return ;
+ }
++module_exit(mx6_usb_dr_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor");
++MODULE_LICENSE("GPL");
+diff --git a/arch/arm/mach-mx6/usb_h1.c b/arch/arm/mach-mx6/usb_h1.c
+index f86a4f4..eeac0c4 100644
+--- a/arch/arm/mach-mx6/usb_h1.c
++++ b/arch/arm/mach-mx6/usb_h1.c
+@@ -400,7 +400,7 @@ static int  __init mx6_usb_h1_init(void)
+ 	struct imx_mxc_ehci_data imx6sl_mxc_ehci_hs_data[] = {
+ 		imx_mxc_ehci_data_entry_single(MX6SL, 1, HS1)};
+ 
+-	mx6_set_usb_host1_vbus_func(&mx6_set_usb_host1_vbus);
++	mx6_get_host1_vbus_func(&mx6_set_usb_host1_vbus);
+ 	if (mx6_set_usb_host1_vbus)
+ 		mx6_set_usb_host1_vbus(true);
+ 
+@@ -438,11 +438,12 @@ static int  __init mx6_usb_h1_init(void)
+ 		pdev_wakeup = imx6sl_add_fsl_usb2_hs_wakeup(1, &usbh1_wakeup_config);
+ 	else
+ 		pdev_wakeup = imx6q_add_fsl_usb2_hs_wakeup(1, &usbh1_wakeup_config);
++	platform_device_add(pdev);
+ 	((struct fsl_usb2_platform_data *)(pdev->dev.platform_data))->wakeup_pdata =
+ 		(struct fsl_usb2_wakeup_platform_data *)(pdev_wakeup->dev.platform_data);
+ 	return 0;
+ }
+-module_init(mx6_usb_h1_init);
++arch_initcall(mx6_usb_h1_init);
+ 
+ static void __exit mx6_usb_h1_exit(void)
+ {
+diff --git a/arch/arm/mach-mx6/usb_h2.c b/arch/arm/mach-mx6/usb_h2.c
+index 37cad03..be092ab 100644
+--- a/arch/arm/mach-mx6/usb_h2.c
++++ b/arch/arm/mach-mx6/usb_h2.c
+@@ -237,6 +237,7 @@ void __init mx6_usb_h2_init(void)
+ 		pdev_wakeup = imx6sl_add_fsl_usb2_hs_wakeup(2, &usbh2_wakeup_config);
+ 	else
+ 		pdev_wakeup = imx6q_add_fsl_usb2_hs_wakeup(2, &usbh2_wakeup_config);
++	platform_device_add(pdev);
+ 	((struct fsl_usb2_platform_data *)(pdev->dev.platform_data))->wakeup_pdata =
+ 		pdev_wakeup->dev.platform_data;
+ 	/* Some phy and power's special controls for host2
+diff --git a/arch/arm/mach-mx6/usb_h3.c b/arch/arm/mach-mx6/usb_h3.c
+index 820ecd9..e25c016 100644
+--- a/arch/arm/mach-mx6/usb_h3.c
++++ b/arch/arm/mach-mx6/usb_h3.c
+@@ -227,6 +227,7 @@ void __init mx6_usb_h3_init(void)
+ 	pdev = imx6q_add_fsl_ehci_hs(3, &usbh3_config);
+ 	usbh3_wakeup_config.usb_pdata[0] = pdev->dev.platform_data;
+ 	pdev_wakeup = imx6q_add_fsl_usb2_hs_wakeup(3, &usbh3_wakeup_config);
++	platform_device_add(pdev);
+ 	((struct fsl_usb2_platform_data *)(pdev->dev.platform_data))->wakeup_pdata =
+ 		pdev_wakeup->dev.platform_data;
+ 
+diff --git a/arch/arm/plat-mxc/devices/platform-fsl-usb2-otg.c b/arch/arm/plat-mxc/devices/platform-fsl-usb2-otg.c
+index f32593c..da7b221 100644
+--- a/arch/arm/plat-mxc/devices/platform-fsl-usb2-otg.c
++++ b/arch/arm/plat-mxc/devices/platform-fsl-usb2-otg.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * Based on Uwe Kleine-Koenig's platform-fsl-usb2-udc.c
+  * Copyright (C) 2010 Pengutronix
+@@ -39,7 +39,51 @@ struct platform_device *__init imx_add_fsl_usb2_otg(
+ 			.flags = IORESOURCE_IRQ,
+ 		},
+ 	};
+-	return imx_add_platform_device_dmamask("fsl-usb2-otg", -1,
+-			res, ARRAY_SIZE(res),
+-			pdata, sizeof(*pdata), DMA_BIT_MASK(32));
++
++	int ret = -ENOMEM;
++	const char *name = "fsl-usb2-otg";
++	int id = -1;
++	unsigned int num_resources = ARRAY_SIZE(res);
++	size_t size_data = sizeof(*pdata);
++	u64 dmamask = DMA_BIT_MASK(32);
++	struct platform_device *pdev;
++
++	pdev = platform_device_alloc(name, id);
++	if (!pdev)
++		goto err;
++
++	if (dmamask) {
++		/*
++		 * This memory isn't freed when the device is put,
++		 * I don't have a nice idea for that though.  Conceptually
++		 * dma_mask in struct device should not be a pointer.
++		 * See http://thread.gmane.org/gmane.linux.kernel.pci/9081
++		 */
++		pdev->dev.dma_mask =
++			kmalloc(sizeof(*pdev->dev.dma_mask), GFP_KERNEL);
++		if (!pdev->dev.dma_mask)
++			/* ret is still -ENOMEM; */
++			goto err;
++
++		*pdev->dev.dma_mask = dmamask;
++		pdev->dev.coherent_dma_mask = dmamask;
++	}
++
++	ret = platform_device_add_resources(pdev, res, num_resources);
++	if (ret)
++		goto err;
++
++	if (data) {
++		ret = platform_device_add_data(pdev, pdata, size_data);
++		if (ret)
++			goto err;
++	}
++
++	return pdev;
++err:
++		if (dmamask)
++			kfree(pdev->dev.dma_mask);
++		platform_device_put(pdev);
++		return ERR_PTR(ret);
+ }
++EXPORT_SYMBOL(imx_add_fsl_usb2_otg);
+diff --git a/arch/arm/plat-mxc/devices/platform-fsl-usb2-udc.c b/arch/arm/plat-mxc/devices/platform-fsl-usb2-udc.c
+index 34e522a..4c54e11 100644
+--- a/arch/arm/plat-mxc/devices/platform-fsl-usb2-udc.c
++++ b/arch/arm/plat-mxc/devices/platform-fsl-usb2-udc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * Copyright (C) 2010 Pengutronix
+  * Uwe Kleine-Koenig <u.kleine-koenig@pengutronix.de>
+@@ -58,7 +58,52 @@ struct platform_device *__init imx_add_fsl_usb2_udc(
+ 			.flags = IORESOURCE_IRQ,
+ 		},
+ 	};
+-	return imx_add_platform_device_dmamask("fsl-usb2-udc", -1,
+-			res, ARRAY_SIZE(res),
+-			pdata, sizeof(*pdata), DMA_BIT_MASK(32));
++
++	int ret = -ENOMEM;
++	const char *name = "fsl-usb2-udc";
++	int id = -1;
++	unsigned int num_resources = ARRAY_SIZE(res);
++	size_t size_data = sizeof(*pdata);
++	u64 dmamask = DMA_BIT_MASK(32);
++	struct platform_device *pdev;
++
++	pdev = platform_device_alloc(name, id);
++	if (!pdev)
++		goto err;
++
++	if (dmamask) {
++		/*
++		 * This memory isn't freed when the device is put,
++		 * I don't have a nice idea for that though.  Conceptually
++		 * dma_mask in struct device should not be a pointer.
++		 * See http://thread.gmane.org/gmane.linux.kernel.pci/9081
++		 */
++		pdev->dev.dma_mask =
++			kmalloc(sizeof(*pdev->dev.dma_mask), GFP_KERNEL);
++		if (!pdev->dev.dma_mask)
++			/* ret is still -ENOMEM; */
++			goto err;
++
++		*pdev->dev.dma_mask = dmamask;
++		pdev->dev.coherent_dma_mask = dmamask;
++	}
++
++	ret = platform_device_add_resources(pdev, res, num_resources);
++	if (ret)
++		goto err;
++
++	if (data) {
++		ret = platform_device_add_data(pdev, pdata, size_data);
++		if (ret)
++			goto err;
++	}
++
++	return pdev;
++
++err:
++		if (dmamask)
++			kfree(pdev->dev.dma_mask);
++		platform_device_put(pdev);
++		return ERR_PTR(ret);
+ }
++EXPORT_SYMBOL(imx_add_fsl_usb2_udc);
+diff --git a/arch/arm/plat-mxc/devices/platform-mxc-ehci.c b/arch/arm/plat-mxc/devices/platform-mxc-ehci.c
+index 2b9cdff..984fa29 100644
+--- a/arch/arm/plat-mxc/devices/platform-mxc-ehci.c
++++ b/arch/arm/plat-mxc/devices/platform-mxc-ehci.c
+@@ -101,8 +101,52 @@ struct platform_device *__init imx_add_fsl_ehci(
+ 			.flags = IORESOURCE_IRQ,
+ 		},
+ 	};
+-	return imx_add_platform_device_dmamask("fsl-ehci", data->id,
+-			res, ARRAY_SIZE(res),
+-			pdata, sizeof(*pdata), DMA_BIT_MASK(32));
++	int ret = -ENOMEM;
++	const char *name = "fsl-ehci";
++	int id = data->id;
++	unsigned int num_resources = ARRAY_SIZE(res);
++	size_t size_data = sizeof(*pdata);
++	u64 dmamask = DMA_BIT_MASK(32);
++	struct platform_device *pdev;
++
++	pdev = platform_device_alloc(name, id);
++	if (!pdev)
++		goto err;
++
++	if (dmamask) {
++		/*
++		 * This memory isn't freed when the device is put,
++		 * I don't have a nice idea for that though.  Conceptually
++		 * dma_mask in struct device should not be a pointer.
++		 * See http://thread.gmane.org/gmane.linux.kernel.pci/9081
++		 */
++		pdev->dev.dma_mask =
++			kmalloc(sizeof(*pdev->dev.dma_mask), GFP_KERNEL);
++		if (!pdev->dev.dma_mask)
++			/* ret is still -ENOMEM; */
++			goto err;
++
++		*pdev->dev.dma_mask = dmamask;
++		pdev->dev.coherent_dma_mask = dmamask;
++	}
++
++	ret = platform_device_add_resources(pdev, res, num_resources);
++	if (ret)
++		goto err;
++
++    if (data) {
++		ret = platform_device_add_data(pdev, pdata, size_data);
++		if (ret)
++			goto err;
++	}
++
++	return pdev;
++
++err:
++		if (dmamask)
++			kfree(pdev->dev.dma_mask);
++		platform_device_put(pdev);
++		return ERR_PTR(ret);
++
+ }
+ EXPORT_SYMBOL(imx_add_fsl_ehci);
+diff --git a/arch/arm/plat-mxc/usb_common.c b/arch/arm/plat-mxc/usb_common.c
+index 97d963a..a327d30 100755
+--- a/arch/arm/plat-mxc/usb_common.c
++++ b/arch/arm/plat-mxc/usb_common.c
+@@ -52,7 +52,8 @@
+ typedef void (*driver_vbus_func)(bool);
+ 
+ void __iomem *imx_otg_base;
+-static  driver_vbus_func s_driver_vbus;
++static  driver_vbus_func s_h1_driver_vbus;
++static  driver_vbus_func s_otg_driver_vbus;
+ 
+ EXPORT_SYMBOL(imx_otg_base);
+ 
+@@ -73,14 +74,26 @@ EXPORT_SYMBOL(usb_icbug_swfix_need);
+ 
+ void mx6_set_host1_vbus_func(driver_vbus_func driver_vbus)
+ {
+-	s_driver_vbus = driver_vbus;
++	s_h1_driver_vbus = driver_vbus;
+ }
+ 
+-void mx6_set_usb_host1_vbus_func(driver_vbus_func *driver_vbus)
++void mx6_get_host1_vbus_func(driver_vbus_func *driver_vbus)
+ {
+-	*driver_vbus = s_driver_vbus;
++	*driver_vbus = s_h1_driver_vbus;
+ }
+-EXPORT_SYMBOL(mx6_set_usb_host1_vbus_func);
++EXPORT_SYMBOL(mx6_get_host1_vbus_func);
++
++void mx6_set_otghost_vbus_func(driver_vbus_func driver_vbus)
++{
++	s_otg_driver_vbus = driver_vbus;
++}
++
++void mx6_get_otghost_vbus_func(driver_vbus_func *driver_vbus)
++{
++	*driver_vbus = s_otg_driver_vbus;
++}
++EXPORT_SYMBOL(mx6_get_otghost_vbus_func);
++
+ 
+ 
+ enum fsl_usb2_modes get_usb_mode(struct fsl_usb2_platform_data *pdata)
+-- 
+1.7.7.4
+

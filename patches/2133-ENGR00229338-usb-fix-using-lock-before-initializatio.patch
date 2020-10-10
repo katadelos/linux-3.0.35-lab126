@@ -1,0 +1,63 @@
+From 3331fe12576eb3b8a06749eb897eb48e6ecca0a6 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Fri, 12 Oct 2012 15:23:49 +0800
+Subject: [PATCH 2133/2463] ENGR00229338: usb: fix using lock before
+ initialization problem
+
+It will cause below problem if spin_lock debug is on:
+
+BUG: spinlock lockup on CPU#0, swapper/1, 9a0292a0
+
+The reason is the lock is used before initialization.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    3 ++-
+ drivers/usb/host/ehci-arc.c     |    3 ++-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 86518d9..75fe978 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -3065,6 +3065,8 @@ static int __devinit fsl_udc_probe(struct platform_device *pdev)
+ 		goto err2a;
+ 	}
+ 
++	spin_lock_init(&pdata->lock);
++
+ 	/* Due to mx35/mx25's phy's bug */
+ 	reset_phy();
+ 
+@@ -3210,7 +3212,6 @@ static int __devinit fsl_udc_probe(struct platform_device *pdev)
+ 	udc_controller->charger.enable = false;
+ #endif
+ 
+-	spin_lock_init(&pdata->lock);
+ 	return 0;
+ 
+ err4:
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index e09f4df..3581586 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -260,6 +260,8 @@ int usb_hcd_fsl_probe(const struct hc_driver *driver,
+ 		goto err4;
+ 	}
+ 
++	spin_lock_init(&pdata->lock);
++
+ 	fsl_platform_set_host_mode(hcd);
+ 	hcd->power_budget = pdata->power_budget;
+ 	ehci = hcd_to_ehci(hcd);
+@@ -308,7 +310,6 @@ int usb_hcd_fsl_probe(const struct hc_driver *driver,
+ 
+ 	ehci = hcd_to_ehci(hcd);
+ 	pdata->pm_command = ehci->command;
+-	spin_lock_init(&pdata->lock);
+ 	return retval;
+ err6:
+ 	free_irq(irq, (void *)pdev);
+-- 
+1.7.7.4
+

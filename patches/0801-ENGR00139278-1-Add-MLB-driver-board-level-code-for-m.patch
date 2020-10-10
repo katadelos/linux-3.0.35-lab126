@@ -1,0 +1,392 @@
+From 0d6aa8d4df3c01a97ed777253005ff7caf7400d2 Mon Sep 17 00:00:00 2001
+From: Terry Lv <r65388@freescale.com>
+Date: Mon, 26 Dec 2011 12:16:20 +0800
+Subject: [PATCH 0801/2463] ENGR00139278-1: Add MLB driver board level code
+ for mx6q
+
+Add board level code for mlb, including platform data, clock, etc.
+
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig                 |    2 +
+ arch/arm/mach-mx6/Kconfig                       |    1 +
+ arch/arm/mach-mx6/board-mx6q_arm2.c             |   14 ++++-
+ arch/arm/mach-mx6/clock.c                       |   46 ++++++++++++--
+ arch/arm/mach-mx6/crm_regs.h                    |    2 +
+ arch/arm/mach-mx6/devices-imx6q.h               |    4 +
+ arch/arm/plat-mxc/devices/Kconfig               |    3 +
+ arch/arm/plat-mxc/devices/Makefile              |    1 +
+ arch/arm/plat-mxc/devices/platform-mxc_mlb.c    |   71 +++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h |    2 +
+ arch/arm/plat-mxc/include/mach/iomux-mx6q.h     |   10 ++-
+ 11 files changed, 145 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index afc2e26..42c4eeb 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -288,6 +288,7 @@ CONFIG_IMX_HAVE_PLATFORM_IMX_PM=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_ASRC=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_DSI=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_CSI2=y
++CONFIG_IMX_HAVE_PLATFORM_MXC_MLB=y
+ 
+ #
+ # Freescale MXC Implementations
+@@ -1980,6 +1981,7 @@ CONFIG_MXC_ASRC=y
+ #
+ # MXC Media Local Bus Driver
+ #
++CONFIG_MXC_MLB150=m
+ 
+ #
+ # i.MX ADC support
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index e28be21..7136e29 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -55,6 +55,7 @@ config MACH_MX6Q_ARM2
+ 	select IMX_HAVE_PLATFORM_FLEXCAN
+ 	select IMX_HAVE_PLATFORM_IMX_MIPI_CSI2
+ 	select IMX_HAVE_PLATFORM_PERFMON
++	select IMX_HAVE_PLATFORM_MXC_MLB
+ 	help
+ 	  Include support for i.MX 6Quad Armadillo2 platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index b0f45f0..ffa41e3 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -277,6 +277,11 @@ static iomux_v3_cfg_t mx6q_arm2_pads[] = {
+ 
+ 	/* USBOTG ID pin */
+ 	MX6Q_PAD_GPIO_1__USBOTG_ID,
++
++	/* MLB150 */
++	MX6Q_PAD_GPIO_3__MLB_MLBCLK,
++	MX6Q_PAD_GPIO_6__MLB_MLBSIG,
++	MX6Q_PAD_GPIO_2__MLB_MLBDAT,
+ };
+ 
+ static iomux_v3_cfg_t mx6q_arm2_i2c3_pads[] = {
+@@ -620,7 +625,7 @@ static int max7310_u48_setup(struct i2c_client *client,
+ 	void *context)
+ {
+ 	int max7310_gpio_value[] = {
+-		1, 1, 1, 1, 0, 0, 0, 0,
++		1, 1, 1, 1, 0, 1, 0, 0,
+ 	};
+ 
+ 	int n;
+@@ -1343,6 +1348,12 @@ static int __init early_use_esai_record(char *p)
+ 
+ early_param("esai_record", early_use_esai_record);
+ 
++static struct mxc_mlb_platform_data mx6q_arm2_mlb150_data = {
++	.reg_nvcc = NULL,
++	.mlb_clk = "mlb150_clk",
++	.mlb_pll_clk = "pll6",
++};
++
+ static struct mxc_dvfs_platform_data arm2_dvfscore_data = {
+ 	.reg_id = "cpu_vddgp",
+ 	.clk1_id = "cpu_clk",
+@@ -1550,6 +1561,7 @@ static void __init mx6_board_init(void)
+ 	imx6q_add_perfmon(0);
+ 	imx6q_add_perfmon(1);
+ 	imx6q_add_perfmon(2);
++	imx6q_add_mlb150(&mx6q_arm2_mlb150_data);
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index cefdd850..6b1fad1 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -52,7 +52,7 @@ static struct clk pll2_pfd_400M;
+ static struct clk pll3_usb_otg_main_clk;
+ static struct clk pll4_audio_main_clk;
+ static struct clk pll5_video_main_clk;
+-static struct clk pll6_MLB_main_clk;
++static struct clk pll6_mlb150_main_clk;
+ static struct clk pll7_usb_host_main_clk;
+ static struct clk pll8_enet_main_clk;
+ static struct clk apbh_dma_clk;
+@@ -208,7 +208,7 @@ static inline void __iomem *_get_pll_base(struct clk *pll)
+ 		return PLL4_AUDIO_BASE_ADDR;
+ 	else if (pll == &pll5_video_main_clk)
+ 		return PLL5_VIDEO_BASE_ADDR;
+-	else if (pll == &pll6_MLB_main_clk)
++	else if (pll == &pll6_mlb150_main_clk)
+ 		return PLL6_MLB_BASE_ADDR;
+ 	else if (pll == &pll7_usb_host_main_clk)
+ 		return PLL7_480_USB2_BASE_ADDR;
+@@ -844,10 +844,31 @@ static struct clk pll5_video_main_clk = {
+ 	.round_rate = _clk_audio_video_round_rate,
+ };
+ 
+-static struct clk pll6_MLB_main_clk = {
+-	__INIT_CLK_DEBUG(pll6_MLB_main_clk)
++static int _clk_pll_mlb_main_enable(struct clk *clk)
++{
++	unsigned int reg;
++	void __iomem *pllbase;
++
++	pllbase = _get_pll_base(clk);
++
++	reg = __raw_readl(pllbase);
++	reg &= ~ANADIG_PLL_BYPASS;
++
++	reg = 0x0da20000;
++	__raw_writel(reg, pllbase);
++
++	/* Wait for PLL to lock */
++	if (!WAIT(__raw_readl(pllbase) & ANADIG_PLL_LOCK,
++		SPIN_DELAY))
++		panic("pll enable failed\n");
++
++	return 0;
++}
++
++static struct clk pll6_mlb150_main_clk = {
++	__INIT_CLK_DEBUG(pll6_mlb150_main_clk)
+ 	.parent = &osc_clk,
+-	.enable = _clk_pll_enable,
++	.enable = _clk_pll_mlb_main_enable,
+ 	.disable = _clk_pll_disable,
+ };
+ 
+@@ -4520,6 +4541,16 @@ static struct clk usboh3_clk[] = {
+ 	},
+ };
+ 
++static struct clk mlb150_clk = {
++	__INIT_CLK_DEBUG(mlb150_clk)
++	.id = 0,
++	.parent = &ipg_clk,
++	.enable_reg = MXC_CCM_CCGR3,
++	.enable_shift = MXC_CCM_CCGRx_CG9_OFFSET,
++	.enable = _clk_enable,
++	.disable = _clk_disable,
++};
++
+ static int _clk_enable1(struct clk *clk)
+ {
+ 	u32 reg;
+@@ -4699,7 +4730,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "pll3_120M", pll3_60M),
+ 	_REGISTER_CLOCK(NULL, "pll4", pll4_audio_main_clk),
+ 	_REGISTER_CLOCK(NULL, "pll5", pll5_video_main_clk),
+-	_REGISTER_CLOCK(NULL, "pll4", pll6_MLB_main_clk),
++	_REGISTER_CLOCK(NULL, "pll6", pll6_mlb150_main_clk),
+ 	_REGISTER_CLOCK(NULL, "pll3", pll7_usb_host_main_clk),
+ 	_REGISTER_CLOCK(NULL, "pll4", pll8_enet_main_clk),
+ 	_REGISTER_CLOCK(NULL, "cpu_clk", cpu_clk),
+@@ -4792,6 +4823,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK("mxs-perfmon.0", "perfmon", perfmon0_clk),
+ 	_REGISTER_CLOCK("mxs-perfmon.1", "perfmon", perfmon1_clk),
+ 	_REGISTER_CLOCK("mxs-perfmon.2", "perfmon", perfmon2_clk),
++	_REGISTER_CLOCK(NULL, "mlb150_clk", mlb150_clk),
+ };
+ 
+ static void clk_tree_init(void)
+@@ -4849,7 +4881,7 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ #endif
+ 	pll4_audio_main_clk.disable(&pll4_audio_main_clk);
+ 	pll5_video_main_clk.disable(&pll5_video_main_clk);
+-	pll6_MLB_main_clk.disable(&pll6_MLB_main_clk);
++	pll6_mlb150_main_clk.disable(&pll6_mlb150_main_clk);
+ 	pll7_usb_host_main_clk.disable(&pll7_usb_host_main_clk);
+ 	pll8_enet_main_clk.disable(&pll8_enet_main_clk);
+ 
+diff --git a/arch/arm/mach-mx6/crm_regs.h b/arch/arm/mach-mx6/crm_regs.h
+index 5b80070..7ae4396 100644
+--- a/arch/arm/mach-mx6/crm_regs.h
++++ b/arch/arm/mach-mx6/crm_regs.h
+@@ -83,6 +83,7 @@
+ #define ANADIG_PLL_AV_DIV_SELECT_OFFSET		(0)
+ 
+ /* PLL6_MLB defines. */
++#define ANADIG_PLL_MLB_LOCK			(1 << 31)
+ #define ANADIG_PLL_MLB_FLT_RES_CFG_MASK		(0x7 << 26)
+ #define ANADIG_PLL_MLB_FLT_RES_CFG_OFFSET	(26)
+ #define ANADIG_PLL_MLB_RX_CLK_DELAY_CFG_MASK	(0x7 << 23)
+@@ -91,6 +92,7 @@
+ #define ANADIG_PLL_MLB_VDDD_DELAY_CFG_OFFSET	(20)
+ #define ANADIG_PLL_MLB_VDDA_DELAY_CFG_MASK	(0x7 << 17)
+ #define ANADIG_PLL_MLB_VDDA_DELAY_CFG_OFFSET	(17)
++#define ANADIG_PLL_MLB_BYPASS			(1 << 16)
+ 
+ /* PLL8_ENET defines. */
+ #define ANADIG_PLL_ENET_LOCK			(1 << 31)
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index e87f9c0..ce6b50d 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -194,3 +194,7 @@ extern const struct imx_perfmon_data imx6q_perfmon_data[] __initconst;
+ #define imx6q_add_perfmon(id) \
+ 	imx_add_perfmon(&imx6q_perfmon_data[id])
+ 
++extern const struct imx_mxc_mlb_data imx6q_mxc_mlb150_data __initconst;
++#define imx6q_add_mlb150(pdata)        \
++	imx_add_mlb(pdata)
++
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index fa09bfb..3eead8e 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -1,6 +1,9 @@
+ config IMX_HAVE_PLATFORM_DMA
+ 	bool
+ 
++config IMX_HAVE_PLATFORM_MXC_MLB
++	bool
++
+ config IMX_HAVE_PLATFORM_FEC
+ 	bool
+ 	default y if ARCH_MX25 || SOC_IMX27 || SOC_IMX35 || SOC_IMX51 || SOC_IMX53
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index f453b04..71cfefa 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -1,4 +1,5 @@
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_DMA) += platform-dma.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_MXC_MLB) += platform-mxc_mlb.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_FEC) += platform-fec.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_FLEXCAN) += platform-flexcan.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_FSL_USB2_UDC) += platform-fsl-usb2-udc.o
+diff --git a/arch/arm/plat-mxc/devices/platform-mxc_mlb.c b/arch/arm/plat-mxc/devices/platform-mxc_mlb.c
+new file mode 100644
+index 0000000..a1ede415
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-mxc_mlb.c
+@@ -0,0 +1,71 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++
++#ifdef CONFIG_SOC_IMX53
++struct platform_device *__init imx_add_mlb(
++		const struct mxc_mlb_platform_data *pdata)
++{
++	struct resource res[] = {
++		{
++			.start = MX53_MLB_BASE_ADDR,
++			.end = MX53_MLB_BASE_ADDR + SZ_4K - 1,
++			.flags = IORESOURCE_MEM,
++		},
++		{
++			.start = MX53_INT_MLB,
++			.end = MX53_INT_MLB,
++			.flags = IORESOURCE_IRQ,
++		},
++	};
++	return imx_add_platform_device("mxc_mlb", 0,
++			res, ARRAY_SIZE(res), pdata, sizeof(*pdata));
++}
++#endif /* ifdef CONFIG_SOC_IMX53 */
++
++#ifdef CONFIG_SOC_IMX6Q
++struct platform_device *__init imx_add_mlb(
++		const struct mxc_mlb_platform_data *pdata)
++{
++	struct resource res[] = {
++		{
++			.start = MLB_BASE_ADDR,
++			.end = MLB_BASE_ADDR + SZ_4K - 1,
++			.flags = IORESOURCE_MEM,
++		},
++		{
++			.start = MXC_INT_MLB,
++			.end = MXC_INT_MLB,
++			.flags = IORESOURCE_IRQ,
++		},
++		{
++			.start = MXC_INT_MLB_AHB0,
++			.end = MXC_INT_MLB_AHB0,
++			.flags = IORESOURCE_IRQ,
++		},
++		{
++			.start = MXC_INT_MLB_AHB1,
++			.end = MXC_INT_MLB_AHB1,
++			.flags = IORESOURCE_IRQ,
++		},
++	};
++	return imx_add_platform_device("mxc_mlb150", 0,
++			res, ARRAY_SIZE(res), pdata, sizeof(*pdata));
++}
++#endif
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index cb73e1e..a5ad0df 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -51,6 +51,8 @@ struct platform_device *__init imx_add_flexcan(
+ 		const struct flexcan_platform_data *pdata);
+ 
+ #include <linux/fsl_devices.h>
++struct platform_device *__init imx_add_mlb(
++		const struct mxc_mlb_platform_data *pdata);
+ struct imx_fsl_usb2_udc_data {
+ 	resource_size_t iobase;
+ 	resource_size_t irq;
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+index 9ebde65..c199ad2 100644
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6q.h
+@@ -46,6 +46,10 @@ typedef enum iomux_config {
+ 		PAD_CTL_DSE_80ohm | PAD_CTL_SRE_FAST | PAD_CTL_HYS)
+ 
+ #define MX6Q_HIGH_DRV	(PAD_CTL_DSE_120ohm)
++
++#define MX6Q_MLB150_PAD_CTRL	(PAD_CTL_SPEED_LOW |	\
++		PAD_CTL_DSE_40ohm | PAD_CTL_SRE_FAST)	\
++
+ #define MX6Q_UART_PAD_CTRL	(PAD_CTL_PKE | PAD_CTL_PUE |	\
+ 		PAD_CTL_PUS_100K_UP | PAD_CTL_SPEED_MED |	\
+ 		PAD_CTL_DSE_40ohm | PAD_CTL_SRE_FAST | PAD_CTL_HYS)
+@@ -5915,7 +5919,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_GPIO_3__USBOH3_USBH1_OC		\
+ 		(_MX6Q_PAD_GPIO_3__USBOH3_USBH1_OC | MUX_PAD_CTRL(NO_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_3__MLB_MLBCLK		\
+-		(_MX6Q_PAD_GPIO_3__MLB_MLBCLK | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_GPIO_3__MLB_MLBCLK | MUX_PAD_CTRL(MX6Q_MLB150_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_GPIO_6__ESAI1_SCKT		\
+ 		(_MX6Q_PAD_GPIO_6__ESAI1_SCKT | MUX_PAD_CTRL(NO_PAD_CTRL))
+@@ -5932,7 +5936,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_GPIO_6__USDHC2_LCTL		\
+ 		(_MX6Q_PAD_GPIO_6__USDHC2_LCTL | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_6__MLB_MLBSIG		\
+-		(_MX6Q_PAD_GPIO_6__MLB_MLBSIG | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_GPIO_6__MLB_MLBSIG | MUX_PAD_CTRL(MX6Q_MLB150_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_GPIO_2__ESAI1_FST		\
+ 		(_MX6Q_PAD_GPIO_2__ESAI1_FST | MUX_PAD_CTRL(NO_PAD_CTRL))
+@@ -5949,7 +5953,7 @@ typedef enum iomux_config {
+ #define  MX6Q_PAD_GPIO_2__USDHC2_WP		\
+ 		(_MX6Q_PAD_GPIO_2__USDHC2_WP | MUX_PAD_CTRL(MX6Q_USDHC_PAD_CTRL))
+ #define  MX6Q_PAD_GPIO_2__MLB_MLBDAT		\
+-		(_MX6Q_PAD_GPIO_2__MLB_MLBDAT | MUX_PAD_CTRL(NO_PAD_CTRL))
++		(_MX6Q_PAD_GPIO_2__MLB_MLBDAT | MUX_PAD_CTRL(MX6Q_MLB150_PAD_CTRL))
+ 
+ #define  MX6Q_PAD_GPIO_4__ESAI1_HCKT		\
+ 		(_MX6Q_PAD_GPIO_4__ESAI1_HCKT | MUX_PAD_CTRL(NO_PAD_CTRL))
+-- 
+1.7.7.4
+

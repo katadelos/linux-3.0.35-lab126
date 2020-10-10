@@ -1,0 +1,97 @@
+From 7395b0589692adeaf30d1cae659ddf39ad78bf49 Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Thu, 29 Nov 2012 16:28:25 +0800
+Subject: [PATCH 2301/2463] ENGR00234722 USB: fix Kernel dump issue after USB
+ driver loadable
+
+- It is better to disable otgsc and wake up interrupt to avoid an
+  abnormal interrupt happen during USB driver being removed.
+- If the USB host is already at low power mode, only need turn on
+  the clock, no need turn off the clock.
+- Need discharge dp and dm during USB driver being removed ,in order
+  to avoid a wakeup interrupt happen. And if the USB otg is in host
+  mode, we should clear discharge dp and dm in fsl_otg_set_host()
+  during system boot up.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    9 ++++++++-
+ drivers/usb/host/ehci-arc.c     |    6 +++---
+ drivers/usb/otg/fsl_otg.c       |    5 +++++
+ 3 files changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index ae0daac..89bd9a3 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -3248,7 +3248,7 @@ err1a:
+ static int  fsl_udc_remove(struct platform_device *pdev)
+ {
+ 	struct fsl_usb2_platform_data *pdata = pdev->dev.platform_data;
+-
++	u32 temp;
+ 	DECLARE_COMPLETION(done);
+ 
+ 	if (!udc_controller)
+@@ -3258,6 +3258,13 @@ static int  fsl_udc_remove(struct platform_device *pdev)
+ 	if (udc_controller->stopped)
+ 		dr_clk_gate(true);
+ 
++	/* disable wake up and otgsc interrupt for safely remove udc driver*/
++	temp = fsl_readl(&dr_regs->otgsc);
++	temp &= ~(0x7f << 24);
++	fsl_writel(temp, &dr_regs->otgsc);
++	dr_wake_up_enable(udc_controller, false);
++
++	dr_discharge_line(pdata, true);
+ 	/* DR has been stopped in usb_gadget_unregister_driver() */
+ 	remove_proc_file();
+ 
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index cf9d9e1..8c703b9 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -339,14 +339,14 @@ static void usb_hcd_fsl_remove(struct usb_hcd *hcd,
+ 		if (pdata->usb_clock_for_pm)
+ 			pdata->usb_clock_for_pm(true);
+ 
++		/*disable the wakeup to avoid an abnormal wakeup interrupt*/
++		usb_host_set_wakeup(hcd->self.controller, false);
++
+ 		tmp = ehci_readl(ehci, &ehci->regs->port_status[0]);
+ 		if (tmp & PORT_PTS_PHCD) {
+ 			tmp &= ~PORT_PTS_PHCD;
+ 			ehci_writel(ehci, tmp, &ehci->regs->port_status[0]);
+ 			msleep(100);
+-
+-			if (pdata->usb_clock_for_pm)
+-				pdata->usb_clock_for_pm(false);
+ 		}
+ 	}
+ 
+diff --git a/drivers/usb/otg/fsl_otg.c b/drivers/usb/otg/fsl_otg.c
+index d728cf9..292c2e9 100755
+--- a/drivers/usb/otg/fsl_otg.c
++++ b/drivers/usb/otg/fsl_otg.c
+@@ -607,6 +607,9 @@ int fsl_otg_start_gadget(struct otg_fsm *fsm, int on)
+ static int fsl_otg_set_host(struct otg_transceiver *otg_p, struct usb_bus *host)
+ {
+ 	struct fsl_otg *otg_dev = container_of(otg_p, struct fsl_otg, otg);
++	struct fsl_usb2_platform_data *pdata;
++
++	pdata = otg_dev->otg.dev->platform_data;
+ 
+ 	if (!otg_p || otg_dev != fsl_otg_dev)
+ 		return -ENODEV;
+@@ -633,6 +636,8 @@ static int fsl_otg_set_host(struct otg_transceiver *otg_p, struct usb_bus *host)
+ 		else {
+ 			/* if the device is already at the port */
+ 			otg_drv_vbus(&otg_dev->fsm, 1);
++			if (pdata->dr_discharge_line)
++				pdata->dr_discharge_line(false);
+ 			fsl_otg_wait_stable_vbus(true);
+ 			b_session_irq_enable(false);
+ 			fsl_otg_start_host(&otg_dev->fsm, 1);
+-- 
+1.7.7.4
+

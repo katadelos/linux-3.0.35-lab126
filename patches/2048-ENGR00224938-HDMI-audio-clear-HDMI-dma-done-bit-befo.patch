@@ -1,0 +1,43 @@
+From 547bcf3ca2487a8a3df4c28c393a1588665230ee Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Wed, 19 Sep 2012 13:30:27 +0800
+Subject: [PATCH 2048/2463] ENGR00224938 HDMI audio: clear HDMI dma done bit
+ before start
+
+HDMI hardware fix: signal of HDMI DMA DONE is hard connected to SDMA
+event line. SDMA event is triggered by edge. If the HDMI DMA done is
+already 1 before start, there would be no SDMA event being trigged after
+HDMI generates another HDMI DONE signal.
+
+In this patch, clear HDMI DONE bit before start HDMI audio DMA.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ sound/soc/imx/imx-hdmi-dma.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/imx/imx-hdmi-dma.c b/sound/soc/imx/imx-hdmi-dma.c
+index 74d4555..342f9c8 100644
+--- a/sound/soc/imx/imx-hdmi-dma.c
++++ b/sound/soc/imx/imx-hdmi-dma.c
+@@ -1110,6 +1110,7 @@ static int hdmi_dma_trigger(struct snd_pcm_substream *substream, int cmd)
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+ 	struct imx_hdmi_dma_runtime_data *rtd = runtime->private_data;
+ 	unsigned long offset,  count, space_to_end, appl_bytes;
++	unsigned int status;
+ 
+ 	switch (cmd) {
+ 	case SNDRV_PCM_TRIGGER_START:
+@@ -1166,6 +1167,9 @@ static int hdmi_dma_trigger(struct snd_pcm_substream *substream, int cmd)
+ 		hdmi_fifo_reset();
+ 		udelay(1);
+ 
++		status = hdmi_dma_get_irq_status();
++		hdmi_dma_clear_irq_status(status);
++
+ 		hdmi_dma_priv->tx_active = true;
+ 		hdmi_dma_start();
+ 		hdmi_dma_irq_mask(0);
+-- 
+1.7.7.4
+

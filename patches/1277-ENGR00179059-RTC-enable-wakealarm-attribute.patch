@@ -1,0 +1,39 @@
+From 2a244604fbccb69c42431fe50b790c6b46b4034a Mon Sep 17 00:00:00 2001
+From: Frank Li <Frank.Li@freescale.com>
+Date: Fri, 6 Apr 2012 12:58:40 +0800
+Subject: [PATCH 1277/2463] ENGR00179059 RTC: enable wakealarm attribute
+
+Set 10s wake alarm from now by below command
+
+echo +10 > /sys/class/rtc/rtc0/wakealarm
+
+Signed-off-by: Frank Li <Frank.Li@freescale.com>
+---
+ drivers/rtc/rtc-snvs.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/rtc/rtc-snvs.c b/drivers/rtc/rtc-snvs.c
+index aa3dedb..2051e86 100644
+--- a/drivers/rtc/rtc-snvs.c
++++ b/drivers/rtc/rtc-snvs.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+  */
+ 
+ /*
+@@ -565,6 +565,10 @@ static int snvs_rtc_probe(struct platform_device *pdev)
+ 	pdata->irq = platform_get_irq(pdev, 0);
+ 	platform_set_drvdata(pdev, pdata);
+ 
++
++	/* Added to support sysfs wakealarm attribute */
++	pdev->dev.power.can_wakeup = 1;
++
+ 	/* initialize glitch detect */
+ 	__raw_writel(SNVS_LPPGDR_INIT, ioaddr + SNVS_LPPGDR);
+ 	udelay(100);
+-- 
+1.7.7.4
+

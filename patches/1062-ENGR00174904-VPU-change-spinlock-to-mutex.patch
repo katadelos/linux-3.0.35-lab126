@@ -1,0 +1,200 @@
+From 02d4d6da50d2c7288bc5a07c992eebb315379ff8 Mon Sep 17 00:00:00 2001
+From: Sammy He <r62914@freescale.com>
+Date: Tue, 21 Feb 2012 13:51:20 +0800
+Subject: [PATCH 1062/2463] ENGR00174904 VPU: change spinlock to mutex
+
+The spinlock caused a bug warning when we enable the lock debug mechenism.
+
+See the log:
+"
+BUG: sleeping function called from invalid context at mm/slub.c:847
+in_atomic(): 1, irqs_disabled(): 0, pid: 6053, name: aiurdemux0:sink
+INFO: lockdep is turned off.
+no locks held by aiurdemux0:sink/6053.
+[<80042f24>] (unwind_backtrace+0x0/0xfc) from
+                                     [<800f1dec>] (kmem_cache_alloc+0x114/0x180)
+[<800f1dec>] (kmem_cache_alloc+0x114/0x180) from
+                                     [<800e425c>] (__get_vm_area_node+0x88/0x194)
+[<800e425c>] (__get_vm_area_node+0x88/0x194) from
+                                     [<800e4b78>] (__vmalloc_node_range+0x68/0x1c8)
+[<800e4b78>] (__vmalloc_node_range+0x68/0x1c8) from
+                                     [<800e4d18>] (__vmalloc_node+0x40/0x48)
+[<800e4d18>] (__vmalloc_node+0x40/0x48) from
+                                     [<800e4f04>] (vmalloc_user+0x2c/0x74)
+[<800e4f04>] (vmalloc_user+0x2c/0x74) from [<8038eb28>] (vpu_ioctl+0x204/0x8b0)
+[<8038eb28>] (vpu_ioctl+0x204/0x8b0) from [<8010643c>] (do_vfs_ioctl+0x80/0x5e4)
+[<8010643c>] (do_vfs_ioctl+0x80/0x5e4) from [<801069d8>] (sys_ioctl+0x38/0x60)
+[<801069d8>] (sys_ioctl+0x38/0x60) from [<8003d500>] (ret_fast_syscall+0x0/0x3c)
+"
+
+Change the spinlock to mutex to fix this issue.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+Signed-off-by: Sammy He <r62914@freescale.com>
+---
+ drivers/mxc/vpu/mxc_vpu.c |   37 ++++++++++++++++++-------------------
+ 1 files changed, 18 insertions(+), 19 deletions(-)
+
+diff --git a/drivers/mxc/vpu/mxc_vpu.c b/drivers/mxc/vpu/mxc_vpu.c
+index 20d523a..c3235dfb 100644
+--- a/drivers/mxc/vpu/mxc_vpu.c
++++ b/drivers/mxc/vpu/mxc_vpu.c
+@@ -53,6 +53,7 @@ struct vpu_priv {
+ 	struct fasync_struct *async_queue;
+ 	struct work_struct work;
+ 	struct workqueue_struct *workqueue;
++	struct mutex lock;
+ };
+ 
+ /* To track the allocated memory buffer */
+@@ -66,7 +67,6 @@ struct iram_setting {
+ 	u32 end;
+ };
+ 
+-static DEFINE_SPINLOCK(vpu_lock);
+ static LIST_HEAD(head);
+ 
+ static int vpu_major;
+@@ -224,10 +224,10 @@ static irqreturn_t vpu_jpu_irq_handler(int irq, void *dev_id)
+  */
+ static int vpu_open(struct inode *inode, struct file *filp)
+ {
+-	spin_lock(&vpu_lock);
++	mutex_lock(&vpu_data.lock);
+ 	open_count++;
+ 	filp->private_data = (void *)(&vpu_data);
+-	spin_unlock(&vpu_lock);
++	mutex_unlock(&vpu_data.lock);
+ 	return 0;
+ }
+ 
+@@ -276,9 +276,9 @@ static long vpu_ioctl(struct file *filp, u_int cmd,
+ 				break;
+ 			}
+ 
+-			spin_lock(&vpu_lock);
++			mutex_lock(&vpu_data.lock);
+ 			list_add(&rec->list, &head);
+-			spin_unlock(&vpu_lock);
++			mutex_unlock(&vpu_data.lock);
+ 
+ 			break;
+ 		}
+@@ -299,7 +299,7 @@ static long vpu_ioctl(struct file *filp, u_int cmd,
+ 				vpu_free_dma_buffer(&vpu_mem);
+ 			}
+ 
+-			spin_lock(&vpu_lock);
++			mutex_lock(&vpu_data.lock);
+ 			list_for_each_entry_safe(rec, n, &head, list) {
+ 				if (rec->mem.cpu_addr == vpu_mem.cpu_addr) {
+ 					/* delete from list */
+@@ -308,7 +308,7 @@ static long vpu_ioctl(struct file *filp, u_int cmd,
+ 					break;
+ 				}
+ 			}
+-			spin_unlock(&vpu_lock);
++			mutex_unlock(&vpu_data.lock);
+ 
+ 			break;
+ 		}
+@@ -354,18 +354,18 @@ static long vpu_ioctl(struct file *filp, u_int cmd,
+ 		}
+ 	case VPU_IOC_GET_SHARE_MEM:
+ 		{
+-			spin_lock(&vpu_lock);
++			mutex_lock(&vpu_data.lock);
+ 			if (share_mem.cpu_addr != 0) {
+ 				ret = copy_to_user((void __user *)arg,
+ 						   &share_mem,
+ 						   sizeof(struct vpu_mem_desc));
+-				spin_unlock(&vpu_lock);
++				mutex_unlock(&vpu_data.lock);
+ 				break;
+ 			} else {
+ 				if (copy_from_user(&share_mem,
+ 						   (struct vpu_mem_desc *)arg,
+ 						 sizeof(struct vpu_mem_desc))) {
+-					spin_unlock(&vpu_lock);
++					mutex_unlock(&vpu_data.lock);
+ 					return -EFAULT;
+ 				}
+ 				if (vpu_alloc_dma_buffer(&share_mem) == -1)
+@@ -378,24 +378,24 @@ static long vpu_ioctl(struct file *filp, u_int cmd,
+ 						ret = -EFAULT;
+ 				}
+ 			}
+-			spin_unlock(&vpu_lock);
++			mutex_unlock(&vpu_data.lock);
+ 			break;
+ 		}
+ 	case VPU_IOC_REQ_VSHARE_MEM:
+ 		{
+-			spin_lock(&vpu_lock);
++			mutex_lock(&vpu_data.lock);
+ 			if (vshare_mem.cpu_addr != 0) {
+ 				ret = copy_to_user((void __user *)arg,
+ 						   &vshare_mem,
+ 						   sizeof(struct vpu_mem_desc));
+-				spin_unlock(&vpu_lock);
++				mutex_unlock(&vpu_data.lock);
+ 				break;
+ 			} else {
+ 				if (copy_from_user(&vshare_mem,
+ 						   (struct vpu_mem_desc *)arg,
+ 						   sizeof(struct
+ 							  vpu_mem_desc))) {
+-					spin_unlock(&vpu_lock);
++					mutex_unlock(&vpu_data.lock);
+ 					return -EFAULT;
+ 				}
+ 				/* vmalloc shared memory if not allocated */
+@@ -408,7 +408,7 @@ static long vpu_ioctl(struct file *filp, u_int cmd,
+ 				     sizeof(struct vpu_mem_desc)))
+ 					ret = -EFAULT;
+ 			}
+-			spin_unlock(&vpu_lock);
++			mutex_unlock(&vpu_data.lock);
+ 			break;
+ 		}
+ 	case VPU_IOC_GET_WORK_ADDR:
+@@ -481,7 +481,7 @@ static long vpu_ioctl(struct file *filp, u_int cmd,
+  */
+ static int vpu_release(struct inode *inode, struct file *filp)
+ {
+-	spin_lock(&vpu_lock);
++	mutex_lock(&vpu_data.lock);
+ 	if (open_count > 0 && !(--open_count)) {
+ 		vpu_free_buffers();
+ 
+@@ -491,7 +491,7 @@ static int vpu_release(struct inode *inode, struct file *filp)
+ 		vfree((void *)vshare_mem.cpu_addr);
+ 		vshare_mem.cpu_addr = 0;
+ 	}
+-	spin_unlock(&vpu_lock);
++	mutex_unlock(&vpu_data.lock);
+ 
+ 	return 0;
+ }
+@@ -558,10 +558,8 @@ static int vpu_map_vshare_mem(struct file *fp, struct vm_area_struct *vm)
+ {
+ 	int ret = -EINVAL;
+ 
+-	spin_lock(&vpu_lock);
+ 	ret = remap_vmalloc_range(vm, (void *)(vm->vm_pgoff << PAGE_SHIFT), 0);
+ 	vm->vm_flags |= VM_IO;
+-	spin_unlock(&vpu_lock);
+ 
+ 	return ret;
+ }
+@@ -678,6 +676,7 @@ static int vpu_dev_probe(struct platform_device *pdev)
+ 
+ 	vpu_data.workqueue = create_workqueue("vpu_wq");
+ 	INIT_WORK(&vpu_data.work, vpu_worker_callback);
++	mutex_init(&vpu_data.lock);
+ 	printk(KERN_INFO "VPU initialized\n");
+ 	goto out;
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,125 @@
+From 3af3e695bc1349ce87ffb5dc48299205b4e1d0a1 Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Tue, 8 Nov 2011 14:57:05 +0800
+Subject: [PATCH 0576/2463] ENGR00161598 [MX6] OTG Driver:fix OTG function
+ issue
+
+- Add Wait for Vbus change stable function for remove Vbus interrupt.
+- fix insert a HOST cable ,device modprobe issue.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |   11 ++++-------
+ drivers/usb/otg/fsl_otg.c       |   32 +++++++++++++++++++++++++++++++-
+ 2 files changed, 35 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 8d35728..aa61a67 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -2190,9 +2190,6 @@ static irqreturn_t fsl_udc_irq(int irq, void *_udc)
+ 
+ 	spin_lock_irqsave(&udc->lock, flags);
+ 
+-	if (try_wake_up_udc(udc) == false) {
+-		goto irq_end;
+-	}
+ #ifdef CONFIG_USB_OTG
+ 	/* if no gadget register in this driver, we need do noting */
+ 	if (udc->transceiver->gadget == NULL) {
+@@ -2203,6 +2200,9 @@ static irqreturn_t fsl_udc_irq(int irq, void *_udc)
+ 		goto irq_end;
+ 	}
+ #endif
++	if (try_wake_up_udc(udc) == false) {
++		goto irq_end;
++	}
+ 	irq_src = fsl_readl(&dr_regs->usbsts) & fsl_readl(&dr_regs->usbintr);
+ 	/* Clear notification bits */
+ 	fsl_writel(irq_src, &dr_regs->usbsts);
+@@ -2320,11 +2320,8 @@ int usb_gadget_probe_driver(struct usb_gadget_driver *driver,
+ 	}
+ 
+ 	if (udc_controller->transceiver) {
+-		if (fsl_readl(&dr_regs->otgsc) & OTGSC_STS_USB_ID)
+-			udc_controller->suspended = 1;
+-		else
+-			udc_controller->suspended = 0;
+ 		printk(KERN_INFO "Suspend udc for OTG auto detect\n");
++		udc_controller->suspended = 1;
+ 		dr_wake_up_enable(udc_controller, true);
+ 		dr_clk_gate(false);
+ 		/* export udc suspend/resume call to OTG */
+diff --git a/drivers/usb/otg/fsl_otg.c b/drivers/usb/otg/fsl_otg.c
+index 6d65969..a30815c 100755
+--- a/drivers/usb/otg/fsl_otg.c
++++ b/drivers/usb/otg/fsl_otg.c
+@@ -64,6 +64,7 @@
+ 
+ #define TIMER_FREQ 1000 /* 1000 ms */
+ #define IDLE_TIME  5000 /* 5000 ms */
++#define FSL_VBUS_CHANGE_TIMEOUT (msecs_to_jiffies(1000)) /* 1000 ms */
+ 
+ MODULE_DESCRIPTION("Freescale USB OTG Driver");
+ 
+@@ -160,6 +161,24 @@ static void fsl_otg_wait_dischrg_vbus(void)
+ 	fsl_otg_clk_gate(false);
+ }
+ 
++/* Wait for VBUS stable when change vbus true for rise false for fall*/
++static void fsl_otg_wait_stable_vbus(bool on)
++{
++	unsigned long timeout;
++	fsl_otg_clk_gate(true);
++	/* Wait for vbus change  to B_SESSION_VALID complete */
++	timeout = jiffies + FSL_VBUS_CHANGE_TIMEOUT;
++	while ((le32_to_cpu(usb_dr_regs->otgsc)&OTGSC_INTSTS_B_SESSION_VALID) == !on) {
++		if (time_after(jiffies, timeout)) {
++			printk(KERN_ERR"wait otg vbus change timeout! \n");
++			fsl_otg_clk_gate(false);
++			break;
++		}
++		msleep(10);
++	}
++	fsl_otg_clk_gate(false);
++}
++
+ /* A-device driver vbus, controlled through PP bit in PORTSC */
+ void fsl_otg_drv_vbus(struct fsl_usb2_platform_data *pdata, int on)
+ {
+@@ -600,7 +619,16 @@ static int fsl_otg_set_host(struct otg_transceiver *otg_p, struct usb_bus *host)
+ 		 * so suspend the host after a short delay.
+ 		 */
+ 		otg_dev->host_working = 1;
+-		schedule_otg_work(&otg_dev->otg_event, 100);
++		if (otg_dev->fsm.id)
++			schedule_otg_work(&otg_dev->otg_event, 100);
++		else {
++			/* if the device is already at the port */
++			otg_drv_vbus(&otg_dev->fsm, 1);
++			fsl_otg_wait_stable_vbus(true);
++			b_session_irq_enable(false);
++			fsl_otg_start_host(&otg_dev->fsm, 1);
++		}
++
+ 		return 0;
+ 	} else {		/* host driver going away */
+ 
+@@ -705,12 +733,14 @@ static void fsl_otg_event(struct work_struct *work)
+ 	if (fsm->id) {		/* switch to gadget */
+ 		fsl_otg_start_host(fsm, 0);
+ 		otg_drv_vbus(fsm, 0);
++		fsl_otg_wait_stable_vbus(false);
+ 		fsl_otg_wait_dischrg_vbus();
+ 		b_session_irq_enable(false);
+ 		fsl_otg_start_gadget(fsm, 1);
+ 	} else {			/* switch to host */
+ 		fsl_otg_start_gadget(fsm, 0);
+ 		otg_drv_vbus(fsm, 1);
++		fsl_otg_wait_stable_vbus(true);
+ 		b_session_irq_enable(false);
+ 		fsl_otg_start_host(fsm, 1);
+ 	}
+-- 
+1.7.7.4
+

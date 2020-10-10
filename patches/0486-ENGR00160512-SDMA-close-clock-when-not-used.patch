@@ -1,0 +1,41 @@
+From c64381d0c36b79755c883ef590789546610a6bde Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Fri, 21 Oct 2011 11:28:23 +0800
+Subject: [PATCH 0486/2463] ENGR00160512 SDMA: close clock when not used
+
+When SDMA is not used, close SDMA clock.
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ drivers/dma/imx-sdma.c |    5 ++---
+ 1 files changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/dma/imx-sdma.c b/drivers/dma/imx-sdma.c
+index 34dd96a..7dd48b1 100644
+--- a/drivers/dma/imx-sdma.c
++++ b/drivers/dma/imx-sdma.c
+@@ -833,11 +833,11 @@ static int sdma_alloc_chan_resources(struct dma_chan *chan)
+ 
+ 	sdmac->peripheral_type = data->peripheral_type;
+ 	sdmac->event_id0 = data->dma_request;
+-	ret = sdma_set_channel_priority(sdmac, prio);
++	ret = sdma_request_channel(sdmac);
+ 	if (ret)
+ 		return ret;
+ 
+-	ret = sdma_request_channel(sdmac);
++	ret = sdma_set_channel_priority(sdmac, prio);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -1142,7 +1142,6 @@ static int __init sdma_get_firmware(struct sdma_engine *sdma,
+ 	addr = (void *)header + header->script_addrs_start;
+ 	ram_code = (void *)header + header->ram_code_start;
+ 
+-	clk_enable(sdma->clk);
+ 	/* download the RAM image for SDMA */
+ 	sdma_load_script(sdma, ram_code,
+ 			header->ram_code_size,
+-- 
+1.7.7.4
+

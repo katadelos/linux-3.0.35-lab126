@@ -1,0 +1,31 @@
+From 23e10f4602e549deab1d85d384a3e14c5dd871c4 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <richard.zhao@freescale.com>
+Date: Wed, 9 Nov 2011 15:01:45 +0800
+Subject: [PATCH 0584/2463] ENGR00161764 mx6q: disable gc355 temporally
+
+Reasons:
+ - gc355 suspend failed. which cause the whole system suspend failed.
+ - gc355 cause reserved memory must be ioremap, consume too much vmalloc space.
+ - gc355 can not work in 4.6.2 gpu driver.
+
+Signed-off-by: Richard Zhao <richard.zhao@freescale.com>
+---
+ arch/arm/plat-mxc/devices/platform-viv_gpu.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/platform-viv_gpu.c b/arch/arm/plat-mxc/devices/platform-viv_gpu.c
+index b11efe0..7108cac 100644
+--- a/arch/arm/plat-mxc/devices/platform-viv_gpu.c
++++ b/arch/arm/plat-mxc/devices/platform-viv_gpu.c
+@@ -28,7 +28,7 @@ const struct imx_viv_gpu_data imx6_gpu_data __initconst = {
+ 	.iobase_2d = GPU_2D_ARB_BASE_ADDR,
+ 	.irq_2d = MXC_INT_GPU2D_IRQ,
+ 	.iobase_vg = OPENVG_ARB_BASE_ADDR,
+-	.irq_vg = MXC_INT_OPENVG_XAQ2,
++	.irq_vg = -1 /*MXC_INT_OPENVG_XAQ2*/,
+ };
+ #endif
+ 
+-- 
+1.7.7.4
+

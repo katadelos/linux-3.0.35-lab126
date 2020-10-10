@@ -1,0 +1,28 @@
+From 1de94b533f54123e93c052f2521a88f3cd09a3cd Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Thu, 10 May 2012 10:08:38 +0800
+Subject: [PATCH 1441/2463] ENGR00180810 v4l2 capture: fix  write reg error
+ when change mode
+
+Add 1ms delay after power up, then initialize the camera sensor
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index c2bac5c..5822689 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -1668,6 +1668,7 @@ static int mxc_v4l_open(struct file *file)
+ 		ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+ 				       true, true);
+ 		vidioc_int_s_power(cam->sensor, 1);
++		msleep(1);
+ 		vidioc_int_init(cam->sensor);
+ 		vidioc_int_dev_init(cam->sensor);
+ 	}
+-- 
+1.7.7.4
+

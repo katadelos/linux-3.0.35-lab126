@@ -1,0 +1,58 @@
+From 3b509358a976bc43041930485fd7f644980b62b4 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Tue, 14 Aug 2012 15:16:49 +0800
+Subject: [PATCH 1912/2463] ENGR00220341-1 usb: add spin_lock_irqsave protect
+ for pdata->lowpower
+
+pdata->lowpower may be accessed at two drivers together, assumed
+the situation that host/device set phy to low power mode but
+still not set the flag lowpower, at this time the wakeup occurs, as
+the flag lowpower is still not set, the interrupt will be infinite loop
+as no one will serve it.
+
+This commit is for MSL code and add protect at wakeup interrupt.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ arch/arm/plat-mxc/usb_wakeup.c |   18 ++++++++++++++++--
+ 1 files changed, 16 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/usb_wakeup.c b/arch/arm/plat-mxc/usb_wakeup.c
+index e67c221..5d31d36 100755
+--- a/arch/arm/plat-mxc/usb_wakeup.c
++++ b/arch/arm/plat-mxc/usb_wakeup.c
+@@ -47,6 +47,20 @@ static void wakeup_clk_gate(struct fsl_usb2_wakeup_platform_data *pdata, bool on
+ 	if (pdata->usb_clock_for_pm)
+ 		pdata->usb_clock_for_pm(on);
+ }
++static bool phy_in_lowpower_mode(struct fsl_usb2_platform_data *pdata)
++{
++	unsigned long flags;
++	bool ret = true;
++
++	spin_lock_irqsave(&pdata->lock, flags);
++
++	if (!pdata->lowpower)
++		ret = false;
++
++	spin_unlock_irqrestore(&pdata->lock, flags);
++
++	return ret;
++}
+ 
+ static bool usb2_is_in_lowpower(struct wakeup_ctrl *ctrl)
+ {
+@@ -54,8 +68,8 @@ static bool usb2_is_in_lowpower(struct wakeup_ctrl *ctrl)
+ 	struct fsl_usb2_wakeup_platform_data *pdata = ctrl->pdata;
+ 	/* all the usb module related the wakeup is in lowpower mode */
+ 	for (i = 0; i < 3; i++) {
+-		if (pdata->usb_pdata[i]) {
+-			if (pdata->usb_pdata[i]->phy_lowpower_suspend && !pdata->usb_pdata[i]->lowpower)
++		if (pdata->usb_pdata[i] && pdata->usb_pdata[i]->phy_lowpower_suspend) {
++			if (!phy_in_lowpower_mode(pdata->usb_pdata[i]))
+ 				return false;
+ 		}
+ 	}
+-- 
+1.7.7.4
+

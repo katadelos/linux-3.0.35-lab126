@@ -1,0 +1,37 @@
+From 7e1e90f910aad11ad15e80bb30d03f0f13a1856c Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Fri, 13 Apr 2012 08:16:05 +0800
+Subject: [PATCH 1321/2463] ENGR00179513-1 VDOA: update software state before
+ start vdoa
+
+Fix a bug when vdoa interrupt happens
+before software state updated.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/vdoa.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/vdoa.c b/drivers/mxc/ipu3/vdoa.c
+index 1a5266d..2d3aaef 100644
+--- a/drivers/mxc/ipu3/vdoa.c
++++ b/drivers/mxc/ipu3/vdoa.c
+@@ -308,6 +308,7 @@ int vdoa_start(vdoa_handle_t handle, int timeout_ms)
+ 
+ 	CHECK_NULL_PTR(vdoa);
+ 	CHECK_STATE(VDOA_GET_OBUF, return -EINVAL);
++	vdoa->state = VDOA_START;
+ 	init_completion(&vdoa->comp);
+ 	vdoa_write_register(vdoa, VDOAIST,
+ 			VDOAIEIST_TRANSFER_ERR | VDOAIEIST_TRANSFER_END);
+@@ -318,7 +319,6 @@ int vdoa_start(vdoa_handle_t handle, int timeout_ms)
+ 	vdoa_write_register(vdoa, VDOASRR, VDOASRR_START_XFER);
+ 	dump_registers(vdoa);
+ 
+-	vdoa->state = VDOA_START;
+ 	ret = wait_for_completion_timeout(&vdoa->comp,
+ 			msecs_to_jiffies(timeout_ms));
+ 
+-- 
+1.7.7.4
+

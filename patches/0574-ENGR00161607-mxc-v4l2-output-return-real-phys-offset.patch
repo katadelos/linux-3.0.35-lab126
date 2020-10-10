@@ -1,0 +1,44 @@
+From ce8205785380cecce6e1eac927896ca6859ec3e5 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Tue, 8 Nov 2011 14:07:14 +0800
+Subject: [PATCH 0574/2463] ENGR00161607 mxc v4l2 output: return real phys
+ offset after mmap
+
+vpu unit test failed because it need phys offset of each buffer allocated by
+v4l2 output driver.
+videobuf dma contig method only allocate real dma buffer when user call mmap.
+Fix this issue by adding code to querybuf ioctl, return real phys after
+buffer mmaped.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_vout.c |   11 ++++++++++-
+ 1 files changed, 10 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_vout.c b/drivers/media/video/mxc/output/mxc_vout.c
+index 8596b42..6c7e42f 100644
+--- a/drivers/media/video/mxc/output/mxc_vout.c
++++ b/drivers/media/video/mxc/output/mxc_vout.c
+@@ -1106,9 +1106,18 @@ static int mxc_vidioc_reqbufs(struct file *file, void *fh,
+ static int mxc_vidioc_querybuf(struct file *file, void *fh,
+ 			struct v4l2_buffer *b)
+ {
++	int ret;
+ 	struct mxc_vout_output *vout = fh;
+ 
+-	return videobuf_querybuf(&vout->vbq, b);
++	ret = videobuf_querybuf(&vout->vbq, b);
++	if (!ret) {
++		/* return physical address */
++		struct videobuf_buffer *vb = vout->vbq.bufs[b->index];
++		if (b->flags & V4L2_BUF_FLAG_MAPPED)
++			b->m.offset = videobuf_to_dma_contig(vb);
++	}
++
++	return ret;
+ }
+ 
+ static int mxc_vidioc_qbuf(struct file *file, void *fh,
+-- 
+1.7.7.4
+

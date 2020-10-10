@@ -1,0 +1,36 @@
+From 4cc44cebd1ddbd15e8ccac53260bd886d10e248b Mon Sep 17 00:00:00 2001
+From: Rong Dian <b38775@freescale.com>
+Date: Mon, 27 Aug 2012 11:27:06 +0800
+Subject: [PATCH 1973/2463] ENGR00221450 imx6 thermal: add sys_close() in
+ cooling device
+
+add sys_close() to close opened file in cooling device
+
+Signed-off-by: Rong Dian <b38775@freescale.com>
+---
+ drivers/mxc/thermal/cooling.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/thermal/cooling.c b/drivers/mxc/thermal/cooling.c
+index 31188f0..7019d99 100644
+--- a/drivers/mxc/thermal/cooling.c
++++ b/drivers/mxc/thermal/cooling.c
+@@ -178,6 +178,7 @@ int anatop_thermal_cpu_hotplug(bool cpu_on)
+ 					sys_write(fd, (char *)"1", MAX_CPU_ONLINE_LEN);
+ 					cpu_mask &= ~(0x1 << cpu);
+ 					ret = 0;
++					sys_close(fd);
+ 					break;
+ 				}
+ 				sys_close(fd);
+@@ -199,6 +200,7 @@ int anatop_thermal_cpu_hotplug(bool cpu_on)
+ 					sys_write(fd, (char *)"0", MAX_CPU_ONLINE_LEN);
+ 					cpu_mask |= 0x1 << cpu;
+ 					ret = 0;
++					sys_close(fd);
+ 					break;
+ 				}
+ 				sys_close(fd);
+-- 
+1.7.7.4
+

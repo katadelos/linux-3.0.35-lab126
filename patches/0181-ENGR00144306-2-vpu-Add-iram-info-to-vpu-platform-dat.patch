@@ -1,0 +1,106 @@
+From 9ae9b6baeb6a73211cdab8463704aa94530d0d9d Mon Sep 17 00:00:00 2001
+From: Sammy He <r62914@freescale.com>
+Date: Tue, 31 May 2011 17:49:24 +0800
+Subject: [PATCH 0181/2463] ENGR00144306-2 vpu: Add iram info to vpu platform
+ data for each platform
+
+Add iram info to vpu platform data for each platform in linux/arch folder.
+Disable iram on MX51 and enable iram on MX53 platform.
+And remove VPU_IRAM_SIZE usage.
+
+Signed-off-by: Sammy He <r62914@freescale.com>
+---
+ arch/arm/mach-mx5/clock.c                       |    5 ++---
+ arch/arm/plat-mxc/devices/platform-imx_vpu.c    |    8 +++++---
+ arch/arm/plat-mxc/include/mach/devices-common.h |    2 ++
+ arch/arm/plat-mxc/include/mach/mxc_vpu.h        |    2 ++
+ 4 files changed, 11 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/clock.c b/arch/arm/mach-mx5/clock.c
+index 775e3f1..e728e65 100755
+--- a/arch/arm/mach-mx5/clock.c
++++ b/arch/arm/mach-mx5/clock.c
+@@ -4034,9 +4034,6 @@ static struct clk vpu_clk[] = {
+ 	{
+ 	__INIT_CLK_DEBUG(vpu_clk_2)
+ 	 .parent = &emi_fast_clk,
+-#ifdef CONFIG_MXC_VPU_IRAM
+-	 .secondary = &emi_intr_clk[0],
+-#endif
+ 	 }
+ };
+ 
+@@ -4993,6 +4990,8 @@ int __init mx53_clocks_init(unsigned long ckil, unsigned long osc, unsigned long
+ 	esdhc3_clk[0].get_rate = _clk_esdhc3_get_rate;
+ 	esdhc3_clk[0].set_rate = _clk_sdhc3_set_rate;
+ 
++	vpu_clk[2].secondary = &emi_intr_clk[0];
++
+ #if defined(CONFIG_USB_STATIC_IRAM) \
+     || defined(CONFIG_USB_STATIC_IRAM_PPH)
+ 	usboh3_clk[1].secondary = &emi_intr_clk[1];
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_vpu.c b/arch/arm/plat-mxc/devices/platform-imx_vpu.c
+index 599592d..4d27cd3 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx_vpu.c
++++ b/arch/arm/plat-mxc/devices/platform-imx_vpu.c
+@@ -9,10 +9,12 @@
+ #include <mach/hardware.h>
+ #include <mach/devices-common.h>
+ 
+-#define imx5_vpu_data_entry_single(soc, vpu_reset, vpu_pg)	\
++#define imx5_vpu_data_entry_single(soc, flag, size, vpu_reset, vpu_pg)	\
+ 	{							\
+ 		.iobase = soc ## _VPU_BASE_ADDR,		\
+ 		.irq = soc ## _INT_VPU,				\
++		.iram_enable = flag,				\
++		.iram_size = size,				\
+ 		.reset = vpu_reset,				\
+ 		.pg = vpu_pg,					\
+ 	}
+@@ -53,7 +55,7 @@ void mx51_vpu_pg(int enable)
+ }
+ const struct imx_vpu_data imx51_vpu_data __initconst =
+ 			imx5_vpu_data_entry_single(MX51,
+-			mx51_vpu_reset, mx51_vpu_pg);
++			false, 0x14000, mx51_vpu_reset, mx51_vpu_pg);
+ #endif
+ 
+ #ifdef CONFIG_SOC_IMX53
+@@ -93,7 +95,7 @@ void mx53_vpu_pg(int enable)
+ 
+ const struct imx_vpu_data imx53_vpu_data __initconst =
+ 			imx5_vpu_data_entry_single(MX53,
+-			mx53_vpu_reset, mx53_vpu_pg);
++			true, 0x14000, mx53_vpu_reset, mx53_vpu_pg);
+ #endif
+ 
+ struct platform_device *__init imx_add_vpu(
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 92dfa01..3cc2aa8 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -321,6 +321,8 @@ struct platform_device *__init imx_add_ipuv3(
+ struct imx_vpu_data {
+ 	resource_size_t iobase;
+ 	resource_size_t irq;
++	bool iram_enable;
++	int iram_size;
+ 	void (*reset) (void);
+ 	void (*pg) (int);
+ };
+diff --git a/arch/arm/plat-mxc/include/mach/mxc_vpu.h b/arch/arm/plat-mxc/include/mach/mxc_vpu.h
+index f123113..19c01b2 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc_vpu.h
++++ b/arch/arm/plat-mxc/include/mach/mxc_vpu.h
+@@ -29,6 +29,8 @@
+ #include <linux/fs.h>
+ 
+ struct mxc_vpu_platform_data {
++	bool iram_enable;
++	int  iram_size;
+ 	void (*reset) (void);
+ 	void (*pg) (int);
+ };
+-- 
+1.7.7.4
+

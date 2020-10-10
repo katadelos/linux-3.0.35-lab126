@@ -1,0 +1,372 @@
+From 90cfa47ce10e6dc9c2da8dad0bd44cbe91dff102 Mon Sep 17 00:00:00 2001
+From: Anish Trivedi <anish@freescale.com>
+Date: Wed, 13 Apr 2011 14:21:30 -0500
+Subject: [PATCH 0108/2463] ENGR00142089-3 MX51/MX53: Upgrade SCC2 and SAHARA
+ drivers to 2.6.38
+
+Starting with 2.6.36, ioctl file operation is removed; therefore,
+changed ioctl function to unlocked_ioctl function, which has a
+different function prototype and requires local locking mechanism
+to prevent more than 1 user from accessing ioctls at the same time.
+
+Modified SCC2 driver to obtain IRQs from resource array.
+
+Modified SAHARA driver to use either MX53 or MX51 base address and
+irq definitions since the generic versions are no longer defined
+in the machine layer header files.
+
+Signed-off-by: Anish Trivedi <anish@freescale.com>
+---
+ drivers/mxc/security/sahara2/include/linux_port.h  |   11 ++---
+ drivers/mxc/security/sahara2/include/sah_kernel.h  |    4 +-
+ .../mxc/security/sahara2/sah_driver_interface.c    |   13 ++++--
+ .../mxc/security/sahara2/sah_interrupt_handler.c   |   21 +++++++--
+ drivers/mxc/security/scc2_driver.c                 |   47 +++++++++++++-------
+ drivers/mxc/security/scc2_internals.h              |   20 +--------
+ 6 files changed, 63 insertions(+), 53 deletions(-)
+
+diff --git a/drivers/mxc/security/sahara2/include/linux_port.h b/drivers/mxc/security/sahara2/include/linux_port.h
+index bd65c55..63efb83 100644
+--- a/drivers/mxc/security/sahara2/include/linux_port.h
++++ b/drivers/mxc/security/sahara2/include/linux_port.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2004-2010 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -210,7 +210,7 @@ typedef struct {
+ /*! Keyword for registering write() operation handler. */
+ #define OS_FN_WRITE write
+ /*! Keyword for registering ioctl() operation handler. */
+-#define OS_FN_IOCTL ioctl
++#define OS_FN_IOCTL unlocked_ioctl
+ /*! Keyword for registering mmap() operation handler. */
+ #define OS_FN_MMAP mmap
+ /*! @} */
+@@ -362,10 +362,10 @@ inline static int os_drv_do_reg(os_driver_reg_t * handle,
+ 		/* If any chardev/POSIX routines were added, then do chrdev part */
+ 		if (handle->fops.open || handle->fops.release
+ 		    || handle->fops.read || handle->fops.write
+-		    || handle->fops.ioctl || handle->fops.mmap) {
++		    || handle->fops.unlocked_ioctl || handle->fops.mmap) {
+ 
+ 			printk("ioctl pointer: %p.  mmap pointer: %p\n",
+-			       handle->fops.ioctl, handle->fops.mmap);
++			       handle->fops.unlocked_ioctl, handle->fops.mmap);
+ 
+ 			/* this method is depricated, see:
+ 			 * http://lwn.net/Articles/126808/
+@@ -1219,7 +1219,7 @@ function_name
+  * @return A call to #os_dev_ioctl_return()
+  */
+ #define OS_DEV_IOCTL(function_name)                                           \
+-static int function_name(struct inode* inode_p_, struct file* file_p_,        \
++static int function_name(struct file *file_p_,                                 \
+                      unsigned int cmd_, unsigned long data_)
+ 
+ /*! Boo. */
+@@ -1489,7 +1489,6 @@ do {                                                                         \
+     int retcode = code;                                                      \
+                                                                              \
+     /* get rid of 'unused parameter' warnings */                             \
+-    (void)inode_p_;                                                          \
+     (void)file_p_;                                                           \
+     (void)cmd_;                                                              \
+     (void)data_;                                                             \
+diff --git a/drivers/mxc/security/sahara2/include/sah_kernel.h b/drivers/mxc/security/sahara2/include/sah_kernel.h
+index e39a61e..f66960b 100644
+--- a/drivers/mxc/security/sahara2/include/sah_kernel.h
++++ b/drivers/mxc/security/sahara2/include/sah_kernel.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2004-2010 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -33,8 +33,6 @@
+ #define SAHARA_IRQ     MXC_INT_SAHARA
+ #elif defined(CONFIG_ARCH_MX5)
+ #include <mach/hardware.h>
+-#define SAHA_BASE_ADDR SAHARA_BASE_ADDR
+-#define SAHARA_IRQ     MXC_INT_SAHARA_H0
+ #else
+ #include <mach/mx2.h>
+ #endif
+diff --git a/drivers/mxc/security/sahara2/sah_driver_interface.c b/drivers/mxc/security/sahara2/sah_driver_interface.c
+index cf01c5f..d810265 100644
+--- a/drivers/mxc/security/sahara2/sah_driver_interface.c
++++ b/drivers/mxc/security/sahara2/sah_driver_interface.c
+@@ -131,6 +131,9 @@ static struct proc_dir_entry *Sahara_procfs_handle;
+ uint32_t sah_hw_version;
+ extern void *sah_virt_base;
+ 
++/* Mutex to prevent usage of the ioctl function by more than 1 user at a time */
++DEFINE_MUTEX(sahara_ioctl_mutex);
++
+ /* This is the wait queue to this driver.  Linux declaration. */
+ DECLARE_WAIT_QUEUE_HEAD(Wait_queue);
+ 
+@@ -175,8 +178,10 @@ OS_DEV_INIT(sah_init)
+ {
+ 	/* Status variable */
+ 	int os_error_code = 0;
+-	uint32_t sah_phys_base = SAHARA_BASE_ADDR;
++	uint32_t sah_phys_base = MX53_SAHARA_BASE_ADDR;
+ 
++	if (cpu_is_mx51())
++		sah_phys_base = MX51_SAHARA_BASE_ADDR;
+ 
+ 	interrupt_registered = 0;
+ 
+@@ -196,9 +201,6 @@ OS_DEV_INIT(sah_init)
+ 	}
+ #endif
+ 
+-	if (cpu_is_mx53())
+-		sah_phys_base -= 0x20000000;
+-
+ 	sah_virt_base = (void *)ioremap(sah_phys_base, SZ_16K);
+ 	if (sah_virt_base == NULL) {
+ 		os_printk(KERN_ERR
+@@ -556,6 +558,8 @@ OS_DEV_IOCTL(sah_ioctl)
+ 	int status = 0;
+ 	int test_mode;
+ 
++	mutex_lock(&sahara_ioctl_mutex);
++
+ 	switch (os_dev_get_ioctl_op()) {
+ 	case SAHARA_HWRESET:
+ #ifdef DIAG_DRV_IF
+@@ -821,6 +825,7 @@ OS_DEV_IOCTL(sah_ioctl)
+ 		status = OS_ERROR_FAIL_S;
+ 	}
+ 
++	mutex_unlock(&sahara_ioctl_mutex);
+ 	os_dev_ioctl_return(status);
+ }
+ 
+diff --git a/drivers/mxc/security/sahara2/sah_interrupt_handler.c b/drivers/mxc/security/sahara2/sah_interrupt_handler.c
+index 959c3d8..d13c657 100644
+--- a/drivers/mxc/security/sahara2/sah_interrupt_handler.c
++++ b/drivers/mxc/security/sahara2/sah_interrupt_handler.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2004-2010 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -107,6 +107,11 @@ int sah_Intr_Init(wait_queue_head_t * wait_queue)
+ 
+ 	int result;
+ 
++	int irq_sah = MX53_INT_SAHARA_H0;
++
++	if (cpu_is_mx51())
++		irq_sah = MX51_MXC_INT_SAHARA_H0;
++
+ #ifdef KERNEL_TEST
+ 	SAHARA_INT_PTR = sah_Intr_Top_Half;
+ #endif
+@@ -115,18 +120,18 @@ int sah_Intr_Init(wait_queue_head_t * wait_queue)
+ 	int_queue = wait_queue;
+ 
+ 	/* Request use of the Interrupt line. */
+-	result = request_irq(SAHARA_IRQ,
++	result = request_irq(irq_sah,
+ 			     sah_Intr_Top_Half, 0, SAHARA_NAME, NULL);
+ 
+ #ifdef DIAG_DRV_INTERRUPT
+ 	if (result != 0) {
+ 		sprintf(err_string, "Cannot use SAHARA interrupt line %d. "
+-			"request_irq() return code is %i.", SAHARA_IRQ, result);
++			"request_irq() return code is %i.", irq_sah, result);
+ 		LOG_KDIAG(err_string);
+ 	} else {
+ 		sprintf(err_string,
+ 			"SAHARA driver registered for interrupt %d. ",
+-			SAHARA_IRQ);
++			irq_sah);
+ 		LOG_KDIAG(err_string);
+ 	}
+ #endif
+@@ -154,8 +159,14 @@ int sah_Intr_Init(wait_queue_head_t * wait_queue)
+ ******************************************************************************/
+ void sah_Intr_Release(void)
+ {
++
++	int irq_sah = MX53_INT_SAHARA_H0;
++
++	if (cpu_is_mx51())
++		irq_sah = MX51_MXC_INT_SAHARA_H0;
++
+ 	/* Release the Interrupt. */
+-	free_irq(SAHARA_IRQ, NULL);
++	free_irq(irq_sah, NULL);
+ }
+ 
+ /*!
+diff --git a/drivers/mxc/security/scc2_driver.c b/drivers/mxc/security/scc2_driver.c
+index e0cbb28..a8bd3b2 100644
+--- a/drivers/mxc/security/scc2_driver.c
++++ b/drivers/mxc/security/scc2_driver.c
+@@ -137,6 +137,10 @@ static scc_config_t scc_configuration = {
+  *  registers are unavailable).  Once it goes failed, it never leaves it. */
+ static volatile enum scc_status scc_availability = SCC_STATUS_INITIAL;
+ 
++/* Variables to hold irq numbers */
++static int irq_smn;
++static int irq_scm;
++
+ /** Flag to say whether interrupt handler has been registered for
+  * SMN interrupt */
+ static int smn_irq_set = 0;
+@@ -537,12 +541,6 @@ static int scc_init(void)
+ 			goto out;
+ 		}
+ 
+-		/* See whether there is an SCC available */
+-		if (0 && !SCC_ENABLED()) {
+-			os_printk(KERN_ERR
+-				  "SCC2: Fuse for SCC is set to disabled.  Exiting.\n");
+-			goto out;
+-		}
+ 		/* Map the SCC (SCM and SMN) memory on the internal bus into
+ 		   kernel address space */
+ 		scc_base = (void *)ioremap(scc_phys_base, SZ_4K);
+@@ -571,9 +569,6 @@ static int scc_init(void)
+ 			goto out;
+ 		}
+ 
+-		if (cpu_is_mx51_rev(CHIP_REV_2_0) < 0)
+-			scm_ram_phys_base += 0x8000;
+-
+ 		scm_ram_base = (void *)ioremap_nocache(scm_ram_phys_base,
+ 						       scc_configuration.
+ 						       partition_count *
+@@ -711,13 +706,13 @@ static void scc_cleanup(void)
+ 
+ 	/* Deregister SCM interrupt handler */
+ 	if (scm_irq_set) {
+-		os_deregister_interrupt(INT_SCC_SCM);
++		os_deregister_interrupt(irq_scm);
+ 	}
+ 
+ 	/* Deregister SMN interrupt handler */
+ 	if (smn_irq_set) {
+ #ifdef USE_SMN_INTERRUPT
+-		os_deregister_interrupt(INT_SCC_SMN);
++		os_deregister_interrupt(irq_smn);
+ #endif
+ 	}
+ 
+@@ -989,11 +984,11 @@ OS_DEV_ISR(scc_irq)
+ 	uint32_t scm_status;
+ 	int handled = 0;	/* assume interrupt isn't from SMN */
+ #if defined(USE_SMN_INTERRUPT)
+-	int smn_irq = INT_SCC_SMN;	/* SMN interrupt is on a line by itself */
++	int smn_irq = irq_smn;	/* SMN interrupt is on a line by itself */
+ #elif defined (NO_SMN_INTERRUPT)
+ 	int smn_irq = -1;	/* not wired to CPU at all */
+ #else
+-	int smn_irq = INT_SCC_SCM;	/* SMN interrupt shares a line with SCM */
++	int smn_irq = irq_scm;	/* SMN interrupt shares a line with SCM */
+ #endif
+ 
+ 	/* Update current state... This will perform callbacks... */
+@@ -1012,7 +1007,7 @@ OS_DEV_ISR(scc_irq)
+ 	scm_status = SCC_READ_REGISTER(SCM_STATUS_REG);
+ 
+ 	/* The driver masks interrupts, so this should never happen. */
+-	if (os_dev_get_irq() == INT_SCC_SCM) {
++	if (os_dev_get_irq() == irq_scm) {
+ 		/* but if it does, try to prevent it in the future */
+ 		SCC_WRITE_REGISTER(SCM_INT_CTL_REG, 0);
+ 		handled++;
+@@ -1234,7 +1229,7 @@ static int setup_interrupt_handling(void)
+ #ifdef USE_SMN_INTERRUPT
+ 	/* Install interrupt service routine for SMN. */
+ 	smn_error_code = os_register_interrupt(SCC_DRIVER_NAME,
+-					       INT_SCC_SMN, scc_irq);
++					       irq_smn, scc_irq);
+ 	if (smn_error_code != 0) {
+ 		os_printk(KERN_ERR
+ 			  "SCC2 Driver: Error installing SMN Interrupt Handler: %d\n",
+@@ -1254,7 +1249,7 @@ static int setup_interrupt_handling(void)
+ 	 * Install interrupt service routine for SCM (or both together).
+ 	 */
+ 	scm_error_code = os_register_interrupt(SCC_DRIVER_NAME,
+-					       INT_SCC_SCM, scc_irq);
++					       irq_scm, scc_irq);
+ 	if (scm_error_code != 0) {
+ #ifndef MXC
+ 		os_printk(KERN_ERR
+@@ -2339,6 +2334,26 @@ static int scc_dev_probe(struct platform_device *pdev)
+ 
+ 	scm_ram_phys_base = r->start;
+ 
++	/* get the scc smn irq */
++	r = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
++	if (!r) {
++		dev_err(&pdev->dev, "can't get IORESOURCE_IRQ (0)\n");
++		ret = -ENXIO;
++		goto exit;
++	}
++
++	irq_smn = r->start;
++
++	/* get the scc scm irq */
++	r = platform_get_resource(pdev, IORESOURCE_IRQ, 1);
++	if (!r) {
++		dev_err(&pdev->dev, "can't get IORESOURCE_IRQ (1)\n");
++		ret = -ENXIO;
++		goto exit;
++	}
++
++	irq_scm = r->start;
++
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,18))
+ 	scc_clk = clk_get(&pdev->dev, "scc_clk");
+ #endif
+diff --git a/drivers/mxc/security/scc2_internals.h b/drivers/mxc/security/scc2_internals.h
+index 1c047de..bd7399b 100644
+--- a/drivers/mxc/security/scc2_internals.h
++++ b/drivers/mxc/security/scc2_internals.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2004-2010 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -45,24 +45,6 @@
+ 
+ #include <linux/mxc_scc2_driver.h>
+ 
+-#if defined(MXC)
+-
+-#include <mach/iim.h>
+-#include <mach/mxc_scc.h>
+-
+-
+-/**
+- * This macro is used to determine whether the SCC is enabled/available
+- * on the platform.  This macro may need to be ported.
+- */
+-#define SCC_FUSE __raw_readl(IO_ADDRESS(IIM_BASE_ADDR + MXC_IIMHWV1))
+-#define SCC_ENABLED() ((SCC_FUSE & MXC_IIMHWV1_SCC_DISABLE) == 0)
+-
+-#else  /* neither TAHITI nor MXC */
+-
+-#error Do not understand target architecture
+-
+-#endif /* TAHITI */
+ /**
+  * Define the number of Stored Keys which the SCC driver will make available.
+  * Value shall be from 0 to 20.  Default is zero (0).
+-- 
+1.7.7.4
+

@@ -1,0 +1,905 @@
+From 3a1fc5fb7c49f9aeb648881fa1da585d438185ee Mon Sep 17 00:00:00 2001
+From: Alexey Dobriyan <adobriyan@gmail.com>
+Date: Thu, 16 Jun 2011 11:01:34 +0000
+Subject: [PATCH 0914/2463] net: remove mm.h inclusion from netdevice.h
+
+Remove linux/mm.h inclusion from netdevice.h -- it's unused (I've checked manually).
+
+To prevent mm.h inclusion via other channels also extract "enum dma_data_direction"
+definition into separate header. This tiny piece is what gluing netdevice.h with mm.h
+via "netdevice.h => dmaengine.h => dma-mapping.h => scatterlist.h => mm.h".
+Removal of mm.h from scatterlist.h was tried and was found not feasible
+on most archs, so the link was cutoff earlier.
+
+Hope people are OK with tiny include file.
+
+Note, that mm_types.h is still dragged in, but it is a separate story.
+
+Signed-off-by: Alexey Dobriyan <adobriyan@gmail.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+---
+ arch/arm/mach-davinci/board-mityomapl138.c        |    1 +
+ arch/arm/mach-davinci/dm646x.c                    |    1 +
+ arch/arm/mach-davinci/pm.c                        |    1 +
+ arch/arm/mach-imx/dma-v1.c                        |    1 +
+ arch/arm/mach-imx/mach-mx31_3ds.c                 |    1 +
+ arch/arm/mach-iop13xx/setup.c                     |    1 +
+ arch/arm/mach-mxs/devices/platform-auart.c        |    1 +
+ arch/arm/mach-mxs/devices/platform-dma.c          |    1 +
+ arch/arm/mach-mxs/devices/platform-fec.c          |    1 +
+ arch/arm/plat-mxc/devices/platform-fec.c          |    1 +
+ arch/arm/plat-mxc/devices/platform-fsl-usb2-udc.c |    1 +
+ arch/arm/plat-mxc/devices/platform-imx-fb.c       |    1 +
+ arch/arm/plat-mxc/devices/platform-ipu-core.c     |    1 +
+ arch/arm/plat-mxc/devices/platform-mxc-ehci.c     |    1 +
+ arch/arm/plat-mxc/devices/platform-mxc-mmc.c      |    1 +
+ arch/arm/plat-nomadik/include/plat/ste_dma40.h    |    1 +
+ arch/x86/kernel/tboot.c                           |    1 +
+ crypto/async_tx/raid6test.c                       |    1 +
+ drivers/dma/coh901318.c                           |    1 +
+ drivers/dma/dmaengine.c                           |    1 +
+ drivers/dma/dmatest.c                             |    1 +
+ drivers/dma/ipu/ipu_idmac.c                       |    1 +
+ drivers/dma/ste_dma40.c                           |    1 +
+ drivers/media/dvb/mantis/mantis_ca.c              |    1 +
+ drivers/media/dvb/mantis/mantis_evm.c             |    1 +
+ drivers/media/dvb/mantis/mantis_hif.c             |    1 +
+ drivers/media/dvb/mantis/mantis_ioc.c             |    1 +
+ drivers/media/dvb/mantis/mantis_pcmcia.c          |    1 +
+ drivers/media/dvb/mantis/mantis_uart.c            |    1 +
+ drivers/media/dvb/mantis/mantis_vp1034.c          |    1 +
+ drivers/mmc/host/tmio_mmc_dma.c                   |    1 +
+ drivers/mtd/nand/atmel_nand.c                     |    1 +
+ drivers/net/arm/ks8695net.c                       |    1 +
+ drivers/net/bnx2x/bnx2x.h                         |    1 +
+ drivers/net/can/janz-ican3.c                      |    1 +
+ drivers/net/can/softing/softing_fw.c              |    1 +
+ drivers/net/can/softing/softing_main.c            |    1 +
+ drivers/net/ethoc.c                               |    1 +
+ drivers/net/fec_mpc52xx.c                         |    1 +
+ drivers/net/greth.c                               |    1 +
+ drivers/net/irda/pxaficp_ir.c                     |    2 ++
+ drivers/net/ks8851_mll.c                          |    1 +
+ drivers/net/sgiseeq.c                             |    1 +
+ drivers/net/stmmac/dwmac1000_core.c               |    1 +
+ drivers/net/stmmac/dwmac1000_dma.c                |    1 +
+ drivers/net/stmmac/dwmac100_core.c                |    1 +
+ drivers/net/stmmac/dwmac100_dma.c                 |    1 +
+ drivers/net/stmmac/stmmac_ethtool.c               |    1 +
+ drivers/net/stmmac/stmmac_mdio.c                  |    1 +
+ drivers/net/usb/cdc-phonet.c                      |    1 +
+ drivers/net/vxge/vxge-config.h                    |    1 +
+ drivers/net/wireless/ath/ath5k/base.c             |    1 +
+ drivers/net/wireless/ath/ath9k/beacon.c           |    1 +
+ drivers/net/wireless/ath/ath9k/init.c             |    1 +
+ drivers/net/wireless/ath/ath9k/recv.c             |    1 +
+ drivers/net/wireless/ath/ath9k/xmit.c             |    1 +
+ drivers/staging/pohmelfs/crypto.c                 |    1 +
+ drivers/tty/serial/ifx6x60.c                      |    1 +
+ drivers/usb/gadget/f_phonet.c                     |    1 +
+ include/crypto/if_alg.h                           |    1 +
+ include/linux/dma-direction.h                     |   13 +++++++++++++
+ include/linux/dma-mapping.h                       |   10 +---------
+ include/linux/dmaengine.h                         |    4 +++-
+ include/linux/netdevice.h                         |    1 -
+ net/sched/sch_netem.c                             |    1 +
+ security/apparmor/lib.c                           |    1 +
+ 66 files changed, 80 insertions(+), 11 deletions(-)
+
+diff --git a/arch/arm/mach-davinci/board-mityomapl138.c b/arch/arm/mach-davinci/board-mityomapl138.c
+index 606a6f2..5f5d783 100644
+--- a/arch/arm/mach-davinci/board-mityomapl138.c
++++ b/arch/arm/mach-davinci/board-mityomapl138.c
+@@ -20,6 +20,7 @@
+ #include <linux/spi/spi.h>
+ #include <linux/spi/flash.h>
+ 
++#include <asm/io.h>
+ #include <asm/mach-types.h>
+ #include <asm/mach/arch.h>
+ #include <mach/common.h>
+diff --git a/arch/arm/mach-davinci/dm646x.c b/arch/arm/mach-davinci/dm646x.c
+index 1e0f809..e00d61e 100644
+--- a/arch/arm/mach-davinci/dm646x.c
++++ b/arch/arm/mach-davinci/dm646x.c
+@@ -8,6 +8,7 @@
+  * is licensed "as is" without any warranty of any kind, whether express
+  * or implied.
+  */
++#include <linux/dma-mapping.h>
+ #include <linux/init.h>
+ #include <linux/clk.h>
+ #include <linux/serial_8250.h>
+diff --git a/arch/arm/mach-davinci/pm.c b/arch/arm/mach-davinci/pm.c
+index 1bd73a0..04c49f7 100644
+--- a/arch/arm/mach-davinci/pm.c
++++ b/arch/arm/mach-davinci/pm.c
+@@ -17,6 +17,7 @@
+ 
+ #include <asm/cacheflush.h>
+ #include <asm/delay.h>
++#include <asm/io.h>
+ 
+ #include <mach/da8xx.h>
+ #include <mach/sram.h>
+diff --git a/arch/arm/mach-imx/dma-v1.c b/arch/arm/mach-imx/dma-v1.c
+index 236f149..f8aa5be 100644
+--- a/arch/arm/mach-imx/dma-v1.c
++++ b/arch/arm/mach-imx/dma-v1.c
+@@ -26,6 +26,7 @@
+ #include <linux/init.h>
+ #include <linux/kernel.h>
+ #include <linux/interrupt.h>
++#include <linux/err.h>
+ #include <linux/errno.h>
+ #include <linux/clk.h>
+ #include <linux/scatterlist.h>
+diff --git a/arch/arm/mach-imx/mach-mx31_3ds.c b/arch/arm/mach-imx/mach-mx31_3ds.c
+index 9b98244..b5ecc26 100644
+--- a/arch/arm/mach-imx/mach-mx31_3ds.c
++++ b/arch/arm/mach-imx/mach-mx31_3ds.c
+@@ -13,6 +13,7 @@
+  */
+ 
+ #include <linux/delay.h>
++#include <linux/dma-mapping.h>
+ #include <linux/types.h>
+ #include <linux/init.h>
+ #include <linux/clk.h>
+diff --git a/arch/arm/mach-iop13xx/setup.c b/arch/arm/mach-iop13xx/setup.c
+index 5c147fb..a5b9897 100644
+--- a/arch/arm/mach-iop13xx/setup.c
++++ b/arch/arm/mach-iop13xx/setup.c
+@@ -17,6 +17,7 @@
+  *
+  */
+ 
++#include <linux/dma-mapping.h>
+ #include <linux/serial_8250.h>
+ #include <linux/io.h>
+ #ifdef CONFIG_MTD_PHYSMAP
+diff --git a/arch/arm/mach-mxs/devices/platform-auart.c b/arch/arm/mach-mxs/devices/platform-auart.c
+index 796606c..27608f5 100644
+--- a/arch/arm/mach-mxs/devices/platform-auart.c
++++ b/arch/arm/mach-mxs/devices/platform-auart.c
+@@ -6,6 +6,7 @@
+  * the terms of the GNU General Public License version 2 as published by the
+  * Free Software Foundation.
+  */
++#include <linux/dma-mapping.h>
+ #include <asm/sizes.h>
+ #include <mach/mx23.h>
+ #include <mach/mx28.h>
+diff --git a/arch/arm/mach-mxs/devices/platform-dma.c b/arch/arm/mach-mxs/devices/platform-dma.c
+index 295c442..6a0202b 100644
+--- a/arch/arm/mach-mxs/devices/platform-dma.c
++++ b/arch/arm/mach-mxs/devices/platform-dma.c
+@@ -6,6 +6,7 @@
+  * Free Software Foundation.
+  */
+ #include <linux/compiler.h>
++#include <linux/dma-mapping.h>
+ #include <linux/err.h>
+ #include <linux/init.h>
+ 
+diff --git a/arch/arm/mach-mxs/devices/platform-fec.c b/arch/arm/mach-mxs/devices/platform-fec.c
+index 9859cf2..ae96a4f 100644
+--- a/arch/arm/mach-mxs/devices/platform-fec.c
++++ b/arch/arm/mach-mxs/devices/platform-fec.c
+@@ -6,6 +6,7 @@
+  * the terms of the GNU General Public License version 2 as published by the
+  * Free Software Foundation.
+  */
++#include <linux/dma-mapping.h>
+ #include <asm/sizes.h>
+ #include <mach/mx28.h>
+ #include <mach/devices-common.h>
+diff --git a/arch/arm/plat-mxc/devices/platform-fec.c b/arch/arm/plat-mxc/devices/platform-fec.c
+index 370a991..b5e9857 100644
+--- a/arch/arm/plat-mxc/devices/platform-fec.c
++++ b/arch/arm/plat-mxc/devices/platform-fec.c
+@@ -8,6 +8,7 @@
+  *
+  * Copyright (C) 2011 Freescale Semiconductor, Inc.
+  */
++#include <linux/dma-mapping.h>
+ #include <asm/sizes.h>
+ #include <mach/hardware.h>
+ #include <mach/devices-common.h>
+diff --git a/arch/arm/plat-mxc/devices/platform-fsl-usb2-udc.c b/arch/arm/plat-mxc/devices/platform-fsl-usb2-udc.c
+index 87161a5..34e522a 100644
+--- a/arch/arm/plat-mxc/devices/platform-fsl-usb2-udc.c
++++ b/arch/arm/plat-mxc/devices/platform-fsl-usb2-udc.c
+@@ -8,6 +8,7 @@
+  * the terms of the GNU General Public License version 2 as published by the
+  * Free Software Foundation.
+  */
++#include <linux/dma-mapping.h>
+ #include <mach/hardware.h>
+ #include <mach/devices-common.h>
+ 
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-fb.c b/arch/arm/plat-mxc/devices/platform-imx-fb.c
+index 79a1cb1..2b0b5e0 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-fb.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-fb.c
+@@ -6,6 +6,7 @@
+  * the terms of the GNU General Public License version 2 as published by the
+  * Free Software Foundation.
+  */
++#include <linux/dma-mapping.h>
+ #include <mach/hardware.h>
+ #include <mach/devices-common.h>
+ 
+diff --git a/arch/arm/plat-mxc/devices/platform-ipu-core.c b/arch/arm/plat-mxc/devices/platform-ipu-core.c
+index edf6503..79d340a 100644
+--- a/arch/arm/plat-mxc/devices/platform-ipu-core.c
++++ b/arch/arm/plat-mxc/devices/platform-ipu-core.c
+@@ -6,6 +6,7 @@
+  * the terms of the GNU General Public License version 2 as published by the
+  * Free Software Foundation.
+  */
++#include <linux/dma-mapping.h>
+ #include <mach/hardware.h>
+ #include <mach/devices-common.h>
+ 
+diff --git a/arch/arm/plat-mxc/devices/platform-mxc-ehci.c b/arch/arm/plat-mxc/devices/platform-mxc-ehci.c
+index fc2b32d..700cf46 100644
+--- a/arch/arm/plat-mxc/devices/platform-mxc-ehci.c
++++ b/arch/arm/plat-mxc/devices/platform-mxc-ehci.c
+@@ -6,6 +6,7 @@
+  * the terms of the GNU General Public License version 2 as published by the
+  * Free Software Foundation.
+  */
++#include <linux/dma-mapping.h>
+ #include <mach/hardware.h>
+ #include <mach/devices-common.h>
+ #define imx_mxc_ehci_data_entry_single(soc, _id, hs)			\
+diff --git a/arch/arm/plat-mxc/devices/platform-mxc-mmc.c b/arch/arm/plat-mxc/devices/platform-mxc-mmc.c
+index 90d762f..540d3a7 100644
+--- a/arch/arm/plat-mxc/devices/platform-mxc-mmc.c
++++ b/arch/arm/plat-mxc/devices/platform-mxc-mmc.c
+@@ -6,6 +6,7 @@
+  * the terms of the GNU General Public License version 2 as published by the
+  * Free Software Foundation.
+  */
++#include <linux/dma-mapping.h>
+ #include <mach/hardware.h>
+ #include <mach/devices-common.h>
+ 
+diff --git a/arch/arm/plat-nomadik/include/plat/ste_dma40.h b/arch/arm/plat-nomadik/include/plat/ste_dma40.h
+index c448860..685c787 100644
+--- a/arch/arm/plat-nomadik/include/plat/ste_dma40.h
++++ b/arch/arm/plat-nomadik/include/plat/ste_dma40.h
+@@ -10,6 +10,7 @@
+ #define STE_DMA40_H
+ 
+ #include <linux/dmaengine.h>
++#include <linux/scatterlist.h>
+ #include <linux/workqueue.h>
+ #include <linux/interrupt.h>
+ 
+diff --git a/arch/x86/kernel/tboot.c b/arch/x86/kernel/tboot.c
+index 30ac65d..e07a2fc 100644
+--- a/arch/x86/kernel/tboot.c
++++ b/arch/x86/kernel/tboot.c
+@@ -36,6 +36,7 @@
+ #include <asm/bootparam.h>
+ #include <asm/pgtable.h>
+ #include <asm/pgalloc.h>
++#include <asm/swiotlb.h>
+ #include <asm/fixmap.h>
+ #include <asm/proto.h>
+ #include <asm/setup.h>
+diff --git a/crypto/async_tx/raid6test.c b/crypto/async_tx/raid6test.c
+index c132193..c88ff9e 100644
+--- a/crypto/async_tx/raid6test.c
++++ b/crypto/async_tx/raid6test.c
+@@ -21,6 +21,7 @@
+  */
+ #include <linux/async_tx.h>
+ #include <linux/gfp.h>
++#include <linux/mm.h>
+ #include <linux/random.h>
+ 
+ #undef pr
+diff --git a/drivers/dma/coh901318.c b/drivers/dma/coh901318.c
+index af8c0b5..a92d95e 100644
+--- a/drivers/dma/coh901318.c
++++ b/drivers/dma/coh901318.c
+@@ -11,6 +11,7 @@
+ #include <linux/module.h>
+ #include <linux/kernel.h> /* printk() */
+ #include <linux/fs.h> /* everything... */
++#include <linux/scatterlist.h>
+ #include <linux/slab.h> /* kmalloc() */
+ #include <linux/dmaengine.h>
+ #include <linux/platform_device.h>
+diff --git a/drivers/dma/dmaengine.c b/drivers/dma/dmaengine.c
+index 8bcb15f..48694c3 100644
+--- a/drivers/dma/dmaengine.c
++++ b/drivers/dma/dmaengine.c
+@@ -45,6 +45,7 @@
+  * See Documentation/dmaengine.txt for more details
+  */
+ 
++#include <linux/dma-mapping.h>
+ #include <linux/init.h>
+ #include <linux/module.h>
+ #include <linux/mm.h>
+diff --git a/drivers/dma/dmatest.c b/drivers/dma/dmatest.c
+index b4f5c32..765f5ff 100644
+--- a/drivers/dma/dmatest.c
++++ b/drivers/dma/dmatest.c
+@@ -8,6 +8,7 @@
+  * published by the Free Software Foundation.
+  */
+ #include <linux/delay.h>
++#include <linux/dma-mapping.h>
+ #include <linux/dmaengine.h>
+ #include <linux/init.h>
+ #include <linux/kthread.h>
+diff --git a/drivers/dma/ipu/ipu_idmac.c b/drivers/dma/ipu/ipu_idmac.c
+index c1a125e..fd7d2b3 100644
+--- a/drivers/dma/ipu/ipu_idmac.c
++++ b/drivers/dma/ipu/ipu_idmac.c
+@@ -9,6 +9,7 @@
+  * published by the Free Software Foundation.
+  */
+ 
++#include <linux/dma-mapping.h>
+ #include <linux/init.h>
+ #include <linux/platform_device.h>
+ #include <linux/err.h>
+diff --git a/drivers/dma/ste_dma40.c b/drivers/dma/ste_dma40.c
+index 8f222d4..29d1add 100644
+--- a/drivers/dma/ste_dma40.c
++++ b/drivers/dma/ste_dma40.c
+@@ -6,6 +6,7 @@
+  * License terms: GNU General Public License (GPL) version 2
+  */
+ 
++#include <linux/dma-mapping.h>
+ #include <linux/kernel.h>
+ #include <linux/slab.h>
+ #include <linux/dmaengine.h>
+diff --git a/drivers/media/dvb/mantis/mantis_ca.c b/drivers/media/dvb/mantis/mantis_ca.c
+index 330216f..3d70469 100644
+--- a/drivers/media/dvb/mantis/mantis_ca.c
++++ b/drivers/media/dvb/mantis/mantis_ca.c
+@@ -22,6 +22,7 @@
+ #include <linux/slab.h>
+ #include <linux/sched.h>
+ #include <linux/interrupt.h>
++#include <asm/io.h>
+ 
+ #include "dmxdev.h"
+ #include "dvbdev.h"
+diff --git a/drivers/media/dvb/mantis/mantis_evm.c b/drivers/media/dvb/mantis/mantis_evm.c
+index 9f73c2c..36f2256 100644
+--- a/drivers/media/dvb/mantis/mantis_evm.c
++++ b/drivers/media/dvb/mantis/mantis_evm.c
+@@ -23,6 +23,7 @@
+ #include <linux/signal.h>
+ #include <linux/sched.h>
+ #include <linux/interrupt.h>
++#include <asm/io.h>
+ 
+ #include "dmxdev.h"
+ #include "dvbdev.h"
+diff --git a/drivers/media/dvb/mantis/mantis_hif.c b/drivers/media/dvb/mantis/mantis_hif.c
+index 5772ebb..672cf4d 100644
+--- a/drivers/media/dvb/mantis/mantis_hif.c
++++ b/drivers/media/dvb/mantis/mantis_hif.c
+@@ -23,6 +23,7 @@
+ #include <linux/sched.h>
+ 
+ #include <linux/interrupt.h>
++#include <asm/io.h>
+ 
+ #include "dmxdev.h"
+ #include "dvbdev.h"
+diff --git a/drivers/media/dvb/mantis/mantis_ioc.c b/drivers/media/dvb/mantis/mantis_ioc.c
+index 479086d..24fcdc6 100644
+--- a/drivers/media/dvb/mantis/mantis_ioc.c
++++ b/drivers/media/dvb/mantis/mantis_ioc.c
+@@ -24,6 +24,7 @@
+ #include <linux/signal.h>
+ #include <linux/sched.h>
+ #include <linux/interrupt.h>
++#include <asm/io.h>
+ 
+ #include "dmxdev.h"
+ #include "dvbdev.h"
+diff --git a/drivers/media/dvb/mantis/mantis_pcmcia.c b/drivers/media/dvb/mantis/mantis_pcmcia.c
+index 5cb545b..2f188c0 100644
+--- a/drivers/media/dvb/mantis/mantis_pcmcia.c
++++ b/drivers/media/dvb/mantis/mantis_pcmcia.c
+@@ -23,6 +23,7 @@
+ #include <linux/signal.h>
+ #include <linux/sched.h>
+ #include <linux/interrupt.h>
++#include <asm/io.h>
+ 
+ #include "dmxdev.h"
+ #include "dvbdev.h"
+diff --git a/drivers/media/dvb/mantis/mantis_uart.c b/drivers/media/dvb/mantis/mantis_uart.c
+index f807c8b..18340da 100644
+--- a/drivers/media/dvb/mantis/mantis_uart.c
++++ b/drivers/media/dvb/mantis/mantis_uart.c
+@@ -20,6 +20,7 @@
+ 
+ #include <linux/kernel.h>
+ #include <linux/spinlock.h>
++#include <asm/io.h>
+ 
+ #include <linux/signal.h>
+ #include <linux/sched.h>
+diff --git a/drivers/media/dvb/mantis/mantis_vp1034.c b/drivers/media/dvb/mantis/mantis_vp1034.c
+index 26bc0cb..430ae84 100644
+--- a/drivers/media/dvb/mantis/mantis_vp1034.c
++++ b/drivers/media/dvb/mantis/mantis_vp1034.c
+@@ -21,6 +21,7 @@
+ #include <linux/signal.h>
+ #include <linux/sched.h>
+ #include <linux/interrupt.h>
++#include <asm/io.h>
+ 
+ #include "dmxdev.h"
+ #include "dvbdev.h"
+diff --git a/drivers/mmc/host/tmio_mmc_dma.c b/drivers/mmc/host/tmio_mmc_dma.c
+index 25f1ad6..bf12513 100644
+--- a/drivers/mmc/host/tmio_mmc_dma.c
++++ b/drivers/mmc/host/tmio_mmc_dma.c
+@@ -11,6 +11,7 @@
+  */
+ 
+ #include <linux/device.h>
++#include <linux/dma-mapping.h>
+ #include <linux/dmaengine.h>
+ #include <linux/mfd/tmio.h>
+ #include <linux/mmc/host.h>
+diff --git a/drivers/mtd/nand/atmel_nand.c b/drivers/mtd/nand/atmel_nand.c
+index b300705..1b90fd5 100644
+--- a/drivers/mtd/nand/atmel_nand.c
++++ b/drivers/mtd/nand/atmel_nand.c
+@@ -22,6 +22,7 @@
+  *
+  */
+ 
++#include <linux/dma-mapping.h>
+ #include <linux/slab.h>
+ #include <linux/module.h>
+ #include <linux/moduleparam.h>
+diff --git a/drivers/net/arm/ks8695net.c b/drivers/net/arm/ks8695net.c
+index a7b0caa..5bf2210 100644
+--- a/drivers/net/arm/ks8695net.c
++++ b/drivers/net/arm/ks8695net.c
+@@ -16,6 +16,7 @@
+  *		  Vincent Sanders <vince@simtec.co.uk>
+  */
+ 
++#include <linux/dma-mapping.h>
+ #include <linux/module.h>
+ #include <linux/ioport.h>
+ #include <linux/netdevice.h>
+diff --git a/drivers/net/bnx2x/bnx2x.h b/drivers/net/bnx2x/bnx2x.h
+index 668a578..3aec804 100644
+--- a/drivers/net/bnx2x/bnx2x.h
++++ b/drivers/net/bnx2x/bnx2x.h
+@@ -14,6 +14,7 @@
+ #ifndef BNX2X_H
+ #define BNX2X_H
+ #include <linux/netdevice.h>
++#include <linux/dma-mapping.h>
+ #include <linux/types.h>
+ 
+ /* compilation time flags */
+diff --git a/drivers/net/can/janz-ican3.c b/drivers/net/can/janz-ican3.c
+index f1942ca..32778d5 100644
+--- a/drivers/net/can/janz-ican3.c
++++ b/drivers/net/can/janz-ican3.c
+@@ -22,6 +22,7 @@
+ #include <linux/can/error.h>
+ 
+ #include <linux/mfd/janz.h>
++#include <asm/io.h>
+ 
+ /* the DPM has 64k of memory, organized into 256x 256 byte pages */
+ #define DPM_NUM_PAGES		256
+diff --git a/drivers/net/can/softing/softing_fw.c b/drivers/net/can/softing/softing_fw.c
+index b520784..3105961 100644
+--- a/drivers/net/can/softing/softing_fw.c
++++ b/drivers/net/can/softing/softing_fw.c
+@@ -20,6 +20,7 @@
+ #include <linux/firmware.h>
+ #include <linux/sched.h>
+ #include <asm/div64.h>
++#include <asm/io.h>
+ 
+ #include "softing.h"
+ 
+diff --git a/drivers/net/can/softing/softing_main.c b/drivers/net/can/softing/softing_main.c
+index 60a49e5..954b295 100644
+--- a/drivers/net/can/softing/softing_main.c
++++ b/drivers/net/can/softing/softing_main.c
+@@ -21,6 +21,7 @@
+ #include <linux/module.h>
+ #include <linux/init.h>
+ #include <linux/interrupt.h>
++#include <asm/io.h>
+ 
+ #include "softing.h"
+ 
+diff --git a/drivers/net/ethoc.c b/drivers/net/ethoc.c
+index a83dd31..1ee20f7 100644
+--- a/drivers/net/ethoc.c
++++ b/drivers/net/ethoc.c
+@@ -11,6 +11,7 @@
+  * Written by Thierry Reding <thierry.reding@avionic-design.de>
+  */
+ 
++#include <linux/dma-mapping.h>
+ #include <linux/etherdevice.h>
+ #include <linux/crc32.h>
+ #include <linux/io.h>
+diff --git a/drivers/net/fec_mpc52xx.c b/drivers/net/fec_mpc52xx.c
+index 9f81b1a..80f4103 100644
+--- a/drivers/net/fec_mpc52xx.c
++++ b/drivers/net/fec_mpc52xx.c
+@@ -14,6 +14,7 @@
+  *
+  */
+ 
++#include <linux/dma-mapping.h>
+ #include <linux/module.h>
+ 
+ #include <linux/kernel.h>
+diff --git a/drivers/net/greth.c b/drivers/net/greth.c
+index 672f096..38fd297 100644
+--- a/drivers/net/greth.c
++++ b/drivers/net/greth.c
+@@ -22,6 +22,7 @@
+  *               Marko Isomaki
+  */
+ 
++#include <linux/dma-mapping.h>
+ #include <linux/module.h>
+ #include <linux/uaccess.h>
+ #include <linux/init.h>
+diff --git a/drivers/net/irda/pxaficp_ir.c b/drivers/net/irda/pxaficp_ir.c
+index 001ed0a..d0851df 100644
+--- a/drivers/net/irda/pxaficp_ir.c
++++ b/drivers/net/irda/pxaficp_ir.c
+@@ -12,6 +12,8 @@
+  * Infra-red driver (SIR/FIR) for the PXA2xx embedded microprocessor
+  *
+  */
++#include <linux/dma-mapping.h>
++#include <linux/interrupt.h>
+ #include <linux/module.h>
+ #include <linux/netdevice.h>
+ #include <linux/etherdevice.h>
+diff --git a/drivers/net/ks8851_mll.c b/drivers/net/ks8851_mll.c
+index 3eacbb4..50ec391 100644
+--- a/drivers/net/ks8851_mll.c
++++ b/drivers/net/ks8851_mll.c
+@@ -34,6 +34,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/delay.h>
+ #include <linux/slab.h>
++#include <asm/io.h>
+ 
+ #define	DRV_NAME	"ks8851_mll"
+ 
+diff --git a/drivers/net/sgiseeq.c b/drivers/net/sgiseeq.c
+index 54415c7..52fb7ed 100644
+--- a/drivers/net/sgiseeq.c
++++ b/drivers/net/sgiseeq.c
+@@ -6,6 +6,7 @@
+ 
+ #undef DEBUG
+ 
++#include <linux/dma-mapping.h>
+ #include <linux/kernel.h>
+ #include <linux/module.h>
+ #include <linux/slab.h>
+diff --git a/drivers/net/stmmac/dwmac1000_core.c b/drivers/net/stmmac/dwmac1000_core.c
+index f20455c..0f63b3c 100644
+--- a/drivers/net/stmmac/dwmac1000_core.c
++++ b/drivers/net/stmmac/dwmac1000_core.c
+@@ -28,6 +28,7 @@
+ 
+ #include <linux/crc32.h>
+ #include <linux/slab.h>
++#include <asm/io.h>
+ #include "dwmac1000.h"
+ 
+ static void dwmac1000_core_init(void __iomem *ioaddr)
+diff --git a/drivers/net/stmmac/dwmac1000_dma.c b/drivers/net/stmmac/dwmac1000_dma.c
+index 2c47712..3dbeea6 100644
+--- a/drivers/net/stmmac/dwmac1000_dma.c
++++ b/drivers/net/stmmac/dwmac1000_dma.c
+@@ -26,6 +26,7 @@
+   Author: Giuseppe Cavallaro <peppe.cavallaro@st.com>
+ *******************************************************************************/
+ 
++#include <asm/io.h>
+ #include "dwmac1000.h"
+ #include "dwmac_dma.h"
+ 
+diff --git a/drivers/net/stmmac/dwmac100_core.c b/drivers/net/stmmac/dwmac100_core.c
+index c724fc3..743a580 100644
+--- a/drivers/net/stmmac/dwmac100_core.c
++++ b/drivers/net/stmmac/dwmac100_core.c
+@@ -29,6 +29,7 @@
+ *******************************************************************************/
+ 
+ #include <linux/crc32.h>
++#include <asm/io.h>
+ #include "dwmac100.h"
+ 
+ static void dwmac100_core_init(void __iomem *ioaddr)
+diff --git a/drivers/net/stmmac/dwmac100_dma.c b/drivers/net/stmmac/dwmac100_dma.c
+index e3e224b..627f656 100644
+--- a/drivers/net/stmmac/dwmac100_dma.c
++++ b/drivers/net/stmmac/dwmac100_dma.c
+@@ -28,6 +28,7 @@
+   Author: Giuseppe Cavallaro <peppe.cavallaro@st.com>
+ *******************************************************************************/
+ 
++#include <asm/io.h>
+ #include "dwmac100.h"
+ #include "dwmac_dma.h"
+ 
+diff --git a/drivers/net/stmmac/stmmac_ethtool.c b/drivers/net/stmmac/stmmac_ethtool.c
+index ae5213a..6e011dd 100644
+--- a/drivers/net/stmmac/stmmac_ethtool.c
++++ b/drivers/net/stmmac/stmmac_ethtool.c
+@@ -26,6 +26,7 @@
+ #include <linux/ethtool.h>
+ #include <linux/mii.h>
+ #include <linux/phy.h>
++#include <asm/io.h>
+ 
+ #include "stmmac.h"
+ #include "dwmac_dma.h"
+diff --git a/drivers/net/stmmac/stmmac_mdio.c b/drivers/net/stmmac/stmmac_mdio.c
+index 234b406..29a6bb6 100644
+--- a/drivers/net/stmmac/stmmac_mdio.c
++++ b/drivers/net/stmmac/stmmac_mdio.c
+@@ -27,6 +27,7 @@
+ #include <linux/mii.h>
+ #include <linux/phy.h>
+ #include <linux/slab.h>
++#include <asm/io.h>
+ 
+ #include "stmmac.h"
+ 
+diff --git a/drivers/net/usb/cdc-phonet.c b/drivers/net/usb/cdc-phonet.c
+index f967913..a60d006 100644
+--- a/drivers/net/usb/cdc-phonet.c
++++ b/drivers/net/usb/cdc-phonet.c
+@@ -21,6 +21,7 @@
+  */
+ 
+ #include <linux/kernel.h>
++#include <linux/mm.h>
+ #include <linux/module.h>
+ #include <linux/gfp.h>
+ #include <linux/usb.h>
+diff --git a/drivers/net/vxge/vxge-config.h b/drivers/net/vxge/vxge-config.h
+index 359b9b9..668b36f 100644
+--- a/drivers/net/vxge/vxge-config.h
++++ b/drivers/net/vxge/vxge-config.h
+@@ -15,6 +15,7 @@
+ #define VXGE_CONFIG_H
+ #include <linux/list.h>
+ #include <linux/slab.h>
++#include <asm/io.h>
+ 
+ #ifndef VXGE_CACHE_LINE_SIZE
+ #define VXGE_CACHE_LINE_SIZE 128
+diff --git a/drivers/net/wireless/ath/ath5k/base.c b/drivers/net/wireless/ath/ath5k/base.c
+index 1ae8913..cd1297a 100644
+--- a/drivers/net/wireless/ath/ath5k/base.c
++++ b/drivers/net/wireless/ath/ath5k/base.c
+@@ -42,6 +42,7 @@
+ 
+ #include <linux/module.h>
+ #include <linux/delay.h>
++#include <linux/dma-mapping.h>
+ #include <linux/hardirq.h>
+ #include <linux/if.h>
+ #include <linux/io.h>
+diff --git a/drivers/net/wireless/ath/ath9k/beacon.c b/drivers/net/wireless/ath/ath9k/beacon.c
+index d4d8cec..c8c8dc9 100644
+--- a/drivers/net/wireless/ath/ath9k/beacon.c
++++ b/drivers/net/wireless/ath/ath9k/beacon.c
+@@ -14,6 +14,7 @@
+  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+  */
+ 
++#include <linux/dma-mapping.h>
+ #include "ath9k.h"
+ 
+ #define FUDGE 2
+diff --git a/drivers/net/wireless/ath/ath9k/init.c b/drivers/net/wireless/ath/ath9k/init.c
+index 5a9fd21..69a980c 100644
+--- a/drivers/net/wireless/ath/ath9k/init.c
++++ b/drivers/net/wireless/ath/ath9k/init.c
+@@ -14,6 +14,7 @@
+  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+  */
+ 
++#include <linux/dma-mapping.h>
+ #include <linux/slab.h>
+ #include <linux/ath9k_platform.h>
+ 
+diff --git a/drivers/net/wireless/ath/ath9k/recv.c b/drivers/net/wireless/ath/ath9k/recv.c
+index 3b5f9d6..836ef2b 100644
+--- a/drivers/net/wireless/ath/ath9k/recv.c
++++ b/drivers/net/wireless/ath/ath9k/recv.c
+@@ -14,6 +14,7 @@
+  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+  */
+ 
++#include <linux/dma-mapping.h>
+ #include "ath9k.h"
+ #include "ar9003_mac.h"
+ 
+diff --git a/drivers/net/wireless/ath/ath9k/xmit.c b/drivers/net/wireless/ath/ath9k/xmit.c
+index 33443bc..1273881 100644
+--- a/drivers/net/wireless/ath/ath9k/xmit.c
++++ b/drivers/net/wireless/ath/ath9k/xmit.c
+@@ -14,6 +14,7 @@
+  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+  */
+ 
++#include <linux/dma-mapping.h>
+ #include "ath9k.h"
+ #include "ar9003_mac.h"
+ 
+diff --git a/drivers/staging/pohmelfs/crypto.c b/drivers/staging/pohmelfs/crypto.c
+index 5cca24f..ad92771 100644
+--- a/drivers/staging/pohmelfs/crypto.c
++++ b/drivers/staging/pohmelfs/crypto.c
+@@ -17,6 +17,7 @@
+ #include <linux/highmem.h>
+ #include <linux/kthread.h>
+ #include <linux/pagemap.h>
++#include <linux/scatterlist.h>
+ #include <linux/slab.h>
+ 
+ #include "netfs.h"
+diff --git a/drivers/tty/serial/ifx6x60.c b/drivers/tty/serial/ifx6x60.c
+index 5315525..426434e 100644
+--- a/drivers/tty/serial/ifx6x60.c
++++ b/drivers/tty/serial/ifx6x60.c
+@@ -36,6 +36,7 @@
+  *	you need to use this driver for another platform.
+  *
+  *****************************************************************************/
++#include <linux/dma-mapping.h>
+ #include <linux/module.h>
+ #include <linux/termios.h>
+ #include <linux/tty.h>
+diff --git a/drivers/usb/gadget/f_phonet.c b/drivers/usb/gadget/f_phonet.c
+index 5e14950..f22fc68 100644
+--- a/drivers/usb/gadget/f_phonet.c
++++ b/drivers/usb/gadget/f_phonet.c
+@@ -20,6 +20,7 @@
+  * 02110-1301 USA
+  */
+ 
++#include <linux/mm.h>
+ #include <linux/slab.h>
+ #include <linux/kernel.h>
+ #include <linux/device.h>
+diff --git a/include/crypto/if_alg.h b/include/crypto/if_alg.h
+index c5813c8..d61c111 100644
+--- a/include/crypto/if_alg.h
++++ b/include/crypto/if_alg.h
+@@ -16,6 +16,7 @@
+ #include <linux/compiler.h>
+ #include <linux/completion.h>
+ #include <linux/if_alg.h>
++#include <linux/scatterlist.h>
+ #include <linux/types.h>
+ #include <net/sock.h>
+ 
+diff --git a/include/linux/dma-direction.h b/include/linux/dma-direction.h
+new file mode 100644
+index 0000000..95b6a82
+--- /dev/null
++++ b/include/linux/dma-direction.h
+@@ -0,0 +1,13 @@
++#ifndef _LINUX_DMA_DIRECTION_H
++#define _LINUX_DMA_DIRECTION_H
++/*
++ * These definitions mirror those in pci.h, so they can be used
++ * interchangeably with their PCI_ counterparts.
++ */
++enum dma_data_direction {
++	DMA_BIDIRECTIONAL = 0,
++	DMA_TO_DEVICE = 1,
++	DMA_FROM_DEVICE = 2,
++	DMA_NONE = 3,
++};
++#endif
+diff --git a/include/linux/dma-mapping.h b/include/linux/dma-mapping.h
+index ba8319a..1a167c4 100644
+--- a/include/linux/dma-mapping.h
++++ b/include/linux/dma-mapping.h
+@@ -4,17 +4,9 @@
+ #include <linux/device.h>
+ #include <linux/err.h>
+ #include <linux/dma-attrs.h>
++#include <linux/dma-direction.h>
+ #include <linux/scatterlist.h>
+ 
+-/* These definitions mirror those in pci.h, so they can be used
+- * interchangeably with their PCI_ counterparts */
+-enum dma_data_direction {
+-	DMA_BIDIRECTIONAL = 0,
+-	DMA_TO_DEVICE = 1,
+-	DMA_FROM_DEVICE = 2,
+-	DMA_NONE = 3,
+-};
+-
+ struct dma_map_ops {
+ 	void* (*alloc_coherent)(struct device *dev, size_t size,
+ 				dma_addr_t *dma_handle, gfp_t gfp);
+diff --git a/include/linux/dmaengine.h b/include/linux/dmaengine.h
+index eee7add..8fbf40e 100644
+--- a/include/linux/dmaengine.h
++++ b/include/linux/dmaengine.h
+@@ -23,7 +23,9 @@
+ 
+ #include <linux/device.h>
+ #include <linux/uio.h>
+-#include <linux/dma-mapping.h>
++#include <linux/dma-direction.h>
++
++struct scatterlist;
+ 
+ /**
+  * typedef dma_cookie_t - an opaque DMA cookie
+diff --git a/include/linux/netdevice.h b/include/linux/netdevice.h
+index c6d6d48..056c45b 100644
+--- a/include/linux/netdevice.h
++++ b/include/linux/netdevice.h
+@@ -34,7 +34,6 @@
+ #include <linux/pm_qos_params.h>
+ #include <linux/timer.h>
+ #include <linux/delay.h>
+-#include <linux/mm.h>
+ #include <asm/atomic.h>
+ #include <asm/cache.h>
+ #include <asm/byteorder.h>
+diff --git a/net/sched/sch_netem.c b/net/sched/sch_netem.c
+index 945f3dd..f0913ff 100644
+--- a/net/sched/sch_netem.c
++++ b/net/sched/sch_netem.c
+@@ -13,6 +13,7 @@
+  *		Catalin(ux aka Dino) BOIE <catab at umbrella dot ro>
+  */
+ 
++#include <linux/mm.h>
+ #include <linux/module.h>
+ #include <linux/slab.h>
+ #include <linux/types.h>
+diff --git a/security/apparmor/lib.c b/security/apparmor/lib.c
+index 506d2ba..b82e383 100644
+--- a/security/apparmor/lib.c
++++ b/security/apparmor/lib.c
+@@ -12,6 +12,7 @@
+  * License.
+  */
+ 
++#include <linux/mm.h>
+ #include <linux/slab.h>
+ #include <linux/string.h>
+ #include <linux/vmalloc.h>
+-- 
+1.7.7.4
+

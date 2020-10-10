@@ -1,0 +1,203 @@
+From 33e9107f2805c515e239ce5312c5fd842b97b064 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Thu, 16 Aug 2012 02:45:11 +0800
+Subject: [PATCH 1909/2463] ENGR00220388 [MX6]Adjust SOC/PU voltage according
+ to datasheet
+
+SOC/PU voltage need to following some rules according to latest
+datasheet:
+
+1. SOC/PU CAP voltage must be 1.15V <= SOC/PU <= 1.3V;
+2. SOC and PU must be same as they don't have level shift;
+3. Adjust previous wrong voltage setting.
+
+If SOC/PU voltage is too low, may cause system crash on some
+chips, we have a board that easily crash with GPU working and
+doing some tar operation, with this voltage adjust, this issue
+fixed.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/cpu_op-mx6.c |   89 +++++++++++++++------------------------
+ 1 files changed, 34 insertions(+), 55 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/cpu_op-mx6.c b/arch/arm/mach-mx6/cpu_op-mx6.c
+index 98181ce..d0a7a42 100644
+--- a/arch/arm/mach-mx6/cpu_op-mx6.c
++++ b/arch/arm/mach-mx6/cpu_op-mx6.c
+@@ -36,22 +36,15 @@ static struct cpu_op mx6_cpu_op_1_2G[] = {
+ 	 .pll_rate = 792000000,
+ 	 .cpu_rate = 792000000,
+ 	 .cpu_podf = 0,
+-	 .pu_voltage = 1100000,
+-	 .soc_voltage = 1100000,
++	 .pu_voltage = 1150000,
++	 .soc_voltage = 1150000,
+ 	 .cpu_voltage = 1100000,},
+-/*	{
+-	 .pll_rate = 996000000,
+-	 .cpu_rate = 498000000,
+-	 .cpu_podf = 1,
+-	 .pu_voltage = 1100000,
+-	 .soc_voltage = 1100000,
+-	 .cpu_voltage = 1050000,},*/
+ 	 {
+ 	  .pll_rate = 396000000,
+ 	  .cpu_rate = 396000000,
+ 	  .cpu_podf = 0,
+-	  .pu_voltage = 1100000,
+-	  .soc_voltage = 1100000,
++	  .pu_voltage = 1150000,
++	  .soc_voltage = 1150000,
+ 	  .cpu_voltage = 925000,},
+ };
+ 
+@@ -68,22 +61,15 @@ static struct cpu_op mx6_cpu_op_1G[] = {
+ 	 .pll_rate = 792000000,
+ 	 .cpu_rate = 792000000,
+ 	 .cpu_podf = 0,
+-	 .pu_voltage = 1100000,
+-	 .soc_voltage = 1100000,
++	 .pu_voltage = 1150000,
++	 .soc_voltage = 1150000,
+ 	 .cpu_voltage = 1100000,},
+-/*	{
+-	 .pll_rate = 996000000,
+-	 .cpu_rate = 498000000,
+-	 .cpu_podf = 1,
+-	 .pu_voltage = 1100000,
+-	 .soc_voltage = 1100000,
+-	 .cpu_voltage = 1050000,},*/
+ 	 {
+ 	  .pll_rate = 396000000,
+ 	  .cpu_rate = 396000000,
+ 	  .cpu_podf = 0,
+-	  .pu_voltage = 1100000,
+-	  .soc_voltage = 1100000,
++	  .pu_voltage = 1150000,
++	  .soc_voltage = 1150000,
+ 	  .cpu_voltage = 925000,},
+ };
+ 
+@@ -92,22 +78,15 @@ static struct cpu_op mx6_cpu_op[] = {
+ 	 .pll_rate = 792000000,
+ 	 .cpu_rate = 792000000,
+ 	 .cpu_podf = 0,
+-	 .pu_voltage = 1100000,
+-	 .soc_voltage = 1100000,
++	 .pu_voltage = 1150000,
++	 .soc_voltage = 1150000,
+ 	 .cpu_voltage = 1100000,},
+-/*	{
+-	 .pll_rate = 996000000,
+-	 .cpu_rate = 498000000,
+-	 .cpu_podf = 1,
+-	 .pu_voltage = 1100000,
+-	 .soc_voltage = 1100000,
+-	 .cpu_voltage = 1050000,},*/
+ 	 {
+ 	  .pll_rate = 396000000,
+ 	  .cpu_rate = 396000000,
+ 	  .cpu_podf = 0,
+-	  .pu_voltage = 1100000,
+-	  .soc_voltage = 1100000,
++	  .pu_voltage = 1150000,
++	  .soc_voltage = 1150000,
+ 	  .cpu_voltage = 925000,},
+ };
+ 
+@@ -124,22 +103,22 @@ static struct cpu_op mx6dl_cpu_op_1_2G[] = {
+ 	 .pll_rate = 792000000,
+ 	 .cpu_rate = 792000000,
+ 	 .cpu_podf = 0,
+-	 .pu_voltage = 1100000,
+-	 .soc_voltage = 1100000,
+-	 .cpu_voltage = 1125000,},
++	 .pu_voltage = 1150000,
++	 .soc_voltage = 1150000,
++	 .cpu_voltage = 1100000,},
+ 	 {
+ 	  .pll_rate = 396000000,
+ 	  .cpu_rate = 396000000,
+ 	  .cpu_podf = 0,
+-	  .pu_voltage = 1100000,
+-	  .soc_voltage = 1100000,
++	  .pu_voltage = 1150000,
++	  .soc_voltage = 1150000,
+ 	  .cpu_voltage = 1025000,},
+ 	 {
+ 	  .pll_rate = 396000000,
+ 	  .cpu_rate = 198000000,
+ 	  .cpu_podf = 1,
+-	  .pu_voltage = 1100000,
+-	  .soc_voltage = 1100000,
++	  .pu_voltage = 1150000,
++	  .soc_voltage = 1150000,
+ 	  .cpu_voltage = 1025000,},
+ };
+ /* working point(wp): 0 - 1GHz; 1 - 800MHz, 2 - 400MHz, 3  - 200MHz */
+@@ -155,22 +134,22 @@ static struct cpu_op mx6dl_cpu_op_1G[] = {
+ 	 .pll_rate = 792000000,
+ 	 .cpu_rate = 792000000,
+ 	 .cpu_podf = 0,
+-	 .pu_voltage = 1100000,
+-	 .soc_voltage = 1100000,
+-	 .cpu_voltage = 1125000,},
++	 .pu_voltage = 1150000,
++	 .soc_voltage = 1150000,
++	 .cpu_voltage = 1100000,},
+ 	{
+ 	 .pll_rate = 396000000,
+ 	 .cpu_rate = 396000000,
+ 	 .cpu_podf = 0,
+-	 .pu_voltage = 1100000,
+-	 .soc_voltage = 1100000,
++	 .pu_voltage = 1150000,
++	 .soc_voltage = 1150000,
+ 	 .cpu_voltage = 1025000,},
+ 	 {
+ 	  .pll_rate = 396000000,
+ 	  .cpu_rate = 198000000,
+ 	  .cpu_podf = 1,
+-	  .pu_voltage = 1100000,
+-	  .soc_voltage = 1100000,
++	  .pu_voltage = 1150000,
++	  .soc_voltage = 1150000,
+ 	  .cpu_voltage = 1025000,},
+ };
+ static struct cpu_op mx6dl_cpu_op[] = {
+@@ -178,23 +157,23 @@ static struct cpu_op mx6dl_cpu_op[] = {
+ 	 .pll_rate = 792000000,
+ 	 .cpu_rate = 792000000,
+ 	 .cpu_podf = 0,
+-	 .pu_voltage = 1100000,
+-	 .soc_voltage = 1100000,
++	 .pu_voltage = 1150000,
++	 .soc_voltage = 1150000,
+ 	 .cpu_voltage = 1100000,},
+ 	 {
+ 	  .pll_rate = 396000000,
+ 	  .cpu_rate = 396000000,
+ 	  .cpu_podf = 0,
+-	  .pu_voltage = 1100000,
+-	  .soc_voltage = 1100000,
+-	  .cpu_voltage = 1000000,},
++	  .pu_voltage = 1150000,
++	  .soc_voltage = 1150000,
++	  .cpu_voltage = 1025000,},
+ 	{
+ 	 .pll_rate = 396000000,
+ 	 .cpu_rate = 198000000,
+ 	 .cpu_podf = 1,
+-	 .pu_voltage = 1100000,
+-	 .soc_voltage = 1100000,
+-	 .cpu_voltage = 1000000,},
++	 .pu_voltage = 1150000,
++	 .soc_voltage = 1150000,
++	 .cpu_voltage = 1025000,},
+ };
+ 
+ static struct dvfs_op dvfs_core_setpoint_1_2G[] = {
+-- 
+1.7.7.4
+

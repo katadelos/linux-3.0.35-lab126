@@ -1,0 +1,102 @@
+From d4d84c13bf11f13bbba2201873951226128e3724 Mon Sep 17 00:00:00 2001
+From: "Zhou, Jie" <b30303@freescale.com>
+Date: Fri, 1 Apr 2011 01:01:27 +0800
+Subject: [PATCH 0124/2463] ENGR00141400 GPU: Improve GPU clock gating
+
+seperate interrupt handling and clk_enable for Z160 and Z430
+
+Signed-off-by: Zhou, Jie <b30303@freescale.com>
+Signed-off-by: Richard Zhao <richard.zhao@freescale.com>
+---
+ drivers/mxc/amd-gpu/common/gsl_intrmgr.c          |   18 ++++--------------
+ drivers/mxc/amd-gpu/include/api/gsl_klibapi.h     |    2 +-
+ drivers/mxc/amd-gpu/platform/hal/linux/gsl_kmod.c |    4 ++--
+ drivers/mxc/amd-gpu/platform/hal/linux/misc.c     |    4 ++--
+ 4 files changed, 9 insertions(+), 19 deletions(-)
+
+diff --git a/drivers/mxc/amd-gpu/common/gsl_intrmgr.c b/drivers/mxc/amd-gpu/common/gsl_intrmgr.c
+index ae2eb4a..4ea3bab 100644
+--- a/drivers/mxc/amd-gpu/common/gsl_intrmgr.c
++++ b/drivers/mxc/amd-gpu/common/gsl_intrmgr.c
+@@ -84,21 +84,11 @@ kgsl_intr_decode(gsl_device_t *device, gsl_intrblock_t block_id)
+ //----------------------------------------------------------------------------
+ 
+ KGSL_API void
+-kgsl_intr_isr()
++kgsl_intr_isr(gsl_device_t *device)
+ {
+-    gsl_deviceid_t  device_id;
+-    gsl_device_t    *device;
+-
+-    // loop through the devices, and call device specific isr
+-    for (device_id = (gsl_deviceid_t)(GSL_DEVICE_ANY + 1); device_id <= GSL_DEVICE_MAX; device_id++)
+-    {
+-        device = &gsl_driver.device[device_id-1];    // device_id is 1 based
+-
+-        if (device->intr.flags & GSL_FLAGS_INITIALIZED)
+-        {
+-            kgsl_device_active(device);
+-            device->ftbl.intr_isr(device);
+-        }
++    if (device->intr.flags & GSL_FLAGS_INITIALIZED) {
++	kgsl_device_active(device);
++	device->ftbl.intr_isr(device);
+     }
+ }
+ 
+diff --git a/drivers/mxc/amd-gpu/include/api/gsl_klibapi.h b/drivers/mxc/amd-gpu/include/api/gsl_klibapi.h
+index 3c08545..c883184 100644
+--- a/drivers/mxc/amd-gpu/include/api/gsl_klibapi.h
++++ b/drivers/mxc/amd-gpu/include/api/gsl_klibapi.h
+@@ -120,7 +120,7 @@ KGSL_API int                kgsl_sharedmem_fromhostpointer(gsl_deviceid_t device
+ ////////////////////////////////////////////////////////////////////////////
+ //  interrupt API
+ ////////////////////////////////////////////////////////////////////////////
+-KGSL_API void               kgsl_intr_isr(void);
++KGSL_API void               kgsl_intr_isr(gsl_device_t *device);
+ 
+ 
+ ////////////////////////////////////////////////////////////////////////////
+diff --git a/drivers/mxc/amd-gpu/platform/hal/linux/gsl_kmod.c b/drivers/mxc/amd-gpu/platform/hal/linux/gsl_kmod.c
+index 7d10874..94667d0 100644
+--- a/drivers/mxc/amd-gpu/platform/hal/linux/gsl_kmod.c
++++ b/drivers/mxc/amd-gpu/platform/hal/linux/gsl_kmod.c
+@@ -751,13 +751,13 @@ static struct class *gsl_kmod_class;
+ 
+ static irqreturn_t z160_irq_handler(int irq, void *dev_id)
+ {
+-    kgsl_intr_isr();
++    kgsl_intr_isr(&gsl_driver.device[GSL_DEVICE_G12-1]);
+     return IRQ_HANDLED;
+ }
+ 
+ static irqreturn_t z430_irq_handler(int irq, void *dev_id)
+ {
+-    kgsl_intr_isr();
++    kgsl_intr_isr(&gsl_driver.device[GSL_DEVICE_YAMATO-1]);
+     return IRQ_HANDLED;
+ }
+ 
+diff --git a/drivers/mxc/amd-gpu/platform/hal/linux/misc.c b/drivers/mxc/amd-gpu/platform/hal/linux/misc.c
+index f91ded3..2908627 100644
+--- a/drivers/mxc/amd-gpu/platform/hal/linux/misc.c
++++ b/drivers/mxc/amd-gpu/platform/hal/linux/misc.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2010 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -85,7 +85,7 @@ static int _kgsl_device_active(gsl_device_t *dev, int all)
+ }
+ int kgsl_device_active(gsl_device_t *dev)
+ {
+-	return _kgsl_device_active(dev, 1);
++	return _kgsl_device_active(dev, 0);
+ }
+ 
+ static void kgsl_device_inactive(unsigned long data)
+-- 
+1.7.7.4
+

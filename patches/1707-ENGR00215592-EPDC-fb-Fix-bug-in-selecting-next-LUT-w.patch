@@ -1,0 +1,33 @@
+From 981283605e9ab75607b4868d63f3758a2aeec7de Mon Sep 17 00:00:00 2001
+From: Danny Nold <dannynold@freescale.com>
+Date: Mon, 2 Jul 2012 12:57:58 -0500
+Subject: [PATCH 1707/2463] ENGR00215592 - EPDC fb: Fix bug in selecting next
+ LUT when 0-31 busy
+
+If LUT 63 is busy and LUTs 0-31 are busy, the epdc_choose_next_lut
+function was not correctly selecting an available LUT between 32-62.
+Instead, it was returning 0.  This fixes that issue by properly
+offsetting the available LUT from the second 32-bit segment of the
+64-bit LUT field.
+
+Signed-off-by: Danny Nold <dannynold@freescale.com>
+---
+ drivers/video/mxc/mxc_epdc_fb.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_epdc_fb.c b/drivers/video/mxc/mxc_epdc_fb.c
+index ef4916d..730fba6 100644
+--- a/drivers/video/mxc/mxc_epdc_fb.c
++++ b/drivers/video/mxc/mxc_epdc_fb.c
+@@ -753,7 +753,7 @@ static int epdc_choose_next_lut(int rev, int *next_lut)
+ 				*next_lut = ffz((u32)luts_status);
+ 				if (*next_lut == -1)
+ 					*next_lut =
+-						ffz((u32)(luts_status >> 32));
++						ffz((u32)(luts_status >> 32)) + 32;
+ 			}
+ 		}
+ 
+-- 
+1.7.7.4
+

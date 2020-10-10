@@ -1,0 +1,45 @@
+From ab7e7e61310b5361fb2071669bb99d34fb652dde Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Fri, 7 Sep 2012 09:07:56 +0800
+Subject: [PATCH 2017/2463] ENGR00223344 [Thermal]Fix clk enable flow bug
+
+We should make sure clk_enable is called after clk_get.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ drivers/mxc/thermal/thermal.c |   12 +++++++-----
+ 1 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/mxc/thermal/thermal.c b/drivers/mxc/thermal/thermal.c
+index f0e961f..0982a7b 100644
+--- a/drivers/mxc/thermal/thermal.c
++++ b/drivers/mxc/thermal/thermal.c
+@@ -912,6 +912,13 @@ static int anatop_thermal_probe(struct platform_device *pdev)
+ 		dev_err(&pdev->dev, "failed to remap anatop calibration data address!\n");
+ 		goto anatop_failed;
+ 	}
++
++	pll3_clk = clk_get(NULL, "pll3_main_clk");
++	if (IS_ERR(pll3_clk)) {
++		retval = -ENOENT;
++		goto anatop_failed;
++	}
++
+ 	raw_n40c = DEFAULT_N40C;
+ 	/* use calibration data to get ratio */
+ 	anatop_thermal_counting_ratio(__raw_readl(calibration_addr));
+@@ -925,11 +932,6 @@ static int anatop_thermal_probe(struct platform_device *pdev)
+ 			  NULL);
+ 	thermal_irq = res_irq->start;
+ 
+-	pll3_clk = clk_get(NULL, "pll3_main_clk");
+-	if (IS_ERR(pll3_clk)) {
+-		retval = -ENOENT;
+-		goto anatop_failed;
+-	}
+ 
+ 	anatop_thermal_add(device);
+ 	anatop_thermal_cpufreq_init();
+-- 
+1.7.7.4
+

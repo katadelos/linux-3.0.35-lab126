@@ -1,0 +1,90 @@
+From 70f87803e77173f11347ff41883d2d82bf91657e Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.liu@freescale.com>
+Date: Tue, 11 Sep 2012 18:18:39 +0800
+Subject: [PATCH 2084/2463] ENGR00223797-2 IPUv3:Support bypass reset for
+ probe
+
+This patch adds bypass reset support in IPUv3 driver
+probe function to avoid IPUv3 being reset if a plat-
+form supports smooth transition from bootloader
+splashimage to system UI.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit d8c12ced755491d8337fb7456fa78004701d5408)
+---
+ drivers/mxc/ipu3/ipu_common.c |   37 +++++++++++++++++++++----------------
+ 1 files changed, 21 insertions(+), 16 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index 5954eb6..c8f2983 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -162,10 +162,11 @@ static int __devinit ipu_clk_setup_enable(struct ipu_soc *ipu,
+ 	clk_debug_register(&ipu->pixel_clk[0]);
+ 	clk_debug_register(&ipu->pixel_clk[1]);
+ 
+-	clk_enable(ipu->ipu_clk);
++	if (!plat_data->bypass_reset)
++		clk_enable(ipu->ipu_clk);
+ 
+-	clk_set_parent(&ipu->pixel_clk[0], ipu->ipu_clk);
+-	clk_set_parent(&ipu->pixel_clk[1], ipu->ipu_clk);
++	ipu->pixel_clk[0].parent = ipu->ipu_clk;
++	ipu->pixel_clk[1].parent = ipu->ipu_clk;
+ 
+ 	ipu->di_clk[0] = clk_get(ipu->dev, di0_clk);
+ 	ipu->di_clk[1] = clk_get(ipu->dev, di1_clk);
+@@ -245,9 +246,6 @@ static int __devinit ipu_probe(struct platform_device *pdev)
+ 
+ 	ipu->dev = &pdev->dev;
+ 
+-	if (plat_data->init)
+-		plat_data->init(pdev->id);
+-
+ 	ipu->irq_err = platform_get_irq(pdev, 0);
+ 	ipu->irq_sync = platform_get_irq(pdev, 1);
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+@@ -334,23 +332,30 @@ static int __devinit ipu_probe(struct platform_device *pdev)
+ 
+ 	platform_set_drvdata(pdev, ipu);
+ 
+-	ipu_reset(ipu);
++	if (!plat_data->bypass_reset) {
++		if (plat_data->init)
++			plat_data->init(pdev->id);
+ 
+-	/* Enable error interrupts by default */
+-	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(5));
+-	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(6));
+-	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(9));
+-	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(10));
++		ipu_reset(ipu);
++
++		ipu_disp_init(ipu);
+ 
+-	ipu_disp_init(ipu);
++		/* Set MCU_T to divide MCU access window into 2 */
++		ipu_cm_write(ipu, 0x00400000L | (IPU_MCU_T_DEFAULT << 18),
++			     IPU_DISP_GEN);
++	}
+ 
+ 	/* Set sync refresh channels and CSI->mem channel as high priority */
+ 	ipu_idmac_write(ipu, 0x18800001L, IDMAC_CHA_PRI(0));
+ 
+-	/* Set MCU_T to divide MCU access window into 2 */
+-	ipu_cm_write(ipu, 0x00400000L | (IPU_MCU_T_DEFAULT << 18), IPU_DISP_GEN);
++	/* Enable error interrupts by default */
++	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(5));
++	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(6));
++	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(9));
++	ipu_cm_write(ipu, 0xFFFFFFFF, IPU_INT_CTRL(10));
+ 
+-	clk_disable(ipu->ipu_clk);
++	if (!plat_data->bypass_reset)
++		clk_disable(ipu->ipu_clk);
+ 
+ 	register_ipu_device(ipu, pdev->id);
+ 
+-- 
+1.7.7.4
+

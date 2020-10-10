@@ -1,0 +1,32 @@
+From d62bb922c01964f05b8ca9b11eb6e7fcf31d823b Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Thu, 22 Nov 2012 15:38:46 +0800
+Subject: [PATCH 2284/2463] ENGR00234519 mmc: support eMMC v4.5 memory cards
+
+Bypass eMMC version checking, so that eMMC v4.5 can work on current kernel as
+eMMC v4.4 cards, no specific v4.5 feature supported. Only basic read/write
+operations are supported, also ddr mode is supported.
+
+Acked-by: Dong Aisheng <b29396@freescale.com>
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/core/mmc.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mmc/core/mmc.c b/drivers/mmc/core/mmc.c
+index f8ffabd..ce5e63c 100644
+--- a/drivers/mmc/core/mmc.c
++++ b/drivers/mmc/core/mmc.c
+@@ -259,7 +259,8 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
+ 	}
+ 
+ 	card->ext_csd.rev = ext_csd[EXT_CSD_REV];
+-	if (card->ext_csd.rev > 5) {
++	/* workaround: support emmc 4.5 cards to work at emmc 4.4 mode */
++	if (card->ext_csd.rev > 6) {
+ 		printk(KERN_ERR "%s: unrecognised EXT_CSD revision %d\n",
+ 			mmc_hostname(card->host), card->ext_csd.rev);
+ 		err = -EINVAL;
+-- 
+1.7.7.4
+

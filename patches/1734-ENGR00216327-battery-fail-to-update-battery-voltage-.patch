@@ -1,0 +1,29 @@
+From 2df3f7a85d2155bbadebe9fd151bc6ca05d7a282 Mon Sep 17 00:00:00 2001
+From: Rong Dian <b38775@freescale.com>
+Date: Tue, 10 Jul 2012 19:23:50 +0800
+Subject: [PATCH 1734/2463] ENGR00216327: battery: fail to update battery
+ voltage with usb charger attached
+
+when usb charger is online, driver also updates battery voltage
+
+Signed-off-by: Rong Dian <b38775@freescale.com>
+---
+ drivers/power/sabresd_battery.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/power/sabresd_battery.c b/drivers/power/sabresd_battery.c
+index 94d7e41..1e13ebf 100755
+--- a/drivers/power/sabresd_battery.c
++++ b/drivers/power/sabresd_battery.c
+@@ -265,7 +265,7 @@ static void max8903_battery_update_status(struct max8903_data *data)
+ 		data->voltage_uV = temp_last;
+ 		}
+ 	}
+-	if (data->charger_online == 1) {
++	if (data->charger_online == 1 || data->usb_charger_online == 1) {
+ 		data->voltage_uV = temp;
+ 		temp_last = temp;
+ 	}
+-- 
+1.7.7.4
+

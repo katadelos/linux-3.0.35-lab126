@@ -1,0 +1,77 @@
+From 947d9bad8ecec953f3ceea0e33e6c12485e9a254 Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Fri, 23 Mar 2012 13:59:10 +0800
+Subject: [PATCH 1216/2463] ENGR00177748 pfuze100 mx6q_sabreSD: keep VGEN4 and
+ VGEN5 always on
+
+To enable regulator_has_full_constraints when kernel boot, some regulator
+be kept on always, from SabreSD schematic, VGEN4 and VGEN5 of pfuze100 should
+be on forever.
+
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c         |    7 +------
+ arch/arm/mach-mx6/mx6q_sabresd_pmic_pfuze100.c |    8 ++++----
+ 2 files changed, 5 insertions(+), 10 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index babe27a..20bcef3 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -686,12 +686,7 @@ static int __init max17135_regulator_init(struct max17135 *max17135)
+ 		}
+ 	}
+ 
+-	/*
+-	 * TODO: We cannot enable full constraints for now, since
+-	 * it results in the PFUZE regulators being disabled
+-	 * at the end of boot, which removes power from the board.
+-	 */
+-	/*regulator_has_full_constraints();*/
++	regulator_has_full_constraints();
+ 
+ 	return 0;
+ }
+diff --git a/arch/arm/mach-mx6/mx6q_sabresd_pmic_pfuze100.c b/arch/arm/mach-mx6/mx6q_sabresd_pmic_pfuze100.c
+index 5936c6d..2d3863b 100644
+--- a/arch/arm/mach-mx6/mx6q_sabresd_pmic_pfuze100.c
++++ b/arch/arm/mach-mx6/mx6q_sabresd_pmic_pfuze100.c
+@@ -282,8 +282,6 @@ static struct regulator_init_data vgen1_init = {
+ 			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE |
+ 			REGULATOR_CHANGE_STATUS,
+ 			.valid_modes_mask = 0,
+-			.always_on = 0,
+-			.boot_on = 0,
+ 			},
+ 	.num_consumer_supplies = ARRAY_SIZE(vgen1_consumers),
+ 	.consumer_supplies = vgen1_consumers,
+@@ -316,8 +314,6 @@ static struct regulator_init_data vgen3_init = {
+ 			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE |
+ 			REGULATOR_CHANGE_STATUS,
+ 			.valid_modes_mask = 0,
+-			.always_on = 0,
+-			.boot_on = 0,
+ 			},
+ };
+ 
+@@ -329,6 +325,8 @@ static struct regulator_init_data vgen4_init = {
+ 			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE |
+ 			REGULATOR_CHANGE_STATUS,
+ 			.valid_modes_mask = 0,
++			.always_on = 1,
++			.boot_on = 1,
+ 			},
+ 	.num_consumer_supplies = ARRAY_SIZE(vgen4_consumers),
+ 	.consumer_supplies = vgen4_consumers,
+@@ -342,6 +340,8 @@ static struct regulator_init_data vgen5_init = {
+ 			.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE |
+ 			REGULATOR_CHANGE_STATUS,
+ 			.valid_modes_mask = 0,
++			.always_on = 1,
++			.boot_on = 1,
+ 			},
+ 	.num_consumer_supplies = ARRAY_SIZE(vgen5_consumers),
+ 	.consumer_supplies = vgen5_consumers,
+-- 
+1.7.7.4
+

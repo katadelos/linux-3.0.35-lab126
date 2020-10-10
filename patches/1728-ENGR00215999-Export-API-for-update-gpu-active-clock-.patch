@@ -1,0 +1,364 @@
+From 47f90b6aefd51cd1dc0d8fde5c9500be044d4917 Mon Sep 17 00:00:00 2001
+From: Loren Huang <b02279@freescale.com>
+Date: Fri, 6 Jul 2012 18:59:08 +0800
+Subject: [PATCH 1728/2463] ENGR00215999 Export API for update gpu active
+ clock dynamically
+
+The patch is from vivante.
+
+Signed-off-by: Loren Huang <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c  |  158 ++++++++++++++++----
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h  |   19 +++
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c     |   18 +++
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h   |   12 ++
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h |   20 +++-
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h    |    7 +
+ 6 files changed, 204 insertions(+), 30 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+index 9710c82..c201c63 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+@@ -593,6 +593,9 @@ gckHARDWARE_Construct(
+     hardware->powerState      = gcvTRUE;
+     hardware->lastWaitLink    = ~0U;
+     hardware->globalSemaphore = gcvNULL;
++#if gcdENABLE_FSCALE_VAL_ADJUST
++    hardware->powerOnFscaleVal = 64;
++#endif
+ 
+     gcmkONERROR(gckOS_CreateMutex(Os, &hardware->powerMutex));
+     gcmkONERROR(gckOS_CreateSemaphore(Os, &hardware->globalSemaphore));
+@@ -3462,6 +3465,62 @@ _PowerEnum(gceCHIPPOWERSTATE State)
+ }
+ #endif
+ 
++static gceSTATUS
++_GetClock(
++    IN gckHARDWARE Hardware,
++    IN gceCHIPPOWERSTATE State,
++    OUT gctUINT_PTR Clock
++)
++{
++    gctUINT clock;
++
++    /* Clocks. */
++    static const gctUINT clocks[4] =
++    {
++        /* gcvPOWER_ON */
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (64) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
++
++        /* gcvPOWER_OFF */
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
++
++        /* gcvPOWER_IDLE */
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
++
++        /* gcvPOWER_SUSPEND */
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
++        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
++    };
++
++    gcmkHEADER();
++
++    gcmkVERIFY_ARGUMENT(State >= gcvPOWER_ON && State <= gcvPOWER_OFF);
++
++    clock = clocks[State];
++
++#if gcdENABLE_FSCALE_VAL_ADJUST
++    if (State == gcvPOWER_ON)
++    {
++        clock = ((((gctUINT32) (clock)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (Hardware->powerOnFscaleVal) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2)));
++    }
++#endif
++
++    *Clock = clock;
++
++    gcmkFOOTER();
++    return gcvSTATUS_OK;
++}
++
+ /*******************************************************************************
+ **
+ **  gckHARDWARE_SetPowerManagementState
+@@ -3565,34 +3624,6 @@ gckHARDWARE_SetPowerManagementState(
+         },
+     };
+ 
+-    /* Clocks. */
+-    static const gctUINT clocks[4] =
+-    {
+-        /* gcvPOWER_ON */
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (64) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
+-
+-        /* gcvPOWER_OFF */
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
+-
+-        /* gcvPOWER_IDLE */
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
+-
+-        /* gcvPOWER_SUSPEND */
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 0:0) - (0 ? 0:0) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 0:0) - (0 ? 0:0) + 1))))))) << (0 ? 0:0))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 1:1) - (0 ? 1:1) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 1:1) - (0 ? 1:1) + 1))))))) << (0 ? 1:1))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 8:2) - (0 ? 8:2) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:2) - (0 ? 8:2) + 1))))))) << (0 ? 8:2))) |
+-        ((((gctUINT32) (0)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (1) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))),
+-    };
+-
+     gcmkHEADER_ARG("Hardware=0x%x State=%d", Hardware, State);
+ #if gcmIS_DEBUG(gcdDEBUG_TRACE)
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+@@ -3733,7 +3764,7 @@ gckHARDWARE_SetPowerManagementState(
+ 
+     /* Grab control flags and clock. */
+     flag  = flags[Hardware->chipPowerState][State];
+-    clock = clocks[State];
++    gcmkONERROR(_GetClock(Hardware, State, &clock));
+ 
+ #if gcdPOWEROFF_TIMEOUT
+     if (timeout)
+@@ -4223,6 +4254,75 @@ gckHARDWARE_QueryPowerManagementState(
+     return gcvSTATUS_OK;
+ }
+ 
++#if gcdENABLE_FSCALE_VAL_ADJUST
++gceSTATUS
++gckHARDWARE_SetFscaleValue(
++    IN gckHARDWARE Hardware,
++    IN gctUINT32   FscaleValue
++    )
++{
++    gceSTATUS status;
++    gctUINT32 clock;
++    gctBOOL acquired = gcvFALSE;
++
++    gcmkHEADER_ARG("Hardware=0x%x FscaleVal=%d", Hardware, FscaleVal);
++
++    gcmkVERIFY_ARGUMENT(FscaleValue > 0 && FscaleValue <= 64);
++
++    Hardware->powerOnFscaleVal = FscaleValue;
++
++    gcmkONERROR(
++        gckOS_AcquireMutex(Hardware->os, Hardware->powerMutex, gcvINFINITE));
++    acquired =  gcvTRUE;
++
++    if (Hardware->chipPowerState == gcvPOWER_ON)
++    {
++        gcmkONERROR(_GetClock(Hardware, gcvPOWER_ON, &clock));
++
++        gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os,
++                                          Hardware->core,
++                                          0x00000,
++                                          clock));
++        
++        /* Done loading the frequency scaler. */
++        gcmkONERROR(gckOS_WriteRegisterEx(Hardware->os,
++                                          Hardware->core,
++                                          0x00000,
++                                          ((((gctUINT32) (clock)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9))) | (((gctUINT32) ((gctUINT32) (0) & ((gctUINT32) ((((1 ? 9:9) - (0 ? 9:9) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 9:9) - (0 ? 9:9) + 1))))))) << (0 ? 9:9)))));
++    }
++
++    gcmkVERIFY(gckOS_ReleaseMutex(Hardware->os, Hardware->powerMutex));
++
++    gcmkFOOTER_NO();
++    return gcvSTATUS_OK;
++
++OnError:
++    if (acquired)
++    {
++        gcmkVERIFY(gckOS_ReleaseMutex(Hardware->os, Hardware->powerMutex));
++    }
++
++    gcmkFOOTER();
++    return status;
++}
++
++gceSTATUS
++gckHARDWARE_GetFscaleValue(
++    IN gckHARDWARE Hardware,
++    IN gctUINT * FscaleValue,
++    IN gctUINT * MinFscaleValue,
++    IN gctUINT * MaxFscaleValue
++    )
++{
++    *FscaleValue = Hardware->powerOnFscaleVal;
++    *MinFscaleValue = 1;
++    *MaxFscaleValue = 64;
++
++    return gcvSTATUS_OK;
++}
++
++#endif
++
+ #if gcdPOWEROFF_TIMEOUT
+ gceSTATUS
+ gckHARDWARE_SetPowerOffTimeout(
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h
+index caf84c7..8a96d1f 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.h
+@@ -83,6 +83,11 @@ struct _gckHARDWARE
+ #endif
+ 
+     gctPOINTER                  pageTableDirty;
++
++#if gcdENABLE_FSCALE_VAL_ADJUST
++    /* FSCALE_VAL when gcvPOWER_ON. */
++    gctUINT32                   powerOnFscaleVal;
++#endif
+ };
+ 
+ gceSTATUS
+@@ -104,6 +109,20 @@ gckHARDWARE_GetFrameInfo(
+     OUT gcsHAL_FRAME_INFO * FrameInfo
+     );
+ 
++gceSTATUS
++gckHARDWARE_SetFscaleValue(
++    IN gckHARDWARE Hardware,
++    IN gctUINT32   FscaleValue
++    );
++
++gceSTATUS
++gckHARDWARE_GetFscaleValue(
++    IN gckHARDWARE Hardware,
++    IN gctUINT * FscaleValue,
++    IN gctUINT * MinFscaleValue,
++    IN gctUINT * MaxFscaleValue
++    );
++
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
+index c7a05a5..2dd6504 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
+@@ -1796,6 +1796,24 @@ gckKERNEL_Dispatch(
+ 
+         break;
+ 
++    case gcvHAL_SET_FSCALE_VALUE:
++#if gcdENABLE_FSCALE_VAL_ADJUST
++        status = gckHARDWARE_SetFscaleValue(Kernel->hardware,
++                                            Interface->u.SetFscaleValue.value);
++#else
++        status = gcvSTATUS_NOT_SUPPORTED;
++#endif
++        break;
++    case gcvHAL_GET_FSCALE_VALUE:
++#if gcdENABLE_FSCALE_VAL_ADJUST
++        status = gckHARDWARE_GetFscaleValue(Kernel->hardware,
++                                            &Interface->u.GetFscaleValue.value,
++                                            &Interface->u.GetFscaleValue.minValue,
++                                            &Interface->u.GetFscaleValue.maxValue);
++#else
++        status = gcvSTATUS_NOT_SUPPORTED;
++#endif
++        break;
+     default:
+         /* Invalid command. */
+         gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
+index b1e6b48..d015915 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
+@@ -344,6 +344,18 @@ gcoHAL_Get2DEngine(
+     OUT gco2D * Engine
+     );
+ 
++gceSTATUS
++gcoHAL_SetFscaleValue(
++    IN gctUINT FscaleValue
++    );
++
++gceSTATUS
++gcoHAL_GetFscaleValue(
++    OUT gctUINT * FscaleValue,
++    OUT gctUINT * MinFscaleValue,
++    OUT gctUINT * MaxFscaleValue
++    );
++
+ #ifndef VIVANTE_NO_3D
+ /* Get pointer to gco3D object. */
+ gceSTATUS
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h
+index 765341b..c1f204f 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver.h
+@@ -153,7 +153,11 @@ typedef enum _gceHAL_COMMAND_CODES
+ 
+     /* GPU and event dump */
+     gcvHAL_DUMP_GPU_STATE,
+-    gcvHAL_DUMP_EVENT
++    gcvHAL_DUMP_EVENT,
++
++    /* FSCALE_VAL. */
++    gcvHAL_SET_FSCALE_VALUE,
++    gcvHAL_GET_FSCALE_VALUE
+ }
+ gceHAL_COMMAND_CODES;
+ 
+@@ -893,6 +897,20 @@ typedef struct _gcsHAL_INTERFACE
+             IN gceVIDMEM_NODE_SHARED_INFO_TYPE infoType;
+         }
+         SetSharedInfo;
++
++        struct _gcsHAL_SET_FSCALE_VALUE
++        {
++            IN gctUINT              value;
++        }
++        SetFscaleValue;
++
++        struct _gcsHAL_GET_FSCALE_VALUE
++        {
++            OUT gctUINT             value;
++            OUT gctUINT             minValue;
++            OUT gctUINT             maxValue;
++        }
++        GetFscaleValue;
+     }
+     u;
+ }
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+index 0b7c42c..01d2d52 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+@@ -152,6 +152,13 @@
+ #   define gcdDUMP_FRAMERATE					0
+ #endif
+ 
++/*
++    gcdENABLE_FSCALE_VAL_ADJUST
++        When non-zero, FSCALE_VAL when gcvPOWER_ON can be adjusted externally.
++ */
++#ifndef gcdENABLE_FSCALE_VAL_ADJUST
++#   define gcdENABLE_FSCALE_VAL_ADJUST          1
++#endif
+ 
+ /*
+     gcdDUMP_IN_KERNEL
+-- 
+1.7.7.4
+

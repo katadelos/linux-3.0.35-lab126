@@ -1,0 +1,112 @@
+From 0f4ebeca928fcead80e4cfa13f1ca870a4f5b5b1 Mon Sep 17 00:00:00 2001
+From: Loren Huang <b02279@freescale.com>
+Date: Fri, 11 May 2012 10:20:56 +0800
+Subject: [PATCH 1444/2463] ENGR00209022 Update gpu clock management code
+
+-This patch from vivante.They need to bypass the
+reference count in clock management code as they
+may touch clock while they just want to change
+power state.
+
+Signed-off-by: Loren Huang <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |   75 +++++++++++---------
+ 1 files changed, 42 insertions(+), 33 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index 510b030..cbc7c84 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -6934,46 +6934,55 @@ gckOS_SetGPUPower(
+     struct clk *clk_2dcore = Os->device->clk_2d_core;
+     struct clk *clk_2d_axi = Os->device->clk_2d_axi;
+     struct clk *clk_vg_axi = Os->device->clk_vg_axi;
++    
++    gctBOOL oldClockState = gcvFALSE;
+ 
+     gcmkHEADER_ARG("Os=0x%X Core=%d Clock=%d Power=%d", Os, Core, Clock, Power);
++
++    if (Os->device->kernels[Core] != NULL)
++        oldClockState = Os->device->kernels[Core]->hardware->clockState;
++
+     if (Clock == gcvTRUE) {
+-        switch (Core) {
+-        case gcvCORE_MAJOR:
+-            clk_enable(clk_3dcore);
+-            if (cpu_is_mx6q())
+-                clk_enable(clk_3dshader);
+-            break;
+-        case gcvCORE_2D:
+-            clk_enable(clk_2dcore);
+-            clk_enable(clk_2d_axi);
+-            break;
+-        case gcvCORE_VG:
+-            clk_enable(clk_2dcore);
+-            clk_enable(clk_vg_axi);
+-            break;
+-        default:
+-            break;
++        if (oldClockState == gcvFALSE) {
++            switch (Core) {
++            case gcvCORE_MAJOR:
++                clk_enable(clk_3dcore);
++                if (cpu_is_mx6q())
++                    clk_enable(clk_3dshader);
++                break;
++            case gcvCORE_2D:
++                clk_enable(clk_2dcore);
++                clk_enable(clk_2d_axi);
++                break;
++            case gcvCORE_VG:
++                clk_enable(clk_2dcore);
++                clk_enable(clk_vg_axi);
++                break;
++            default:
++                break;
++            }
+         }
+     } else {
+-        switch (Core) {
+-        case gcvCORE_MAJOR:
+-            if (cpu_is_mx6q())
+-                clk_disable(clk_3dshader);
+-            clk_disable(clk_3dcore);
+-            break;
+-        case gcvCORE_2D:
+-            clk_disable(clk_2dcore);
+-            clk_disable(clk_2d_axi);
+-            break;
+-        case gcvCORE_VG:
+-            clk_disable(clk_2dcore);
+-            clk_disable(clk_vg_axi);
+-            break;
+-        default:
+-            break;
++        if (oldClockState == gcvTRUE) {
++            switch (Core) {
++            case gcvCORE_MAJOR:
++                if (cpu_is_mx6q())
++                    clk_disable(clk_3dshader);
++                clk_disable(clk_3dcore);
++                break;
++            case gcvCORE_2D:
++                clk_disable(clk_2dcore);
++                clk_disable(clk_2d_axi);
++                break;
++            case gcvCORE_VG:
++                clk_disable(clk_2dcore);
++                clk_disable(clk_vg_axi);
++                break;
++            default:
++                break;
++            }
+         }
+     }
+-    /* TODO: Put your code here. */
+ 
+     gcmkFOOTER_NO();
+     return gcvSTATUS_OK;
+-- 
+1.7.7.4
+

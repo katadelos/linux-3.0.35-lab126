@@ -1,0 +1,52 @@
+From 2e20b78f7eb6c261687ea3cfd5044da5e8076e6b Mon Sep 17 00:00:00 2001
+From: Zeng Zhaoming <b32542@freescale.com>
+Date: Tue, 9 Aug 2011 02:27:05 +0800
+Subject: [PATCH 0331/2463] ENGR00154525 SDMA: SDMA not works when event
+ number bigger than 32
+
+New sdma driver in 2.6.38 kernel not map event to channel correctly by
+ignore events bigger than 32.
+
+Fix it by remove this restriction
+
+Signed-off-by: Zeng Zhaoming <b32542@freescale.com>
+---
+ drivers/dma/imx-sdma.c |   12 ++++++------
+ 1 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/dma/imx-sdma.c b/drivers/dma/imx-sdma.c
+index 27c42d1..34dd96a 100644
+--- a/drivers/dma/imx-sdma.c
++++ b/drivers/dma/imx-sdma.c
+@@ -673,11 +673,11 @@ static int sdma_config_channel(struct sdma_channel *sdmac)
+ 	sdmac->shp_addr = 0;
+ 	sdmac->per_addr = 0;
+ 
+-	if (sdmac->event_id0) {
+-		if (sdmac->event_id0 > 32)
+-			return -EINVAL;
++	if (sdmac->event_id0)
+ 		sdma_event_enable(sdmac, sdmac->event_id0);
+-	}
++
++	if (sdmac->event_id1)
++		sdma_event_enable(sdmac, sdmac->event_id1);
+ 
+ 	switch (sdmac->peripheral_type) {
+ 	case IMX_DMATYPE_DSP:
+@@ -699,10 +699,10 @@ static int sdma_config_channel(struct sdma_channel *sdmac)
+ 		if (sdmac->event_id1) {
+ 			sdmac->event_mask1 = 1 << (sdmac->event_id1 % 32);
+ 			if (sdmac->event_id1 > 31)
+-				sdmac->watermark_level |= 1 << 31;
++				sdmac->watermark_level |= 1 << 29;
+ 			sdmac->event_mask0 = 1 << (sdmac->event_id0 % 32);
+ 			if (sdmac->event_id0 > 31)
+-				sdmac->watermark_level |= 1 << 30;
++				sdmac->watermark_level |= 1 << 28;
+ 		} else {
+ 			sdmac->event_mask0 = 1 << sdmac->event_id0;
+ 			sdmac->event_mask1 = 1 << (sdmac->event_id0 - 32);
+-- 
+1.7.7.4
+

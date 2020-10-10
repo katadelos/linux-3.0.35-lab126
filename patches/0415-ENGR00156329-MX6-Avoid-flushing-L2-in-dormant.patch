@@ -1,0 +1,191 @@
+From 44e4456fd425e1e80e6c90830cb2545712fdf21d Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Fri, 9 Sep 2011 11:39:21 +0800
+Subject: [PATCH 0415/2463] ENGR00156329 [MX6]Avoid flushing L2 in dormant
+
+We can leave L2 cache alone during dormant,
+just keep in mind don't access cache in dormant
+process, then it should be OK without flushing
+L2 cache, it will improve performance of suspend
+and resume.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/mx6q_suspend.S |   81 ++++++++++++++++++++++++++++++++++++--
+ arch/arm/mach-mx6/pm.c           |   14 +------
+ 2 files changed, 78 insertions(+), 17 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mx6q_suspend.S b/arch/arm/mach-mx6/mx6q_suspend.S
+index 4279a52..afb6ff5 100644
+--- a/arch/arm/mach-mx6/mx6q_suspend.S
++++ b/arch/arm/mach-mx6/mx6q_suspend.S
+@@ -19,6 +19,7 @@
+ #include <linux/linkage.h>
+ #include <mach/hardware.h>
+ #include <asm/memory.h>
++#include <asm/hardware/cache-l2x0.h>
+ #include "src-reg.h"
+ 
+ #define ARM_CTRL_DCACHE		(1 << 2)
+@@ -299,6 +300,39 @@ ddr_iomux_save:
+ 	mrc	p15, 0, r4, c1, c0, 0	@ SCTLR
+ 	stmfd	r0!, {r4}
+ 
++#ifdef CONFIG_CACHE_L2X0
++	ldr r2, =L2_BASE_ADDR
++	add r2, r2, #PERIPBASE_VIRT
++
++	ldr	r4, [r2, #L2X0_CTRL]
++	ldr	r5, [r2, #L2X0_AUX_CTRL]
++	ldr	r6, [r2, #L2X0_TAG_LATENCY_CTRL]
++	ldr	r7, [r2, #L2X0_DATA_LATENCY_CTRL]
++	stmfd	r0!, {r4-r7}
++
++	ldr	r4, [r2, #L2X0_EVENT_CNT_CTRL]
++	ldr	r5, [r2, #L2X0_EVENT_CNT1_CFG]
++	ldr	r6, [r2, #L2X0_EVENT_CNT0_CFG]
++	ldr	r7, [r2, #L2X0_EVENT_CNT1_VAL]
++	stmfd	r0!, {r4-r7}
++
++	ldr	r4, [r2, #L2X0_EVENT_CNT0_VAL]
++	ldr	r5, [r2, #L2X0_INTR_MASK]
++	ldr	r6, [r2, #L2X0_MASKED_INTR_STAT]
++	ldr	r7, [r2, #L2X0_RAW_INTR_STAT]
++	stmfd	r0!, {r4-r7}
++
++	ldr	r4, [r2, #L2X0_INTR_CLEAR]
++	ldr	r5, [r2, #L2X0_LOCKDOWN_WAY_D]
++	ldr	r6, [r2, #L2X0_LOCKDOWN_WAY_I]
++	ldr	r7, [r2, #L2X0_LINE_DATA]
++	stmfd	r0!, {r4-r7}
++
++	ldr	r4, [r2, #L2X0_LINE_TAG]
++	ldr	r5, [r2, #L2X0_PREFETCH_CTRL]
++	ldr	r6, [r2, #L2X0_POWER_CTRL]
++	stmfd	r0!, {r4-r6}
++#endif
+ 	/*
+ 	 * Flush all data from the L1 data cache before disabling
+ 	 * SCTLR.C bit.
+@@ -343,7 +377,6 @@ ddr_iomux_save:
+ 	 */
+ 	dsb
+ 	dmb
+-
+ /****************************************************************
+ set ddr iomux to low power mode
+ ****************************************************************/
+@@ -496,9 +529,44 @@ use_ttbr0:
+ 	bx	r1
+ mmu_on_label:
+ 	/* Set up the per-CPU stacks */
+-	mov 	r5, lr
++	mov 	r8, lr
+ 	bl	cpu_init
+ 
++#ifdef CONFIG_CACHE_L2X0
++	ldr r2, =L2_BASE_ADDR
++	add r2, r2, #PERIPBASE_VIRT
++
++	ldmea	r0!, {r4-r7}
++	/* L2 will be enabled after L1 is enabled */
++	mov r4, #0x0
++	str	r4, [r2, #L2X0_CTRL]
++	str	r5, [r2, #L2X0_AUX_CTRL]
++	str	r6, [r2, #L2X0_TAG_LATENCY_CTRL]
++	str	r7, [r2, #L2X0_DATA_LATENCY_CTRL]
++
++	ldmea	r0!, {r4-r7}
++	str	r4, [r2, #L2X0_EVENT_CNT_CTRL]
++	str	r5, [r2, #L2X0_EVENT_CNT1_CFG]
++	str	r6, [r2, #L2X0_EVENT_CNT0_CFG]
++	str	r7, [r2, #L2X0_EVENT_CNT1_VAL]
++
++	ldmea	r0!, {r4-r7}
++	str	r4, [r2, #L2X0_EVENT_CNT0_VAL]
++	str	r5, [r2, #L2X0_INTR_MASK]
++	str	r6, [r2, #L2X0_MASKED_INTR_STAT]
++	str	r7, [r2, #L2X0_RAW_INTR_STAT]
++
++	ldmea	r0!, {r4-r7}
++	str	r4, [r2, #L2X0_INTR_CLEAR]
++	str	r5, [r2, #L2X0_LOCKDOWN_WAY_D]
++	str	r6, [r2, #L2X0_LOCKDOWN_WAY_I]
++	str	r7, [r2, #L2X0_LINE_DATA]
++
++	ldmea	r0!, {r4-r6}
++	str	r4, [r2, #L2X0_LINE_TAG]
++	str	r5, [r2, #L2X0_PREFETCH_CTRL]
++	str	r6, [r2, #L2X0_POWER_CTRL]
++#endif
+ 	/*
+ 	 * Restore the MMU table entry that was modified for
+ 	 * enabling MMU.
+@@ -555,16 +623,21 @@ restore control register to enable cache
+ ************************************************************/
+ 	mov	r0, r11
+ 	mcr	p15, 0, r0, c1, c0, 0	@ with caches enabled.
++	dsb
+ 	isb
+ 
++	/* Enable L2 cache here */
++    ldr r2, =L2_BASE_ADDR
++    add r2, r2, #PERIPBASE_VIRT
++	mov r4, #0x1
++	str	r4, [r2, #L2X0_CTRL]
+ /***********************************************************
+ return back to mx6_suspend_enter for dormant
+ ***********************************************************/
+-	mov	lr, r5
++	mov	lr, r8
+ 	ldmfd	sp!, {r0-r12}
+ 	mov	pc, lr
+ 
+-
+ /************************************************
+ return back to mx6_suspend_enter for suspend
+ *************************************************/
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index 362d026..00b7044 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -166,13 +166,7 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 
+ 		local_flush_tlb_all();
+ 		flush_cache_all();
+-#ifdef CONFIG_CACHE_L2X0
+-		outer_cache.flush_all();
+ 
+-		/* for dormant mode, we need to disable l2 cache */
+-		if (state == PM_SUSPEND_MEM)
+-			outer_cache.disable();
+-#endif
+ 		suspend_in_iram(state, (unsigned long)iram_paddr,
+ 			(unsigned long)suspend_iram_base);
+ 
+@@ -191,13 +185,7 @@ static int mx6_suspend_enter(suspend_state_t state)
+ 					gic_dist_base + GIC_DIST_ENABLE_SET +
+ 					(MXC_INT_GPT / 32) * 4);
+ 
+-			flush_cache_all();
+-#ifdef CONFIG_CACHE_L2X0
+-			/* init l2 cache, pl310 */
+-			mxc_init_l2x0();
+-#endif
+ 		}
+-
+ 		mx6_suspend_restore();
+ 
+ 		if (pm_data && pm_data->suspend_exit)
+@@ -282,7 +270,7 @@ static int __init pm_init(void)
+ 	/* Need to remap the area here since we want the memory region
+ 		 to be executable. */
+ 	suspend_iram_base = __arm_ioremap(iram_paddr, SZ_4K,
+-					  MT_MEMORY);
++					  MT_MEMORY_NONCACHED);
+ 	pr_info("cpaddr = %x suspend_iram_base=%x\n",
+ 		(unsigned int)cpaddr, (unsigned int)suspend_iram_base);
+ 
+-- 
+1.7.7.4
+

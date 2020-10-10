@@ -1,0 +1,55 @@
+From 94badf4eccf3dbdfa22345ff28f236cb578628a1 Mon Sep 17 00:00:00 2001
+From: Sheng Nan <b38800@freescale.com>
+Date: Fri, 1 Mar 2013 10:26:58 +0800
+Subject: [PATCH 2401/2463] ENGR00252071-2: mxc_v4l2_capture: ov5640_mipi:
+ update probe print information
+
+Because ov5642 and ov5640 changes the probe information due to auto detect,
+ov5640_mipi should keep the same.
+
+- Add found information to tell user ov5640_mipi is found.
+- Use the same "not found" information as ov5642/ov5640.
+
+Signed-off-by: Sheng Nan <b38800@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov5640_mipi.c |    7 ++++---
+ 1 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov5640_mipi.c b/drivers/media/video/mxc/capture/ov5640_mipi.c
+index d2b79d2..04f5ee7 100644
+--- a/drivers/media/video/mxc/capture/ov5640_mipi.c
++++ b/drivers/media/video/mxc/capture/ov5640_mipi.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -1936,13 +1936,13 @@ static int ov5640_probe(struct i2c_client *client,
+ 
+ 	retval = ov5640_read_reg(OV5640_CHIP_ID_HIGH_BYTE, &chip_id_high);
+ 	if (retval < 0 || chip_id_high != 0x56) {
+-		pr_err("%s:cannot find camera\n", __func__);
++		pr_warning("camera ov5640_mipi is not found\n");
+ 		retval = -ENODEV;
+ 		goto err4;
+ 	}
+ 	retval = ov5640_read_reg(OV5640_CHIP_ID_LOW_BYTE, &chip_id_low);
+ 	if (retval < 0 || chip_id_low != 0x40) {
+-		pr_err("%s:cannot find camera\n", __func__);
++		pr_warning("camera ov5640_mipi is not found\n");
+ 		retval = -ENODEV;
+ 		goto err4;
+ 	}
+@@ -1955,6 +1955,7 @@ static int ov5640_probe(struct i2c_client *client,
+ 	ov5640_int_device.priv = &ov5640_data;
+ 	retval = v4l2_int_device_register(&ov5640_int_device);
+ 
++	pr_info("camera ov5640_mipi is found\n");
+ 	return retval;
+ 
+ err4:
+-- 
+1.7.7.4
+

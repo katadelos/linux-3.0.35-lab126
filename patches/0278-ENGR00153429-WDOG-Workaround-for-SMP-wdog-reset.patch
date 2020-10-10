@@ -1,0 +1,243 @@
+From 2544dd00e7db0d52714332b9ad2bd775b3f208b5 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Wed, 20 Jul 2011 15:57:05 +0800
+Subject: [PATCH 0278/2463] ENGR00153429 [WDOG]Workaround for SMP wdog reset
+
+1. Copy mx6_secondary_startup to iRAM;
+2. CPU0 reset CPUx, then waiting CPUx reset OK, and
+   clear CPUx's boot_entry;
+3. CPUx reset OK, waiting CPU0 to clear its parameter;
+4. All these steps done, CPUx go on boot;
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/cpu.c              |    1 -
+ arch/arm/mach-mx6/headsmp.S          |  110 ++++++++++++++++++++++++++++++++--
+ arch/arm/mach-mx6/platsmp.c          |   26 +++++++--
+ arch/arm/plat-mxc/include/mach/mx6.h |    3 +-
+ 4 files changed, 127 insertions(+), 13 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index f0e1d77..8e7b13c 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -23,7 +23,6 @@
+ #include <linux/module.h>
+ #include <linux/iram_alloc.h>
+ #include <mach/hardware.h>
+-#include <linux/iram_alloc.h>
+ #include <asm/io.h>
+ 
+ static int __init post_cpu_init(void)
+diff --git a/arch/arm/mach-mx6/headsmp.S b/arch/arm/mach-mx6/headsmp.S
+index 590e55f..3adc6e8 100644
+--- a/arch/arm/mach-mx6/headsmp.S
++++ b/arch/arm/mach-mx6/headsmp.S
+@@ -52,21 +52,119 @@ ENTRY(v7_invalidate_l1)
+         mov     pc, lr
+ ENDPROC(v7_invalidate_l1)
+ 
++	__CPUINIT
+ ENTRY(mx6_secondary_startup)
+-	msr     cpsr_fsxc, #0xd3
++	/*************************************************************
++	The following code include workaround for smp wdog reset issue,
++	when system reset, core1~core3 will check its GPR register, if
++	it contain a valid pointer, they will continue to run, but
++	since when a reset happen, DRAM can't be access before its
++	controller initialized, so we must make sure the pointer value
++	is in iRAM space, also, ARM recommend that there should not be
++	any AXI access pending in the system if we want to reset
++	individual CPU, it is better to put CPU in WFI state before
++	reset, so now we implement the following flow to make sure
++	this scenario:
+ 
+-	/* invalidate l1-cache first */
+-	bl      v7_invalidate_l1
++         _______________________             _______________________
++        |           CPU0        |     ----> |        CPU<n>         |
++        |_______________________|    |      |_______________________|
++                    |                |                 |
++                    |                |                 |
++                   \|/               |                \|/
++         _______________________     |      _______________________
++        |  GPR<n*2+2>=parameter |    |     | Rom jump to boot_entry|
++        |_______________________|    |     |_______________________|
++                    |                |                 |
++                    |                |                 |
++                   \|/               |                \|/
++         _______________________     |      _______________________
++        | GPR<n*2+1>=boot_entry |    |  -- |     GPR<n*2+1>=0      |
++        |_______________________|    | |   |_______________________|
++                    |                | |                |
++                    |                | |                |    <----------------
++                   \|/               | |               \|/                    |
++         _______________________     | |          _____________     N     _________
++        |        Reset CPU<n>   |____| |    ---> /CPU<n*2+2>=0?\ ------->|  WFI    |
++        |_______________________|      |    |    \_____________/         |_________|
++                    |                  |    |            |                    ^
++-------------->     |                  |    |            | Y                  |
++|                  \|/                 |    |           \|/                   |
++|      N      _____________            |    |                                 |
++-------------/GPR<n*2+1>=0?\ <---------     |                                 |
++             \_____________/                |                                 |
++                    |                       |                                 |
++                 Y  |                       |                                 |
++                   \|/                      |                                 |
++         _______________________            |                                 |
++        |       GPR<n*2+2>=0    | ----------                                  |
++        |_______________________|                                             |
++                    |                                                         |
++                    |                                                         |
++                   \|/                                                        |
++         _______________________                                              |
++        |    IPI software irq   |---------------------------------------------
++        |_______________________|
++
++
++	This function code is copied to iRAM 0x93f000, since
++	there is function call below, such as v7_invalidate_l1 and
++	secondary_startup, we have to use absolute address jump,
++	to get the physical address of these functions, we need
++	the offset of physical and virtual address, the
++	offset is passed from GPR parameter, currently we store
++	it at r8, future code change should avoid using r8.
++*****************************************************************************/
++	/* count the offset value and store it in r8 */
++	ldr r3, =mx6_secondary_startup
+ 	mrc	p15, 0, r0, c0, c0, 5
+ 	and r0, r0, #15
+-	ldr r1, = 0x020d8020
++	ldr r1, =0x020d8024
+ 	add r1, r0, LSL#3
++	ldr r0, [r1]
++	sub r8, r3, r0
+ 
+-	mov r0, #0
++	msr     cpsr_fsxc, #0xd3
++
++	/* must enable gic cpu, then cpu<n> can wakeup when cpu0
++	send a software irq*/
++	ldr r1, =0xa00100
++	mov r0, #0x1
+ 	str r0, [r1]
++	mov r0, #0xf0
+ 	str r0, [r1, #0x4]
++	mov r0, #0x2
++	str r0, [r1, #0x8]
++
++	/* read cpu number in order to clear related GPRx */
++	mrc	p15, 0, r0, c0, c0, 5
++	and r0, r0, #15
++	ldr r1, =0x020d8020
++	add r1, r0, LSL#3
++	/* clear GPR boot_entry register */
++	mov r0, #0
++	str r0, [r1]
++
++	/* check whether GPR paremeter register is cleared */
++	ldr r0, [r1, #0x4]
++	cmp r0, #0x0
++	beq 4f
++3:
++	wfi
++	ldr r0, [r1, #0x4]
++	cmp r0, #0x0
++	bne 3b
++4:
++	/* invalidate l1-cache first */
++	ldr r0, =v7_invalidate_l1
++	sub r0, r0, r8
++	mov lr, pc
++	add lr, lr, #0x4
++	mov pc, r0
++	ldr r0, =secondary_startup
++	sub r0, r0, r8
+ 
+ 	/* jump to secondary_startup */
+-	b secondary_startup
++	mov pc, r0
+ 
+ ENDPROC(mx6_secondary_startup)
+diff --git a/arch/arm/mach-mx6/platsmp.c b/arch/arm/mach-mx6/platsmp.c
+index 66ab4e6..123063b 100644
+--- a/arch/arm/mach-mx6/platsmp.c
++++ b/arch/arm/mach-mx6/platsmp.c
+@@ -30,6 +30,7 @@
+ #include <asm/smp_scu.h>
+ #include <mach/mx6.h>
+ #include "src-reg.h"
++#include <asm/io.h>
+ 
+ static DEFINE_SPINLOCK(boot_lock);
+ 
+@@ -61,7 +62,8 @@ int __cpuinit boot_secondary(unsigned int cpu, struct task_struct *idle)
+ {
+ 	unsigned long boot_entry;
+ 	void __iomem *src_base = IO_ADDRESS(SRC_BASE_ADDR);
+-	int val;
++	void *boot_iram_base;
++	unsigned int val;
+ 
+ 	 /*
+ 	  * set synchronisation state between this boot processor
+@@ -69,24 +71,38 @@ int __cpuinit boot_secondary(unsigned int cpu, struct task_struct *idle)
+ 	  */
+ 	spin_lock(&boot_lock);
+ 
+-	/* set entry point for cpu1-cpu3*/
+-	boot_entry = virt_to_phys(mx6_secondary_startup);
++	/* boot entry is at the last 4K iRAM, from 0x93f000 */
++	boot_entry = MX6Q_IRAM_BASE_ADDR + MX6Q_IRAM_SIZE;
++	boot_iram_base = (void *)ioremap(boot_entry, SZ_4K);
++	memcpy((void *)boot_iram_base, mx6_secondary_startup, SZ_1K);
+ 
++	/* set entry point for cpu1-cpu3*/
+ 	writel(boot_entry, src_base + SRC_GPR1_OFFSET + 4 * 2 * cpu);
+-	writel(0, src_base + SRC_GPR1_OFFSET + 4 * 2 * cpu + 4);
++	writel(virt_to_phys(mx6_secondary_startup),
++			src_base + SRC_GPR1_OFFSET + 4 * 2 * cpu + 4);
+ 
+ 	smp_wmb();
+ 	dsb();
+ 	flush_cache_all();
+ 
+-	/* reset cpu n */
++	/* reset cpu<n> */
+ 	val = readl(src_base + SRC_SCR_OFFSET);
+ 	val |= 1 << (BP_SRC_SCR_CORE0_RST + cpu);
+ 	val |= 1 << (BP_SRC_SCR_CORES_DBG_RST + cpu);
+ 	writel(val, src_base + SRC_SCR_OFFSET);
+ 
++	val = jiffies;
++	/* wait cpu<n> boot up and clear boot_entry, timeout is 500ms */
++	while (__raw_readl(src_base + SRC_GPR1_OFFSET + 4 * 2 * cpu) != 0) {
++		if (time_after(jiffies, val + HZ / 2)) {
++			printk(KERN_WARNING "cpu %d: boot up failed!\n", cpu);
++			break;
++		}
++	}
++
+ 	/* let cpu<n> out of loop, call secondary_startup function*/
+ 	writel(0, src_base + SRC_GPR1_OFFSET + 4 * 2 * cpu + 4);
++	smp_send_reschedule(cpu);
+ 
+ 	/*
+ 	* now the secondary core is starting up let it run its
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 67ad25d..0fee96f 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -73,7 +73,8 @@
+ /* IRAM
+  */
+ #define MX6Q_IRAM_BASE_ADDR		IRAM_BASE_ADDR
+-#define MX6Q_IRAM_SIZE			SZ_256K
++/* The last 4K is for cpu hotplug to workaround wdog issue*/
++#define MX6Q_IRAM_SIZE			(SZ_256K - SZ_4K)
+ 
+ /* Blocks connected via pl301periph */
+ #define ROMCP_ARB_BASE_ADDR             0x00000000
+-- 
+1.7.7.4
+

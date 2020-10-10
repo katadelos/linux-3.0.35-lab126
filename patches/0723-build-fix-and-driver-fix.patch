@@ -1,0 +1,215 @@
+From e6e0db4ca2aac4e84bbb2a540d3bbee4cc66d156 Mon Sep 17 00:00:00 2001
+From: Jason Liu <jason.hui@linaro.org>
+Date: Wed, 14 Dec 2011 22:03:31 +0800
+Subject: [PATCH 0723/2463] build fix and driver fix
+
+Signed-off-by: Jason Liu <jason.hui@linaro.org>
+---
+ drivers/mmc/host/sdhci.h    |    1 +
+ drivers/net/fec.c           |   20 ++++++++++++++------
+ drivers/regulator/Kconfig   |    6 +++---
+ drivers/rtc/rtc-snvs.c      |    2 +-
+ drivers/usb/host/ehci-arc.c |    2 +-
+ drivers/usb/host/ehci.h     |    4 ----
+ drivers/usb/otg/fsl_otg.c   |    9 ++++-----
+ 7 files changed, 24 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci.h b/drivers/mmc/host/sdhci.h
+index 2899a9f..e6af69e 100644
+--- a/drivers/mmc/host/sdhci.h
++++ b/drivers/mmc/host/sdhci.h
+@@ -275,6 +275,7 @@ struct sdhci_ops {
+ 	int	(*set_uhs_signaling)(struct sdhci_host *host, unsigned int uhs);
+ 
+ 	void		(*pre_tuning)(struct sdhci_host *host, u32 val);
++	void		(*platform_clk_ctrl)(struct sdhci_host *host, bool enable);
+ };
+ 
+ #ifdef CONFIG_MMC_SDHCI_IO_ACCESSORS
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+old mode 100644
+new mode 100755
+index dc6349c..b56a623
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -57,7 +57,7 @@
+ #include "fec.h"
+ #include "fec_1588.h"
+ 
+-#if defined(CONFIG_ARM)
++#if defined(CONFIG_ARCH_MXC) || defined(CONFIG_SOC_IMX28)
+ #define FEC_ALIGNMENT	0xf
+ #else
+ #define FEC_ALIGNMENT	0x3
+@@ -167,7 +167,8 @@ MODULE_PARM_DESC(macaddr, "FEC Ethernet MAC address");
+  * account when setting it.
+  */
+ #if defined(CONFIG_M523x) || defined(CONFIG_M527x) || defined(CONFIG_M528x) || \
+-    defined(CONFIG_M520x) || defined(CONFIG_M532x) || defined(CONFIG_ARM)
++    defined(CONFIG_M520x) || defined(CONFIG_M532x) || \
++    defined(CONFIG_ARCH_MXC) || defined(CONFIG_SOC_IMX28)
+ #define	OPT_FRAME_SIZE	(PKT_MAXBUF_SIZE << 16)
+ #else
+ #define	OPT_FRAME_SIZE	0
+@@ -229,6 +230,13 @@ struct fec_enet_private {
+ 	uint    ptimer_present;
+ };
+ 
++static irqreturn_t fec_enet_interrupt(int irq, void * dev_id);
++static void fec_enet_tx(struct net_device *dev);
++static void fec_enet_rx(struct net_device *dev);
++static int fec_enet_close(struct net_device *dev);
++static void fec_restart(struct net_device *dev, int duplex);
++static void fec_stop(struct net_device *dev);
++
+ /* FEC MII MMFR bits definition */
+ #define FEC_MMFR_ST		(1 << 30)
+ #define FEC_MMFR_OP_READ	(2 << 28)
+@@ -301,7 +309,7 @@ fec_enet_start_xmit(struct sk_buff *skb, struct net_device *ndev)
+ 	if (((unsigned long) bufaddr) & FEC_ALIGNMENT) {
+ 		unsigned int index;
+ 		index = bdp - fep->tx_bd_base;
+-		memcpy(fep->tx_bounce[index], skb->data, skb->len);
++		memcpy(fep->tx_bounce[index], (void *)skb->data, skb->len);
+ 		bufaddr = fep->tx_bounce[index];
+ 	}
+ 
+@@ -558,7 +566,7 @@ fec_enet_rx(struct net_device *ndev)
+ 			/* 1588 messeage TS handle */
+ 			if (fep->ptimer_present)
+ 				fec_ptp_store_rxstamp(fpp, skb, bdp);
+-			skb->protocol = eth_type_trans(skb, dev);
++			skb->protocol = eth_type_trans(skb, ndev);
+ 			netif_rx(skb);
+ 		}
+ 
+@@ -819,7 +827,7 @@ static int fec_enet_mii_probe(struct net_device *ndev)
+ 	}
+ 
+ 	snprintf(phy_name, MII_BUS_ID_SIZE, PHY_ID_FMT, mdio_bus_id, phy_id);
+-	phy_dev = phy_connect(dev, phy_name, &fec_enet_adjust_link, 0,
++	phy_dev = phy_connect(ndev, phy_name, &fec_enet_adjust_link, 0,
+ 		fep->phy_interface);
+ 
+ 	if (IS_ERR(phy_dev)) {
+@@ -1084,7 +1092,7 @@ fec_enet_open(struct net_device *ndev)
+ 
+ 	if (!clk_get_usecount(fep->clk))
+ 		clk_enable(fep->clk);
+-	ret = fec_enet_alloc_buffers(dev);
++	ret = fec_enet_alloc_buffers(ndev);
+ 	if (ret)
+ 		return ret;
+ 
+diff --git a/drivers/regulator/Kconfig b/drivers/regulator/Kconfig
+index db301f4..f996525 100755
+--- a/drivers/regulator/Kconfig
++++ b/drivers/regulator/Kconfig
+@@ -290,6 +290,9 @@ config REGULATOR_DB8500_PRCMU
+ 
+ config REGULATOR_TPS6586X
+ 	tristate "TI TPS6586X Power regulators"
++	depends on MFD_TPS6586X
++	help
++	  This driver supports TPS6586X voltage regulator chips.
+ 
+ config REGULATOR_ANATOP
+ 	tristate "ANATOP LDO regulators"
+@@ -298,9 +301,6 @@ config REGULATOR_ANATOP
+ 	default y
+ 	help
+ 	  Say y here to support ANATOP LDOs regulators.
+-	depends on MFD_TPS6586X
+-	help
+-	  This driver supports TPS6586X voltage regulator chips.
+ 
+ config REGULATOR_TPS6524X
+ 	tristate "TI TPS6524X Power regulators"
+diff --git a/drivers/rtc/rtc-snvs.c b/drivers/rtc/rtc-snvs.c
+index dfd7849..0fd8b23 100644
+--- a/drivers/rtc/rtc-snvs.c
++++ b/drivers/rtc/rtc-snvs.c
+@@ -483,6 +483,7 @@ static int snvs_rtc_probe(struct platform_device *pdev)
+ 	pdata->ioaddr = ioremap(pdata->baseaddr, 0xC00);
+ 	ioaddr = pdata->ioaddr;
+ 	pdata->irq = platform_get_irq(pdev, 0);
++	platform_set_drvdata(pdev, pdata);
+ 
+ 	/* initialize glitch detect */
+ 	__raw_writel(SNVS_LPPGDR_INIT, ioaddr + SNVS_LPPGDR);
+@@ -520,7 +521,6 @@ static int snvs_rtc_probe(struct platform_device *pdev)
+ 	}
+ 
+ 	pdata->rtc = rtc;
+-	platform_set_drvdata(pdev, pdata);
+ 
+ 	tv.tv_nsec = 0;
+ 	tv.tv_sec = rtc_read_lp_counter(ioaddr + SNVS_LPSRTCMR);
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index 5ccfdf8..6419273 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -502,7 +502,7 @@ static int ehci_fsl_setup(struct usb_hcd *hcd)
+ 	/* EHCI registers start at offset 0x100 */
+ 	ehci->caps = hcd->regs + 0x100;
+ 	ehci->regs = hcd->regs + 0x100 +
+-	    HC_LENGTH(ehci_readl(ehci, &ehci->caps->hc_capbase));
++	    HC_LENGTH(ehci, ehci_readl(ehci, &ehci->caps->hc_capbase));
+ 	dbg_hcs_params(ehci, "reset");
+ 	dbg_hcc_params(ehci, "reset");
+ 
+diff --git a/drivers/usb/host/ehci.h b/drivers/usb/host/ehci.h
+index c208d0b..dd493a6 100644
+--- a/drivers/usb/host/ehci.h
++++ b/drivers/usb/host/ehci.h
+@@ -176,10 +176,6 @@ struct ehci_hcd {			/* one per controller */
+ #ifdef DEBUG
+ 	struct dentry		*debug_dir;
+ #endif
+-	/*
+-	 * OTG controllers and transceivers need software interaction
+-	 */
+-	struct otg_transceiver	*transceiver;
+ };
+ 
+ /* convert between an HCD pointer and the corresponding EHCI_HCD */
+diff --git a/drivers/usb/otg/fsl_otg.c b/drivers/usb/otg/fsl_otg.c
+index be8e016..7ee9fca 100755
+--- a/drivers/usb/otg/fsl_otg.c
++++ b/drivers/usb/otg/fsl_otg.c
+@@ -27,7 +27,6 @@
+ #include <linux/ioport.h>
+ #include <linux/sched.h>
+ #include <linux/slab.h>
+-#include <linux/smp_lock.h>
+ #include <linux/proc_fs.h>
+ #include <linux/errno.h>
+ #include <linux/init.h>
+@@ -802,9 +801,9 @@ irqreturn_t fsl_otg_isr_gpio(int irq, void *dev_id)
+ 	value = gpio_get_value(pdata->id_gpio) ? 1 : 0;
+ 
+ 	if (value)
+-		set_irq_type(gpio_to_irq(pdata->id_gpio), IRQ_TYPE_LEVEL_LOW);
++		irq_set_irq_type(gpio_to_irq(pdata->id_gpio), IRQ_TYPE_LEVEL_LOW);
+ 	else
+-		set_irq_type(gpio_to_irq(pdata->id_gpio), IRQ_TYPE_LEVEL_HIGH);
++		irq_set_irq_type(gpio_to_irq(pdata->id_gpio), IRQ_TYPE_LEVEL_HIGH);
+ 
+ 
+ 	if (value == f_otg->fsm.id)
+@@ -1082,10 +1081,10 @@ int usb_otg_start(struct platform_device *pdev)
+ 	if (pdata->id_gpio != 0) {
+ 		p_otg->fsm.id = gpio_get_value(pdata->id_gpio) ? 1 : 0;
+ 		if (p_otg->fsm.id)
+-			set_irq_type(gpio_to_irq(pdata->id_gpio),
++			irq_set_irq_type(gpio_to_irq(pdata->id_gpio),
+ 				IRQ_TYPE_LEVEL_LOW);
+ 		else
+-			set_irq_type(gpio_to_irq(pdata->id_gpio),
++			irq_set_irq_type(gpio_to_irq(pdata->id_gpio),
+ 				IRQ_TYPE_LEVEL_HIGH);
+ 	}
+ 	p_otg->otg.state = p_otg->fsm.id ? OTG_STATE_UNDEFINED :
+-- 
+1.7.7.4
+

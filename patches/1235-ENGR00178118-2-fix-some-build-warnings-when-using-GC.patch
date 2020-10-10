@@ -1,0 +1,47 @@
+From 4bf956e8722f2568ad06ee72b57af623cf54fa8f Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Tue, 27 Mar 2012 21:20:58 +0800
+Subject: [PATCH 1235/2463] ENGR00178118-2 fix some build warnings when using
+ GCC 4.6.2
+
+fix some build warnings when using GCC 4.6.2:
+
+arch/arm/mach-mx6/board-mx6q_sabresd.c:1588:20:
+warning: function declaration isn't a prototype [-Wstrict-prototypes]
+
+This patch also fix the following section mismatch warnings:
+The function imx6q_init_audio() references
+the variable __initconst imx6_imx_ssi_data.
+This is often because imx6q_init_audio lacks a __initconst
+annotation or the annotation of imx6_imx_ssi_data is wrong.
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index d4ef1d0..a0cd1bb 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1273,7 +1273,7 @@ static struct platform_device sabresd_vmmc_reg_devices = {
+ 	},
+ };
+ 
+-static int imx6q_init_audio(void)
++static int __init imx6q_init_audio(void)
+ {
+ 	if (board_is_mx6_reva()) {
+ 		mxc_register_device(&mx6_sabresd_audio_wm8958_device,
+@@ -1591,7 +1591,7 @@ static struct sys_timer mx6_sabresd_timer = {
+ 	.init   = mx6_sabresd_timer_init,
+ };
+ 
+-static void __init mx6q_sabresd_reserve()
++static void __init mx6q_sabresd_reserve(void)
+ {
+ 	phys_addr_t phys;
+ 
+-- 
+1.7.7.4
+

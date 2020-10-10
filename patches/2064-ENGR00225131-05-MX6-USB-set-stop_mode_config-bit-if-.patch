@@ -1,0 +1,58 @@
+From 8df9e0f011262da4440c9be66839deb1b22a68ac Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Thu, 20 Sep 2012 17:15:26 +0800
+Subject: [PATCH 2064/2463] ENGR00225131-05 MX6 USB: set stop_mode_config bit
+ if wake up is enabled
+
+IC designer had clarified that 1P1 can be turned off if we do not need support
+remote wakeup. So If there is no requirement for USB remote wake up, the 1P1
+can be turn off. USB driver will support dynamically turn on(off) 1P1 during
+system suspend. 1P1 will be turn on depend on USB wakeup is enabled.
+
+- Set stop_mode_config bit if USB host need support USB remote wake up
+- Set stop_mode_config bit if USB device need support USB DP/DM wake
+  up system
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    7 +++++--
+ drivers/usb/host/ehci-arc.c     |    3 +++
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 405dbcc..86518d9 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -3323,10 +3323,13 @@ static int udc_suspend(struct fsl_udc *udc)
+ 	 * charge using usb
+ 	 */
+ 	if (pdata->pmflags == 0) {
+-		if (!udc_can_wakeup_system())
++		if (!udc_can_wakeup_system()) {
+ 			dr_wake_up_enable(udc, false);
+-		else
++		} else {
++			if (pdata->platform_phy_power_on)
++				pdata->platform_phy_power_on();
+ 			dr_wake_up_enable(udc, true);
++		}
+ 	}
+ 
+ 	/*
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index b872d94..e09f4df 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -678,6 +678,9 @@ static int ehci_fsl_drv_suspend(struct platform_device *pdev,
+ 			usb_host_set_wakeup(hcd->self.controller, false);
+ 
+ 			fsl_usb_clk_gate(hcd->self.controller->platform_data, false);
++		} else {
++			if (pdata->platform_phy_power_on)
++				pdata->platform_phy_power_on();
+ 		}
+ 
+ 		printk(KERN_DEBUG "host suspend ends\n");
+-- 
+1.7.7.4
+

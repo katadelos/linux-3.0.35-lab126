@@ -1,0 +1,70 @@
+From a4c1285dfd07bd482fa538c628b056850ea8bf72 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Tue, 19 Jun 2012 06:56:24 +0800
+Subject: [PATCH 1631/2463] ENGR00213944-01: mmc: sdhci: support SD v3.0
+ memory cards.
+
+- Correct switcing signaling voltage sequence according to SD3.0 spec,
+ that turn off SD clk before switching signaling voltage.
+ - previous code can work on MX6Q but failed on MX6SL.
+ - only have sequence corrected, it can work on MX6SL.
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/host/sdhci-esdhc-imx.c |   23 +++++++++++------------
+ 1 files changed, 11 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index 5169d8f..fbb295f 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -491,14 +491,17 @@ static u8 esdhc_readb_le(struct sdhci_host *host, int reg)
+ 	case SDHCI_POWER_CONTROL:
+ 		reg_val = readl(host->ioaddr + SDHCI_VENDOR_SPEC);
+ 		ret |= reg_val & SDHCI_VENDOR_SPEC_VSELECT
+-			? SDHCI_POWER_180 : SDHCI_POWER_330;
++				? SDHCI_POWER_180 : SDHCI_POWER_300;
+ 		/* could not power off */
+ 		ret |= SDHCI_POWER_ON;
+ 		return ret;
+ 	case SDHCI_HOST_CONTROL:
+ 		reg_val = readl(host->ioaddr + SDHCI_HOST_CONTROL);
+-		ret |= reg_val & SDHCI_PROT_CTRL_LCTL
+-			? SDHCI_CTRL_LED : ~SDHCI_CTRL_LED;
++		if (reg_val & SDHCI_PROT_CTRL_LCTL)
++			ret |= SDHCI_CTRL_LED;
++		else
++			ret &= ~SDHCI_CTRL_LED;
++
+ 		ret |= (reg_val & SDHCI_PROT_CTRL_DMASEL_MASK) >> 5;
+ 		if (SDHCI_PROT_CTRL_8BIT == (reg_val & SDHCI_PROT_CTRL_DTW)) {
+ 			ret &= ~SDHCI_CTRL_4BITBUS;
+@@ -547,20 +550,16 @@ static void esdhc_writeb_le(struct sdhci_host *host, u8 val, int reg)
+ 		if (val == (SDHCI_POWER_ON | SDHCI_POWER_180)) {
+ 			u32 reg;
+ 
+-			/* switch to 1.8V */
+-			reg = readl(host->ioaddr + SDHCI_VENDOR_SPEC);
+-			reg |= SDHCI_VENDOR_SPEC_VSELECT;
+-			writel(reg, host->ioaddr + SDHCI_VENDOR_SPEC);
+-
+ 			/* stop sd clock */
++			reg = readl(host->ioaddr + SDHCI_VENDOR_SPEC);
+ 			writel(reg & ~SDHCI_VENDOR_SPEC_FRC_SDCLK_ON, \
+ 				host->ioaddr + SDHCI_VENDOR_SPEC);
+ 
+-			/* sleep at least 5ms */
+-			mdelay(5);
+-
+-			/* restore sd clock status */
++			/* switch to 1.8V */
++			reg = readl(host->ioaddr + SDHCI_VENDOR_SPEC);
++			reg |= SDHCI_VENDOR_SPEC_VSELECT;
+ 			writel(reg, host->ioaddr + SDHCI_VENDOR_SPEC);
++
+ 		} else {
+ 			u32 reg;
+ 
+-- 
+1.7.7.4
+

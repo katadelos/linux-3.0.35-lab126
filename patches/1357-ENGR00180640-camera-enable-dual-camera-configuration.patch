@@ -1,0 +1,77 @@
+From 1c81be6a539289ba20c2ab8225c4e98253aff91f Mon Sep 17 00:00:00 2001
+From: Yuxi Sun <b36102@freescale.com>
+Date: Tue, 24 Apr 2012 14:56:21 +0800
+Subject: [PATCH 1357/2463] ENGR00180640 camera: enable dual camera
+ configuration  in menuconfig
+
+enable dual camera configuration in menuconfig, and set ov5642 as
+the first registered camera
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ drivers/media/video/mxc/capture/Kconfig  |   18 +++++++++---------
+ drivers/media/video/mxc/capture/Makefile |    6 +++---
+ 2 files changed, 12 insertions(+), 12 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/Kconfig b/drivers/media/video/mxc/capture/Kconfig
+index d66c59d..eaebf2e 100644
+--- a/drivers/media/video/mxc/capture/Kconfig
++++ b/drivers/media/video/mxc/capture/Kconfig
+@@ -83,15 +83,6 @@ config MXC_CAMERA_OV5640
+ 	---help---
+ 	  If you plan to use the ov5640 Camera with your MXC system, say Y here.
+ 
+-config MXC_CAMERA_OV5640_MIPI
+-	tristate "OmniVision ov5640 camera support using mipi"
+-	depends on !VIDEO_MXC_EMMA_CAMERA
+-	depends on ARCH_MX6Q
+-	select MXC_MIPI_CSI2 if ARCH_MX6Q
+-	select MXC_CAMERA_SENSOR_CLK
+-	---help---
+-	  If you plan to use the ov5640 Camera with mipi interface in your MXC system, say Y here.
+-
+ config MXC_CAMERA_OV8820_MIPI
+ 	tristate "OmniVision ov8820 camera support using mipi"
+ 	depends on !VIDEO_MXC_EMMA_CAMERA
+@@ -116,6 +107,15 @@ config MXC_TVIN_ADV7180
+ 
+ endchoice
+ 
++config MXC_CAMERA_OV5640_MIPI
++	tristate "OmniVision ov5640 camera support using mipi"
++	depends on !VIDEO_MXC_EMMA_CAMERA
++	depends on ARCH_MX6Q
++	select MXC_MIPI_CSI2 if ARCH_MX6Q
++	select MXC_CAMERA_SENSOR_CLK
++	---help---
++	  If you plan to use the ov5640 Camera with mipi interface in your MXC system, say Y here.
++
+ config MXC_CAMERA_SENSOR_CLK
+ 	tristate "camera clock"
+ 	depends on !VIDEO_MXC_EMMA_CAMERA
+diff --git a/drivers/media/video/mxc/capture/Makefile b/drivers/media/video/mxc/capture/Makefile
+index 85bf84e..d249923 100644
+--- a/drivers/media/video/mxc/capture/Makefile
++++ b/drivers/media/video/mxc/capture/Makefile
+@@ -37,6 +37,9 @@ obj-$(CONFIG_MXC_CAMERA_OV2640) += ov2640_camera.o
+ ov3640_camera-objs := ov3640.o
+ obj-$(CONFIG_MXC_CAMERA_OV3640) += ov3640_camera.o
+ 
++ov5642_camera-objs := ov5642.o
++obj-$(CONFIG_MXC_CAMERA_OV5642) += ov5642_camera.o
++
+ ov5640_camera-objs := ov5640.o
+ obj-$(CONFIG_MXC_CAMERA_OV5640) += ov5640_camera.o
+ 
+@@ -46,8 +49,5 @@ obj-$(CONFIG_MXC_CAMERA_OV5640_MIPI) += ov5640_camera_mipi.o
+ ov8820_camera_mipi-objs := ov8820_mipi.o
+ obj-$(CONFIG_MXC_CAMERA_OV8820_MIPI) += ov8820_camera_mipi.o
+ 
+-ov5642_camera-objs := ov5642.o
+-obj-$(CONFIG_MXC_CAMERA_OV5642) += ov5642_camera.o
+-
+ adv7180_tvin-objs := adv7180.o
+ obj-$(CONFIG_MXC_TVIN_ADV7180) += adv7180_tvin.o
+-- 
+1.7.7.4
+

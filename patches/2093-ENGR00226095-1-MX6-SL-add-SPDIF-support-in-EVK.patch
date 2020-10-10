@@ -1,0 +1,73 @@
+From 28d5abaf9aa3e9af30518dbbd3d5c06fbe7cda7a Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Thu, 27 Sep 2012 15:45:41 +0800
+Subject: [PATCH 2093/2463] ENGR00226095-1 MX6 SL: add SPDIF support in EVK
+
+HDMI AUDIO in evk comes from SPDIF TX, and add SPDIF TX support
+to implement HDMI AUDIO feature
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_common.h |    3 +++
+ arch/arm/mach-mx6/board-mx6sl_evk.c    |   24 ++++++++++++++++++++++++
+ 2 files changed, 27 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_common.h b/arch/arm/mach-mx6/board-mx6sl_common.h
+index e5ddcd1..995e184 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_common.h
++++ b/arch/arm/mach-mx6/board-mx6sl_common.h
+@@ -93,6 +93,9 @@ static iomux_v3_cfg_t mx6sl_brd_pads[] = {
+ 	/* Audio Codec */
+ 	MX6SL_PAD_FEC_RX_ER__GPIO_4_19,	/* HEADPHONE_DET */
+ 
++	/* SPDIF TX */
++	MX6SL_PAD_SD2_DAT4__SPDIF_OUT1,
++
+ 	/* UART1 */
+ 	MX6SL_PAD_UART1_RXD__UART1_RXD,
+ 	MX6SL_PAD_UART1_TXD__UART1_TXD,
+diff --git a/arch/arm/mach-mx6/board-mx6sl_evk.c b/arch/arm/mach-mx6/board-mx6sl_evk.c
+index 825217d..445b128 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_evk.c
++++ b/arch/arm/mach-mx6/board-mx6sl_evk.c
+@@ -557,6 +557,24 @@ static int __init imx6q_init_audio(void)
+ 	return 0;
+ }
+ 
++static int spdif_clk_set_rate(struct clk *clk, unsigned long rate)
++{
++	unsigned long rate_actual;
++	rate_actual = clk_round_rate(clk, rate);
++	clk_set_rate(clk, rate_actual);
++	return 0;
++}
++
++static struct mxc_spdif_platform_data mxc_spdif_data = {
++	.spdif_tx		= 1,
++	.spdif_rx		= 0,
++	.spdif_clk_44100	= 1,
++	.spdif_clk_48000	= -1,
++	.spdif_div_44100	= 23,
++	.spdif_clk_set_rate	= spdif_clk_set_rate,
++	.spdif_clk		= NULL,
++};
++
+ static struct imxi2c_platform_data mx6_evk_i2c0_data = {
+ 	.bitrate = 100000,
+ };
+@@ -1299,6 +1317,12 @@ static void __init mx6_evk_init(void)
+ 	imx6sl_add_rngb();
+ 	imx6sl_add_imx_pxp_v4l2();
+ 
++	mxc_spdif_data.spdif_core_clk = clk_get_sys("mxc_spdif.0", NULL);
++	clk_put(mxc_spdif_data.spdif_core_clk);
++	imx6q_add_spdif(&mxc_spdif_data);
++	imx6q_add_spdif_dai();
++	imx6q_add_spdif_audio_device();
++
+ 	imx6q_add_perfmon(0);
+ 	imx6q_add_perfmon(1);
+ 	imx6q_add_perfmon(2);
+-- 
+1.7.7.4
+

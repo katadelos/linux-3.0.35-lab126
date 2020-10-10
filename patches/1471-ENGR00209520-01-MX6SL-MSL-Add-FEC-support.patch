@@ -1,0 +1,235 @@
+From d35878f313e39e92a09703c707f299b779b1db76 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Wed, 16 May 2012 18:27:09 +0800
+Subject: [PATCH 1471/2463] ENGR00209520-01 - MX6SL MSL : Add FEC support
+
+Add FEC support for mx6-sololite:
+
+- Add FEC pad iomux setting.
+- Power on phy and init fec.
+- Add devname to distinguish different IP.
+- Use ANATOP as FEC clock source in default, remove redundant
+  config "FEC_CLOCK_FROM_ANATOP".
+
+Signed-off-by: Fugang Duan <B38611@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig                       |    5 ----
+ arch/arm/mach-mx6/board-mx6sl_arm2.c            |   19 ++++++++++++++++++
+ arch/arm/mach-mx6/board-mx6sl_arm2.h            |   13 ++++++++++++
+ arch/arm/mach-mx6/devices-imx6q.h               |    3 ++
+ arch/arm/mach-mx6/mx6_fec.c                     |    7 ++++-
+ arch/arm/plat-mxc/devices/platform-fec.c        |   24 +++++++++++++---------
+ arch/arm/plat-mxc/include/mach/devices-common.h |    1 +
+ 7 files changed, 55 insertions(+), 17 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index e1ede87..6620096 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -216,9 +216,4 @@ config MX6_INTER_LDO_BYPASS
+ 	 LDO will replaced by external pmic regulator(e.g. pfuze100), VDDCORE
+ 	 can be adjust automatically adjust by cpu frequency.
+ 
+-comment "MX6 Solo-lite Options:"
+-
+-config FEC_CLOCK_FROM_ANATOP
+-	bool "Use ANATOP clock to get 50MHz FEC Ref clock"
+-
+ endif
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 3879b8d..220ea32 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -80,6 +80,7 @@
+ #define MX6_ARM2_SD2_WP		IMX_GPIO_NR(4, 29)	/* SD2_DAT6 */
+ #define MX6_ARM2_SD2_CD		IMX_GPIO_NR(5, 0)	/* SD2_DAT7 */
+ #define MX6_ARM2_SD3_CD		IMX_GPIO_NR(3, 22)	/* REF_CLK_32K */
++#define MX6_ARM2_FEC_PWR_EN	IMX_GPIO_NR(4, 21)	/* FEC_TX_CLK */
+ 
+ static const struct esdhc_platform_data mx6_arm2_sd1_data __initconst = {
+ 	.cd_gpio		= MX6_ARM2_SD1_CD,
+@@ -113,6 +114,10 @@ static inline void mx6_arm2_init_uart(void)
+ 	imx6q_add_sdhci_usdhc_imx(2, &mx6_arm2_sd3_data);
+ }
+ 
++static struct fec_platform_data fec_data __initdata = {
++	.phy = PHY_INTERFACE_MODE_RMII,
++};
++
+ static void imx6_arm2_usbotg_vbus(bool on)
+ {
+ 	if (on)
+@@ -161,6 +166,20 @@ static void __init mx6_arm2_init(void)
+ 	mxc_iomux_v3_setup_multiple_pads(mx6sl_arm2_pads, ARRAY_SIZE(mx6sl_arm2_pads));
+ 
+ 	mx6_arm2_init_uart();
++	/* get enet tx reference clk from FEC_REF_CLK pad.
++	 * GPR1[14] = 0, GPR1[18:17] = 00
++	 */
++	mxc_iomux_set_gpr_register(1, 14, 1, 0);
++	mxc_iomux_set_gpr_register(1, 17, 2, 0);
++
++	/* power on FEC phy and reset phy */
++	gpio_request(MX6_ARM2_FEC_PWR_EN, "fec-pwr");
++	gpio_direction_output(MX6_ARM2_FEC_PWR_EN, 1);
++	/* wait RC ms for hw reset */
++	udelay(500);
++
++	imx6_init_fec(fec_data);
++
+ 	mx6_arm2_init_usb();
+ }
+ 
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.h b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+index aa25d76..c363bf8 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.h
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+@@ -71,6 +71,19 @@ static iomux_v3_cfg_t mx6sl_arm2_pads[] = {
+ 	MX6SL_PAD_SD3_DAT3__USDHC3_DAT3,
+ 	/* SD3 CD */
+ 	MX6SL_PAD_REF_CLK_32K__GPIO_3_22,
++
++	/* FEC */
++	MX6SL_PAD_FEC_MDC__FEC_MDC,
++	MX6SL_PAD_FEC_MDIO__FEC_MDIO,
++	MX6SL_PAD_FEC_REF_CLK__FEC_REF_OUT, /* clock from anatop */
++	MX6SL_PAD_FEC_RX_ER__GPIO_4_19,
++	MX6SL_PAD_FEC_CRS_DV__FEC_RX_DV,
++	MX6SL_PAD_FEC_RXD0__FEC_RDATA_0,
++	MX6SL_PAD_FEC_RXD1__FEC_RDATA_1,
++	MX6SL_PAD_FEC_TX_EN__FEC_TX_EN,
++	MX6SL_PAD_FEC_TXD0__FEC_TDATA_0,
++	MX6SL_PAD_FEC_TXD1__FEC_TDATA_1,
++	MX6SL_PAD_FEC_TX_CLK__GPIO_4_21, /* Phy power enable */
+ };
+ 
+ #endif
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 1b069b6..eb3b3b0 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -44,6 +44,9 @@ extern const struct imx_dma_data imx6q_dma_data __initconst;
+ extern const struct imx_fec_data imx6q_fec_data __initconst;
+ #define imx6q_add_fec(pdata)	\
+ 	imx_add_fec(&imx6q_fec_data, pdata)
++extern const struct imx_fec_data imx6sl_fec_data __initconst;
++#define imx6sl_add_fec(pdata)	\
++	imx_add_fec(&imx6sl_fec_data, pdata)
+ 
+ extern const struct imx_sdhci_esdhc_imx_data
+ imx6q_sdhci_usdhc_imx_data[] __initconst;
+diff --git a/arch/arm/mach-mx6/mx6_fec.c b/arch/arm/mach-mx6/mx6_fec.c
+index b2aa45b..935ba26 100644
+--- a/arch/arm/mach-mx6/mx6_fec.c
++++ b/arch/arm/mach-mx6/mx6_fec.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -49,5 +49,8 @@ void __init imx6_init_fec(struct fec_platform_data fec_data)
+ 	if (!is_valid_ether_addr(fec_data.mac))
+ 		random_ether_addr(fec_data.mac);
+ 
+-	imx6q_add_fec(&fec_data);
++	if (cpu_is_mx6sl())
++		imx6sl_add_fec(&fec_data);
++	else
++		imx6q_add_fec(&fec_data);
+ }
+diff --git a/arch/arm/plat-mxc/devices/platform-fec.c b/arch/arm/plat-mxc/devices/platform-fec.c
+index b5e9857..20422cf 100644
+--- a/arch/arm/plat-mxc/devices/platform-fec.c
++++ b/arch/arm/plat-mxc/devices/platform-fec.c
+@@ -6,52 +6,56 @@
+  * the terms of the GNU General Public License version 2 as published by the
+  * Free Software Foundation.
+  *
+- * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc.
+  */
+ #include <linux/dma-mapping.h>
+ #include <asm/sizes.h>
+ #include <mach/hardware.h>
+ #include <mach/devices-common.h>
+ 
+-#define imx_fec_data_entry_single(soc)					\
++#define imx_fec_data_entry_single(soc, _devid)				\
+ 	{								\
+ 		.iobase = soc ## _FEC_BASE_ADDR,			\
+ 		.irq = soc ## _INT_FEC,					\
++		.devid = _devid,					\
+ 	}
+ 
+ #ifdef CONFIG_SOC_IMX25
+ const struct imx_fec_data imx25_fec_data __initconst =
+-	imx_fec_data_entry_single(MX25);
++	imx_fec_data_entry_single(MX25, "imx28-fec");
+ #endif /* ifdef CONFIG_SOC_IMX25 */
+ 
+ #ifdef CONFIG_SOC_IMX27
+ const struct imx_fec_data imx27_fec_data __initconst =
+-	imx_fec_data_entry_single(MX27);
++	imx_fec_data_entry_single(MX27, "imx28-fec");
+ #endif /* ifdef CONFIG_SOC_IMX27 */
+ 
+ #ifdef CONFIG_SOC_IMX35
+ const struct imx_fec_data imx35_fec_data __initconst =
+-	imx_fec_data_entry_single(MX35);
++	imx_fec_data_entry_single(MX35, "imx28-fec");
+ #endif
+ 
+ #ifdef CONFIG_SOC_IMX50
+ const struct imx_fec_data imx50_fec_data __initconst =
+-	imx_fec_data_entry_single(MX50);
++	imx_fec_data_entry_single(MX50, "fec");
+ #endif
+ 
+ #ifdef CONFIG_SOC_IMX51
+ const struct imx_fec_data imx51_fec_data __initconst =
+-	imx_fec_data_entry_single(MX51);
++	imx_fec_data_entry_single(MX51, "fec");
+ #endif
+ 
+ #ifdef CONFIG_SOC_IMX53
+ const struct imx_fec_data imx53_fec_data __initconst =
+-	imx_fec_data_entry_single(MX53);
++	imx_fec_data_entry_single(MX53, "fec");
+ #endif
+ 
+ #ifdef CONFIG_SOC_IMX6Q
+ const struct imx_fec_data imx6q_fec_data __initconst =
+-	imx_fec_data_entry_single(MX6Q);
++	imx_fec_data_entry_single(MX6Q, "enet");
++
++const struct imx_fec_data imx6sl_fec_data __initconst =
++	imx_fec_data_entry_single(MX6DL, "fec");
+ #endif
+ 
+ struct platform_device *__init imx_add_fec(
+@@ -70,7 +74,7 @@ struct platform_device *__init imx_add_fec(
+ 		},
+ 	};
+ 
+-	return imx_add_platform_device_dmamask("fec", 0,
++	return imx_add_platform_device_dmamask(data->devid, 0,
+ 			res, ARRAY_SIZE(res),
+ 			pdata, sizeof(*pdata), DMA_BIT_MASK(32));
+ }
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 0bd80b9..b0724ce 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -34,6 +34,7 @@ struct platform_device *__init imx_add_dma(const struct imx_dma_data *data);
+ struct imx_fec_data {
+ 	resource_size_t iobase;
+ 	resource_size_t irq;
++	const char *devid;
+ };
+ struct platform_device *__init imx_add_fec(
+ 		const struct imx_fec_data *data,
+-- 
+1.7.7.4
+

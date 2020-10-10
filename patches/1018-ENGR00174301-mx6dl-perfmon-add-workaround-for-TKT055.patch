@@ -1,0 +1,31 @@
+From 5f5507b4d6c6192b341d7b5b3f0f36fea073cbcb Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Mon, 13 Feb 2012 11:10:48 +0800
+Subject: [PATCH 1018/2463] ENGR00174301 [mx6dl perfmon]add workaround for
+ TKT055916
+
+bit16 of GPR11 must be set to enable performance monitor
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ arch/arm/plat-mxc/devices/platform-imx-perfmon.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-perfmon.c b/arch/arm/plat-mxc/devices/platform-imx-perfmon.c
+index 518322a..56e262b 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-perfmon.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-perfmon.c
+@@ -86,8 +86,8 @@ static void platform_perfmon_init(void)
+ 	if (init)
+ 		return;
+ 
+-	if (mx6q_revision() == IMX_CHIP_REVISION_1_0)
+-		/* GPR11 bit[16] must be set for TO1.0, it's a bug */
++	if (mx6q_revision() == IMX_CHIP_REVISION_1_0 || cpu_is_mx6dl())
++		/* GPR11 bit[16] must be set for TO1.0(6q & 6dl), it's a bug */
+ 		mxc_iomux_set_gpr_register(11, 16, 1, 1);
+ 
+ 	mxc_iomux_set_gpr_register(11, 0, 1, 1);
+-- 
+1.7.7.4
+

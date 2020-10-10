@@ -1,0 +1,85 @@
+From dfadbccae8bfeece3cb9b9770b018b90b4e68ecc Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Wed, 27 Jun 2012 16:08:23 +0800
+Subject: [PATCH 1676/2463] ENGR00215041-1 MX6 clock:Support clko2 to be
+ clko's parent clk
+
+This patch supports clko2 clock to be clko's parent clock.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit 3827c82e439b6a8bbb6569a01327043251875964)
+---
+ arch/arm/mach-mx6/clock.c |   26 +++++++++++++++++++++++---
+ 1 files changed, 23 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 547e24e..3efb6b3 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -77,6 +77,7 @@ static struct clk enfc_clk;
+ static struct clk usdhc3_clk;
+ static struct clk ipg_clk;
+ static struct clk gpt_clk[];
++static struct clk clko2_clk;
+ 
+ static struct cpu_op *cpu_op_tbl;
+ static int cpu_op_nr;
+@@ -4904,11 +4905,17 @@ static int _clk_clko_set_parent(struct clk *clk, struct clk *parent)
+ 		sel = 14;
+ 	else if (parent == &pll4_audio_main_clk)
+ 		sel = 15;
+-	else
++	else if (parent == &clko2_clk) {
++		reg = __raw_readl(MXC_CCM_CCOSR);
++		reg |= MXC_CCM_CCOSR_CKOL_MIRROR_CKO2_MASK;
++		__raw_writel(reg, MXC_CCM_CCOSR);
++		return 0;
++	} else
+ 		return -EINVAL;
+ 
+ 	reg = __raw_readl(MXC_CCM_CCOSR);
+-	reg &= ~MXC_CCM_CCOSR_CKOL_SEL_MASK;
++	reg &= ~(MXC_CCM_CCOSR_CKOL_MIRROR_CKO2_MASK |
++		 MXC_CCM_CCOSR_CKOL_SEL_MASK);
+ 	reg |= sel << MXC_CCM_CCOSR_CKOL_SEL_OFFSET;
+ 	__raw_writel(reg, MXC_CCM_CCOSR);
+ 	return 0;
+@@ -4919,7 +4926,12 @@ static unsigned long _clk_clko_get_rate(struct clk *clk)
+ 	u32 reg = __raw_readl(MXC_CCM_CCOSR);
+ 	u32 div = ((reg & MXC_CCM_CCOSR_CKOL_DIV_MASK) >>
+ 			MXC_CCM_CCOSR_CKOL_DIV_OFFSET) + 1;
+-	return clk_get_rate(clk->parent) / div;
++
++	if (clk->parent == &clko2_clk)
++		/* clko may output clko2 without divider */
++		return clk_get_rate(clk->parent);
++	else
++		return clk_get_rate(clk->parent) / div;
+ }
+ 
+ static int _clk_clko_set_rate(struct clk *clk, unsigned long rate)
+@@ -4928,6 +4940,10 @@ static int _clk_clko_set_rate(struct clk *clk, unsigned long rate)
+ 	u32 parent_rate = clk_get_rate(clk->parent);
+ 	u32 div = parent_rate / rate;
+ 
++	/* clko may output clko2 without divider */
++	if (clk->parent == &clko2_clk)
++		return 0;
++
+ 	if (div == 0)
+ 		div++;
+ 	if (((parent_rate / div) != rate) || (div > 8))
+@@ -4946,6 +4962,10 @@ static unsigned long _clk_clko_round_rate(struct clk *clk,
+ 	u32 parent_rate = clk_get_rate(clk->parent);
+ 	u32 div = parent_rate / rate;
+ 
++	/* clko may output clko2 without divider */
++	if (clk->parent == &clko2_clk)
++		return parent_rate;
++
+ 	/* Make sure rate is not greater than the maximum value for the clock.
+ 	 * Also prevent a div of 0.
+ 	 */
+-- 
+1.7.7.4
+

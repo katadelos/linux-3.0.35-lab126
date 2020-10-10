@@ -1,0 +1,54 @@
+From 576a1b58b54201a7fa14cca71e1033071fc63910 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Fri, 15 Apr 2011 16:23:13 +0800
+Subject: [PATCH 0103/2463] ENGR00141312 tve: add uevent for tve cable
+ detection
+
+When cable mode changed, below uevent will be sent out:
+EVENT=NONE
+EVENT=CVBS0
+EVENT=YPBPR
+EVENT=SVIDEO
+under /sys/devices/platform/tve.0
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/video/mxc/tve.c |   14 +++++++++++++-
+ 1 files changed, 13 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/video/mxc/tve.c b/drivers/video/mxc/tve.c
+index 3470bd4..b29c1d5 100644
+--- a/drivers/video/mxc/tve.c
++++ b/drivers/video/mxc/tve.c
+@@ -745,6 +745,8 @@ static int tve_update_detect_status(void)
+ 	u32 cd_cont_reg;
+ 	u32 timeout = 40;
+ 	unsigned long lock_flags;
++	char event_string[16];
++	char *envp[] = { event_string, NULL };
+ 
+ 	spin_lock_irqsave(&tve_lock, lock_flags);
+ 
+@@ -826,8 +828,18 @@ static int tve_update_detect_status(void)
+ 	__raw_writel(int_ctl | CD_SM_INT | CD_LM_INT,
+ 			tve.base + tve_regs->tve_int_cont_reg);
+ 
+-	if (old_detect != tve.detect)
++	if (old_detect != tve.detect) {
+ 		sysfs_notify(&tve.pdev->dev.kobj, NULL, "headphone");
++		if (tve.detect == 1)
++			sprintf(event_string, "EVENT=CVBS0");
++		else if (tve.detect == 3)
++			sprintf(event_string, "EVENT=YPBPR");
++		else if (tve.detect == 4)
++			sprintf(event_string, "EVENT=SVIDEO");
++		else
++			sprintf(event_string, "EVENT=NONE");
++		kobject_uevent_env(&tve.pdev->dev.kobj, KOBJ_CHANGE, envp);
++	}
+ 
+ 	dev_dbg(&tve.pdev->dev, "detect = %d mode = %d\n",
+ 			tve.detect, tve.output_mode);
+-- 
+1.7.7.4
+

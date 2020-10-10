@@ -1,0 +1,67 @@
+From 07af8fc0f20f3f6d4e29463875ec6843307e2fcb Mon Sep 17 00:00:00 2001
+From: Dong Aisheng <b29396@freescale.com>
+Date: Wed, 16 May 2012 16:59:03 +0800
+Subject: [PATCH 1470/2463] ENGR00171114 flexcan: enable can2 remote wakeup
+ for mx6q
+
+The root cause is missed to set CAN2_STOP_REQ in iomuxc
+group register which is used to support can wakeup feature.
+
+Signed-off-by: Dong Aisheng <b29396@freescale.com>
+---
+ drivers/net/can/flexcan.c |   11 +++++++++--
+ 1 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/net/can/flexcan.c b/drivers/net/can/flexcan.c
+index 27dcf75..467b535 100644
+--- a/drivers/net/can/flexcan.c
++++ b/drivers/net/can/flexcan.c
+@@ -195,6 +195,7 @@ struct flexcan_priv {
+ 	struct clk *clk;
+ 	struct flexcan_platform_data *pdata;
+ 	enum flexcan_ip_version version;
++	int id;
+ };
+ 
+ static struct can_bittiming_const flexcan_bittiming_const = {
+@@ -580,7 +581,8 @@ static irqreturn_t flexcan_irq(int irq, void *dev_id)
+ 	if (reg_esr & FLEXCAN_ESR_WAK_INT) {
+ 		/* first clear stop request then wakeup irq status */
+ 		if (priv->version >= FLEXCAN_VER_10_0_12)
+-			mxc_iomux_set_gpr_register(13, 28, 1, 0);
++			/* CAN1/CAN2_STOP_REQ bit 28/29 in group 13 */
++			mxc_iomux_set_gpr_register(13, 28 + priv->id, 1, 0);
+ 		writel(FLEXCAN_ESR_WAK_INT, &regs->esr);
+ 	}
+ 
+@@ -960,6 +962,9 @@ static int __devinit flexcan_probe(struct platform_device *pdev)
+ 	resource_size_t mem_size;
+ 	int err, irq;
+ 
++	if (pdev->id < 0)
++		return -ENODEV;
++
+ 	clk = clk_get(&pdev->dev, NULL);
+ 	if (IS_ERR(clk)) {
+ 		dev_err(&pdev->dev, "no clock defined\n");
+@@ -1007,6 +1012,7 @@ static int __devinit flexcan_probe(struct platform_device *pdev)
+ 	priv->base = base;
+ 	priv->dev = dev;
+ 	priv->clk = clk;
++	priv->id = pdev->id;
+ 	priv->pdata = pdev->dev.platform_data;
+ 	priv->version = pdev->id_entry->driver_data;
+ 
+@@ -1074,7 +1080,8 @@ static int flexcan_suspend(struct platform_device *pdev, pm_message_t state)
+ 
+ 	/* enable stop request for wakeup */
+ 	if (priv->version >= FLEXCAN_VER_10_0_12)
+-		mxc_iomux_set_gpr_register(13, 28, 1, 1);
++		/* CAN1/CAN2_STOP_REQ bit 28/29 in group 13 */
++		mxc_iomux_set_gpr_register(13, 28 + priv->id, 1, 1);
+ 
+ 	ret = irq_set_irq_wake(dev->irq, 1);
+ 	if (ret)
+-- 
+1.7.7.4
+

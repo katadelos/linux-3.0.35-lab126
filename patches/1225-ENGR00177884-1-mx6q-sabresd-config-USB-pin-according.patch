@@ -1,0 +1,76 @@
+From c7f55a37899b1262f7d7f71479e700a7e413559e Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Mon, 26 Mar 2012 14:04:36 +0800
+Subject: [PATCH 1225/2463] ENGR00177884-1 mx6q sabresd: config USB pin
+ according to board
+
+- Configure USB pin and power control for mx6q sd board
+- keep USB host1 VBUS always on for mx6q sd board
+- set default USB OTG VBUS off for solo ARD board
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    2 +-
+ arch/arm/mach-mx6/board-mx6q_sabresd.c   |    4 +++-
+ arch/arm/mach-mx6/board-mx6q_sabresd.h   |    8 ++++++--
+ 3 files changed, 10 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 794debe..65cef374 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -529,7 +529,7 @@ static int max7310_u43_setup(struct i2c_client *client,
+ 	/*3 NAND_BT_WIFI_STEER*/
+ 
+ 	int max7310_gpio_value[] = {
+-		0, 1, 0, 0, 0, 0, 0, 0,
++		0, 0, 0, 0, 0, 0, 0, 0,
+ 	};
+ 
+ 	int n;
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 20bcef3..da4f5ef 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -114,6 +114,7 @@
+ #define SABRESD_GPS_PPS		IMX_GPIO_NR(3, 18)
+ #define SABRESD_PCIE_PWR_EN	IMX_GPIO_NR(3, 19)
+ #define SABRESD_USB_OTG_PWR	IMX_GPIO_NR(3, 22)
++#define SABRESD_USB_H1_PWR	IMX_GPIO_NR(1, 29)
+ #define SABRESD_CHARGE_CHG_1_B	IMX_GPIO_NR(3, 23)
+ #define SABRESD_TS_INT		IMX_GPIO_NR(3, 26)
+ #define SABRESD_DISP0_RD	IMX_GPIO_NR(3, 28)
+@@ -1013,7 +1014,8 @@ static void __init imx6q_sabresd_init_usb(void)
+ 		return;
+ 	}
+ 	gpio_direction_output(SABRESD_USB_OTG_PWR, 0);
+-
++	/* keep USB host1 VBUS always on */
++	gpio_direction_output(SABRESD_USB_H1_PWR, 1);
+ 	if (board_is_mx6_reva())
+ 		mxc_iomux_set_gpr_register(1, 13, 1, 1);
+ 	else
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.h b/arch/arm/mach-mx6/board-mx6q_sabresd.h
+index 248bd87..5954a5f 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.h
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.h
+@@ -181,10 +181,14 @@ static iomux_v3_cfg_t mx6q_sabresd_pads[] = {
+ 	MX6Q_PAD_EIM_D25__UART3_RXD,
+ 
+ 	/* USBOTG ID pin */
+-	MX6Q_PAD_GPIO_1__USBOTG_ID,
++	MX6Q_PAD_ENET_RX_ER__ANATOP_USBOTG_ID,
++
++	/* USB power pin */
++	MX6Q_PAD_EIM_D22__GPIO_3_22,
++	MX6Q_PAD_ENET_TXD1__GPIO_1_29,
+ 
+ 	/* USB OC pin */
+-	MX6Q_PAD_KEY_COL4__USBOH3_USBOTG_OC,
++	MX6Q_PAD_EIM_D21__USBOH3_USBOTG_OC,
+ 	MX6Q_PAD_EIM_D30__USBOH3_USBH1_OC,
+ 
+ 	/* USDHC2 */
+-- 
+1.7.7.4
+

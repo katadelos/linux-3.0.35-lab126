@@ -1,0 +1,43 @@
+From 99c98e118f5230e7516e5e0548b48ffd3bc3fd00 Mon Sep 17 00:00:00 2001
+From: Lily Zhang <r58066@freescale.com>
+Date: Tue, 13 Mar 2012 18:47:50 +0800
+Subject: [PATCH 1205/2463] ENGR00177310-3 v4l2 capture: enable mclk when open
+ function
+
+Enable mclk when opening v4l2 capture device and disable
+mclk when closing v4l2 capture device.
+If mclk is disabled when operating MIPI camera, the test
+is failed.
+
+Signed-off-by: Lily Zhang <r58066@freescale.com>
+---
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index d775c2c..03864a8 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -1667,9 +1667,6 @@ static int mxc_v4l_open(struct file *file)
+ 		ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+ 				       true, true);
+ 		vidioc_int_init(cam->sensor);
+-
+-		ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
+-				       false, false);
+ }
+ 
+ 	file->private_data = dev;
+@@ -1711,6 +1708,9 @@ static int mxc_v4l_close(struct file *file)
+ 	}
+ 
+ 	if (--cam->open_count == 0) {
++		ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->csi,
++			false, false);
++
+ 		wait_event_interruptible(cam->power_queue,
+ 					 cam->low_power == false);
+ 		pr_info("mxc_v4l_close: release resource\n");
+-- 
+1.7.7.4
+

@@ -1,0 +1,40 @@
+From 9b63a0dc6233f9f0471f11fd7c45097a2bcb93cd Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Tue, 9 Oct 2012 16:49:29 +0800
+Subject: [PATCH 2125/2463] ENGR00227502-2 mx6sl: add csi v4l2 platform device
+
+Add csi v4l2 platform device only when 'csi' is assigned in cmdline.
+Because there's pin conflicts between csi and epdc.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_evk.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_evk.c b/arch/arm/mach-mx6/board-mx6sl_evk.c
+index e656638..9bdd6c1 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_evk.c
++++ b/arch/arm/mach-mx6/board-mx6sl_evk.c
+@@ -1350,6 +1350,11 @@ static struct platform_device evk_max8903_charger_1 = {
+ 	},
+ };
+ 
++/*! Device Definition for csi v4l2 device */
++static struct platform_device csi_v4l2_devices = {
++	.name = "csi_v4l2",
++	.id = 0,
++};
+ 
+ #define SNVS_LPCR 0x38
+ static void mx6_snvs_poweroff(void)
+@@ -1419,6 +1424,7 @@ static void __init mx6_evk_init(void)
+ 			ARRAY_SIZE(mxc_i2c1_board_info));
+ 	/* only camera on I2C3, that's why we can do so */
+ 	if (csi_enabled == 1) {
++		mxc_register_device(&csi_v4l2_devices, NULL);
+ 		imx6q_add_imx_i2c(2, &mx6_evk_i2c2_data);
+ 		i2c_register_board_info(2, mxc_i2c2_board_info,
+ 				ARRAY_SIZE(mxc_i2c2_board_info));
+-- 
+1.7.7.4
+

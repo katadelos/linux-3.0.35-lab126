@@ -1,0 +1,33 @@
+From 244ac9c93dd7f852f05c76d7a4ece266b1d69a9f Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Fri, 12 Oct 2012 17:01:33 +0800
+Subject: [PATCH 2134/2463] ENGR00229354 Mx6 USB device: fix wrong handle for
+ invalid USB_FEATURE requests
+
+There is a bug udc driver handle invalid USB_FEATURE requests in current bsp.
+The invalid USB_FEATURE request will be handled as a valid USB_FEATURE request.
+We should set protocol stall on ep0 to handle invalid USB_FEATURE requests.
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 75fe978..484e62e 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -1695,6 +1695,10 @@ static void setup_received_irq(struct fsl_udc *udc,
+ 				else if (setup->bRequest ==
+ 					 USB_DEVICE_A_ALT_HNP_SUPPORT)
+ 					udc->gadget.a_alt_hnp_support = 1;
++				else
++					break;
++			} else {
++				break;
+ 			}
+ 			rc = 0;
+ 		} else
+-- 
+1.7.7.4
+

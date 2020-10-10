@@ -1,0 +1,44 @@
+From 40c8f49a08e1093be1cb2916c6458139d4824900 Mon Sep 17 00:00:00 2001
+From: Russell King <rmk+kernel@arm.linux.org.uk>
+Date: Thu, 21 Jul 2011 15:07:56 +0100
+Subject: [PATCH 1526/2463] ARM: CPU hotplug: pass in proper affinity mask on
+ IRQ migration
+
+Now that the GIC takes care of selecting a target interrupt from the
+affinity mask, we don't need all this complexity in the core code
+anymore.  Just detect when we need to break affinity.
+
+Signed-off-by: Russell King <rmk+kernel@arm.linux.org.uk>
+---
+ arch/arm/kernel/irq.c |   10 ++++------
+ 1 files changed, 4 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/kernel/irq.c b/arch/arm/kernel/irq.c
+index 3e34b1f..30d6806 100644
+--- a/arch/arm/kernel/irq.c
++++ b/arch/arm/kernel/irq.c
+@@ -142,17 +142,15 @@ int __init arch_probe_nr_irqs(void)
+ 
+ static bool migrate_one_irq(struct irq_data *d)
+ {
+-	unsigned int cpu = cpumask_any_and(d->affinity, cpu_online_mask);
++	const struct cpumask *affinity = d->affinity;
+ 	bool ret = false;
+ 
+-	if (cpu >= nr_cpu_ids) {
+-		cpu = cpumask_any(cpu_online_mask);
++	if (cpumask_any_and(affinity, cpu_online_mask) >= nr_cpu_ids) {
++		affinity cpu_online_mask;
+ 		ret = true;
+ 	}
+ 
+-	pr_debug("IRQ%u: moving from cpu%u to cpu%u\n", d->irq, d->node, cpu);
+-
+-	d->chip->irq_set_affinity(d, cpumask_of(cpu), true);
++	d->chip->irq_set_affinity(d, affinity, true);
+ 
+ 	return ret;
+ }
+-- 
+1.7.7.4
+

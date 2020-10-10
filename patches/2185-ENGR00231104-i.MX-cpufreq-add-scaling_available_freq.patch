@@ -1,0 +1,43 @@
+From adcaa416437dfa104bf90d72f2749d879c7c4f54 Mon Sep 17 00:00:00 2001
+From: Lin Fuzhen <fuzhen.lin@freescale.com>
+Date: Thu, 25 Oct 2012 14:19:24 +0800
+Subject: [PATCH 2185/2463] ENGR00231104 i.MX cpufreq: add
+ scaling_available_freqs attribute
+
+Add scaling_available_freqs attribute in cpufreq for i.MX
+can get cpufreq table info with:
+
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_frequencies
+996000 792000 396000
+
+Signed-off-by: Lin Fuzhen <fuzhen.lin@freescale.com>
+---
+ arch/arm/plat-mxc/cpufreq.c |    5 +++++
+ 1 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index cc26b7a..e6dc591 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -388,6 +388,10 @@ static int mxc_cpufreq_exit(struct cpufreq_policy *policy)
+ 	return 0;
+ }
+ 
++static struct freq_attr *imx_cpufreq_attr[] = {
++	&cpufreq_freq_attr_scaling_available_freqs,
++	NULL,
++};
+ static struct cpufreq_driver mxc_driver = {
+ 	.flags = CPUFREQ_STICKY,
+ 	.verify = mxc_verify_speed,
+@@ -400,6 +404,7 @@ static struct cpufreq_driver mxc_driver = {
+ 	.resume = mxc_cpufreq_resume,
+ #endif
+ 	.name = "imx",
++	.attr = imx_cpufreq_attr,
+ };
+ 
+ extern void mx6_cpu_regulator_init(void);
+-- 
+1.7.7.4
+

@@ -1,0 +1,70 @@
+From c9f6d63a6b91b4494d60191f9fa6cc3b1bd29847 Mon Sep 17 00:00:00 2001
+From: Robin Gong <b38343@freescale.com>
+Date: Mon, 19 Nov 2012 10:04:46 +0800
+Subject: [PATCH 2270/2463] ENGR00233366-4 WDOG LDO_BYPASS: fix wdog2 to reset
+ external pmic in ldo bypass
+
+On Sabresd board design, the WDOG_B output to reset external pmic source from
+GPIO_2 pad which can be configured as WDOG2_WDOG_B, so if in ldo bypass mode,
+we should use WDOG2 reset signal to reset pmic, not WDOG1. Also, configure the
+related pins.
+
+Signed-off-by: Robin Gong <b38343@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6dl_sabresd.h |    4 ++--
+ arch/arm/mach-mx6/board-mx6q_sabresd.h  |    2 +-
+ arch/arm/plat-mxc/system.c              |   10 +++++++---
+ 3 files changed, 10 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6dl_sabresd.h b/arch/arm/mach-mx6/board-mx6dl_sabresd.h
+index 7e6a261..fe278e8 100644
+--- a/arch/arm/mach-mx6/board-mx6dl_sabresd.h
++++ b/arch/arm/mach-mx6/board-mx6dl_sabresd.h
+@@ -263,8 +263,8 @@ static iomux_v3_cfg_t mx6dl_sabresd_pads[] = {
+ 	/* ACCL_INT_INT */
+ 	MX6DL_PAD_SD1_CMD__GPIO_1_18,
+ 
+-	/* USR_DEF_GRN_LED */
+-	MX6DL_PAD_GPIO_1__GPIO_1_1,
++	/*WDOG_B to reset pmic*/
++	MX6DL_PAD_GPIO_1__WDOG2_WDOG_B,
+ 	/* USR_DEF_RED_LED */
+ 	MX6DL_PAD_GPIO_2__GPIO_1_2,
+ };
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.h b/arch/arm/mach-mx6/board-mx6q_sabresd.h
+index da26cd9..a1f5cd9 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.h
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.h
+@@ -30,7 +30,7 @@ static iomux_v3_cfg_t mx6q_sabresd_pads[] = {
+ 	/* CAN1  */
+ 	MX6Q_PAD_KEY_ROW2__HDMI_TX_CEC_LINE,
+ 	/* MX6Q_PAD_KEY_COL2__CAN1_TXCAN, */
+-	MX6Q_PAD_GPIO_1__GPIO_1_1,		/* user defiend green led */
++	MX6Q_PAD_GPIO_1__WDOG2_WDOG_B,		/*WDOG_B to reset pmic*/
+ 	MX6Q_PAD_GPIO_2__GPIO_1_2,		/* user defined red led */
+ 	MX6Q_PAD_GPIO_7__GPIO_1_7,		/* NERR */
+ 
+diff --git a/arch/arm/plat-mxc/system.c b/arch/arm/plat-mxc/system.c
+index ccb91b3..9ab2583 100644
+--- a/arch/arm/plat-mxc/system.c
++++ b/arch/arm/plat-mxc/system.c
+@@ -57,9 +57,13 @@ void arch_reset(char mode, const char *cmd)
+ 
+ #ifdef CONFIG_ARCH_MX6
+ 	/* wait for reset to assert... */
+-	if (enable_ldo_mode == LDO_MODE_BYPASSED)
+-		wcr_enable = 0x14; /*reset system by extern pmic*/
+-	else
++	if (enable_ldo_mode == LDO_MODE_BYPASSED) {
++		/*On Sabresd board use WDOG2 to reset external PMIC, so here do
++		* more WDOG2 reset.*/
++		wcr_enable = 0x14;
++		__raw_write(wcr_enable, IO_ADDRESS(MX6Q_WDOG2_BASE_ADDR));
++		__raw_writew(wcr_enable, IO_ADDRESS(MX6Q_WDOG2_BASE_ADDR));
++	} else
+ 		wcr_enable = (1 << 2);
+ 	__raw_writew(wcr_enable, wdog_base);
+ 	/* errata TKT039676, SRS bit may be missed when
+-- 
+1.7.7.4
+

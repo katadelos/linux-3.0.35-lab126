@@ -1,0 +1,30 @@
+From e65fb60817f2d667aa11cf219bd123b2fa4de803 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.liu@freescale.com>
+Date: Tue, 24 Jul 2012 18:10:23 +0800
+Subject: [PATCH 1805/2463] ENGR00182061-4 MXC v4l2 capture:Remove
+ inappropriate msleep code
+
+msleep() after camera power down should not be called in mxc
+v4l2 capture core code. Instead, this should be handled by
+camera power down function.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+---
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |    1 -
+ 1 files changed, 0 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index e8643ab..ab41d9c 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -1681,7 +1681,6 @@ static int mxc_v4l_open(struct file *file)
+ 		ipu_csi_enable_mclk_if(cam->ipu, CSI_MCLK_I2C, cam->mclk_source,
+ 				       true, true);
+ 		vidioc_int_s_power(cam->sensor, 1);
+-		msleep(1);
+ 		vidioc_int_init(cam->sensor);
+ 		vidioc_int_dev_init(cam->sensor);
+ 	}
+-- 
+1.7.7.4
+

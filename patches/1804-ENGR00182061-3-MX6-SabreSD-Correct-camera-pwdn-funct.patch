@@ -1,0 +1,43 @@
+From ead6561b45ac232ae8003163f328634650638c96 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.liu@freescale.com>
+Date: Tue, 24 Jul 2012 18:01:35 +0800
+Subject: [PATCH 1804/2463] ENGR00182061-3 MX6 SabreSD:Correct camera pwdn
+ function
+
+This patch adds 2ms sleep after camera power down signal
+is set to high or to low to ensure power down or up
+is successful. OV5640/OV5642 camera specs say that they
+require this condtion to be true - for PWDN to go low,
+power must first become stable(DVDD to PWDN>=1ms), so
+this patch simply use 2ms which should be enough.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index e3caf4c..13d72412 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -477,6 +477,8 @@ static void mx6q_csi0_cam_powerdown(int powerdown)
+ 		gpio_set_value(SABRESD_CSI0_PWN, 1);
+ 	else
+ 		gpio_set_value(SABRESD_CSI0_PWN, 0);
++
++	msleep(2);
+ }
+ 
+ static void mx6q_csi0_io_init(void)
+@@ -542,6 +544,8 @@ static void mx6q_mipi_powerdown(int powerdown)
+ 		gpio_set_value(SABRESD_MIPICSI_PWN, 1);
+ 	else
+ 		gpio_set_value(SABRESD_MIPICSI_PWN, 0);
++
++	msleep(2);
+ }
+ 
+ static void mx6q_mipi_sensor_io_init(void)
+-- 
+1.7.7.4
+

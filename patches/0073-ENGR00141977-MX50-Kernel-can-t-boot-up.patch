@@ -1,0 +1,78 @@
+From df09ed8ea870928f26ce5f745d02b7375525c970 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Tue, 12 Apr 2011 14:24:00 +0800
+Subject: [PATCH 0073/2463] ENGR00141977 MX50: Kernel can't boot up
+
+Kernel can't boot up on 2.6.38 branch due to the that
+Russell has made one change to MT_HIGH_VECTORS, which
+result in this memory region is read-only, so, memcpy
+will fail when copy suspend code into iram.
+
+Since the iram code region need excuting and rw attribue,
+change the MT_HIGH_VECTORS to MT_MEMORY.
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx5/cpu.c       |    7 ++++++-
+ arch/arm/mach-mx5/mx50_freq.c |    4 ++--
+ 2 files changed, 8 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/cpu.c b/arch/arm/mach-mx5/cpu.c
+index 107df20..eab1514 100755
+--- a/arch/arm/mach-mx5/cpu.c
++++ b/arch/arm/mach-mx5/cpu.c
+@@ -33,6 +33,7 @@
+ void __iomem *arm_plat_base;
+ void __iomem *gpc_base;
+ void __iomem *ccm_base;
++extern void init_ddr_settings(void);
+ 
+ static int cpu_silicon_rev = -1;
+ void (*set_num_cpu_op)(int num);
+@@ -229,6 +230,7 @@ static int __init post_cpu_init(void)
+ 		arm_plat_base = MX50_IO_ADDRESS(MX50_ARM_BASE_ADDR);
+ 		iram_init(MX50_IRAM_BASE_ADDR, MX50_IRAM_SIZE);
+ 	}
++
+ 	if (cpu_is_mx51() || cpu_is_mx53()) {
+ 		if (cpu_is_mx51()) {
+ 			base = MX51_IO_ADDRESS(MX51_AIPS1_BASE_ADDR);
+@@ -274,9 +276,12 @@ static int __init post_cpu_init(void)
+ 	clk_put(gpcclk);
+ 
+ 	/* Set ALP bits to 000. Set ALP_EN bit in Arm Memory Controller reg. */
+-		reg = 0x8;
++	reg = 0x8;
+ 	__raw_writel(reg, arm_plat_base + CORTEXA8_PLAT_AMC);
+ 
++	if (cpu_is_mx50())
++		init_ddr_settings();
++
+ 	return 0;
+ }
+ 
+diff --git a/arch/arm/mach-mx5/mx50_freq.c b/arch/arm/mach-mx5/mx50_freq.c
+index 50c1a4d..de9fd7b 100755
+--- a/arch/arm/mach-mx5/mx50_freq.c
++++ b/arch/arm/mach-mx5/mx50_freq.c
+@@ -382,7 +382,7 @@ void init_ddr_settings(void)
+ 	/* Need to remap the area here since we want the memory region
+ 		 to be executable. */
+ 	ddr_freq_change_iram_base = __arm_ioremap(iram_paddr,
+-						SZ_8K, MT_HIGH_VECTORS);
++						SZ_8K, MT_MEMORY);
+ 	memcpy(ddr_freq_change_iram_base, mx50_ddr_freq_change, SZ_8K);
+ 	change_ddr_freq = (void *)ddr_freq_change_iram_base;
+ 
+@@ -399,7 +399,7 @@ void init_ddr_settings(void)
+ 	/* Need to remap the area here since we want the memory region
+ 		 to be executable. */
+ 	wait_in_iram_base = __arm_ioremap(iram_paddr,
+-						SZ_4K, MT_HIGH_VECTORS);
++						SZ_4K, MT_MEMORY);
+ 	memcpy(wait_in_iram_base, mx50_wait, SZ_4K);
+ 	wait_in_iram = (void *)wait_in_iram_base;
+ 
+-- 
+1.7.7.4
+

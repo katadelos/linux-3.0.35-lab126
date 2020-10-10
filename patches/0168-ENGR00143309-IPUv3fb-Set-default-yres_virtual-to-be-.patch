@@ -1,0 +1,48 @@
+From 404a442dd1d34a6a794e50a0af0c1f87d29ef22c Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Thu, 12 May 2011 20:18:25 +0800
+Subject: [PATCH 0168/2463] ENGR00143309 IPUv3fb:Set default yres_virtual to
+ be 3*yres
+
+This patch sets framebuffer yres_virtual to be 3*yres defaultly.
+Before this patch is applied, the yres_virtual will be changed
+to yres when hdmi cable is hot plugged out and in, which
+reduces yres_virtual to yres and pan display mechanism cannot
+work well.
+
+Signed-off-by: Liu Ying <b17645@freescale.com>
+(cherry picked from commit 99a218e876a3a4831ec121fdff0e2b4e39408eda)
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |    9 ++++-----
+ 1 files changed, 4 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 1107bea..b3bf655 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -678,8 +678,10 @@ static int mxcfb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
+ 
+ 	if (var->xres_virtual < var->xres)
+ 		var->xres_virtual = var->xres;
+-	if (var->yres_virtual < var->yres)
+-		var->yres_virtual = var->yres;
++
++	/* Default Y virtual size is 3*yres */
++	if (var->yres_virtual < var->yres * 3)
++		var->yres_virtual = var->yres * 3;
+ 
+ 	if ((var->bits_per_pixel != 32) && (var->bits_per_pixel != 24) &&
+ 	    (var->bits_per_pixel != 16) && (var->bits_per_pixel != 12) &&
+@@ -1802,9 +1804,6 @@ static int mxcfb_setup(struct fb_info *fbi, struct platform_device *pdev)
+ 
+ 	mxcfb_check_var(&fbi->var, fbi);
+ 
+-	/* Default Y virtual size is 3x panel size */
+-	fbi->var.yres_virtual = fbi->var.yres * 3;
+-
+ 	mxcfb_set_fix(fbi);
+ 
+ 	/* setup display */
+-- 
+1.7.7.4
+

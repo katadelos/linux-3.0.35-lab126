@@ -1,0 +1,40 @@
+From 869a87a535a4ba3a3b62ac6c822fac259b9d014b Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Fri, 29 Jun 2012 15:53:46 -0700
+Subject: [PATCH 1686/2463] ENGR00215492-1: Fix DMA size in extended
+ descriptor for ahash_digest()
+
+Save of DMA size in extended descriptor was missing, thus crashes could
+occur during post-request unmapping.
+
+Also, removed lingering DEBUG def that shouldn't have been there.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/crypto/caam/caamhash.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/crypto/caam/caamhash.c b/drivers/crypto/caam/caamhash.c
+index 85eaa95..d36582b 100644
+--- a/drivers/crypto/caam/caamhash.c
++++ b/drivers/crypto/caam/caamhash.c
+@@ -89,7 +89,6 @@
+ #define HASH_MSG_LEN			8
+ #define MAX_CTX_LEN			(HASH_MSG_LEN + SHA512_DIGEST_SIZE)
+ 
+-#define DEBUG
+ #ifdef DEBUG
+ /* for print_hex_dumps with line references */
+ #define xstr(s) str(s)
+@@ -1095,6 +1094,7 @@ static int ahash_digest(struct ahash_request *req)
+ 			  DESC_JOB_IO_LEN;
+ 	edesc->sec4_sg_dma = dma_map_single(jrdev, edesc->sec4_sg,
+ 					    sec4_sg_bytes, DMA_TO_DEVICE);
++	edesc->sec4_sg_bytes = sec4_sg_bytes;
+ 	dma_sync_single_for_device(jrdev, edesc->sec4_sg_dma, sec4_sg_bytes,
+ 				   DMA_TO_DEVICE);
+ 	edesc->src_nents = src_nents;
+-- 
+1.7.7.4
+

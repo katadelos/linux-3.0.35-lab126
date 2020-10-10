@@ -1,0 +1,37 @@
+From 959d1bd4ae7ab5df9557cbf02499d0981d5fe659 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <richard.zhao@freescale.com>
+Date: Thu, 14 Apr 2011 17:27:20 +0800
+Subject: [PATCH 0093/2463] ENGR00142124-2 ipu: Use preserved memory for
+ primary DI only
+
+Only fb0 uses reserved memory.
+
+Signed-off-by: Richard Zhao <richard.zhao@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_common.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_common.c b/drivers/mxc/ipu3/ipu_common.c
+index bf09143..bc49778 100644
+--- a/drivers/mxc/ipu3/ipu_common.c
++++ b/drivers/mxc/ipu3/ipu_common.c
+@@ -284,12 +284,16 @@ static int __init register_fb_device(struct platform_device *pdev)
+ 		/* DI1 -> DP-BG channel: */
+ 		imx_add_ipuv3_fb(plat_data->fb_head1_platform_data, 1);
+ 		/* DI0 -> DC channel: */
++		plat_data->fb_head0_platform_data->res_base = 0;
++		plat_data->fb_head0_platform_data->res_size = 0;
+ 		imx_add_ipuv3_fb(plat_data->fb_head0_platform_data, 0);
+ 	} else {
+ 		dev_info(g_ipu_dev, "DI0 is primary\n");
+ 		/* DI0 -> DP-BG channel: */
+ 		imx_add_ipuv3_fb(plat_data->fb_head0_platform_data, 0);
+ 		/* DI1 -> DC channel: */
++		plat_data->fb_head1_platform_data->res_base = 0;
++		plat_data->fb_head1_platform_data->res_size = 0;
+ 		imx_add_ipuv3_fb(plat_data->fb_head1_platform_data, 1);
+ 	}
+ 
+-- 
+1.7.7.4
+

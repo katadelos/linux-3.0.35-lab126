@@ -1,0 +1,121 @@
+From 80ecfe135e4687f4369d6e310f6a265f29d45b87 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Fri, 13 Apr 2012 14:16:21 +0800
+Subject: [PATCH 1319/2463] ENGR00179631 MX6 SabreSD: Add MIPI DSI Display
+ support
+
+Add MIPI DSI Display support on mx6 SabreSD board.
+MIPI DSI needs pll3_pfd_540M clock source for 540MHz.
+if using ldb, the pll3_pfd_540M clock will be changed to 454Mhz.
+So add command line option disable_ldb when using MIPI DSI display.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |   38 +++++++++++++++++++++++++++++++-
+ arch/arm/mach-mx6/board-mx6q_sabresd.h |    5 ++++
+ 2 files changed, 42 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index fba11a5..82fb04e 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -67,6 +67,7 @@
+ #include <mach/ipu-v3.h>
+ #include <mach/mxc_hdmi.h>
+ #include <mach/mxc_asrc.h>
++#include <mach/mipi_dsi.h>
+ 
+ #include <asm/irq.h>
+ #include <asm/setup.h>
+@@ -194,6 +195,7 @@
+ static struct clk *sata_clk;
+ static int mma8451_position = 3;
+ static int mag3110_position;
++static int disable_ldb;
+ 
+ extern char *gp_reg_id;
+ extern int epdc_enabled;
+@@ -1158,6 +1160,28 @@ static struct imx_asrc_platform_data imx_asrc_data = {
+ 	.clk_map_ver = 2,
+ };
+ 
++static void mx6_reset_mipi_dsi(void)
++{
++	gpio_set_value(SABRESD_DISP_PWR_EN, 1);
++	gpio_set_value(SABRESD_DISP_RST_B, 1);
++	udelay(10);
++	gpio_set_value(SABRESD_DISP_RST_B, 0);
++	udelay(50);
++	gpio_set_value(SABRESD_DISP_RST_B, 1);
++
++	/*
++	 * it needs to delay 120ms minimum for reset complete
++	 */
++	msleep(120);
++}
++
++static struct mipi_dsi_platform_data mipi_dsi_pdata = {
++	.ipu_id		= 0,
++	.disp_id	= 1,
++	.lcd_panel	= "TRULY-WVGA",
++	.reset		= mx6_reset_mipi_dsi,
++};
++
+ static struct ipuv3_fb_platform_data sabresd_fb_data[] = {
+ 	{ /*fb0*/
+ 	.disp_dev = "ldb",
+@@ -1439,6 +1463,14 @@ static const struct imx_pcie_platform_data mx6_sabresd_pcie_data __initconst = {
+ 	.pcie_dis	= SABRESD_PCIE_DIS_B,
+ };
+ 
++static int __init early_disable_ldb(char *p)
++{
++	/*mipi dsi need pll3_pfd_540M as 540MHz, ldb will change to 454Mhz*/
++	disable_ldb = 1;
++	return 0;
++}
++
++early_param("disable_ldb", early_disable_ldb);
+ /*!
+  * Board specific initialization.
+  */
+@@ -1482,6 +1514,8 @@ static void __init mx6_sabresd_board_init(void)
+ 		ldb_data.sec_ipu_id = 0;
+ 		ldb_data.sec_disp_id = 1;
+ 		hdmi_core_data.disp_id = 1;
++		mipi_dsi_pdata.ipu_id = 0;
++		mipi_dsi_pdata.disp_id = 1;
+ 	}
+ 	imx6q_add_mxc_hdmi_core(&hdmi_core_data);
+ 
+@@ -1495,8 +1529,10 @@ static void __init mx6_sabresd_board_init(void)
+ 			imx6q_add_ipuv3fb(i, &sabresd_fb_data[i]);
+ 
+ 	imx6q_add_vdoa();
++	imx6q_add_mipi_dsi(&mipi_dsi_pdata);
+ 	imx6q_add_lcdif(&lcdif_data);
+-	imx6q_add_ldb(&ldb_data);
++	if (!disable_ldb)
++		imx6q_add_ldb(&ldb_data);
+ 	imx6q_add_v4l2_output(0);
+ 	imx6q_add_v4l2_capture(0);
+ 	imx6q_add_mipi_csi2(&mipi_csi2_pdata);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.h b/arch/arm/mach-mx6/board-mx6q_sabresd.h
+index d84a606..8ccb342 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.h
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.h
+@@ -253,6 +253,11 @@ static iomux_v3_cfg_t mx6q_sabresd_pads[] = {
+ 
+ 	MX6Q_PAD_GPIO_17__GPIO_7_12, /* PCIE_RST */
+ 	MX6Q_PAD_KEY_COL4__GPIO_4_14, /* PCIE_DIS */
++
++	/* DISP_RST_B */
++	MX6Q_PAD_NANDF_CS0__GPIO_6_11,
++	/* DISP_PWR_EN */
++	MX6Q_PAD_NANDF_CS1__GPIO_6_14,
+ };
+ 
+ static iomux_v3_cfg_t mx6q_sabresd_csi0_sensor_pads[] = {
+-- 
+1.7.7.4
+

@@ -1,0 +1,144 @@
+From 62960a81f593190813c171002ba2103ce32ce01a Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Tue, 12 Mar 2013 16:54:59 +0800
+Subject: [PATCH 2435/2463] ENGR00253927 IPU: Fix NULL pointer bug when BG EOF
+ interrupt occur early
+
+Fix NULL pointer bug when IPU BG EOF interrupt occur before register irq handler
+It can be reproduced on MIPI DSI display on i.mx6dl SabreSD board.
+
+The sequence is:
+a) enable display channel
+b) pan display (fb_set_var()) -> ipu_enable_irq
+c) ipu_request_irq
+If an EOF interrupt comes before c and after b, the issue happens.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |   80 ++++++++++++++++++++++----------------
+ 1 files changed, 46 insertions(+), 34 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index f8dd59e..4c98d51 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -2040,6 +2040,31 @@ static int mxcfb_register(struct fb_info *fbi)
+ 	fb_var_to_videomode(&m, &fbi->var);
+ 	fb_add_videomode(&m, &fbi->modelist);
+ 
++	if (ipu_request_irq(mxcfbi->ipu, mxcfbi->ipu_ch_irq,
++		mxcfb_irq_handler, IPU_IRQF_ONESHOT, MXCFB_NAME, fbi) != 0) {
++		dev_err(fbi->device, "Error registering EOF irq handler.\n");
++		ret = -EBUSY;
++		goto err0;
++	}
++	ipu_disable_irq(mxcfbi->ipu, mxcfbi->ipu_ch_irq);
++	if (ipu_request_irq(mxcfbi->ipu, mxcfbi->ipu_ch_nf_irq,
++		mxcfb_nf_irq_handler, IPU_IRQF_ONESHOT, MXCFB_NAME, fbi) != 0) {
++		dev_err(fbi->device, "Error registering NFACK irq handler.\n");
++		ret = -EBUSY;
++		goto err1;
++	}
++	ipu_disable_irq(mxcfbi->ipu, mxcfbi->ipu_ch_nf_irq);
++
++	if (mxcfbi->ipu_alp_ch_irq != -1)
++		if (ipu_request_irq(mxcfbi->ipu, mxcfbi->ipu_alp_ch_irq,
++				mxcfb_alpha_irq_handler, IPU_IRQF_ONESHOT,
++					MXCFB_NAME, fbi) != 0) {
++			dev_err(fbi->device, "Error registering alpha irq "
++					"handler.\n");
++			ret = -EBUSY;
++			goto err2;
++		}
++
+ 	if (!mxcfbi->late_init) {
+ 		fbi->var.activate |= FB_ACTIVATE_FORCE;
+ 		console_lock();
+@@ -2047,11 +2072,20 @@ static int mxcfb_register(struct fb_info *fbi)
+ 		ret = fb_set_var(fbi, &fbi->var);
+ 		fbi->flags &= ~FBINFO_MISC_USEREVENT;
+ 		console_unlock();
++		if (ret < 0) {
++			dev_err(fbi->device, "Error fb_set_var ret:%d\n", ret);
++			goto err3;
++		}
+ 
+ 		if (mxcfbi->next_blank == FB_BLANK_UNBLANK) {
+ 			console_lock();
+-			fb_blank(fbi, FB_BLANK_UNBLANK);
++			ret = fb_blank(fbi, FB_BLANK_UNBLANK);
+ 			console_unlock();
++			if (ret < 0) {
++				dev_err(fbi->device,
++					"Error fb_blank ret:%d\n", ret);
++				goto err4;
++			}
+ 		}
+ 	} else {
+ 		/*
+@@ -2067,44 +2101,13 @@ static int mxcfb_register(struct fb_info *fbi)
+ 		}
+ 	}
+ 
+-	if (ipu_request_irq(mxcfbi->ipu, mxcfbi->ipu_ch_irq,
+-		mxcfb_irq_handler, IPU_IRQF_ONESHOT, MXCFB_NAME, fbi) != 0) {
+-		dev_err(fbi->device, "Error registering EOF irq handler.\n");
+-		ret = -EBUSY;
+-		goto err0;
+-	}
+-	ipu_disable_irq(mxcfbi->ipu, mxcfbi->ipu_ch_irq);
+-	if (ipu_request_irq(mxcfbi->ipu, mxcfbi->ipu_ch_nf_irq,
+-		mxcfb_nf_irq_handler, IPU_IRQF_ONESHOT, MXCFB_NAME, fbi) != 0) {
+-		dev_err(fbi->device, "Error registering NFACK irq handler.\n");
+-		ret = -EBUSY;
+-		goto err1;
+-	}
+-	ipu_disable_irq(mxcfbi->ipu, mxcfbi->ipu_ch_nf_irq);
+-
+-	if (mxcfbi->ipu_alp_ch_irq != -1)
+-		if (ipu_request_irq(mxcfbi->ipu, mxcfbi->ipu_alp_ch_irq,
+-				mxcfb_alpha_irq_handler, IPU_IRQF_ONESHOT,
+-					MXCFB_NAME, fbi) != 0) {
+-			dev_err(fbi->device, "Error registering alpha irq "
+-					"handler.\n");
+-			ret = -EBUSY;
+-			goto err2;
+-		}
+ 
+ 	ret = register_framebuffer(fbi);
+ 	if (ret < 0)
+-		goto err3;
++		goto err5;
+ 
+ 	return ret;
+-err3:
+-	if (mxcfbi->ipu_alp_ch_irq != -1)
+-		ipu_free_irq(mxcfbi->ipu, mxcfbi->ipu_alp_ch_irq, fbi);
+-err2:
+-	ipu_free_irq(mxcfbi->ipu, mxcfbi->ipu_ch_nf_irq, fbi);
+-err1:
+-	ipu_free_irq(mxcfbi->ipu, mxcfbi->ipu_ch_irq, fbi);
+-err0:
++err5:
+ 	if (mxcfbi->next_blank == FB_BLANK_UNBLANK) {
+ 		console_lock();
+ 		if (!mxcfbi->late_init)
+@@ -2116,6 +2119,15 @@ err0:
+ 		}
+ 		console_unlock();
+ 	}
++err4:
++err3:
++	if (mxcfbi->ipu_alp_ch_irq != -1)
++		ipu_free_irq(mxcfbi->ipu, mxcfbi->ipu_alp_ch_irq, fbi);
++err2:
++	ipu_free_irq(mxcfbi->ipu, mxcfbi->ipu_ch_nf_irq, fbi);
++err1:
++	ipu_free_irq(mxcfbi->ipu, mxcfbi->ipu_ch_irq, fbi);
++err0:
+ 	return ret;
+ }
+ 
+-- 
+1.7.7.4
+

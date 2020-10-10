@@ -1,0 +1,55 @@
+From 2ca09709338826d79de2d079a6e53e69d6db3118 Mon Sep 17 00:00:00 2001
+From: Terry Lv <r65388@freescale.com>
+Date: Thu, 27 Jan 2011 20:54:32 +0800
+Subject: [PATCH 0058/2463] ENGR00138547: mxc_iim: can't release twice in
+ mxc_iim
+
+When open mxc_iim twice, mxc_iim can't be close twice.
+
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/char/mxc_iim.c |    7 +++----
+ 1 files changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/char/mxc_iim.c b/drivers/char/mxc_iim.c
+index fc42afc..ea59295 100644
+--- a/drivers/char/mxc_iim.c
++++ b/drivers/char/mxc_iim.c
+@@ -507,9 +507,6 @@ static int mxc_iim_open(struct inode *inode, struct file *filp)
+ 	}
+ 	clk_enable(iim_data->clk);
+ 
+-	iim_data->virt_base =
+-		(u32)ioremap(iim_data->reg_base, iim_data->reg_size);
+-
+ 	mxc_iim_disable_irq();
+ 
+ 	dev_dbg(iim_data->dev, "<= %s\n", __func__);
+@@ -529,7 +526,6 @@ static int mxc_iim_release(struct inode *inode, struct file *filp)
+ {
+ 	clk_disable(iim_data->clk);
+ 	clk_put(iim_data->clk);
+-	iounmap((void *)iim_data->virt_base);
+ 	return 0;
+ }
+ 
+@@ -598,6 +594,8 @@ static __devinit int mxc_iim_probe(struct platform_device *pdev)
+ 	iim_data->reg_end = res->end;
+ 	iim_data->reg_size =
+ 		iim_data->reg_end - iim_data->reg_base + 1;
++	iim_data->virt_base =
++		(u32)ioremap(iim_data->reg_base, iim_data->reg_size);
+ 
+ 	mutex_init(&(iim_data->mutex));
+ 	spin_lock_init(&(iim_data->lock));
+@@ -614,6 +612,7 @@ static __devinit int mxc_iim_probe(struct platform_device *pdev)
+ static int __devexit mxc_iim_remove(struct platform_device *pdev)
+ {
+ 	free_irq(iim_data->irq, iim_data);
++	iounmap((void *)iim_data->virt_base);
+ 	misc_deregister(&mxc_iim_miscdev);
+ 	return 0;
+ }
+-- 
+1.7.7.4
+

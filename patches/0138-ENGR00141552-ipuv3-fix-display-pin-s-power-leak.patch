@@ -1,0 +1,74 @@
+From 9afd177e7524394df137f4af3b1b1682bfaab002 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Thu, 28 Apr 2011 11:23:36 +0800
+Subject: [PATCH 0138/2463] ENGR00141552 ipuv3: fix display pin's power leak
+
+If you disable display, the display port's pin may keep high voltage which
+may cause power leakage. Fix this issue by make all pin go into low level
+after display disable.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_disp.c      |   19 +++++++++++++++++++
+ drivers/video/mxc/mxc_ipuv3_fb.c |    1 +
+ include/linux/ipu.h              |    2 ++
+ 3 files changed, 22 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_disp.c b/drivers/mxc/ipu3/ipu_disp.c
+index f2c6bee..9e8d703 100644
+--- a/drivers/mxc/ipu3/ipu_disp.c
++++ b/drivers/mxc/ipu3/ipu_disp.c
+@@ -1475,6 +1475,25 @@ int32_t ipu_init_sync_panel(int disp, uint32_t pixel_clk,
+ }
+ EXPORT_SYMBOL(ipu_init_sync_panel);
+ 
++void ipu_uninit_sync_panel(int disp)
++{
++	unsigned long lock_flags;
++	uint32_t reg;
++	uint32_t di_gen;
++
++	spin_lock_irqsave(&ipu_lock, lock_flags);
++
++	di_gen = __raw_readl(DI_GENERAL(disp));
++	di_gen |= 0x3ff | DI_GEN_POLARITY_DISP_CLK;
++	__raw_writel(di_gen, DI_GENERAL(disp));
++
++	reg = __raw_readl(DI_POL(disp));
++	reg |= 0x3ffffff;
++	__raw_writel(reg, DI_POL(disp));
++
++	spin_unlock_irqrestore(&ipu_lock, lock_flags);
++}
++EXPORT_SYMBOL(ipu_uninit_sync_panel);
+ 
+ int ipu_init_async_panel(int disp, int type, uint32_t cycle_time,
+ 			 uint32_t pixel_fmt, ipu_adc_sig_cfg_t sig)
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 03c07b9..1107bea 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -1226,6 +1226,7 @@ static int mxcfb_blank(int blank, struct fb_info *info)
+ 	case FB_BLANK_HSYNC_SUSPEND:
+ 	case FB_BLANK_NORMAL:
+ 		ipu_disable_channel(mxc_fbi->ipu_ch, true);
++		ipu_uninit_sync_panel(mxc_fbi->ipu_di);
+ 		ipu_uninit_channel(mxc_fbi->ipu_ch);
+ 		break;
+ 	case FB_BLANK_UNBLANK:
+diff --git a/include/linux/ipu.h b/include/linux/ipu.h
+index 2e2b3ce..768ec3d 100644
+--- a/include/linux/ipu.h
++++ b/include/linux/ipu.h
+@@ -956,6 +956,8 @@ int32_t ipu_init_sync_panel(int disp,
+ 			    uint16_t v_sync_width, uint16_t v_end_width,
+ 			    uint32_t v_to_h_sync, ipu_di_signal_cfg_t sig);
+ 
++void ipu_uninit_sync_panel(int disp);
++
+ int32_t ipu_disp_set_window_pos(ipu_channel_t channel, int16_t x_pos,
+ 				int16_t y_pos);
+ int32_t ipu_disp_get_window_pos(ipu_channel_t channel, int16_t *x_pos,
+-- 
+1.7.7.4
+

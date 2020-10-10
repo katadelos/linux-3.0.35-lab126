@@ -1,0 +1,159 @@
+From 0034a278a9e7f4d38390b0e1b98229af58c06bc6 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Tue, 8 Nov 2011 15:54:47 +0800
+Subject: [PATCH 0587/2463] ENGR00161617 - [MX6] : FEC get MAC address from
+ OCOTP.
+
+- FEC get the default MAC address from OCOTP.
+- If the MAC address is all zero, get the random address.
+- But, if add para "fec_mac=xx:xx:xx:xx:xx:xx" in uboot,
+  FEC will get the last MAC address from uboot para.
+
+ Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ arch/arm/mach-mx6/Makefile               |    2 +-
+ arch/arm/mach-mx6/board-mx6q_arm2.c      |    8 +----
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |    8 +----
+ arch/arm/mach-mx6/mx6_fec.c              |   53 ++++++++++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/common.h  |    1 +
+ 5 files changed, 57 insertions(+), 15 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Makefile b/arch/arm/mach-mx6/Makefile
+index 7b3231f..d0fe1f4 100644
+--- a/arch/arm/mach-mx6/Makefile
++++ b/arch/arm/mach-mx6/Makefile
+@@ -3,7 +3,7 @@
+ #
+ 
+ # Object file lists.
+-obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o usb_dr.o usb_h1.o usb_h2.o usb_h3.o pm.o cpu_op-mx6.o mx6_wfi.o mx6_anatop_regulator.o
++obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o usb_dr.o usb_h1.o usb_h2.o usb_h3.o pm.o cpu_op-mx6.o mx6_wfi.o mx6_fec.o mx6_anatop_regulator.o
+ 
+ obj-$(CONFIG_ARCH_MX6) += clock.o mx6q_suspend.o
+ obj-$(CONFIG_MACH_MX6Q_ARM2) += board-mx6q_arm2.o
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 553e55e..665d91b 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -519,12 +519,6 @@ static struct fec_platform_data fec_data __initdata = {
+ 	.phy = PHY_INTERFACE_MODE_RGMII,
+ };
+ 
+-static inline void imx6q_init_fec(void)
+-{
+-	random_ether_addr(fec_data.mac);
+-	imx6q_add_fec(&fec_data);
+-}
+-
+ static int mx6q_arm2_spi_cs[] = {
+ 	MX6Q_ARM2_ECSPI1_CS0,
+ 	MX6Q_ARM2_ECSPI1_CS1,
+@@ -1451,7 +1445,7 @@ static void __init mx6_board_init(void)
+ 	imx6q_add_anatop_thermal_imx(1, &mx6q_arm2_anatop_thermal_data);
+ 
+ 	if (!esai_record)
+-		imx6q_init_fec();
++		imx6_init_fec(fec_data);
+ 
+ 	imx6q_add_pm_imx(0, &mx6q_arm2_pm_data);
+ 	imx6q_add_sdhci_usdhc_imx(3, &mx6q_arm2_sd4_data);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index 6e0a9fa..50c9e9c 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -421,12 +421,6 @@ static struct fec_platform_data fec_data __initdata = {
+ 	.phy = PHY_INTERFACE_MODE_RGMII,
+ };
+ 
+-static inline void imx6q_init_fec(void)
+-{
+-	random_ether_addr(fec_data.mac);
+-	imx6q_add_fec(&fec_data);
+-}
+-
+ static int mx6q_sabrelite_spi_cs[] = {
+ 	MX6Q_SABRELITE_ECSPI1_CS1,
+ };
+@@ -875,7 +869,7 @@ static void __init mx6_sabrelite_board_init(void)
+ 	imx6q_add_mxc_hdmi(&hdmi_data);
+ 
+ 	imx6q_add_anatop_thermal_imx(1, &mx6q_sabrelite_anatop_thermal_data);
+-	imx6q_init_fec();
++	imx6_init_fec(fec_data);
+ 	imx6q_add_pm_imx(0, &mx6q_sabrelite_pm_data);
+ 	imx6q_add_sdhci_usdhc_imx(3, &mx6q_sabrelite_sd4_data);
+ 	imx6q_add_sdhci_usdhc_imx(2, &mx6q_sabrelite_sd3_data);
+diff --git a/arch/arm/mach-mx6/mx6_fec.c b/arch/arm/mach-mx6/mx6_fec.c
+new file mode 100644
+index 0000000..9d3c824
+--- /dev/null
++++ b/arch/arm/mach-mx6/mx6_fec.c
+@@ -0,0 +1,53 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++#include <linux/fec.h>
++#include <linux/etherdevice.h>
++
++#include <mach/common.h>
++#include <mach/hardware.h>
++
++#include <asm/mach-types.h>
++#include <asm/mach/arch.h>
++#include "devices-imx6q.h"
++
++#define HW_OCOTP_MACn(n)        (0x00000250 + (n) * 0x10)
++
++static int fec_get_mac_addr(unsigned char *mac)
++{
++	unsigned int value;
++
++	value = readl(MX6_IO_ADDRESS(OCOTP_BASE_ADDR) + HW_OCOTP_MACn(0));
++	mac[5] = value & 0xff;
++	mac[4] = (value >> 8) & 0xff;
++	mac[3] = (value >> 16) & 0xff;
++	mac[2] = (value >> 24) & 0xff;
++	value = readl(MX6_IO_ADDRESS(OCOTP_BASE_ADDR) + HW_OCOTP_MACn(1));
++	mac[1] = value & 0xff;
++	mac[0] = (value >> 8) & 0xff;
++
++	return 0;
++}
++
++void imx6_init_fec(struct fec_platform_data fec_data)
++{
++	fec_get_mac_addr(fec_data.mac);
++	if (!is_valid_ether_addr(fec_data.mac))
++		random_ether_addr(fec_data.mac);
++
++	imx6q_add_fec(&fec_data);
++}
+diff --git a/arch/arm/plat-mxc/include/mach/common.h b/arch/arm/plat-mxc/include/mach/common.h
+index bc147ae..1359c44 100755
+--- a/arch/arm/plat-mxc/include/mach/common.h
++++ b/arch/arm/plat-mxc/include/mach/common.h
+@@ -72,6 +72,7 @@ extern int mx50_clocks_init(unsigned long ckil, unsigned long osc,
+ 			unsigned long ckih1);
+ extern int mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 			unsigned long ckih1, unsigned long ckih2);
++extern void imx6_init_fec(struct fec_platform_data fec_data);
+ extern int mxc91231_clocks_init(unsigned long fref);
+ extern int mxc_register_gpios(void);
+ extern int mxc_register_device(struct platform_device *pdev, void *data);
+-- 
+1.7.7.4
+

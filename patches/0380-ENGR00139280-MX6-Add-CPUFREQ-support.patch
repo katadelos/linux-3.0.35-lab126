@@ -1,0 +1,1149 @@
+From 4f68d445af0e34e04c27a0f1b38207af611da652 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Fri, 29 Jul 2011 14:30:19 -0500
+Subject: [PATCH 0380/2463] ENGR00139280: MX6: Add CPUFREQ support
+
+Add support for CPUFREQ for SMP system.
+Added support for 1GHz, 800MHz, 400MHz and 160MHz.
+Added support for scaling the voltage along with frequency.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig          |   17 +++++
+ arch/arm/mach-mx5/board-mx50_rdp.c       |   23 +++----
+ arch/arm/mach-mx5/board-mx51_babbage.c   |   24 ++++----
+ arch/arm/mach-mx5/board-mx53_ard.c       |   23 +++----
+ arch/arm/mach-mx5/board-mx53_evk.c       |   23 +++----
+ arch/arm/mach-mx5/board-mx53_loco.c      |   24 +++----
+ arch/arm/mach-mx5/board-mx53_smd.c       |   23 +++----
+ arch/arm/mach-mx5/cpu.c                  |   18 +++++-
+ arch/arm/mach-mx6/Kconfig                |    1 +
+ arch/arm/mach-mx6/Makefile               |    2 +-
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   24 ++++++--
+ arch/arm/mach-mx6/bus_freq.c             |    1 -
+ arch/arm/mach-mx6/clock.c                |   44 +++++++++++++-
+ arch/arm/mach-mx6/cpu.c                  |   19 ++++++
+ arch/arm/mach-mx6/cpu_op-mx6.c           |   73 ++++++++++++++++++++++
+ arch/arm/mach-mx6/cpu_op-mx6.h           |   14 ++++
+ arch/arm/mach-mx6/crm_regs.h             |   13 ++++
+ arch/arm/mach-mx6/pm.c                   |   14 ----
+ arch/arm/plat-mxc/cpu.c                  |    4 +-
+ arch/arm/plat-mxc/cpufreq.c              |   96 +++++++++++++++++++++++------
+ arch/arm/plat-mxc/dvfs_core.c            |   30 +++-------
+ 21 files changed, 362 insertions(+), 148 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 7e7ec68..6f3f626 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -19,6 +19,7 @@ CONFIG_HARDIRQS_SW_RESEND=y
+ CONFIG_GENERIC_IRQ_PROBE=y
+ CONFIG_GENERIC_LOCKBREAK=y
+ CONFIG_RWSEM_GENERIC_SPINLOCK=y
++CONFIG_ARCH_HAS_CPUFREQ=y
+ CONFIG_ARCH_HAS_CPU_IDLE_WAIT=y
+ CONFIG_GENERIC_HWEIGHT=y
+ CONFIG_GENERIC_CALIBRATE_DELAY=y
+@@ -429,6 +430,22 @@ CONFIG_CMDLINE="noinitrd console=ttymxc0,115200 root=/dev/mtdblock2 rw rootfstyp
+ #
+ # CPU Power Management
+ #
++CONFIG_CPU_FREQ=y
++CONFIG_CPU_FREQ_TABLE=y
++# CONFIG_CPU_FREQ_DEBUG is not set
++CONFIG_CPU_FREQ_STAT=y
++# CONFIG_CPU_FREQ_STAT_DETAILS is not set
++# CONFIG_CPU_FREQ_DEFAULT_GOV_PERFORMANCE is not set
++# CONFIG_CPU_FREQ_DEFAULT_GOV_POWERSAVE is not set
++CONFIG_CPU_FREQ_DEFAULT_GOV_USERSPACE=y
++# CONFIG_CPU_FREQ_DEFAULT_GOV_ONDEMAND is not set
++# CONFIG_CPU_FREQ_DEFAULT_GOV_CONSERVATIVE is not set
++#CONFIG_CPU_FREQ_GOV_PERFORMANCE is not set
++CONFIG_CPU_FREQ_GOV_POWERSAVE=y
++CONFIG_CPU_FREQ_GOV_USERSPACE=y
++# CONFIG_CPU_FREQ_GOV_ONDEMAND is not set
++CONFIG_CPU_FREQ_GOV_CONSERVATIVE=y
++CONFIG_CPU_FREQ_IMX=y
+ # CONFIG_CPU_IDLE is not set
+ 
+ #
+diff --git a/arch/arm/mach-mx5/board-mx50_rdp.c b/arch/arm/mach-mx5/board-mx50_rdp.c
+index e533370..26b04ab 100755
+--- a/arch/arm/mach-mx5/board-mx50_rdp.c
++++ b/arch/arm/mach-mx5/board-mx50_rdp.c
+@@ -93,14 +93,14 @@
+ #define MX50_RDP_SD3_WP		IMX_GPIO_NR(5, 28) 	/*GPIO_5_28 */
+ #define MX50_RDP_USB_OTG_PWR	IMX_GPIO_NR(6, 25)	/*GPIO_6_25*/
+ 
+-extern struct regulator *(*get_cpu_regulator)(void);
+-extern void (*put_cpu_regulator)(void);
++extern int (*set_cpu_voltage)(u32 volt);
++extern int mx5_set_cpu_voltage(struct regulator *gp_reg, u32 cpu_volt);
+ 
+ extern int mx50_rdp_init_mc13892(void);
+ 
+-extern char *gp_reg_id;
+ extern char *lp_reg_id;
+ 
++static char *gp_reg_id;
+ static struct regulator *cpu_regulator;
+ static int max17135_regulator_init(struct max17135 *max17135);
+ 
+@@ -755,18 +755,16 @@ static struct mxc_regulator_platform_data rdp_regulator_data = {
+ 	.vcc_reg_id = "lp_vcc",
+ };
+ 
+-static struct regulator *mx50_rdp_get_cpu_regulator(void)
++static int mx50_rdp_set_cpu_voltage(u32 cpu_volt)
+ {
++	int ret = -EINVAL;
++
+ 	if (cpu_regulator == NULL)
+ 		cpu_regulator = regulator_get(NULL, gp_reg_id);
+-	return cpu_regulator;
+-}
++	if (!IS_ERR(cpu_regulator))
++		ret = mx5_set_cpu_voltage(cpu_regulator, cpu_volt);
+ 
+-static void mx50_rdp_put_cpu_regulator(void)
+-{
+-	if (cpu_regulator != NULL)
+-		regulator_put(cpu_regulator);
+-	cpu_regulator = NULL;
++	return ret;
+ }
+ 
+ static const struct esdhc_platform_data mx50_rdp_sd1_data __initconst = {
+@@ -787,8 +785,7 @@ static const struct esdhc_platform_data mx50_rdp_sd3_data __initconst = {
+ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ 				   char **cmdline, struct meminfo *mi)
+ {
+-	get_cpu_regulator = mx50_rdp_get_cpu_regulator;
+-	put_cpu_regulator = mx50_rdp_put_cpu_regulator;
++	set_cpu_voltage = mx50_rdp_set_cpu_voltage;
+ }
+ 
+ static void mx50_rdp_usbotg_vbus(bool on)
+diff --git a/arch/arm/mach-mx5/board-mx51_babbage.c b/arch/arm/mach-mx5/board-mx51_babbage.c
+index 0db1fdac..8a7d8af 100755
+--- a/arch/arm/mach-mx5/board-mx51_babbage.c
++++ b/arch/arm/mach-mx5/board-mx51_babbage.c
+@@ -83,12 +83,12 @@
+ #define	MX51_USB_PLL_DIV_19_2_MHZ	0x01
+ #define	MX51_USB_PLL_DIV_24_MHZ	0x02
+ 
+-extern char *gp_reg_id;
+ extern char *lp_reg_id;
+-extern struct regulator *(*get_cpu_regulator)(void);
+-extern void (*put_cpu_regulator)(void);
++extern int (*set_cpu_voltage)(u32 volt);
++extern int mx5_set_cpu_voltage(struct regulator *gp_reg, u32 cpu_volt);
+ 
+ static struct regulator *cpu_regulator;
++static char *gp_reg_id;
+ 
+ static struct gpio_keys_button babbage_buttons[] = {
+ 	{
+@@ -562,18 +562,17 @@ static struct i2c_board_info mxc_i2c_hs_board_info[] __initdata = {
+ 
+ static struct mxc_gpu_platform_data gpu_data __initdata;
+ 
+-static struct regulator *mx51_bbg_get_cpu_regulator(void)
++static int mx51_bbg_set_cpu_voltage(u32 cpu_volt)
+ {
++	int ret = -EINVAL;
++
+ 	if (cpu_regulator == NULL)
+ 		cpu_regulator = regulator_get(NULL, gp_reg_id);
+-	return cpu_regulator;
+-}
++	if (!IS_ERR(cpu_regulator))
++		ret = mx5_set_cpu_voltage(cpu_regulator, cpu_volt);
++
++	return ret;
+ 
+-static void mx51_bbg_put_cpu_regulator(void)
+-{
+-	if (cpu_regulator != NULL)
+-		regulator_put(cpu_regulator);
+-	cpu_regulator = NULL;
+ }
+ 
+ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+@@ -587,8 +586,7 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ 	int fb_mem = 0;
+ 	char *str;
+ 
+-	get_cpu_regulator = mx51_bbg_get_cpu_regulator;
+-	put_cpu_regulator = mx51_bbg_put_cpu_regulator;
++	set_cpu_voltage = mx51_bbg_set_cpu_voltage;
+ 
+ 	for_each_tag(mem_tag, tags) {
+ 		if (mem_tag->hdr.tag == ATAG_MEM) {
+diff --git a/arch/arm/mach-mx5/board-mx53_ard.c b/arch/arm/mach-mx5/board-mx53_ard.c
+index dd6b16d..8f0cb9c 100755
+--- a/arch/arm/mach-mx5/board-mx53_ard.c
++++ b/arch/arm/mach-mx5/board-mx53_ard.c
+@@ -62,11 +62,11 @@
+ #define ARD_GPS_RST_B			(MAX7310_BASE_ADDR + 7)
+ 
+ static struct regulator *cpu_regulator;
++static char *gp_reg_id;
+ 
+-extern char *gp_reg_id;
+ extern char *lp_reg_id;
+-extern struct regulator *(*get_cpu_regulator)(void);
+-extern void (*put_cpu_regulator)(void);
++extern void (*set_cpu_voltage)(u32 volt);
++extern int mx5_set_cpu_voltage(struct regulator *gp_reg, u32 cpu_volt);
+ 
+ static iomux_v3_cfg_t mx53_ard_pads[] = {
+ 	/* UART */
+@@ -351,25 +351,22 @@ static struct mxc_regulator_platform_data ard_regulator_data = {
+ 	.cpu_reg_id = "SW1",
+ };
+ 
+-static struct regulator *mx53_ard_get_cpu_regulator(void)
++static int mx53_ard_set_cpu_voltage(u32 cpu_volt)
+ {
++	int ret = -EINVAL;
++
+ 	if (cpu_regulator == NULL)
+ 		cpu_regulator = regulator_get(NULL, gp_reg_id);
+-	return cpu_regulator;
+-}
++	if (!IS_ERR(cpu_regulator))
++		ret = mx5_set_cpu_voltage(cpu_regulator, cpu_volt);
+ 
+-static void mx53_ard_put_cpu_regulator(void)
+-{
+-	if (cpu_regulator != NULL)
+-		regulator_put(cpu_regulator);
+-	cpu_regulator = NULL;
++	return ret;
+ }
+ 
+ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ 				   char **cmdline, struct meminfo *mi)
+ {
+-	get_cpu_regulator = mx53_ard_get_cpu_regulator;
+-	put_cpu_regulator = mx53_ard_put_cpu_regulator;
++	set_cpu_voltage = mx53_ard_set_cpu_voltage;
+ }
+ 
+ static inline void mx53_ard_init_uart(void)
+diff --git a/arch/arm/mach-mx5/board-mx53_evk.c b/arch/arm/mach-mx5/board-mx53_evk.c
+index 8a8d305..81aa397 100755
+--- a/arch/arm/mach-mx5/board-mx53_evk.c
++++ b/arch/arm/mach-mx5/board-mx53_evk.c
+@@ -79,12 +79,12 @@
+ #define ARM2_OTG_VBUS			IMX_GPIO_NR(3, 22)	/* GPIO_3_22 */
+ #define ARM2_LCD_CONTRAST		IMX_GPIO_NR(4, 20)	/* GPIO_4_20 */
+ 
+-extern char *gp_reg_id;
+ extern char *lp_reg_id;
+-extern struct regulator *(*get_cpu_regulator)(void);
+-extern void (*put_cpu_regulator)(void);
++extern int (*set_cpu_voltage)(u32 volt);
++extern int mx5_set_cpu_voltage(struct regulator *gp_reg, u32 cpu_volt);
+ 
+ static struct regulator *cpu_regulator;
++static char *gp_reg_id;
+ 
+ static iomux_v3_cfg_t mx53common_pads[] = {
+ 	MX53_PAD_EIM_WAIT__GPIO5_0,
+@@ -725,25 +725,22 @@ static struct mxc_regulator_platform_data evk_regulator_data = {
+ 	.vcc_reg_id = "SW2",
+ };
+ 
+-static struct regulator *mx53_evk_get_cpu_regulator(void)
++static int mx53_evk_set_cpu_voltage(u32 cpu_volt)
+ {
++	int ret = -EINVAL;
++
+ 	if (cpu_regulator == NULL)
+ 		cpu_regulator = regulator_get(NULL, gp_reg_id);
+-	return cpu_regulator;
+-}
++	if (!IS_ERR(cpu_regulator))
++		ret = mx5_set_cpu_voltage(cpu_regulator, cpu_volt);
+ 
+-static void mx53_evk_put_cpu_regulator(void)
+-{
+-	if (cpu_regulator != NULL)
+-		regulator_put(cpu_regulator);
+-	cpu_regulator = NULL;
++	return ret;
+ }
+ 
+ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ 				   char **cmdline, struct meminfo *mi)
+ {
+-	get_cpu_regulator = mx53_evk_get_cpu_regulator;
+-	put_cpu_regulator = mx53_evk_put_cpu_regulator;
++	set_cpu_voltage = mx53_evk_set_cpu_voltage;
+ }
+ 
+ static void __init mx53_evk_board_init(void)
+diff --git a/arch/arm/mach-mx5/board-mx53_loco.c b/arch/arm/mach-mx5/board-mx53_loco.c
+index 01b7b61..b9a8a8e 100755
+--- a/arch/arm/mach-mx5/board-mx53_loco.c
++++ b/arch/arm/mach-mx5/board-mx53_loco.c
+@@ -67,14 +67,14 @@ extern void __iomem *arm_plat_base;
+ extern void __iomem *gpc_base;
+ extern void __iomem *ccm_base;
+ extern void __iomem *imx_otg_base;
+-extern char *gp_reg_id;
+ extern char *lp_reg_id;
+-extern struct regulator *(*get_cpu_regulator)(void);
+-extern void (*put_cpu_regulator)(void);
++extern int (*set_cpu_voltage)(u32 volt);
++extern int mx5_set_cpu_voltage(struct regulator *gp_reg, u32 cpu_volt);
+ 
+ extern int __init mx53_loco_init_da9052(void);
+ 
+ static struct regulator *cpu_regulator;
++static char *gp_reg_id;
+ 
+ static iomux_v3_cfg_t mx53_loco_pads[] = {
+ 	/* FEC */
+@@ -593,18 +593,15 @@ static struct mxc_regulator_platform_data loco_regulator_data = {
+ 	.cpu_reg_id = "cpu_vddgp",
+ };
+ 
+-static struct regulator *mx53_loco_get_cpu_regulator(void)
++static int mx53_loco_set_cpu_voltage(u32 cpu_volt)
+ {
++	int ret = -EINVAL;
++
+ 	if (cpu_regulator == NULL)
+ 		cpu_regulator = regulator_get(NULL, gp_reg_id);
+-	return cpu_regulator;
+-}
+-
+-static void mx53_loco_put_cpu_regulator(void)
+-{
+-	if (cpu_regulator != NULL)
+-		regulator_put(cpu_regulator);
+-	cpu_regulator = NULL;
++	if (!IS_ERR(cpu_regulator))
++		ret = mx5_set_cpu_voltage(cpu_regulator, cpu_volt);
++	return ret;
+ }
+ 
+ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+@@ -618,8 +615,7 @@ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ 	int fb_mem = SZ_32M;
+ 	char *str;
+ 
+-	get_cpu_regulator = mx53_loco_get_cpu_regulator;
+-	put_cpu_regulator = mx53_loco_put_cpu_regulator;
++	set_cpu_voltage = mx53_loco_set_cpu_voltage;
+ 
+ 	for_each_tag(mem_tag, tags) {
+ 		if (mem_tag->hdr.tag == ATAG_MEM) {
+diff --git a/arch/arm/mach-mx5/board-mx53_smd.c b/arch/arm/mach-mx5/board-mx53_smd.c
+index c18d840..79d0c76 100755
+--- a/arch/arm/mach-mx5/board-mx53_smd.c
++++ b/arch/arm/mach-mx5/board-mx53_smd.c
+@@ -83,14 +83,14 @@
+ 
+ static struct clk *sata_clk, *sata_ref_clk;
+ 
+-extern char *gp_reg_id;
+ extern char *lp_reg_id;
+-extern struct regulator *(*get_cpu_regulator)(void);
+-extern void (*put_cpu_regulator)(void);
++extern int (*set_cpu_voltage)(u32 volt);
++extern int mx5_set_cpu_voltage(struct regulator *gp_reg, u32 cpu_volt);
+ 
+ extern int mx53_smd_init_da9052(void);
+ 
+ static struct regulator *cpu_regulator;
++static char *gp_reg_id;
+ 
+ static iomux_v3_cfg_t mx53_smd_pads[] = {
+ 	MX53_PAD_CSI0_DAT10__UART1_TXD_MUX,
+@@ -742,25 +742,22 @@ static struct mxc_regulator_platform_data smd_regulator_data = {
+ 	.cpu_reg_id = "DA9052_BUCK_CORE",
+ };
+ 
+-static struct regulator *mx53_smd_get_cpu_regulator(void)
++static int mx53_smd_set_cpu_voltage(u32 cpu_volt)
+ {
++	int ret = -EINVAL;
++
+ 	if (cpu_regulator == NULL)
+ 		cpu_regulator = regulator_get(NULL, gp_reg_id);
+-	return cpu_regulator;
+-}
++	if (!IS_ERR(cpu_regulator))
++		ret = mx5_set_cpu_voltage(cpu_regulator, cpu_volt);
+ 
+-static void mx53_smd_put_cpu_regulator(void)
+-{
+-	if (cpu_regulator != NULL)
+-		regulator_put(cpu_regulator);
+-	cpu_regulator = NULL;
++	return ret;
+ }
+ 
+ static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+ 				   char **cmdline, struct meminfo *mi)
+ {
+-	get_cpu_regulator = mx53_smd_get_cpu_regulator;
+-	put_cpu_regulator = mx53_smd_put_cpu_regulator;
++	set_cpu_voltage = mx53_smd_set_cpu_voltage;
+ }
+ 
+ static void __init mx53_smd_board_init(void)
+diff --git a/arch/arm/mach-mx5/cpu.c b/arch/arm/mach-mx5/cpu.c
+index eab1514..4d36655 100755
+--- a/arch/arm/mach-mx5/cpu.c
++++ b/arch/arm/mach-mx5/cpu.c
+@@ -17,6 +17,9 @@
+ #include <linux/clk.h>
+ #include <linux/module.h>
+ #include <linux/iram_alloc.h>
++#include <linux/regulator/consumer.h>
++#include <linux/err.h>
++
+ #include <mach/hardware.h>
+ #include <asm/io.h>
+ 
+@@ -33,10 +36,11 @@
+ void __iomem *arm_plat_base;
+ void __iomem *gpc_base;
+ void __iomem *ccm_base;
++struct cpu_op *(*get_cpu_op)(int *op);
++
+ extern void init_ddr_settings(void);
+ 
+ static int cpu_silicon_rev = -1;
+-void (*set_num_cpu_op)(int num);
+ 
+ #define IIM_SREV 0x24
+ #define MX50_HW_ADADIG_DIGPROG	0xB0
+@@ -168,6 +172,18 @@ static int get_mx50_srev(void)
+ 	return 0;
+ }
+ 
++int mx5_set_cpu_voltage(struct regulator *gp_reg, u32 cpu_volt)
++{
++	u32 ret = 0;
++
++	if (!IS_ERR(gp_reg)) {
++		ret = regulator_set_voltage(gp_reg, cpu_volt, cpu_volt);
++		if (ret < 0)
++			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
++	}
++	return ret;
++}
++
+ /*
+  * Returns:
+  *	the silicon revision of the cpu
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 8d0d3c7..d6dc1cb 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -5,6 +5,7 @@ config ARCH_MX6Q
+ 	select USB_ARCH_HAS_EHCI
+ 	select ARCH_MXC_IOMUX_V3
+ 	select ARM_GIC
++	select ARCH_HAS_CPUFREQ
+ 	select IMX_HAVE_PLATFORM_IMX_UART
+ 	select IMX_HAVE_PLATFORM_FEC
+ 	select IMX_HAVE_PLATFORM_IMX_ANATOP_THERMAL
+diff --git a/arch/arm/mach-mx6/Makefile b/arch/arm/mach-mx6/Makefile
+index 094b2cf..bf23b55 100644
+--- a/arch/arm/mach-mx6/Makefile
++++ b/arch/arm/mach-mx6/Makefile
+@@ -3,7 +3,7 @@
+ #
+ 
+ # Object file lists.
+-obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o usb_dr.o usb_h1.o pm.o
++obj-y   := cpu.o mm.o system.o devices.o dummy_gpio.o irq.o bus_freq.o usb_dr.o usb_h1.o pm.o cpu_op-mx6.o
+ 
+ obj-$(CONFIG_ARCH_MX6) += clock.o mx6q_suspend.o
+ obj-$(CONFIG_MACH_MX6Q_SABREAUTO) += board-mx6q_sabreauto.o
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 08e523c..1f7b3d0 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -67,6 +67,7 @@
+ #include "usb.h"
+ #include "devices-imx6q.h"
+ #include "crm_regs.h"
++#include "cpu_op-mx6.h"
+ 
+ #define MX6Q_SABREAUTO_LDB_BACKLIGHT	IMX_GPIO_NR(1, 9)
+ #define MX6Q_SABREAUTO_ECSPI1_CS0	IMX_GPIO_NR(2, 30)
+@@ -86,6 +87,11 @@ void __init early_console_setup(unsigned long base, struct clk *clk);
+ static struct clk *sata_clk;
+ static int esai_record;
+ 
++extern struct regulator *(*get_cpu_regulator)(void);
++extern void (*put_cpu_regulator)(void);
++extern int (*set_cpu_voltage)(u32 volt);
++extern int mx6_set_cpu_voltage(u32 cpu_volt);
++
+ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 
+ 	/* UART4 for debug */
+@@ -302,11 +308,6 @@ static inline void mx6q_sabreauto_init_uart(void)
+ 	imx6q_add_imx_uart(3, NULL);
+ }
+ 
+-static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
+-				char **cmdline, struct meminfo *mi)
+-{
+-}
+-
+ static struct fec_platform_data fec_data __initdata = {
+ 	.phy = PHY_INTERFACE_MODE_RGMII,
+ };
+@@ -674,6 +675,19 @@ static int __init early_use_esai_record(char *p)
+ }
+ 
+ early_param("esai_record", early_use_esai_record);
++
++static int mx6_sabre_set_cpu_voltage(u32 cpu_volt)
++{
++	return mx6_set_cpu_voltage(cpu_volt);
++}
++
++static void __init fixup_mxc_board(struct machine_desc *desc, struct tag *tags,
++				   char **cmdline, struct meminfo *mi)
++{
++	set_cpu_voltage = mx6_sabre_set_cpu_voltage;
++}
++
++
+ /*!
+  * Board specific initialization.
+  */
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index 3c2c242..36308c1 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -74,7 +74,6 @@ int high_bus_freq_mode;
+ int med_bus_freq_mode;
+ 
+ int bus_freq_scaling_initialized;
+-char *gp_reg_id;
+ char *lp_reg_id;
+ 
+ static struct device *busfreq_dev;
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index c037f55..61e69f6 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -29,6 +29,7 @@
+ #include <mach/clock.h>
+ #include <mach/mxc_dvfs.h>
+ #include "crm_regs.h"
++#include "cpu_op-mx6.h"
+ 
+ #ifdef CONFIG_CLK_DEBUG
+ #define __INIT_CLK_DEBUG(n)	.name = #n,
+@@ -37,6 +38,8 @@
+ #endif
+ 
+ extern int mxc_jtag_enabled;
++extern struct cpu_op *(*get_cpu_op)(int *op);
++
+ void __iomem *apll_base;
+ static struct clk pll1_sys_main_clk;
+ static struct clk pll2_528_bus_main_clk;
+@@ -48,6 +51,8 @@ static struct clk pll7_usb_host_main_clk;
+ static struct clk pll8_enet_main_clk;
+ static struct clk apbh_dma_clk;
+ static struct clk openvg_axi_clk;
++static struct cpu_op *cpu_op_tbl;
++static int cpu_op_nr;
+ 
+ #define SPIN_DELAY	1000000 /* in nanoseconds */
+ 
+@@ -408,7 +413,7 @@ static int _clk_pll1_main_set_rate(struct clk *clk, unsigned long rate)
+ {
+ 	unsigned int reg,  div;
+ 
+-	if (rate/1000 < 650000 || rate/1000 > 1300000000)
++	if (rate < AUDIO_VIDEO_MIN_CLK_FREQ || rate > AUDIO_VIDEO_MAX_CLK_FREQ)
+ 		return -EINVAL;
+ 
+ 	div = (rate * 2) / clk_get_rate(clk->parent) ;
+@@ -870,9 +875,37 @@ static unsigned long _clk_arm_get_rate(struct clk *clk)
+ 
+ static int _clk_arm_set_rate(struct clk *clk, unsigned long rate)
+ {
++	int i;
+ 	u32 div;
++	u32 parent_rate;
++
++
++	for (i = 0; i < cpu_op_nr; i++) {
++		if (rate == cpu_op_tbl[i].cpu_rate)
++			break;
++	}
++	if (i >= cpu_op_nr)
++		return -EINVAL;
++
++	if (cpu_op_tbl[i].pll_rate != clk_get_rate(&pll1_sys_main_clk)) {
++		/* Change the PLL1 rate. */
++		if (pll2_pfd_400M.usecount != 0)
++			pll1_sw_clk.set_parent(&pll1_sw_clk, &pll2_pfd_400M);
++		else
++			pll1_sw_clk.set_parent(&pll1_sw_clk, &osc_clk);
++		pll1_sys_main_clk.set_rate(&pll1_sys_main_clk, cpu_op_tbl[i].pll_rate);
++		pll1_sw_clk.set_parent(&pll1_sw_clk, &pll1_sys_main_clk);
++	}
++
++	parent_rate = clk_get_rate(clk->parent);
++	div = parent_rate / rate;
++
++	if (div == 0)
++		div = 1;
++
++	if ((parent_rate / div) > rate)
++		div++;
+ 
+-	div = (clk_get_rate(clk->parent) / rate);
+ 	if (div > 8)
+ 		return -1;
+ 
+@@ -4080,6 +4113,9 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK("imx2-wdt.1", NULL, dummy_clk),
+ 	_REGISTER_CLOCK(NULL, "hdmi_isfr_clk", hdmi_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "hdmi_iahb_clk", hdmi_clk[1]),
++	_REGISTER_CLOCK(NULL, NULL, vdoa_clk),
++	_REGISTER_CLOCK(NULL, NULL, aips_tz2_clk),
++	_REGISTER_CLOCK(NULL, NULL, aips_tz1_clk),
+ };
+ 
+ 
+@@ -4094,7 +4130,6 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	unsigned long ckih1, unsigned long ckih2)
+ {
+ 	__iomem void *base;
+-	u32 reg;
+ 
+ 	int i;
+ 
+@@ -4137,6 +4172,9 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	/* set the NAND to 11MHz. Too fast will cause dma timeout. */
+ 	clk_set_rate(&enfc_clk, enfc_clk.round_rate(&enfc_clk, 11000000));
+ 
++	mx6_cpu_op_init();
++	cpu_op_tbl = get_cpu_op(&cpu_op_nr);
++
+ 	/* Gate off all possible clocks */
+ 	if (mxc_jtag_enabled) {
+ 		__raw_writel(3 << MXC_CCM_CCGRx_CG11_OFFSET |
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index 8e7b13c..dc3f1d1 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -25,6 +25,25 @@
+ #include <mach/hardware.h>
+ #include <asm/io.h>
+ 
++#include "crm_regs.h"
++
++struct cpu_op *(*get_cpu_op)(int *op);
++
++int mx6_set_cpu_voltage(u32 cpu_volt)
++{
++	u32 reg, val;
++
++	val = (cpu_volt - 725000) / 25000;
++
++	reg = __raw_readl(ANADIG_REG_CORE);
++	reg &= ~(ANADIG_REG_TARGET_MASK << ANADIG_REG0_CORE_TARGET_OFFSET);
++	reg |= ((val + 1) << ANADIG_REG0_CORE_TARGET_OFFSET);
++
++	__raw_writel(reg, ANADIG_REG_CORE);
++
++	return 0;
++}
++
+ static int __init post_cpu_init(void)
+ {
+ 	unsigned int reg;
+diff --git a/arch/arm/mach-mx6/cpu_op-mx6.c b/arch/arm/mach-mx6/cpu_op-mx6.c
+new file mode 100644
+index 0000000..5b03abb
+--- /dev/null
++++ b/arch/arm/mach-mx6/cpu_op-mx6.c
+@@ -0,0 +1,73 @@
++/*
++ * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/types.h>
++#include <mach/hardware.h>
++#include <linux/kernel.h>
++
++extern struct cpu_op *(*get_cpu_op)(int *op);
++extern void (*set_num_cpu_op)(int num);
++static int num_cpu_op;
++
++/* working point(wp): 0 - 1GHzMHz; 1 - 800MHz, 3 - 400MHz, 4  - 160MHz */
++static struct cpu_op mx6_cpu_op[] = {
++	{
++	 .pll_rate = 996000000,
++	 .cpu_rate = 996000000,
++	 .pdf = 0,
++	 .mfi = 10,
++	 .mfd = 11,
++	 .mfn = 5,
++	 .cpu_podf = 0,
++	 .cpu_voltage = 1100000,},
++	{
++	 .pll_rate = 792000000,
++	 .cpu_rate = 792000000,
++	 .pdf = 0,
++	 .mfi = 8,
++	 .mfd = 2,
++	 .mfn = 1,
++	 .cpu_podf = 0,
++	 .cpu_voltage = 1025000,},
++	 {
++	  .pll_rate = 792000000,
++	  .cpu_rate = 400000000,
++	  .cpu_podf = 1,
++	  .cpu_voltage = 1025000,},
++	{
++	 .pll_rate = 792000000,
++	 .cpu_rate = 167000000,
++	 .cpu_podf = 4,
++	 .cpu_voltage = 1000000,},
++};
++
++struct cpu_op *mx6_get_cpu_op(int *op)
++{
++	*op = num_cpu_op;
++	return mx6_cpu_op;
++}
++
++void mx6_set_num_cpu_op(int num)
++{
++	num_cpu_op = num;
++	return;
++}
++
++void mx6_cpu_op_init(void)
++{
++	get_cpu_op = mx6_get_cpu_op;
++	set_num_cpu_op = mx6_set_num_cpu_op;
++
++	num_cpu_op = ARRAY_SIZE(mx6_cpu_op);
++}
++
+diff --git a/arch/arm/mach-mx6/cpu_op-mx6.h b/arch/arm/mach-mx6/cpu_op-mx6.h
+new file mode 100644
+index 0000000..f13b269
+--- /dev/null
++++ b/arch/arm/mach-mx6/cpu_op-mx6.h
+@@ -0,0 +1,14 @@
++/*
++ * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++void mx6_cpu_op_init(void);
+diff --git a/arch/arm/mach-mx6/crm_regs.h b/arch/arm/mach-mx6/crm_regs.h
+index c1b7fe9..211c4a3 100644
+--- a/arch/arm/mach-mx6/crm_regs.h
++++ b/arch/arm/mach-mx6/crm_regs.h
+@@ -40,6 +40,7 @@
+ #define PLL8_ENET_BASE_ADDR		(MXC_PLL_BASE + 0xE0)
+ #define PFD_480_BASE_ADDR		(MXC_PLL_BASE + 0xF0)
+ #define PFD_528_BASE_ADDR		(MXC_PLL_BASE + 0x100)
++#define ANADIG_REG_CORE		(MXC_PLL_BASE + 0x140)
+ 
+ #define PLL_SETREG_OFFSET		0x4
+ #define PLL_CLRREG_OFFSET		0x8
+@@ -110,6 +111,18 @@
+ #define ANADIG_PFD0_STABLE			(1 << 6)
+ #define ANADIG_PFD0_FRAC_OFFSET			0
+ 
++/* ANATOP  Regulator/LDO defines */
++#define ANADIG_REG_RAMP_RATE_MASK			0x03
++#define ANADIG_REG_RAMP_RATE_OFFSET			(0x3 << 27)
++#define ANADIG_REG_ADJUST_MASK				0xF
++#define ANADIG_REG_TARGET_MASK				0x1F
++#define ANADIG_REG2_SOC_ADJUST_OFFSET		23
++#define ANADIG_REG2_SOC_TARGET_OFFSET		18
++#define ANADIG_REG1_PU_ADJUST_OFFSET			14
++#define ANADIG_REG1_PU_TARGET_OFFSET			9
++#define ANADIG_REG0_CORE_ADJUST_OFFSET		5
++#define ANADIG_REG0_CORE_TARGET_OFFSET		0
++
+ #define MXC_CCM_BASE		MX6_IO_ADDRESS(CCM_BASE_ADDR)
+ /* CCM Register Offsets. */
+ #define MXC_CCM_CDCR_OFFSET			0x4C
+diff --git a/arch/arm/mach-mx6/pm.c b/arch/arm/mach-mx6/pm.c
+index 45e4397..ac5ede9 100644
+--- a/arch/arm/mach-mx6/pm.c
++++ b/arch/arm/mach-mx6/pm.c
+@@ -224,20 +224,6 @@ static int mx6_suspend_prepare(void)
+  */
+ static void mx6_suspend_finish(void)
+ {
+-#if defined(CONFIG_CPU_FREQ)
+-	struct cpufreq_freqs freqs;
+-
+-	freqs.old = clk_get_rate(cpu_clk) / 1000;
+-	freqs.new = org_freq / 1000;
+-	freqs.cpu = 0;
+-	freqs.flags = 0;
+-
+-	if (org_freq != clk_get_rate(cpu_clk)) {
+-		set_cpu_freq(org_freq);
+-		cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
+-		cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
+-	}
+-#endif
+ }
+ 
+ /*
+diff --git a/arch/arm/plat-mxc/cpu.c b/arch/arm/plat-mxc/cpu.c
+index 22abeb2..157e01a 100755
+--- a/arch/arm/plat-mxc/cpu.c
++++ b/arch/arm/plat-mxc/cpu.c
+@@ -22,8 +22,8 @@
+ unsigned int __mxc_cpu_type;
+ EXPORT_SYMBOL(__mxc_cpu_type);
+ extern int mxc_early_serial_console_init(unsigned long base, struct clk *clk);
+-struct regulator *(*get_cpu_regulator)(void);
+-void (*put_cpu_regulator)(void);
++int (*set_cpu_voltage)(u32 volt);
++void (*set_num_cpu_op)(int num);
+ 
+ void mxc_set_cpu_type(unsigned int type)
+ {
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index 2fbc55e..e65d033 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -21,14 +21,17 @@
+ #include <linux/err.h>
+ #include <linux/slab.h>
+ #include <linux/regulator/consumer.h>
++#include <linux/delay.h>
++
++#include <asm/smp_plat.h>
++#include <asm/cpu.h>
++
+ #include <mach/hardware.h>
+ #include <mach/clock.h>
+ 
+ #define CLK32_FREQ	32768
+ #define NANOSECOND	(1000 * 1000 * 1000)
+ 
+-struct cpu_op *(*get_cpu_op)(int *op);
+-char *gp_reg_id;
+ int cpufreq_trig_needed;
+ 
+ static int cpu_freq_khz_min;
+@@ -40,10 +43,11 @@ static struct cpufreq_frequency_table *imx_freq_table;
+ static int cpu_op_nr;
+ static struct cpu_op *cpu_op_tbl;
+ static struct regulator *gp_regulator;
++static u32 pre_suspend_rate;
+ 
+ extern int dvfs_core_is_active;
+-extern struct regulator *(*get_cpu_regulator)(void);
+-extern void (*put_cpu_regulator)(void);
++extern struct cpu_op *(*get_cpu_op)(int *op);
++extern int (*set_cpu_voltage)(u32 cpu_volt);
+ 
+ int set_cpu_freq(int freq)
+ {
+@@ -65,11 +69,12 @@ int set_cpu_freq(int freq)
+ 
+ 	/*Set the voltage for the GP domain. */
+ 	if (freq > org_cpu_rate) {
+-		ret = regulator_set_voltage(gp_regulator, gp_volt, gp_volt);
++		ret = set_cpu_voltage(gp_volt);
+ 		if (ret < 0) {
+ 			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
+ 			return ret;
+ 		}
++		udelay(50);
+ 	}
+ 
+ 	ret = clk_set_rate(cpu_clk, freq);
+@@ -79,7 +84,7 @@ int set_cpu_freq(int freq)
+ 	}
+ 
+ 	if (freq < org_cpu_rate) {
+-		ret = regulator_set_voltage(gp_regulator, gp_volt, gp_volt);
++		ret = set_cpu_voltage(gp_volt);
+ 		if (ret < 0) {
+ 			printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE!!!!\n");
+ 			return ret;
+@@ -91,7 +96,7 @@ int set_cpu_freq(int freq)
+ 
+ static int mxc_verify_speed(struct cpufreq_policy *policy)
+ {
+-	if (policy->cpu != 0)
++	if (policy->cpu > num_possible_cpus())
+ 		return -EINVAL;
+ 
+ 	return cpufreq_frequency_table_verify(policy, imx_freq_table);
+@@ -99,7 +104,7 @@ static int mxc_verify_speed(struct cpufreq_policy *policy)
+ 
+ static unsigned int mxc_get_speed(unsigned int cpu)
+ {
+-	if (cpu)
++	if (cpu > num_possible_cpus())
+ 		return 0;
+ 
+ 	return clk_get_rate(cpu_clk) / 1000;
+@@ -112,11 +117,18 @@ static int mxc_set_target(struct cpufreq_policy *policy,
+ 	int freq_Hz;
+ 	int ret = 0;
+ 	unsigned int index;
++	int i, num_cpus;
++
++	num_cpus = num_possible_cpus();
++	if (policy->cpu > num_cpus)
++		return 0;
+ 
++#ifdef CONFIG_ARCH_MX5
+ 	if (dvfs_core_is_active) {
+ 		printk(KERN_DEBUG"DVFS-CORE is active, cannot change frequency using CPUFREQ\n");
+ 		return ret;
+ 	}
++#endif
+ 
+ 	cpufreq_frequency_table_target(policy, imx_freq_table,
+ 			target_freq, relation, &index);
+@@ -124,17 +136,59 @@ static int mxc_set_target(struct cpufreq_policy *policy,
+ 
+ 	freqs.old = clk_get_rate(cpu_clk) / 1000;
+ 	freqs.new = freq_Hz / 1000;
+-	freqs.cpu = 0;
++	freqs.cpu = policy->cpu;
+ 	freqs.flags = 0;
+-	cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
++
++	for (i = 0; i < num_cpus; i++) {
++		freqs.cpu = i;
++		cpufreq_notify_transition(&freqs, CPUFREQ_PRECHANGE);
++	}
+ 
+ 	ret = set_cpu_freq(freq_Hz);
+ 
+-	cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
++#ifdef CONFIG_SMP
++	/* Loops per jiffy is not updated by the CPUFREQ driver for SMP systems.
++	  * So update it for all CPUs.
++	  */
++
++	for_each_cpu(i, policy->cpus)
++		per_cpu(cpu_data, i).loops_per_jiffy =
++		cpufreq_scale(per_cpu(cpu_data, i).loops_per_jiffy,
++					freqs.old, freqs.new);
++#endif
++	for (i = 0; i < num_cpus; i++) {
++		freqs.cpu = i;
++		cpufreq_notify_transition(&freqs, CPUFREQ_POSTCHANGE);
++	}
++
+ 
+ 	return ret;
+ }
+ 
++static int mxc_cpufreq_suspend(struct platform_device *pdev,
++				 pm_message_t state)
++{
++	struct cpufreq_policy *policy = pdev;
++
++	pre_suspend_rate = clk_get_rate(cpu_clk);
++	/* Set to max freq and voltage */
++	if (pre_suspend_rate != (imx_freq_table[0].frequency * 1000))
++		set_cpu_freq(imx_freq_table[0].frequency);
++
++	return 0;
++}
++
++static int mxc_cpufreq_resume(struct platform_device *pdev,
++				 pm_message_t state)
++{
++	struct cpufreq_policy *policy = pdev;
++
++	if (clk_get_rate(cpu_clk) != pre_suspend_rate)
++		set_cpu_freq(pre_suspend_rate);
++
++	return 0;
++}
++
+ static int __devinit mxc_cpufreq_init(struct cpufreq_policy *policy)
+ {
+ 	int ret;
+@@ -142,7 +196,7 @@ static int __devinit mxc_cpufreq_init(struct cpufreq_policy *policy)
+ 
+ 	printk(KERN_INFO "i.MXC CPU frequency driver\n");
+ 
+-	if (policy->cpu != 0)
++	if (policy->cpu >= num_possible_cpus())
+ 		return -EINVAL;
+ 
+ 	if (!get_cpu_op)
+@@ -154,14 +208,6 @@ static int __devinit mxc_cpufreq_init(struct cpufreq_policy *policy)
+ 		return PTR_ERR(cpu_clk);
+ 	}
+ 
+-	gp_regulator = get_cpu_regulator();
+-
+-	if (IS_ERR(gp_regulator)) {
+-		clk_put(cpu_clk);
+-		printk(KERN_ERR "%s: failed to get gp regulator\n", __func__);
+-		return PTR_ERR(gp_regulator);
+-	}
+-
+ 	cpu_op_tbl = get_cpu_op(&cpu_op_nr);
+ 
+ 	cpu_freq_khz_min = cpu_op_tbl[0].cpu_rate / 1000;
+@@ -193,6 +239,14 @@ static int __devinit mxc_cpufreq_init(struct cpufreq_policy *policy)
+ 	policy->min = policy->cpuinfo.min_freq = cpu_freq_khz_min;
+ 	policy->max = policy->cpuinfo.max_freq = cpu_freq_khz_max;
+ 
++	/* All processors share the same frequency and voltage.
++	  * So all frequencies need to be scaled together.
++	  */
++	 if (is_smp()) {
++		policy->shared_type = CPUFREQ_SHARED_TYPE_ANY;
++		cpumask_setall(policy->cpus);
++	}
++
+ 	/* Manual states, that PLL stabilizes in two CLK32 periods */
+ 	policy->cpuinfo.transition_latency = 2 * NANOSECOND / CLK32_FREQ;
+ 
+@@ -230,6 +284,8 @@ static struct cpufreq_driver mxc_driver = {
+ 	.get = mxc_get_speed,
+ 	.init = mxc_cpufreq_init,
+ 	.exit = mxc_cpufreq_exit,
++	.suspend = mxc_cpufreq_suspend,
++	.resume = mxc_cpufreq_resume,
+ 	.name = "imx",
+ };
+ 
+diff --git a/arch/arm/plat-mxc/dvfs_core.c b/arch/arm/plat-mxc/dvfs_core.c
+index 846fee9..954ca86 100755
+--- a/arch/arm/plat-mxc/dvfs_core.c
++++ b/arch/arm/plat-mxc/dvfs_core.c
+@@ -97,6 +97,8 @@ static int minf;
+ 
+ extern void setup_pll(void);
+ extern int cpufreq_trig_needed;
++extern int (*set_cpu_voltage)(u32 cpu_volt);
++
+ struct timeval core_prev_intr;
+ 
+ void dump_dvfs_core_regs(void);
+@@ -112,13 +114,10 @@ static struct clk *pll1_sw_clk;
+ static struct clk *cpu_clk;
+ static struct clk *dvfs_clk;
+ static struct regulator *core_regulator;
+-extern struct regulator *(*get_cpu_regulator)(void);
+-extern void*(*put_cpu_regulator)(void);
+ 
+ static int cpu_op_nr;
+-#ifdef CONFIG_ARCH_MX5
+ extern struct cpu_op *(*get_cpu_op)(int *op);
+-#endif
++extern int (*set_cpu_voltage)(u32 cpu_volt);
+ 
+ enum {
+ 	FSVAI_FREQ_NOCHANGE = 0x0,
+@@ -194,8 +193,7 @@ static int set_cpu_freq(int op)
+ 
+ 		/*Set the voltage for the GP domain. */
+ 		if (rate > org_cpu_rate) {
+-			ret = regulator_set_voltage(core_regulator, gp_volt,
+-						    gp_volt);
++			ret = set_cpu_voltage(gp_volt);
+ 			if (ret < 0) {
+ 				printk(KERN_DEBUG "COULD NOT SET GP VOLTAGE\n");
+ 				return ret;
+@@ -242,8 +240,7 @@ static int set_cpu_freq(int op)
+ 		spin_unlock_irqrestore(&mxc_dvfs_core_lock, flags);
+ 
+ 		if (rate < org_cpu_rate) {
+-			ret = regulator_set_voltage(core_regulator,
+-						    gp_volt, gp_volt);
++			ret = set_cpu_voltage(gp_volt);
+ 			if (ret < 0) {
+ 				printk(KERN_DEBUG
+ 				       "COULD NOT SET GP VOLTAGE!!!!\n");
+@@ -284,8 +281,7 @@ static int set_cpu_freq(int op)
+ 		}
+ 		/* Check if FSVAI indicate freq up */
+ 		if (podf < arm_podf) {
+-			ret = regulator_set_voltage(core_regulator,
+-						    gp_volt, gp_volt);
++			ret = set_cpu_voltage(gp_volt);
+ 			if (ret < 0) {
+ 				printk(KERN_DEBUG
+ 				       "COULD NOT SET GP VOLTAGE!!!!\n");
+@@ -345,8 +341,7 @@ static int set_cpu_freq(int op)
+ 		spin_unlock_irqrestore(&mxc_dvfs_core_lock, flags);
+ 
+ 		if (vinc == 0) {
+-			ret = regulator_set_voltage(core_regulator,
+-						    gp_volt, gp_volt);
++			ret = set_cpu_voltage(gp_volt);
+ 			if (ret < 0) {
+ 				printk(KERN_DEBUG
+ 				       "COULD NOT SET GP VOLTAGE\n!!!");
+@@ -497,7 +492,7 @@ static void dvfs_core_work_handler(struct work_struct *work)
+ {
+ 	u32 fsvai;
+ 	u32 reg;
+-	u32 curr_cpu;
++	u32 curr_cpu = 0;
+ 	int ret = 0;
+ 	int low_freq_bus_ready = 0;
+ 	int bus_incr = 0, cpu_dcr = 0;
+@@ -853,15 +848,6 @@ static int __devinit mxc_dvfs_core_probe(struct platform_device *pdev)
+ 		return PTR_ERR(dvfs_clk);
+ 	}
+ 
+-	core_regulator = get_cpu_regulator();
+-	if (IS_ERR(core_regulator)) {
+-		clk_put(cpu_clk);
+-		clk_put(dvfs_clk);
+-		printk(KERN_ERR "%s: failed to get gp regulator %s\n",
+-				__func__, dvfs_data->reg_id);
+-		return PTR_ERR(core_regulator);
+-	}
+-
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 	if (res == NULL) {
+ 		err = -ENODEV;
+-- 
+1.7.7.4
+

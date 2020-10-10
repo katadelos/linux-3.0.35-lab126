@@ -1,0 +1,30 @@
+From 63a423497cb305c4089d2f93f706e1d58b472a42 Mon Sep 17 00:00:00 2001
+From: Zhang Jiejing <jiejing.zhang@freescale.com>
+Date: Mon, 16 Jul 2012 09:51:47 +0800
+Subject: [PATCH 1749/2463] ENGR00217258 mxc_vpu: return error when ioctl was
+ not supported.
+
+MXC_VPU will return 0 if IOCTL don't support, for user space, it think
+this IOCTL success, but it's needs actually return a failed return
+value.
+
+Signed-off-by Zhang Jiejing <jiejing.zhang@freescale.com>
+---
+ drivers/mxc/vpu/mxc_vpu.c |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/vpu/mxc_vpu.c b/drivers/mxc/vpu/mxc_vpu.c
+index 03a35be..c97437f 100644
+--- a/drivers/mxc/vpu/mxc_vpu.c
++++ b/drivers/mxc/vpu/mxc_vpu.c
+@@ -481,6 +481,7 @@ static long vpu_ioctl(struct file *filp, u_int cmd,
+ 	default:
+ 		{
+ 			printk(KERN_ERR "No such IOCTL, cmd is %d\n", cmd);
++			ret = -EINVAL;
+ 			break;
+ 		}
+ 	}
+-- 
+1.7.7.4
+

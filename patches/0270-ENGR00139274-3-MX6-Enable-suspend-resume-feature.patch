@@ -1,0 +1,142 @@
+From 95c82298255f2a195b9923722df74b25785288d9 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Wed, 20 Jul 2011 14:45:21 +0800
+Subject: [PATCH 0270/2463] ENGR00139274-3 [MX6]Enable suspend/resume feature
+
+1. Add irq_set_wake function to gic chip;
+2. Fix uart no_console_suspend issue;
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/irq.c              |   27 ++++++++++++++++++++++++++-
+ arch/arm/mach-mx6/system.c           |   27 +++++++++++----------------
+ arch/arm/plat-mxc/include/mach/mx6.h |    3 ++-
+ 3 files changed, 39 insertions(+), 18 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/irq.c b/arch/arm/mach-mx6/irq.c
+index 0c160bc..7cc9396 100644
+--- a/arch/arm/mach-mx6/irq.c
++++ b/arch/arm/mach-mx6/irq.c
+@@ -20,15 +20,40 @@
+ #include <linux/init.h>
+ #include <linux/io.h>
+ #include <linux/platform_device.h>
+-
++#include <linux/irq.h>
+ #include <asm/hardware/gic.h>
+ #include <mach/hardware.h>
+ 
+ int mx6q_register_gpios(void);
++unsigned int gpc_wake_irq[4];
++
++static int mx6_gic_irq_set_wake(struct irq_data *d, unsigned int enable)
++{
++	if ((d->irq < MXC_INT_START) || (d->irq > MXC_INT_END)) {
++		printk(KERN_ERR "Invalid irq number!\n");
++		return -EINVAL;
++	}
+ 
++	if (enable) {
++		gpc_wake_irq[d->irq / 32 - 1] |= 1 << (d->irq % 32);
++		printk(KERN_INFO "add wake up source irq %d\n", d->irq);
++	} else {
++		printk(KERN_INFO "remove wake up source irq %d\n", d->irq);
++		gpc_wake_irq[d->irq / 32 - 1] &= ~(1 << (d->irq % 32));
++	}
++	return 0;
++}
+ void __init mx6_init_irq(void)
+ {
++	struct irq_desc *desc;
++	unsigned int i;
++
+ 	gic_init(0, 29, IO_ADDRESS(IC_DISTRIBUTOR_BASE_ADDR),
+ 		IO_ADDRESS(IC_INTERFACES_BASE_ADDR));
++
++	for (i = MXC_INT_START; i <= MXC_INT_END; i++) {
++		desc = irq_to_desc(i);
++		desc->irq_data.chip->irq_set_wake = mx6_gic_irq_set_wake;
++	}
+ 	mx6q_register_gpios();
+ }
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index f18389b..eb22241 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -34,17 +34,17 @@
+ #define SCU_INVALIDATE		0x0c
+ #define SCU_FPGA_REVISION	0x10
+ 
+-void gpc_enable_wakeup(unsigned int irq)
++extern unsigned int gpc_wake_irq[4];
++
++void gpc_set_wakeup(unsigned int irq[4])
+ {
+ 	void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+-
+-	if ((irq < 32) || (irq > 158))
+-		printk(KERN_ERR "Invalid irq number!\n");
+-
+-	/* Enable wake up source */
+-	__raw_writel(~(1 << (irq % 32)),
+-		gpc_base + 0x8 + (irq / 32 - 1) * 4);
+-
++	/* Mask all wake up source */
++	__raw_writel(~irq[0], gpc_base + 0x8);
++	__raw_writel(~irq[1], gpc_base + 0xc);
++	__raw_writel(~irq[2], gpc_base + 0x10);
++	__raw_writel(~irq[3], gpc_base + 0x14);
++	return;
+ }
+ /* set cpu low power mode before WFI instruction */
+ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+@@ -91,16 +91,11 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 	}
+ 
+ 	if (stop_mode == 1) {
+-		/* Mask all wake up source */
+-		__raw_writel(0xFFFFFFFF, gpc_base + 0x8);
+-		__raw_writel(0xFFFFFFFF, gpc_base + 0xC);
+-		__raw_writel(0xFFFFFFFF, gpc_base + 0x10);
+-		__raw_writel(0xFFFFFFFF, gpc_base + 0x14);
++
++		gpc_set_wakeup(gpc_wake_irq);
+ 		/* Power down and power up sequence */
+ 		__raw_writel(0xFFFFFFFF, gpc_base + 0x2a4);
+ 		__raw_writel(0xFFFFFFFF, gpc_base + 0x2a8);
+-
+-		gpc_enable_wakeup(MXC_INT_UART4_ANDED);
+ 	}
+ 
+ 	__raw_writel(scu_cr, scu_base + SCU_CTRL);
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index a836788..67ad25d 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -54,7 +54,6 @@
+  */
+ #define DVFS_MAX_PIX_CLK	54000000
+ 
+-
+ /* IROM
+  */
+ #define IROM_BASE_ADDR		0x0
+@@ -268,6 +267,7 @@
+ /*
+  * Interrupt numbers
+  */
++#define MXC_INT_START                              32
+ #define MXC_INT_GPR                                32
+ #define MXC_INT_CHEETAH_CSYSPWRUPREQ               33
+ #define MX6Q_INT_SDMA                              34
+@@ -396,6 +396,7 @@
+ #define MXC_INT_DCIC2                              157
+ #define MXC_INT_MLB_AHB1                           158
+ #define MXC_INT_ANATOP_ANA2                        159
++#define MXC_INT_END 		                       159
+ 
+ #define MX6Q_INT_UART1	MXC_INT_UART1_ANDED
+ #define MX6Q_INT_UART2	MXC_INT_UART2_ANDED
+-- 
+1.7.7.4
+

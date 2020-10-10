@@ -1,0 +1,52 @@
+From 85e0440b10e01abc2ea6e94cf511bbbadc002bc2 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Thu, 27 Oct 2011 09:32:41 +0800
+Subject: [PATCH 0548/2463] ENGR00160875-1 ipuv3 dev: low performance if
+ enable rotation
+
+1. no dma alloc for rot buf every time which will cost time.
+2. fix split mode condition.
+3. export some functions.
+
+This patch for common head file.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ include/linux/ipu.h |   16 ++++++++++++++++
+ 1 files changed, 16 insertions(+), 0 deletions(-)
+
+diff --git a/include/linux/ipu.h b/include/linux/ipu.h
+index 17638ab..0516248 100644
+--- a/include/linux/ipu.h
++++ b/include/linux/ipu.h
+@@ -138,6 +138,12 @@ typedef enum {
+ /*! @} */
+ 
+ /* IPU device */
++typedef enum {
++	RGB_CS,
++	YUV_CS,
++	NULL_CS
++} cs_t;
++
+ struct ipu_pos {
+ 	u32 x;
+ 	u32 y;
+@@ -246,4 +252,14 @@ enum {
+ #define IPU_ALLOC		_IOWR('I', 0x3, int)
+ #define IPU_FREE		_IOW('I', 0x4, int)
+ 
++/* export functions */
++#ifdef __KERNEL__
++unsigned int fmt_to_bpp(unsigned int pixelformat);
++cs_t colorspaceofpixel(int fmt);
++int need_csc(int ifmt, int ofmt);
++
++int ipu_queue_task(struct ipu_task *task);
++int ipu_check_task(struct ipu_task *task);
++#endif
++
+ #endif
+-- 
+1.7.7.4
+

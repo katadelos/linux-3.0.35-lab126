@@ -1,0 +1,40 @@
+From 64dd5b8200381b4cb60fdd43c08dbbc217ea4010 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Tue, 8 Mar 2011 14:59:21 +0800
+Subject: [PATCH 0064/2463] ENGR00140391 ISL29023:Keep int thresholds in
+ interrupt handler
+
+We used to set the interrupt thresholds to the measure range
+of the light sensor in the interrupt handler, this potentially
+makes user poll on the input event and never be waken up.
+
+This patch keeps the interrupt thresholds in the interrupt
+handler and is tested on MX53 SMD.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+---
+ drivers/input/misc/isl29023.c |    8 --------
+ 1 files changed, 0 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/input/misc/isl29023.c b/drivers/input/misc/isl29023.c
+index 7c1dd7f..8ea0deb 100755
+--- a/drivers/input/misc/isl29023.c
++++ b/drivers/input/misc/isl29023.c
+@@ -826,14 +826,6 @@ static void isl29023_work(struct work_struct *work)
+ 	/* Clear interrupt flag */
+ 	isl29023_set_int_flag(client, 0);
+ 
+-	/*
+-	 * Max threshold to avoid multiple interrupts.
+-	 * Let the user to reprogramme the interrupt
+-	 * thresholds.
+-	 */
+-	isl29023_set_int_ht(client, 0xffff);
+-	isl29023_set_int_lt(client, 0x0);
+-
+ 	data->mode_before_interrupt = isl29023_get_mode(client);
+ 	lux = isl29023_get_adc_value(client);
+ 
+-- 
+1.7.7.4
+

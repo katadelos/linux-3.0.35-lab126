@@ -1,0 +1,92 @@
+From b05e23043cc3096ee02ed39f5ecae6ae059585b2 Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Fri, 19 Oct 2012 13:27:24 -0700
+Subject: [PATCH 2192/2463] ENGR00230538-2: CAAM: Add Secure Memory and SNVS
+ properties
+
+Add Secure Memory and SNVS properties to MX6 configuration.
+
+Previous configurations of MX6 platform device definition lacked
+specific propeties for CAAM Secure Memory and SNVS. Added these
+properties to define register ranges for both entities.
+
+Also corrected the name for the offset of the address range for
+CAAM Secure Memory to more accurately reflect it's purpose.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ arch/arm/plat-mxc/devices/platform-imx-caam.c   |   14 ++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h |    8 +++++---
+ arch/arm/plat-mxc/include/mach/mx6.h            |    4 ++--
+ 3 files changed, 21 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-caam.c b/arch/arm/plat-mxc/devices/platform-imx-caam.c
+index 3162490..aaaf501 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx-caam.c
++++ b/arch/arm/plat-mxc/devices/platform-imx-caam.c
+@@ -31,6 +31,8 @@
+ 
+ const struct imx_caam_data imx6q_imx_caam_data __initconst = {
+ 	.iobase_caam = MXC_CAAM_BASE_ADDR,
++	.iobase_caam_sm = CAAM_SECMEM_BASE_ADDR,
++	.iobase_snvs = MX6Q_SNVS_BASE_ADDR,
+ 	.irq_sec_vio = MXC_INT_SNVS_SEC,
+ 	.irq_snvs = MX6Q_INT_SNVS,
+ 	.jr[0].offset_jr = 0x1000,
+@@ -51,6 +53,18 @@ struct platform_device *__init imx_add_caam(
+ 			.end = data->iobase_caam + SZ_64K - 1,
+ 			.flags = IORESOURCE_MEM,
+ 		}, {
++			/* Define range for secure memory */
++			.name = "iobase_caam_sm",
++			.start = data->iobase_caam_sm,
++			.end = data->iobase_caam_sm + SZ_16K - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			/* Define range for SNVS */
++			.name = "iobase_snvs",
++			.start = data->iobase_snvs,
++			.end = data->iobase_snvs + SZ_4K - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
+ 			/* Define interrupt for security violations */
+ 			.name = "irq_sec_vio",
+ 			.start = data->irq_sec_vio,
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 1ff68bd..f6d616d 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -112,9 +112,11 @@ struct imx_caam_jr_data {
+ };
+ 
+ struct imx_caam_data {
+-	resource_size_t iobase_caam;
+-	resource_size_t irq_sec_vio;
+-	resource_size_t irq_snvs;
++	resource_size_t iobase_caam;	/* entirety of CAAM register map */
++	resource_size_t iobase_caam_sm;	/* base of secure memory */
++	resource_size_t iobase_snvs;	/* base of SNVS */
++	resource_size_t irq_sec_vio;	/* SNVS security violation */
++	resource_size_t irq_snvs;	/* SNVS consolidated (incl. RTC) */
+ 	struct imx_caam_jr_data jr[4];	/* offset+IRQ for each possible ring */
+ };
+ 
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index dfb3f64..48b04b1 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -83,8 +83,8 @@
+ #define ROMCP_ARB_BASE_ADDR		0x00000000
+ #define ROMCP_ARB_END_ADDR		0x000FFFFF
+ #define BOOT_ROM_BASE_ADDR		ROMCP_ARB_BASE_ADDR
+-#define CAAM_ARB_BASE_ADDR		0x00100000
+-#define CAAM_ARB_END_ADDR		0x00103FFF
++#define CAAM_SECMEM_BASE_ADDR		0x00100000
++#define CAAM_SECMEM_END_ADDR		0x00103FFF
+ #define APBH_DMA_ARB_BASE_ADDR		0x00110000
+ #define APBH_DMA_ARB_END_ADDR		0x00117FFF
+ #define MX6Q_HDMI_ARB_BASE_ADDR		0x00120000
+-- 
+1.7.7.4
+

@@ -1,0 +1,83 @@
+From 3d991f4a4bfc444c471433ff3ad83ecae242f2af Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Wed, 7 Dec 2011 13:31:35 +0800
+Subject: [PATCH 0699/2463] ENGR00169661:Remove the discharge for VBUS and DP
+
+- VBUS discharge code should be removed from suspend_irq function
+- On Arik, there is a huge capacitance(C86), even discharge VBUS,
+  the Drop of VBUS is still very slow
+- On Arik, the B session valid threshold is not 0.8V or 1.4V, it is
+  about 2V~3V, so we can receive B session valid interrupt very soon
+- No DP discharge needed, but wait for SE0 is needed
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |   21 ++-------------------
+ 1 files changed, 2 insertions(+), 19 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 391ba58..af27c7f 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -2009,20 +2009,10 @@ static void port_change_irq(struct fsl_udc *udc)
+ /* Process suspend interrupt */
+ static void suspend_irq(struct fsl_udc *udc)
+ {
+-	u32 otgsc = 0;
+-
+ 	pr_debug("%s begins\n", __func__);
+ 
+ 	udc->resume_state = udc->usb_state;
+ 	udc->usb_state = USB_STATE_SUSPENDED;
+-
+-	/* Set discharge vbus */
+-	otgsc = fsl_readl(&dr_regs->otgsc);
+-	otgsc &= ~(OTGSC_INTSTS_MASK);
+-	otgsc |= OTGSC_CTRL_VBUS_DISCHARGE;
+-	fsl_writel(otgsc, &dr_regs->otgsc);
+-
+-
+ 	/* report suspend to the driver, serial.c does not support this */
+ 	if (udc->driver->suspend)
+ 		udc->driver->suspend(&udc->gadget);
+@@ -2107,7 +2097,7 @@ static void gadget_wait_line_to_se0(void)
+ 					" your hardware design!\n");
+ 			break;
+ 		}
+-		msleep(10);
++		msleep(1);
+ 	}
+ }
+ 
+@@ -2144,10 +2134,6 @@ static void fsl_gadget_disconnect_event(struct work_struct *work)
+ 	u32 tmp;
+ 
+ 	pdata = udc->pdata;
+-
+-	/* enable pulldown dp */
+-	if (pdata->gadget_discharge_dp)
+-		pdata->gadget_discharge_dp(true);
+ 	/*
+ 	 * Some boards are very slow change line state from J to SE0 for DP,
+ 	 * So, we need to discharge DP, otherwise there is a wakeup interrupt
+@@ -2155,10 +2141,6 @@ static void fsl_gadget_disconnect_event(struct work_struct *work)
+ 	 */
+ 	gadget_wait_line_to_se0();
+ 
+-	/* Disable pulldown dp */
+-	if (pdata->gadget_discharge_dp)
+-		pdata->gadget_discharge_dp(false);
+-
+ 	/*
+ 	 * Wait class drivers finish, an well-behaviour class driver should
+ 	 * call ep_disable when it is notified to be disconnected.
+@@ -2216,6 +2198,7 @@ bool try_wake_up_udc(struct fsl_udc *udc)
+ 			fsl_writel(tmp | USB_CMD_RUN_STOP, &dr_regs->usbcmd);
+ 			printk(KERN_DEBUG "%s: udc out low power mode\n", __func__);
+ 		} else {
++			printk(KERN_INFO "USB device disconnected\n");
+ 			fsl_writel(tmp & ~USB_CMD_RUN_STOP, &dr_regs->usbcmd);
+ 			/* here we need disable B_SESSION_IRQ, after
+ 			 * schedule_work finished, it need to be enabled again.
+-- 
+1.7.7.4
+

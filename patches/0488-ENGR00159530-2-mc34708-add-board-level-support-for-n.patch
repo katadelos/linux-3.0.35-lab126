@@ -1,0 +1,370 @@
+From e629d4ed8437ed5ea0f758ca3395f4345bd6b724 Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Mon, 10 Oct 2011 18:13:07 +0800
+Subject: [PATCH 0488/2463] ENGR00159530-2 mc34708:add board level support for
+ new pmic driver
+
+1.add new board level file related to new pmic driver
+2.support for new board id for RevB of LOCO,so it can support
+  both RevA and RevB boards
+
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ arch/arm/mach-mx5/Makefile                 |    2 +-
+ arch/arm/mach-mx5/board-mx53_loco.c        |   30 ++++-
+ arch/arm/mach-mx5/mx53_loco_pmic_mc34708.c |  238 ++++++++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/mxc.h       |    3 +
+ 4 files changed, 270 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/Makefile b/arch/arm/mach-mx5/Makefile
+index 557a514..0128d64 100755
+--- a/arch/arm/mach-mx5/Makefile
++++ b/arch/arm/mach-mx5/Makefile
+@@ -16,7 +16,7 @@ obj-$(CONFIG_MACH_MX51_3DS) += board-mx51_3ds.o
+ obj-$(CONFIG_MACH_MX53_EVK) += board-mx53_evk.o
+ obj-$(CONFIG_MACH_MX53_SMD) += board-mx53_smd.o mx53_smd_pmic_da9053.o
+ obj-$(CONFIG_MACH_IMX_BLUETOOTH_RFKILL) += imx_bt_rfkill.o
+-obj-$(CONFIG_MACH_MX53_LOCO) += board-mx53_loco.o mx53_loco_pmic_da9053.o
++obj-$(CONFIG_MACH_MX53_LOCO) += board-mx53_loco.o mx53_loco_pmic_da9053.o mx53_loco_pmic_mc34708.o
+ obj-$(CONFIG_MACH_MX53_ARD) += board-mx53_ard.o
+ obj-$(CONFIG_MACH_EUKREA_CPUIMX51) += board-cpuimx51.o
+ obj-$(CONFIG_MACH_EUKREA_MBIMX51_BASEBOARD) += eukrea_mbimx51-baseboard.o
+diff --git a/arch/arm/mach-mx5/board-mx53_loco.c b/arch/arm/mach-mx5/board-mx53_loco.c
+index e8dfdad..1430fb2 100755
+--- a/arch/arm/mach-mx5/board-mx53_loco.c
++++ b/arch/arm/mach-mx5/board-mx53_loco.c
+@@ -37,6 +37,7 @@
+ #include <mach/ipu-v3.h>
+ #include <mach/mxc_dvfs.h>
+ #include <mach/ahci_sata.h>
++#include <mach/mxc.h>
+ 
+ #include <asm/mach-types.h>
+ #include <asm/mach/arch.h>
+@@ -61,7 +62,11 @@
+ #define LOCO_FEC_PHY_RST		IMX_GPIO_NR(7, 6)
+ #define LOCO_USBH1_VBUS			IMX_GPIO_NR(7, 8)
+ 
++#define MX53_LOCO_MC34708_IRQ_REVA      IMX_GPIO_NR(5, 30)
++#define MX53_LOCO_MC34708_IRQ_REVB      IMX_GPIO_NR(5, 23)
++
+ static struct clk *sata_clk, *sata_ref_clk;
++static u32 mx53_loco_mc34708_irq;
+ 
+ extern void __iomem *arm_plat_base;
+ extern void __iomem *gpc_base;
+@@ -72,6 +77,7 @@ extern int (*set_cpu_voltage)(u32 volt);
+ extern int mx5_set_cpu_voltage(struct regulator *gp_reg, u32 cpu_volt);
+ 
+ extern int __init mx53_loco_init_da9052(void);
++extern int __init mx53_loco_init_mc34708(u32 int_gpio);
+ 
+ static struct regulator *cpu_regulator;
+ static char *gp_reg_id;
+@@ -684,7 +690,8 @@ static struct mxc_spdif_platform_data mxc_spdif_data = {
+ 
+ static void __init mx53_loco_board_init(void)
+ {
+-	int i;
++	int i, ret;
++	iomux_v3_cfg_t mc34708_int = MX53_PAD_CSI0_DAT12__GPIO5_30;
+ 
+ 	mx53_loco_io_init();
+ 	gp_reg_id = loco_regulator_data.cpu_reg_id;
+@@ -717,8 +724,27 @@ static void __init mx53_loco_board_init(void)
+ 	imx53_add_srtc();
+ 	imx53_add_imx_i2c(0, &mx53_loco_i2c_data);
+ 	imx53_add_imx_i2c(1, &mx53_loco_i2c_data);
++	if (board_is_mx53_loco_mc34708()) {
++		if (board_is_rev(IMX_BOARD_REV_2)) {/*Board RevA*/
++			mc34708_int = MX53_PAD_CSI0_DAT12__GPIO5_30;
++			mx53_loco_mc34708_irq = MX53_LOCO_MC34708_IRQ_REVA;
++		} else if (board_is_rev(IMX_BOARD_REV_4)) {/*Board RevB*/
++			mc34708_int = MX53_PAD_CSI0_DAT5__GPIO5_23;
++			mx53_loco_mc34708_irq = MX53_LOCO_MC34708_IRQ_REVB;
++		}
++		mxc_iomux_v3_setup_pad(mc34708_int);
++		ret = gpio_request(mx53_loco_mc34708_irq, "mc34708-int");
++		if (ret) {
++			printk(KERN_ERR"request mc34708-int error!!\n");
++			return;
++		} else {
++			gpio_direction_input(mx53_loco_mc34708_irq);
++			mx53_loco_init_mc34708(mx53_loco_mc34708_irq);
++		}
+ 
+-	mx53_loco_init_da9052();
++	} else {
++		mx53_loco_init_da9052();
++	}
+ 	i2c_register_board_info(0, mxc_i2c0_board_info,
+ 				ARRAY_SIZE(mxc_i2c0_board_info));
+ 	i2c_register_board_info(1, mxc_i2c1_board_info,
+diff --git a/arch/arm/mach-mx5/mx53_loco_pmic_mc34708.c b/arch/arm/mach-mx5/mx53_loco_pmic_mc34708.c
+new file mode 100644
+index 0000000..f88a184
+--- /dev/null
++++ b/arch/arm/mach-mx5/mx53_loco_pmic_mc34708.c
+@@ -0,0 +1,238 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
++ */
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/i2c.h>
++#include <linux/irq.h>
++#include <linux/interrupt.h>
++#include <linux/err.h>
++#include <linux/gpio.h>
++#include <linux/regulator/machine.h>
++#include <linux/mfd/mc-pmic.h>
++#include <mach/irqs.h>
++#include <mach/iomux-mx53.h>
++
++/*
++ * Convenience conversion.
++ * Here atm, maybe there is somewhere better for this.
++ */
++#define mV_to_uV(mV) (mV * 1000)
++#define uV_to_mV(uV) (uV / 1000)
++#define V_to_uV(V) (mV_to_uV(V * 1000))
++#define uV_to_V(uV) (uV_to_mV(uV) / 1000)
++
++#define MC34708_I2C_DEVICE_NAME  "mc34708"
++/* 7-bit I2C bus slave address */
++#define MC34708_I2C_ADDR         (0x08)
++
++
++static struct regulator_init_data sw1a_init = {
++	.constraints = {
++		.name = "SW1",
++		.min_uV = 650000,
++		.max_uV = 1437500,
++		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++		.valid_modes_mask = 0,
++		.always_on = 1,
++		.boot_on = 1,
++	},
++};
++
++static struct regulator_init_data sw1b_init = {
++	.constraints = {
++		.name = "SW1B",
++		.min_uV = 650000,
++		.max_uV = 1437500,
++		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++		.valid_modes_mask = 0,
++		.always_on = 1,
++		.boot_on = 1,
++	},
++};
++
++static struct regulator_init_data sw2_init = {
++	.constraints = {
++		.name = "SW2",
++		.min_uV = 650000,
++		.max_uV = 1437500,
++		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++		.always_on = 1,
++		.boot_on = 1,
++		.initial_state = PM_SUSPEND_MEM,
++	}
++};
++
++static struct regulator_init_data sw3_init = {
++	.constraints = {
++		.name = "SW3",
++		.min_uV = 650000,
++		.max_uV = 1425000,
++		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++		.boot_on = 1,
++	}
++};
++
++static struct regulator_init_data sw4a_init = {
++	.constraints = {
++		.name = "SW4A",
++		.min_uV = mV_to_uV(1200),
++		.max_uV = mV_to_uV(3300),
++		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++		.always_on = 1,
++		.boot_on = 1,
++	}
++};
++
++static struct regulator_init_data sw4b_init = {
++	.constraints = {
++		.name = "SW4B",
++		.min_uV = mV_to_uV(1200),
++		.max_uV = mV_to_uV(3300),
++		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++		.always_on = 1,
++		.boot_on = 1,
++	}
++};
++
++static struct regulator_init_data sw5_init = {
++	.constraints = {
++		.name = "SW5",
++		.min_uV = mV_to_uV(1200),
++		.max_uV = mV_to_uV(1975),
++		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++		.always_on = 1,
++		.boot_on = 1,
++	}
++};
++
++static struct regulator_init_data vrefddr_init = {
++	.constraints = {
++		.name = "VREFDDR",
++		.always_on = 1,
++		.boot_on = 1,
++	}
++};
++
++static struct regulator_init_data vusb_init = {
++	.constraints = {
++		.name = "VUSB",
++		.valid_ops_mask = REGULATOR_CHANGE_STATUS,
++		.boot_on = 1,
++		.always_on = 1,
++	}
++};
++
++static struct regulator_init_data swbst_init = {
++	.constraints = {
++		.name = "SWBST",
++		.valid_ops_mask = REGULATOR_CHANGE_STATUS,
++		.boot_on = 1,
++		.always_on = 1,
++	}
++};
++
++static struct regulator_init_data vpll_init = {
++	.constraints = {
++		.name = "VPLL",
++		.min_uV = mV_to_uV(1200),
++		.max_uV = mV_to_uV(1800),
++		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++		.boot_on = 1,
++	},
++};
++
++static struct regulator_init_data vdac_init = {
++	.constraints = {
++		.name = "VDAC",
++		.min_uV = mV_to_uV(2500),
++		.max_uV = mV_to_uV(2775),
++		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++		.boot_on = 1,
++		.always_on = 1,
++	}
++};
++
++static struct regulator_init_data vusb2_init = {
++	.constraints = {
++		.name = "VUSB2",
++		.min_uV = mV_to_uV(2500),
++		.max_uV = mV_to_uV(3000),
++		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++		.boot_on = 1,
++		.always_on = 1,
++	}
++};
++
++static struct regulator_init_data vgen1_init = {
++	.constraints = {
++		.name = "VGEN1",
++		.min_uV = mV_to_uV(1200),
++		.max_uV = mV_to_uV(1550),
++		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++		.always_on = 1,
++	}
++};
++
++static struct regulator_init_data vgen2_init = {
++	.constraints = {
++		.name = "VGEN2",
++		.min_uV = mV_to_uV(2500),
++		.max_uV = mV_to_uV(3300),
++		.valid_ops_mask = REGULATOR_CHANGE_VOLTAGE,
++		.always_on = 1,
++	}
++};
++
++static struct mc_pmic_regulator_init_data mx53_loco_mc34708_regulators[] = {
++	{ .id = MC34708_SW1A,			.init_data = &sw1a_init},
++	{ .id = MC34708_SW1B,			.init_data = &sw1b_init},
++	{ .id = MC34708_SW2,			.init_data = &sw2_init},
++	{ .id = MC34708_SW3,			.init_data = &sw3_init},
++	{ .id = MC34708_SW4A,			.init_data = &sw4a_init},
++	{ .id = MC34708_SW4B,			.init_data = &sw4b_init},
++	{ .id = MC34708_SW5,			.init_data = &sw5_init},
++	{ .id = MC34708_SWBST,			.init_data = &swbst_init},
++	{ .id = MC34708_VPLL,			.init_data = &vpll_init},
++	{ .id = MC34708_VREFDDR,		.init_data = &vrefddr_init},
++	{ .id = MC34708_VUSB,			.init_data = &vusb_init},
++	{ .id = MC34708_VUSB2,			.init_data = &vusb2_init},
++	{ .id = MC34708_VDAC,			.init_data = &vdac_init},
++	{ .id = MC34708_VGEN1,			.init_data = &vgen1_init},
++	{ .id = MC34708_VGEN2,			.init_data = &vgen2_init},
++
++};
++
++
++static struct mc_pmic_platform_data mc34708_plat = {
++	.flags = MC_PMIC_USE_RTC | MC_PMIC_USE_REGULATOR,
++	.num_regulators = ARRAY_SIZE(mx53_loco_mc34708_regulators),
++	.regulators = mx53_loco_mc34708_regulators,
++};
++
++static struct i2c_board_info __initdata mc34708_i2c_device = {
++	I2C_BOARD_INFO(MC34708_I2C_DEVICE_NAME, MC34708_I2C_ADDR),
++	.platform_data = &mc34708_plat,
++};
++
++int __init mx53_loco_init_mc34708(u32 int_gpio)
++{
++	mc34708_i2c_device.irq = gpio_to_irq(int_gpio);/*update INT gpio*/
++	return i2c_register_board_info(0, &mc34708_i2c_device, 1);
++}
+diff --git a/arch/arm/plat-mxc/include/mach/mxc.h b/arch/arm/plat-mxc/include/mach/mxc.h
+index 1fe198d..fb698ca 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc.h
++++ b/arch/arm/plat-mxc/include/mach/mxc.h
+@@ -67,6 +67,7 @@
+ #define IMX_BOARD_REV_1		0x000
+ #define IMX_BOARD_REV_2		0x100
+ #define IMX_BOARD_REV_3		0x200
++#define IMX_BOARD_REV_4		0x300
+ 
+ #ifndef __ASSEMBLY__
+ extern unsigned int system_rev;
+@@ -75,6 +76,8 @@ extern unsigned int system_rev;
+ #endif
+ 
+ #ifdef CONFIG_ARCH_MX5
++#define board_is_mx53_loco_mc34708() (cpu_is_mx53() &&	\
++	(board_is_rev(IMX_BOARD_REV_2) || board_is_rev(IMX_BOARD_REV_4)))
+ #define board_is_mx53_arm2() (cpu_is_mx53() && board_is_rev(IMX_BOARD_REV_2))
+ #define board_is_mx53_evk_a()    (cpu_is_mx53() && board_is_rev(IMX_BOARD_REV_1))
+ #define board_is_mx53_evk_b()    (cpu_is_mx53() && board_is_rev(IMX_BOARD_REV_3))
+-- 
+1.7.7.4
+

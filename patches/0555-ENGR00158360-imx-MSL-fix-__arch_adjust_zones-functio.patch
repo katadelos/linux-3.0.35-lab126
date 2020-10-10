@@ -1,0 +1,40 @@
+From ca23fd3ac20515b1e2d3c52322481ead0fd779fc Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Fri, 4 Nov 2011 16:27:04 +0800
+Subject: [PATCH 0555/2463] ENGR00158360 imx MSL: fix __arch_adjust_zones
+ function
+
+fix __arch_adjust_zones if MXC_DMA_ZONE_SIZE if bigger than system memory
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/plat-mxc/include/mach/memory.h |   12 ++++++++----
+ 1 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/include/mach/memory.h b/arch/arm/plat-mxc/include/mach/memory.h
+index 5a17215..55b08d9 100755
+--- a/arch/arm/plat-mxc/include/mach/memory.h
++++ b/arch/arm/plat-mxc/include/mach/memory.h
+@@ -82,11 +82,15 @@
+ static inline void __arch_adjust_zones(unsigned long *zone_size,
+ 		unsigned long *zhole_size)
+ {
++#ifdef CONFIG_ZONE_DMA
+ 	/* Create separate zone to reserve memory for DMA */
+-	zone_size[1] = zone_size[0] - MXC_DMA_ZONE_SIZE;
+-	zone_size[0] = MXC_DMA_ZONE_SIZE;
+-	zhole_size[1] = zhole_size[0];
+-	zhole_size[0] = 0;
++	if ((zone_size[0] - zhole_size[0]) > MXC_DMA_ZONE_SIZE) {
++		zone_size[1] = zone_size[0] - MXC_DMA_ZONE_SIZE;
++		zone_size[0] = MXC_DMA_ZONE_SIZE;
++		zhole_size[1] = zhole_size[0];
++		zhole_size[0] = 0;
++	}
++#endif
+ }
+ 
+ #define arch_adjust_zones(size, holes) \
+-- 
+1.7.7.4
+

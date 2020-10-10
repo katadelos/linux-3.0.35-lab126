@@ -1,0 +1,265 @@
+From f13f2f6245c36709b90454ca1bda9bd9420b04e8 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Wed, 4 Apr 2012 20:38:37 +0800
+Subject: [PATCH 1282/2463] ENGR00178875-1 VDOA: Add vdoa support on i.MX6 SOC
+ platform
+
+Add vdoa support on i.MX6 SOC platform
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig                       |    1 +
+ arch/arm/mach-mx6/board-mx6q_arm2.c             |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c        |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c        |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabresd.c          |    1 +
+ arch/arm/mach-mx6/clock.c                       |    6 +-
+ arch/arm/mach-mx6/devices-imx6q.h               |    2 +
+ arch/arm/plat-mxc/devices/Kconfig               |    3 +
+ arch/arm/plat-mxc/devices/Makefile              |    1 +
+ arch/arm/plat-mxc/devices/platform-imx-vdoa.c   |   60 +++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h |    9 +++
+ arch/arm/plat-mxc/include/mach/ipu-v3.h         |   12 +++++
+ 12 files changed, 95 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 3c083fe..1df2421 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -14,6 +14,7 @@ config ARCH_MX6Q
+ 	select IMX_HAVE_PLATFORM_MXC_PWM
+ 	select IMX_HAVE_PLATFORM_LDB
+ 	select IMX_HAVE_PLATFORM_IMX_SPDIF
++	select IMX_HAVE_PLATFORM_IMX_VDOA
+ 
+ config FORCE_MAX_ZONEORDER
+     int "MAX_ORDER"
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index dc4218a..f720c87 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -2051,6 +2051,7 @@ static void __init mx6_arm2_init(void)
+ 
+ 	if (!disable_mipi_dsi)
+ 		imx6q_add_mipi_dsi(&mipi_dsi_pdata);
++	imx6q_add_vdoa();
+ 	imx6q_add_lcdif(&lcdif_data);
+ 	imx6q_add_ldb(&ldb_data);
+ 	imx6q_add_v4l2_output(0);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 8819b45..6f1d122 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -1344,6 +1344,7 @@ static void __init mx6_board_init(void)
+ 		for (i = 0; i < (ARRAY_SIZE(sabr_fb_data) + 1) / 2; i++)
+ 			imx6q_add_ipuv3fb(i, &sabr_fb_data[i]);
+ 
++	imx6q_add_vdoa();
+ 	imx6q_add_mipi_dsi(&mipi_dsi_pdata);
+ 	imx6q_add_lcdif(&lcdif_data);
+ 	imx6q_add_ldb(&ldb_data);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index a18862c..f6da893 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -1082,6 +1082,7 @@ static void __init mx6_sabrelite_board_init(void)
+ 	for (i = 0; i < ARRAY_SIZE(sabrelite_fb_data); i++)
+ 		imx6q_add_ipuv3fb(i, &sabrelite_fb_data[i]);
+ 
++	imx6q_add_vdoa();
+ 	imx6q_add_lcdif(&lcdif_data);
+ 	imx6q_add_ldb(&ldb_data);
+ 	imx6q_add_v4l2_output(0);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 1fc33c9..d0d8254 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1488,6 +1488,7 @@ static void __init mx6_sabresd_board_init(void)
+ 		for (i = 0; i < (ARRAY_SIZE(sabresd_fb_data) + 1) / 2; i++)
+ 			imx6q_add_ipuv3fb(i, &sabresd_fb_data[i]);
+ 
++	imx6q_add_vdoa();
+ 	imx6q_add_lcdif(&lcdif_data);
+ 	imx6q_add_ldb(&ldb_data);
+ 	imx6q_add_v4l2_output(0);
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index c5074d3..43ca85f 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -1903,8 +1903,8 @@ static struct clk vdo_axi_clk = {
+ static struct clk vdoa_clk = {
+ 	__INIT_CLK_DEBUG(vdoa_clk)
+ 	.id = 0,
+-	.parent = &axi_clk,
+-	.secondary = &mx6fast1_clk,
++	.parent = &vdo_axi_clk,
++	.secondary = &ipg_clk,
+ 	.enable_reg = MXC_CCM_CCGR2,
+ 	.enable_shift = MXC_CCM_CCGRx_CG13_OFFSET,
+ 	.enable = _clk_enable,
+@@ -5113,7 +5113,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK(NULL, "hdmi_isfr_clk", hdmi_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "hdmi_iahb_clk", hdmi_clk[1]),
+ 	_REGISTER_CLOCK(NULL, "mipi_pllref_clk", mipi_pllref_clk),
+-	_REGISTER_CLOCK(NULL, NULL, vdoa_clk),
++	_REGISTER_CLOCK(NULL, "vdoa", vdoa_clk),
+ 	_REGISTER_CLOCK(NULL, NULL, aips_tz2_clk),
+ 	_REGISTER_CLOCK(NULL, NULL, aips_tz1_clk),
+ 	_REGISTER_CLOCK(NULL, "clko_clk", clko_clk),
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index ab24515..02ac1f4 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -208,3 +208,5 @@ extern const struct imx_pxp_data imx6dl_pxp_data __initconst;
+ extern const struct imx_epdc_data imx6dl_epdc_data __initconst;
+ #define imx6dl_add_imx_epdc(pdata)	\
+ 	imx_add_imx_epdc(&imx6dl_epdc_data, pdata)
++extern const struct imx_vdoa_data imx6q_vdoa_data __initconst;
++#define imx6q_add_vdoa() imx_add_vdoa(&imx6q_vdoa_data)
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index 3eead8e..350845e 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -169,3 +169,6 @@ config IMX_HAVE_PLATFORM_IMX_MIPI_DSI
+ 
+ config IMX_HAVE_PLATFORM_IMX_MIPI_CSI2
+ 	bool
++
++config IMX_HAVE_PLATFORM_IMX_VDOA
++	bool
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index 71cfefa..f2741ca 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -61,3 +61,4 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_MXC_HDMI) += platform-imx-hdmi-soc-dai.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_ASRC) += platform-imx-asrc.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_DSI) += platform-imx-mipi_dsi.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_CSI2) += platform-imx-mipi_csi2.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_VDOA) += platform-imx-vdoa.o
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-vdoa.c b/arch/arm/plat-mxc/devices/platform-imx-vdoa.c
+new file mode 100644
+index 0000000..057fda6
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx-vdoa.c
+@@ -0,0 +1,60 @@
++/*
++ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++
++#define imx_vdoa_data_entry_single(soc, _id, _hwid, size)		\
++	{								\
++		.id = _id,						\
++		.iobase = soc ## _VDOA ## _hwid ## _BASE_ADDR,	\
++		.iosize = size,						\
++		.irq	= soc ## _INT_VDOA ## _hwid,			\
++	}
++
++#define imx_vdoa_data_entry(soc, _id, _hwid, _size)			\
++	[_id] = imx_vdoa_data_entry_single(soc, _id, _hwid, _size)
++
++#ifdef CONFIG_SOC_IMX6Q
++#define MX6Q_VDOA_BASE_ADDR VDOA_BASE_ADDR
++#define SOC_VDOA_BASE_ADDR MX6Q_VDOA_BASE_ADDR
++#define MX6Q_INT_VDOA MXC_INT_VDOA
++const struct imx_vdoa_data imx6q_vdoa_data __initconst =
++			imx_vdoa_data_entry_single(MX6Q, 0, , SZ_4K);
++#endif
++
++struct platform_device *__init imx_add_vdoa(
++		const struct imx_vdoa_data *data)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + data->iosize - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.start = data->irq,
++			.end = data->irq,
++			.flags = IORESOURCE_IRQ,
++		},
++	};
++
++	return imx_add_platform_device("mxc_vdoa", -1,
++			res, ARRAY_SIZE(res), NULL, 0);
++}
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 2f5f04c..9f87b00 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -633,3 +633,12 @@ struct imx_rngb_data {
+ 
+ struct platform_device *__init imx_add_rngb(
+ 		const struct imx_rngb_data *data);
++
++struct imx_vdoa_data {
++	int id;
++	resource_size_t iobase;
++	resource_size_t iosize;
++	resource_size_t irq;
++};
++struct platform_device *__init imx_add_vdoa(
++		const struct imx_vdoa_data *data);
+diff --git a/arch/arm/plat-mxc/include/mach/ipu-v3.h b/arch/arm/plat-mxc/include/mach/ipu-v3.h
+index be711cb..1ddd69e 100755
+--- a/arch/arm/plat-mxc/include/mach/ipu-v3.h
++++ b/arch/arm/plat-mxc/include/mach/ipu-v3.h
+@@ -71,10 +71,19 @@ typedef enum {
+ 	CSI_PRP_ENC_MEM = _MAKE_CHAN(19, NO_DMA, NO_DMA, NO_DMA, 20),
+ 	CSI_PRP_VF_MEM = _MAKE_CHAN(20, NO_DMA, NO_DMA, NO_DMA, 21),
+ 
++	/* for vdi mem->vdi->ic->mem , add graphics plane and alpha*/
+ 	MEM_VDI_PRP_VF_MEM_P = _MAKE_CHAN(21, 8, 14, 17, 21),
+ 	MEM_VDI_PRP_VF_MEM = _MAKE_CHAN(22, 9, 14, 17, 21),
+ 	MEM_VDI_PRP_VF_MEM_N = _MAKE_CHAN(23, 10, 14, 17, 21),
+ 
++	/* for vdi mem->vdi->mem */
++	MEM_VDI_MEM_P = _MAKE_CHAN(24, 8, NO_DMA, NO_DMA, 5),
++	MEM_VDI_MEM = _MAKE_CHAN(25, 9, NO_DMA, NO_DMA, 5),
++	MEM_VDI_MEM_N = _MAKE_CHAN(26, 10, NO_DMA, NO_DMA, 5),
++
++	/* fake channel for vdoa to link with IPU */
++	MEM_VDOA_MEM =  _MAKE_CHAN(27, NO_DMA, NO_DMA, NO_DMA, NO_DMA),
++
+ 	MEM_PP_ADC = CHAN_NONE,
+ 	ADC_SYS2 = CHAN_NONE,
+ 
+@@ -308,6 +317,7 @@ enum ipu_irq_line {
+ 	IPU_IRQ_CSI1_OUT_EOF = 1,
+ 	IPU_IRQ_CSI2_OUT_EOF = 2,
+ 	IPU_IRQ_CSI3_OUT_EOF = 3,
++	IPU_IRQ_VDIC_OUT_EOF = 5,
+ 	IPU_IRQ_VDI_P_IN_EOF = 8,
+ 	IPU_IRQ_VDI_C_IN_EOF = 9,
+ 	IPU_IRQ_VDI_N_IN_EOF = 10,
+@@ -633,6 +643,8 @@ int ipu_request_irq(struct ipu_soc *ipu, uint32_t irq,
+ void ipu_free_irq(struct ipu_soc *ipu, uint32_t irq, void *dev_id);
+ bool ipu_get_irq_status(struct ipu_soc *ipu, uint32_t irq);
+ void ipu_set_csc_coefficients(struct ipu_soc *ipu, ipu_channel_t channel, int32_t param[][3]);
++int32_t ipu_set_channel_bandmode(struct ipu_soc *ipu, ipu_channel_t channel,
++				 ipu_buffer_t type, uint32_t band_height);
+ 
+ /* two stripe calculations */
+ struct stripe_param{
+-- 
+1.7.7.4
+

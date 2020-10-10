@@ -1,0 +1,185 @@
+From 2c056704c442f929e0f367c1fe1f0b0ae458d91b Mon Sep 17 00:00:00 2001
+From: Tony Lin <tony.lin@freescale.com>
+Date: Fri, 9 Sep 2011 11:45:11 +0800
+Subject: [PATCH 0418/2463] ENGR00156314-2 [mx6q]gic: save/restore mode for
+ suspend/resume
+
+add code to gic.c for common gic state save/restore.
+
+Signed-off-by: Tony Lin <tony.lin@freescale.com>
+---
+ arch/arm/common/gic.c               |  111 +++++++++++++++++++++++++++++++++++
+ arch/arm/include/asm/hardware/gic.h |   30 +++++++++
+ 2 files changed, 141 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/common/gic.c b/arch/arm/common/gic.c
+index e60138b..ab8c07d 100644
+--- a/arch/arm/common/gic.c
++++ b/arch/arm/common/gic.c
+@@ -386,6 +386,117 @@ void __cpuinit gic_enable_ppi(unsigned int irq)
+ 	local_irq_restore(flags);
+ }
+ 
++void save_gic_cpu_state(unsigned int gic_nr, struct gic_cpu_state *gcs)
++{
++	BUG_ON(gic_nr >= MAX_GIC_NR);
++
++	gcs->iccicr = __raw_readl(gic_data[gic_nr].cpu_base + GIC_CPU_CTRL);
++	gcs->iccpmr = __raw_readl(gic_data[gic_nr].cpu_base + GIC_CPU_PRIMASK);
++	gcs->iccbpr = __raw_readl(gic_data[gic_nr].cpu_base + GIC_CPU_BINPOINT);
++}
++
++void restore_gic_cpu_state(unsigned int gic_nr, struct gic_cpu_state *gcs)
++{
++	BUG_ON(gic_nr >= MAX_GIC_NR);
++
++	__raw_writel(gcs->iccpmr, gic_data[gic_nr].cpu_base + GIC_CPU_PRIMASK);
++	__raw_writel(gcs->iccbpr, gic_data[gic_nr].cpu_base + GIC_CPU_BINPOINT);
++
++	/* at last, restore ctrl register */
++	__raw_writel(gcs->iccicr, gic_data[gic_nr].cpu_base + GIC_CPU_CTRL);
++}
++
++void save_gic_dist_state(unsigned int gic_nr, struct gic_dist_state *gds)
++{
++	unsigned int gic_irqs, i;
++
++	BUG_ON(gic_nr >= MAX_GIC_NR);
++
++	gic_irqs = readl(gic_data[gic_nr].dist_base + GIC_DIST_CTR) & 0x1f;
++	gic_irqs = (gic_irqs + 1) * 32;
++	if (gic_irqs > 1020)
++		gic_irqs = 1020;
++
++	gds->icddcr = __raw_readl(gic_data[gic_nr].dist_base + GIC_DIST_CTRL);
++
++	/* save interrupt enable status */
++	for (i = 0; i < gic_irqs; i += 32)
++		gds->icdisern[i / 32] = __raw_readl(gic_data[gic_nr].dist_base
++					+ GIC_DIST_ENABLE_SET + i * 4 / 32);
++
++	/* save interrupt pending status */
++	for (i = 0; i < gic_irqs; i += 32)
++		gds->icdisprn[i / 32] = __raw_readl(gic_data[gic_nr].dist_base
++					+ GIC_DIST_PENDING_SET + i * 4 / 32);
++
++	/* save active bit status */
++	for (i = 0; i < gic_irqs; i += 32)
++		gds->icdabrn[i / 32] = __raw_readl(gic_data[gic_nr].dist_base
++					+ GIC_DIST_ACTIVE_BIT + i * 4 / 32);
++
++	/* interrupt priority registers */
++	for (i = 0; i < gic_irqs; i += 4)
++		gds->icdiprn[i / 4] = __raw_readl(gic_data[gic_nr].dist_base
++					+ GIC_DIST_PRI + i * 4 / 4);
++
++	/* interrupt processor targets registers */
++	for (i = 0; i < gic_irqs; i += 4)
++		gds->icdiptrn[i / 4] = __raw_readl(gic_data[gic_nr].dist_base
++					+ GIC_DIST_TARGET + i * 4 / 4);
++
++	/* interrupt configuration registers */
++	for (i = 0; i < gic_irqs; i += 16)
++		gds->icdicfrn[i / 16] = __raw_readl(gic_data[gic_nr].dist_base
++					+ GIC_DIST_CONFIG + i * 4 / 16);
++}
++
++void restore_gic_dist_state(unsigned int gic_nr, struct gic_dist_state *gds)
++{
++	unsigned int gic_irqs, i;
++
++	BUG_ON(gic_nr >= MAX_GIC_NR);
++
++	gic_irqs = readl(gic_data[gic_nr].dist_base + GIC_DIST_CTR) & 0x1f;
++	gic_irqs = (gic_irqs + 1) * 32;
++	if (gic_irqs > 1020)
++		gic_irqs = 1020;
++
++	__raw_writel(0, gic_data[gic_nr].dist_base + GIC_DIST_CTRL);
++
++	/* interrupt configuration registers */
++	for (i = 0; i < gic_irqs; i += 16)
++		 __raw_writel(gds->icdicfrn[i / 16], gic_data[gic_nr].dist_base
++					+ GIC_DIST_CONFIG + i * 4 / 16);
++
++	/* interrupt priority registers */
++	for (i = 0; i < gic_irqs; i += 4)
++		 __raw_writel(gds->icdiprn[i / 4], gic_data[gic_nr].dist_base
++					+ GIC_DIST_PRI + i * 4 / 4);
++
++	/* interrupt processor targets registers */
++	for (i = 0; i < gic_irqs; i += 4)
++		 __raw_writel(gds->icdiptrn[i / 4], gic_data[gic_nr].dist_base
++					+ GIC_DIST_TARGET + i * 4 / 4);
++
++	/* restore active bits */
++	for (i = 0; i < gic_irqs; i += 32)
++		__raw_writel(gds->icdabrn[i / 32], gic_data[gic_nr].dist_base
++					+ GIC_DIST_ACTIVE_BIT + i * 4 / 32);
++
++	/* restore pending bits */
++	for (i = 0; i < gic_irqs; i += 32)
++		__raw_writel(gds->icdisprn[i / 32], gic_data[gic_nr].dist_base
++					+ GIC_DIST_PENDING_SET + i * 4 / 32);
++
++	/* restore interrupt enable status */
++	for (i = 0; i < gic_irqs; i += 32)
++		__raw_writel(gds->icdisern[i / 32], gic_data[gic_nr].dist_base
++					+ GIC_DIST_ENABLE_SET + i * 4 / 32);
++
++	/* at last restore ctrl register */
++	__raw_writel(gds->icddcr, gic_data[gic_nr].dist_base + GIC_DIST_CTRL);
++}
++
+ #ifdef CONFIG_SMP
+ void gic_raise_softirq(const struct cpumask *mask, unsigned int irq)
+ {
+diff --git a/arch/arm/include/asm/hardware/gic.h b/arch/arm/include/asm/hardware/gic.h
+index 0691f9d..0fa541d 100644
+--- a/arch/arm/include/asm/hardware/gic.h
++++ b/arch/arm/include/asm/hardware/gic.h
+@@ -36,11 +36,41 @@
+ extern void __iomem *gic_cpu_base_addr;
+ extern struct irq_chip gic_arch_extn;
+ 
++struct gic_dist_state {
++	u32	icddcr;			/* 0x000 */
++					/* 0x004 RO */
++					/* 0x008 RO */
++					/* 0x00c ~ 0x07c Reserved */
++	u32	icdisrn[8];		/* 0x080 ~ 0x09c */
++	u32	icdisern[8];		/* 0x100 ~ 0x11c Reserved */
++					/* 0x120 ~ 0x17c */
++	u32	icdicern[8];		/* 0x180 ~ 0x19c */
++	u32	icdisprn[32];		/* 0x200 ~ 0x27c */
++	u32	icdicprn[8];		/* 0x280 ~ 0x29c */
++	u32	icdabrn[8];		/* 0x300 ~ 0x31c */
++					/* 0x320 ~ 0x3fc Reserved */
++	u32	icdiprn[64];		/* 0x400 ~ 0x4fc */
++					/* 0x500 ~ 0x7fc Reserved */
++	u32	icdiptrn[64];		/* 0x800 ~ 0x8fc */
++					/* 0x900 ~ 0xbfc Reserved */
++	u32	icdicfrn[16];		/* 0xc00 ~ 0xc3c */
++};
++
++struct gic_cpu_state {
++	u32	iccicr;			/* 0x000 */
++	u32	iccpmr;			/* 0x004 */
++	u32	iccbpr;			/* 0x008 */
++};
++
+ void gic_init(unsigned int, unsigned int, void __iomem *, void __iomem *);
+ void gic_secondary_init(unsigned int);
+ void gic_cascade_irq(unsigned int gic_nr, unsigned int irq);
+ void gic_raise_softirq(const struct cpumask *mask, unsigned int irq);
+ void gic_enable_ppi(unsigned int);
++void save_gic_cpu_state(unsigned int gic_nr, struct gic_cpu_state *gcs);
++void restore_gic_cpu_state(unsigned int gic_nr, struct gic_cpu_state *gcs);
++void save_gic_dist_state(unsigned int gic_nr, struct gic_dist_state *gds);
++void restore_gic_dist_state(unsigned int gic_nr, struct gic_dist_state *gds);
+ #endif
+ 
+ #endif
+-- 
+1.7.7.4
+

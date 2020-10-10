@@ -1,0 +1,219 @@
+From b175b9c891bc6aab14d09bff33a2d0cbd470eb43 Mon Sep 17 00:00:00 2001
+From: Anish Trivedi <anish@freescale.com>
+Date: Wed, 13 Apr 2011 14:16:04 -0500
+Subject: [PATCH 0106/2463] ENGR00142089-1 MX51/MX53: Upgrade SCC2 and SAHARA
+ drivers to 2.6.38
+
+Machine layer changes to add SCC2 device.
+
+Signed-off-by: Anish Trivedi <anish@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx51_babbage.c          |    5 +++++
+ arch/arm/mach-mx5/board-mx53_ard.c              |    5 +++++
+ arch/arm/mach-mx5/board-mx53_evk.c              |    5 +++++
+ arch/arm/mach-mx5/board-mx53_loco.c             |    5 +++++
+ arch/arm/mach-mx5/board-mx53_smd.c              |    5 +++++
+ arch/arm/mach-mx5/devices-imx51.h               |    5 +++++
+ arch/arm/mach-mx5/devices-imx53.h               |    5 +++++
+ arch/arm/plat-mxc/devices/Makefile              |    2 ++
+ arch/arm/plat-mxc/include/mach/devices-common.h |   11 +++++++++++
+ arch/arm/plat-mxc/include/mach/mx51.h           |   18 +++++++++++++++---
+ arch/arm/plat-mxc/include/mach/mx53.h           |    8 ++++++++
+ 11 files changed, 71 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx51_babbage.c b/arch/arm/mach-mx5/board-mx51_babbage.c
+index 6547e93..2f02333 100755
+--- a/arch/arm/mach-mx5/board-mx51_babbage.c
++++ b/arch/arm/mach-mx5/board-mx51_babbage.c
+@@ -454,6 +454,11 @@ static void __init mx51_babbage_init(void)
+ 	imx51_add_ecspi(0, &mx51_babbage_spi_pdata);
+ 	imx51_add_imx2_wdt(0, NULL);
+ 	imx51_add_mxc_gpu(&gpu_data);
++
++	/* this call required to release IRAM partition held by ROM during boot,
++	  * even if SCC2 driver is not part of the image
++	  */
++	imx51_add_mxc_scc2();
+ }
+ 
+ static void __init mx51_babbage_timer_init(void)
+diff --git a/arch/arm/mach-mx5/board-mx53_ard.c b/arch/arm/mach-mx5/board-mx53_ard.c
+index 7ddd0d5..b200b98e 100755
+--- a/arch/arm/mach-mx5/board-mx53_ard.c
++++ b/arch/arm/mach-mx5/board-mx53_ard.c
+@@ -240,6 +240,11 @@ static void __init mx53_ard_board_init(void)
+ 				ARRAY_SIZE(mxc_i2c1_board_info));
+ 	i2c_register_board_info(2, mxc_i2c2_board_info,
+ 				ARRAY_SIZE(mxc_i2c2_board_info));
++
++	/* this call required to release SCC RAM partition held by ROM
++	  * during boot, even if SCC2 driver is not part of the image
++	  */
++	imx53_add_mxc_scc2();
+ }
+ 
+ static void __init mx53_ard_timer_init(void)
+diff --git a/arch/arm/mach-mx5/board-mx53_evk.c b/arch/arm/mach-mx5/board-mx53_evk.c
+index 3dfab9f..12f2cd1 100755
+--- a/arch/arm/mach-mx5/board-mx53_evk.c
++++ b/arch/arm/mach-mx5/board-mx53_evk.c
+@@ -743,6 +743,11 @@ static void __init mx53_evk_board_init(void)
+ 		ARRAY_SIZE(mx53_evk_spi_board_info));
+ 	imx53_add_ecspi(0, &mx53_evk_spi_data);
+ 	imx53_add_imx2_wdt(0, NULL);
++
++	/* this call required to release SCC RAM partition held by ROM
++	  * during boot, even if SCC2 driver is not part of the image
++	  */
++	imx53_add_mxc_scc2();
+ }
+ 
+ static void __init mx53_evk_timer_init(void)
+diff --git a/arch/arm/mach-mx5/board-mx53_loco.c b/arch/arm/mach-mx5/board-mx53_loco.c
+index 1d527fb..c2fdd42 100755
+--- a/arch/arm/mach-mx5/board-mx53_loco.c
++++ b/arch/arm/mach-mx5/board-mx53_loco.c
+@@ -750,6 +750,11 @@ static void __init mx53_loco_board_init(void)
+ 		gpu_data.z160_revision = 0;
+ 	imx53_add_mxc_gpu(&gpu_data);
+ 	imx_add_gpio_keys(&loco_button_data);
++
++	/* this call required to release SCC RAM partition held by ROM
++	  * during boot, even if SCC2 driver is not part of the image
++	  */
++	imx53_add_mxc_scc2();
+ }
+ 
+ static void __init mx53_loco_timer_init(void)
+diff --git a/arch/arm/mach-mx5/board-mx53_smd.c b/arch/arm/mach-mx5/board-mx53_smd.c
+index acc9af7..281320b 100755
+--- a/arch/arm/mach-mx5/board-mx53_smd.c
++++ b/arch/arm/mach-mx5/board-mx53_smd.c
+@@ -708,6 +708,11 @@ static void __init mx53_smd_board_init(void)
+ 	mxc_register_device(&smd_audio_device, &smd_audio_data);
+ 	mxc_register_device(&imx_bt_rfkill, &imx_bt_rfkill_data);
+ 	imx53_add_imx_ssi(1, &smd_ssi_pdata);
++
++	/* this call required to release SCC RAM partition held by ROM
++	  * during boot, even if SCC2 driver is not part of the image
++	  */
++	imx53_add_mxc_scc2();
+ }
+ 
+ static void __init mx53_smd_timer_init(void)
+diff --git a/arch/arm/mach-mx5/devices-imx51.h b/arch/arm/mach-mx5/devices-imx51.h
+index e5861c7..c56cba3 100755
+--- a/arch/arm/mach-mx5/devices-imx51.h
++++ b/arch/arm/mach-mx5/devices-imx51.h
+@@ -55,3 +55,8 @@ extern const struct imx_imx_keypad_data imx51_imx_keypad_data;
+ extern const struct imx_mxc_gpu_data imx51_gpu_data __initconst;
+ #define imx51_add_mxc_gpu(pdata) \
+ 	imx_add_mxc_gpu(&imx51_gpu_data, pdata)
++
++extern const struct imx_mxc_scc2_data imx51_mxc_scc2_data __initconst;
++#define imx51_add_mxc_scc2() \
++	imx_add_mxc_scc2(&imx51_mxc_scc2_data)
++
+diff --git a/arch/arm/mach-mx5/devices-imx53.h b/arch/arm/mach-mx5/devices-imx53.h
+index cc23448..3a6ac44 100755
+--- a/arch/arm/mach-mx5/devices-imx53.h
++++ b/arch/arm/mach-mx5/devices-imx53.h
+@@ -88,3 +88,8 @@ extern const struct imx_mxc_gpu_data imx53_gpu_data __initconst;
+ extern const struct imx_ldb_data imx53_ldb_data __initconst;
+ #define imx53_add_ldb(pdata) \
+ 	imx_add_ldb(&imx53_ldb_data, pdata);
++
++extern const struct imx_mxc_scc2_data imx53_mxc_scc2_data __initconst;
++#define imx53_add_mxc_scc2() \
++	imx_add_mxc_scc2(&imx53_mxc_scc2_data)
++
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index f18fd96..76baca6 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -37,3 +37,5 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_DCP) += platform-imx-dcp.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_RANDOM_RNGC) += platform-imx-rngb.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_PERFMON) += platform-imx-perfmon.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_LDB) += platform-imx_ldb.o
++obj-y += platform-imx-scc2.o
++
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 1209047..6c28bc5 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -388,6 +388,17 @@ struct imx_ldb_data {
+ struct platform_device *__init imx_add_ldb(
+ 	const struct imx_ldb_data *data,
+ 	struct fsl_mxc_ldb_platform_data *pdata);
++
++struct imx_mxc_scc2_data {
++	resource_size_t iobase;
++	resource_size_t ram_start;
++	resource_size_t irq_smn;
++	resource_size_t irq_scm;
++};
++
++struct platform_device *__init imx_add_mxc_scc2(
++		const struct imx_mxc_scc2_data *data);
++
+ struct imx_perfmon_data {
+ 	resource_size_t iobase;
+ 	struct mxs_platform_perfmon_data *pdata;
+diff --git a/arch/arm/plat-mxc/include/mach/mx51.h b/arch/arm/plat-mxc/include/mach/mx51.h
+index 8bf246e..7a993ef 100755
+--- a/arch/arm/plat-mxc/include/mach/mx51.h
++++ b/arch/arm/plat-mxc/include/mach/mx51.h
+@@ -14,6 +14,18 @@
+ #define MX51_IRAM_PARTITIONS		16
+ #define MX51_IRAM_SIZE		(MX51_IRAM_PARTITIONS * SZ_8K)	/* 128KB */
+ 
++/*
++ * SCC RAM: shares IRAM space
++ */
++#define MX51_SCC_RAM_BASE_ADDR	MX51_IRAM_BASE_ADDR
++
++#if defined(CONFIG_MXC_SECURITY_SCC2) \
++    || defined(CONFIG_MXC_SECURITY_SCC2_MODULE)
++#define MX51_SCC_RAM_SIZE  SZ_16K /* 2 partitions of 8 KB from IRAM */
++#else
++#define MX51_SCC_RAM_SIZE  0
++#endif
++
+ #define MX51_GPU_GMEM_BASE_ADDR		0x20000000
+ #define MX51_GPU_GMEM_SIZE		SZ_128K
+ #define MX51_GPU_BASE_ADDR		0x30000000
+@@ -276,9 +288,9 @@
+ #define MX51_MXC_INT_USB_OTG		18
+ #define MX51_MXC_INT_SAHARA_H0		19
+ #define MX51_MXC_INT_SAHARA_H1		20
+-#define MX51_MXC_INT_SCC_SMN		21
+-#define MX51_MXC_INT_SCC_STZ		22
+-#define MX51_MXC_INT_SCC_SCM		23
++#define MX51_INT_SCC_SMN		21
++#define MX51_INT_SCC_STZ		22
++#define MX51_INT_SCC_SCM		23
+ #define MX51_MXC_INT_SRTC_NTZ		24
+ #define MX51_MXC_INT_SRTC_TZ		25
+ #define MX51_MXC_INT_RTIC		26
+diff --git a/arch/arm/plat-mxc/include/mach/mx53.h b/arch/arm/plat-mxc/include/mach/mx53.h
+index b26b8dd..184e431 100755
+--- a/arch/arm/plat-mxc/include/mach/mx53.h
++++ b/arch/arm/plat-mxc/include/mach/mx53.h
+@@ -28,6 +28,14 @@
+ #define MX53_IRAM_PARTITIONS	16
+ #define MX53_IRAM_SIZE		(MX53_IRAM_PARTITIONS * SZ_8K)	/* 128KB */
+ 
++/*
++ * SCC RAM
++ */
++#define MX53_SCC_RAM_BASE_ADDR	0x07000000
++#define MX53_SCC_RAM_PARTITIONS	4
++ /* 16 KB */
++#define MX53_SCC_RAM_SIZE		(MX53_SCC_RAM_PARTITIONS * SZ_4K)
++
+ #ifdef CONFIG_MXC_VPU_IRAM
+ #define VPU_IRAM_SIZE  0x14000
+ #else
+-- 
+1.7.7.4
+

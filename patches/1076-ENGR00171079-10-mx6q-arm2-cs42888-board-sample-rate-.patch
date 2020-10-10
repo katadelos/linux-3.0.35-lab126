@@ -1,0 +1,50 @@
+From 07072ceb17b910d29e8251d91dafed8e352fab95 Mon Sep 17 00:00:00 2001
+From: Adrian Alonso <aalonso@freescale.com>
+Date: Tue, 21 Feb 2012 14:45:49 -0600
+Subject: [PATCH 1076/2463] ENGR00171079-10: mx6q-arm2 cs42888 board sample
+ rate settings
+
+* Board mx6q-arm2 cs42888 supportted sample rate settings,
+  pass them trough mxc_audio_codec_platform_data
+
+Signed-off-by: Adrian Alonso <aalonso@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c |    8 ++++++++
+ 1 files changed, 8 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 6cf998b..71c2612 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -51,6 +51,7 @@
+ #include <linux/regulator/machine.h>
+ #include <linux/regulator/fixed.h>
+ #include <linux/mfd/max17135.h>
++#include <sound/pcm.h>
+ 
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+@@ -643,6 +644,12 @@ static struct fsl_mxc_camera_platform_data ov5640_mipi_data = {
+ 	.io_init	= mx6_mipi_sensor_io_init,
+ };
+ 
++static struct mxc_audio_codec_platform_data cs42888_data = {
++	.rates = (SNDRV_PCM_RATE_44100 |
++			SNDRV_PCM_RATE_88200 |
++			SNDRV_PCM_RATE_176400),
++};
++
+ #define mV_to_uV(mV) (mV * 1000)
+ #define uV_to_mV(uV) (uV / 1000)
+ #define V_to_uV(V) (mV_to_uV(V * 1000))
+@@ -815,6 +822,7 @@ static int __init max17135_regulator_init(struct max17135 *max17135)
+ static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
+ 	{
+ 		I2C_BOARD_INFO("cs42888", 0x48),
++		.platform_data = (void *)&cs42888_data,
+ 	}, {
+ 		I2C_BOARD_INFO("ov5640", 0x3c),
+ 		.platform_data = (void *)&camera_data,
+-- 
+1.7.7.4
+

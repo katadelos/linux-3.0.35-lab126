@@ -1,0 +1,69 @@
+From c19e730006a517332b7500fa187d964a93eb6291 Mon Sep 17 00:00:00 2001
+From: Zeng Zhaoming <b32542@freescale.com>
+Date: Thu, 4 Aug 2011 09:07:32 +0800
+Subject: [PATCH 0319/2463] ENGR00154346 UART: fix uart deadlock
+
+UART hold the following locks in order of:
+
+imx_set_termios():
+--> spin_lock_irqsave(&sport->port.lock, flags)
+    del_timer_sync(&sport->timer);
+	--> spin_lock(timer->base->lock);
+    	--> spin_unlock(timer->base->lock);
+    spin_unlock_irqrestore(&sport->port.lock);
+
+while when imx_timeout() may invoked in following stack:
+run_timer_softirq():
+--> spin_lock_irqsave(timer->base->lock, flags);
+    imx_timeout();
+	--> spin_lock_irqsave(&sport->port.lock, flags);
+	    ...;
+	--> spin_unlock_irqrestore(&sport->port.lock, flags);
+    spin_unlock_irqrestore(timer->base->lock, flags);
+
+the above two cases hold lock with revert order, may
+deadlock in SMP platform.
+
+Signed-off-by: Zeng Zhaoming <b32542@freescale.com>
+---
+ drivers/tty/serial/imx.c |    8 ++++----
+ 1 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/tty/serial/imx.c b/drivers/tty/serial/imx.c
+index fd51726..05147f4 100644
+--- a/drivers/tty/serial/imx.c
++++ b/drivers/tty/serial/imx.c
+@@ -851,6 +851,8 @@ imx_set_termios(struct uart_port *port, struct ktermios *termios,
+ 	baud = uart_get_baud_rate(port, termios, old, 50, port->uartclk / 16);
+ 	quot = uart_get_divisor(port, baud);
+ 
++	del_timer_sync(&sport->timer);
++
+ 	spin_lock_irqsave(&sport->port.lock, flags);
+ 
+ 	sport->port.read_status_mask = 0;
+@@ -875,8 +877,6 @@ imx_set_termios(struct uart_port *port, struct ktermios *termios,
+ 			sport->port.ignore_status_mask |= URXD_OVRRUN;
+ 	}
+ 
+-	del_timer_sync(&sport->timer);
+-
+ 	/*
+ 	 * Update the per-port timeout.
+ 	 */
+@@ -940,10 +940,10 @@ imx_set_termios(struct uart_port *port, struct ktermios *termios,
+ 	/* set the parity, stop bits and data size */
+ 	writel(ucr2 | old_txrxen, sport->port.membase + UCR2);
+ 
++	spin_unlock_irqrestore(&sport->port.lock, flags);
++
+ 	if (UART_ENABLE_MS(&sport->port, termios->c_cflag))
+ 		imx_enable_ms(&sport->port);
+-
+-	spin_unlock_irqrestore(&sport->port.lock, flags);
+ }
+ 
+ static const char *imx_type(struct uart_port *port)
+-- 
+1.7.7.4
+

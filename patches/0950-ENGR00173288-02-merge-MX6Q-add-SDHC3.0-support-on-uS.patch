@@ -1,0 +1,170 @@
+From ea5da9f083852f12ae2f326bf5f13b881da067e8 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Tue, 31 Jan 2012 11:01:52 +0800
+Subject: [PATCH 0950/2463] ENGR00173288-02 merge "[MX6Q]add SDHC3.0 support
+ on uSDHC controller"
+
+ENGR152547-03 [MX6Q]add SDHC3.0 support on uSDHC controller
+add voltage switch function due to SDHC3.0 spec requirement
+add tuning function due to SDHC3.0 spec requirement
+extend some functions to support SDR50 & SDR104 speed mode
+
+- adjust the sequence of current_limit and bus_speed_mode
+- add FSL specific tuning procedure
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/core/core.h   |    1 +
+ drivers/mmc/core/sd.c     |   34 ++++++++++++++++++++++++++++++----
+ drivers/mmc/core/sd_ops.c |   43 +++++++++++++++++++++++++++++++++++++++++++
+ drivers/mmc/core/sd_ops.h |    1 +
+ include/linux/mmc/sd.h    |    3 ---
+ 5 files changed, 75 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/mmc/core/core.h b/drivers/mmc/core/core.h
+index 14664f1..84370ca 100644
+--- a/drivers/mmc/core/core.h
++++ b/drivers/mmc/core/core.h
+@@ -33,6 +33,7 @@ void mmc_init_erase(struct mmc_card *card);
+ 
+ void mmc_set_chip_select(struct mmc_host *host, int mode);
+ void mmc_set_clock(struct mmc_host *host, unsigned int hz);
++void mmc_set_tuning(struct mmc_host *host, unsigned int tuning);
+ void mmc_gate_clock(struct mmc_host *host);
+ void mmc_ungate_clock(struct mmc_host *host);
+ void mmc_set_ungated(struct mmc_host *host);
+diff --git a/drivers/mmc/core/sd.c b/drivers/mmc/core/sd.c
+index bd8805c..9dafabb 100644
+--- a/drivers/mmc/core/sd.c
++++ b/drivers/mmc/core/sd.c
+@@ -613,19 +613,45 @@ static int mmc_sd_init_uhs_card(struct mmc_card *card)
+ 	if (err)
+ 		goto out;
+ 
+-	/* Set bus speed mode of the card */
+-	err = sd_set_bus_speed_mode(card, status);
++	/* Set current limit for the card */
++	err = sd_set_current_limit(card, status);
+ 	if (err)
+ 		goto out;
+ 
+-	/* Set current limit for the card */
+-	err = sd_set_current_limit(card, status);
++	/* Set bus speed mode of the card */
++	err = sd_set_bus_speed_mode(card, status);
+ 	if (err)
+ 		goto out;
+ 
+ 	/* SPI mode doesn't define CMD19 */
++#ifdef CONFIG_MMC_SDHCI_ESDHC_IMX
++	if (!mmc_host_is_spi(card->host)) {
++		int min, max, avg;
++
++		min = card->host->tuning_min;
++		while (min < card->host->tuning_max) {
++			mmc_set_tuning(card->host, min);
++			if (!mmc_send_tuning_cmd(card))
++				break;
++			min += card->host->tuning_step;
++		}
++
++		max = min;
++		while (max < card->host->tuning_max) {
++			mmc_set_tuning(card->host, max);
++			if (!mmc_send_tuning_cmd(card))
++				break;
++			max += card->host->tuning_step;
++		}
++
++		avg = (min + max) / 2;
++		mmc_set_tuning(card->host, avg);
++		mmc_send_tuning_cmd(card);
++	}
++#else
+ 	if (!mmc_host_is_spi(card->host) && card->host->ops->execute_tuning)
+ 		err = card->host->ops->execute_tuning(card->host);
++#endif
+ 
+ out:
+ 	kfree(status);
+diff --git a/drivers/mmc/core/sd_ops.c b/drivers/mmc/core/sd_ops.c
+index 021fed1..afafc8c 100644
+--- a/drivers/mmc/core/sd_ops.c
++++ b/drivers/mmc/core/sd_ops.c
+@@ -345,6 +345,49 @@ int mmc_sd_switch(struct mmc_card *card, int mode, int group,
+ 	return 0;
+ }
+ 
++int mmc_send_tuning_cmd(struct mmc_card *card)
++{
++	struct mmc_request mrq;
++	struct mmc_command cmd;
++	struct mmc_data data;
++	struct scatterlist sg;
++	char scr[64];
++
++	BUG_ON(!card);
++	BUG_ON(!card->host);
++
++	memset(&mrq, 0, sizeof(struct mmc_request));
++	memset(&cmd, 0, sizeof(struct mmc_command));
++	memset(&data, 0, sizeof(struct mmc_data));
++	memset(scr, 0, 64);
++
++	mrq.cmd = &cmd;
++	mrq.data = &data;
++
++	cmd.opcode = MMC_SEND_TUNING_BLOCK;
++	cmd.arg = 0;
++	cmd.flags = MMC_RSP_R1 | MMC_CMD_ADTC;
++
++	data.blksz = 64;
++	data.blocks = 1;
++	data.flags = MMC_DATA_READ;
++	data.sg = &sg;
++	data.sg_len = 1;
++
++	sg_init_one(&sg, scr, 64);
++
++	mmc_set_data_timeout(&data, card);
++
++	mmc_wait_for_req(card->host, &mrq);
++
++	if (cmd.error)
++		return cmd.error;
++	if (data.error)
++		return data.error;
++
++	return 0;
++}
++
+ int mmc_app_sd_status(struct mmc_card *card, void *ssr)
+ {
+ 	int err;
+diff --git a/drivers/mmc/core/sd_ops.h b/drivers/mmc/core/sd_ops.h
+index ffc2305..2142da4 100644
+--- a/drivers/mmc/core/sd_ops.h
++++ b/drivers/mmc/core/sd_ops.h
+@@ -20,6 +20,7 @@ int mmc_app_send_scr(struct mmc_card *card, u32 *scr);
+ int mmc_sd_switch(struct mmc_card *card, int mode, int group,
+ 	u8 value, u8 *resp);
+ int mmc_app_sd_status(struct mmc_card *card, void *ssr);
++int mmc_send_tuning_cmd(struct mmc_card *card);
+ 
+ #endif
+ 
+diff --git a/include/linux/mmc/sd.h b/include/linux/mmc/sd.h
+index ae7cf95..e4c46fd 100644
+--- a/include/linux/mmc/sd.h
++++ b/include/linux/mmc/sd.h
+@@ -91,7 +91,4 @@
+ #define SD_SWITCH_ACCESS_DEF	0
+ #define SD_SWITCH_ACCESS_HS	1
+ 
+-#define SD_VOLTAGE_SWITCH	11
+-#define SD_TUNING_CMD		19
+-
+ #endif
+-- 
+1.7.7.4
+

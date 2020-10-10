@@ -1,0 +1,38 @@
+From 966938a8efc1e0ee6a9dd21778e6dfc06387b6d3 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Mon, 16 Apr 2012 15:47:23 +0800
+Subject: [PATCH 1330/2463] ENGR00179679 Fix usb gadget suspend issue
+ connected to usb charger
+
+- the root cause of this issue is during resume process, USB clock
+ is not turned on for this USB charger case so that the second
+ suspend is processed without USB clock, it cause system hang
+- in udc resume process, at this situation, we should exit low
+ power mode to enable the b session valid intrrupt to close the
+ usb clock when detach from usb charger
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 5a1aab9..ea81802 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -3458,7 +3458,11 @@ end:
+ 
+ 		dr_clk_gate(false);
+ 	}
+-	--udc_controller->suspended;
++
++	if (!(--udc_controller->suspended) && !udc_controller->stopped) {
++		dr_clk_gate(true);
++		dr_phy_low_power_mode(udc_controller, false);
++	}
+ 	enable_irq(udc_controller->irq);
+ 	mutex_unlock(&udc_resume_mutex);
+ 	printk(KERN_DEBUG "USB Gadget resume ends\n");
+-- 
+1.7.7.4
+

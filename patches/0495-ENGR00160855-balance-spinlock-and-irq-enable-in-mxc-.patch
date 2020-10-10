@@ -1,0 +1,34 @@
+From dea7a8f0f3655363ffeabab505db249c1108b783 Mon Sep 17 00:00:00 2001
+From: Alan Tull <alan.tull@freescale.com>
+Date: Wed, 26 Oct 2011 10:40:17 -0500
+Subject: [PATCH 0495/2463] ENGR00160855 balance spinlock and irq enable in
+ mxc hdmi video isr
+
+Need to add a spinlock unlock and irq enable at a return path.
+
+Signed-off-by: Alan Tull <alan.tull@freescale.com>
+---
+ drivers/video/mxc_hdmi.c |    6 ++++--
+ 1 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index c3c0164..d48170d 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -1461,9 +1461,11 @@ static irqreturn_t mxc_hdmi_hotplug(int irq, void *data)
+ 	if (ret == IRQ_DISABLE_FAIL) {
+ 		/* Capture status - used in det_worker ISR */
+ 		intr_stat = hdmi_readb(HDMI_IH_PHY_STAT0);
+-		if ((intr_stat & HDMI_IH_PHY_STAT0_HPD) == 0)
++		if ((intr_stat & HDMI_IH_PHY_STAT0_HPD) == 0) {
++			hdmi_irq_enable(irq);
++			spin_unlock_irqrestore(&hdmi->irq_lock, flags);
+ 			return IRQ_HANDLED;
+-
++		}
+ 		dev_dbg(&hdmi->pdev->dev, "Hotplug interrupt received\n");
+ 		hdmi->latest_intr_stat = intr_stat;
+ 
+-- 
+1.7.7.4
+

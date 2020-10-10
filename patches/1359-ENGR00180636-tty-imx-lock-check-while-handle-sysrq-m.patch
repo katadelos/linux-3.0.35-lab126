@@ -1,0 +1,62 @@
+From e7d0c07fb5e74d5e5f09bbd23ca12b4961d511a7 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Wed, 11 Apr 2012 13:21:15 +0800
+Subject: [PATCH 1359/2463] ENGR00180636: tty/imx: lock check while handle
+ sysrq message
+
+Since the port->lock has already been hold when enter rx_interrupt,
+and thus hold it on during handle_sysrq. We need check whether the
+current console_write is for the sysrq message output or not and use
+the correct lock mechanism.
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ drivers/tty/serial/imx.c |   15 +++++++++++----
+ 1 files changed, 11 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/tty/serial/imx.c b/drivers/tty/serial/imx.c
+index d65c589..a2a33fb 100644
+--- a/drivers/tty/serial/imx.c
++++ b/drivers/tty/serial/imx.c
+@@ -553,10 +553,8 @@ static irqreturn_t imx_rxint(int irq, void *dev_id)
+ 				continue;
+ 		}
+ 
+-		spin_unlock_irqrestore(&sport->port.lock, flags);
+ 		if (uart_handle_sysrq_char(&sport->port, (unsigned char)rx))
+ 			continue;
+-		spin_lock_irqsave(&sport->port.lock, flags);
+ 
+ 		if (unlikely(rx & URXD_ERR)) {
+ 			if (rx & URXD_BRK)
+@@ -1444,8 +1442,14 @@ imx_console_write(struct console *co, const char *s, unsigned int count)
+ 	struct imx_port *sport = imx_ports[co->index];
+ 	unsigned int old_ucr1, old_ucr2, ucr1;
+ 	unsigned long flags;
++	int locked = 1;
++
++	local_irq_save(flags);
++	if (sport->port.sysrq)
++		locked = 0;
++	else
++		spin_lock(&sport->port.lock);
+ 
+-	spin_lock_irqsave(&sport->port.lock, flags);
+ 	/*
+ 	 *	First, save UCR1/2 and then disable interrupts
+ 	 */
+@@ -1471,7 +1475,10 @@ imx_console_write(struct console *co, const char *s, unsigned int count)
+ 
+ 	writel(old_ucr1, sport->port.membase + UCR1);
+ 	writel(old_ucr2, sport->port.membase + UCR2);
+-	spin_unlock_irqrestore(&sport->port.lock, flags);
++
++	if (locked)
++		spin_unlock(&sport->port.lock);
++	local_irq_restore(flags);
+ }
+ 
+ /*
+-- 
+1.7.7.4
+

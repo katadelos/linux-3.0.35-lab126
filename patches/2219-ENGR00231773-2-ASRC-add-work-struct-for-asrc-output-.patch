@@ -1,0 +1,71 @@
+From 07eeb987cd59cecd527ba4658ef8220e8f0c13ad Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Fri, 26 Oct 2012 13:42:35 +0800
+Subject: [PATCH 2219/2463] ENGR00231773-2 ASRC: add work struct for asrc
+ output data receive
+
+SDMA driver can't promise receive all output data generated. Cause when
+the data in output FIFO is less than ASRC output FIFO watermark, there
+would be no DMA request generated and thus no SDMA transfer would
+happens.
+
+In this patch, add work struct to support ASRC driver receive last part
+of data in OUTPUT FIFO in polling way.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/mxc/asrc/mxc_asrc.c |   15 +++++++++++++++
+ include/linux/mxc_asrc.h    |    1 +
+ 2 files changed, 16 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index 13cf635..8ce2197 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -860,9 +860,20 @@ static void asrc_output_dma_callback(void *data)
+ 	params->output_counter++;
+ 	wake_up_interruptible(&params->output_wait_queue);
+ 	spin_unlock_irqrestore(&output_int_lock, lock_flags);
++
++	schedule_work(&params->task_output_work);
+ 	return;
+ }
+ 
++static void asrc_output_task_worker(struct work_struct *w)
++{
++	struct asrc_pair_params *params =
++		container_of(w, struct asrc_pair_params, task_output_work);
++
++	/* asrc output work struct */
++}
++
++
+ static void mxc_free_dma_buf(struct asrc_pair_params *params)
+ {
+ 	if (params->input_dma_total.dma_vaddr != NULL) {
+@@ -1140,6 +1151,10 @@ static long asrc_ioctl(struct file *file,
+ 
+ 			init_waitqueue_head(&params->input_wait_queue);
+ 			init_waitqueue_head(&params->output_wait_queue);
++			/* Add work struct to cover the task of
++			 * receive last period of output data.*/
++			INIT_WORK(&params->task_output_work,
++						asrc_output_task_worker);
+ 
+ 			if (copy_to_user
+ 			    ((void __user *)arg, &config,
+diff --git a/include/linux/mxc_asrc.h b/include/linux/mxc_asrc.h
+index 638d401..4d6149a 100644
+--- a/include/linux/mxc_asrc.h
++++ b/include/linux/mxc_asrc.h
+@@ -215,6 +215,7 @@ struct asrc_pair_params {
+ 	struct dma_block output_dma[ASRC_DMA_BUFFER_NUM];
+ 	struct dma_async_tx_descriptor *desc_in;
+ 	struct dma_async_tx_descriptor *desc_out;
++	struct work_struct task_output_work;
+ };
+ 
+ struct asrc_data {
+-- 
+1.7.7.4
+

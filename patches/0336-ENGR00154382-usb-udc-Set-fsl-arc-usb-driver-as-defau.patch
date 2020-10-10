@@ -1,0 +1,84 @@
+From f4fc14a595078c8047339e67d04ba777fe3d119e Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Tue, 12 Jul 2011 18:19:38 +0800
+Subject: [PATCH 0336/2463] ENGR00154382 usb-udc: Set fsl arc usb driver as
+ default usb device driver
+
+Set fsl arc usb device driver as default usb device driver
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/gadget/Kconfig |   50 ++++++++++++++++++++++----------------------
+ 1 files changed, 25 insertions(+), 25 deletions(-)
+
+diff --git a/drivers/usb/gadget/Kconfig b/drivers/usb/gadget/Kconfig
+index fb005e6..2cd864d 100755
+--- a/drivers/usb/gadget/Kconfig
++++ b/drivers/usb/gadget/Kconfig
+@@ -154,6 +154,31 @@ config USB_ATMEL_USBA
+ 	default USB_GADGET
+ 	select USB_GADGET_SELECTED
+ 
++config USB_GADGET_ARC
++	boolean "Freescale USB Device Controller"
++	depends on ARCH_MXC || ARCH_STMP3XXX || ARCH_MXS
++	select USB_GADGET_DUALSPEED
++	select USB_OTG_UTILS
++	help
++	   Some Freescale processors have a USBOTG controller,
++	   which supports device mode.
++
++	   Say "y" to link the driver statically, or "m" to build a
++	   dynamically linked module called "arc_udc" and force all
++	   gadget drivers to also be dynamically linked.
++
++config USB_STATIC_IRAM_PPH
++	bool "Apply static IRAM patch"
++	depends on USB_GADGET_ARC && (ARCH_MX37 || ARCH_MX3 || ARCH_MX25 || ARCH_MX51)
++	help
++	   Apply static IRAM patch to peripheral driver.
++
++config USB_ARC
++	tristate
++	depends on USB_GADGET_ARC
++	default USB_GADGET
++	select USB_GADGET_SELECTED
++
+ config USB_GADGET_FSL_USB2
+ 	boolean "Freescale Highspeed USB DR Peripheral Controller"
+ 	depends on FSL_SOC || ARCH_MXC
+@@ -522,31 +547,6 @@ config USB_GOKU
+ 	default USB_GADGET
+ 	select USB_GADGET_SELECTED
+ 
+-config USB_GADGET_ARC
+-	boolean "Freescale USB Device Controller"
+-	depends on ARCH_MXC || ARCH_STMP3XXX || ARCH_MXS
+-	select USB_GADGET_DUALSPEED
+-	select USB_OTG_UTILS
+-	help
+-	   Some Freescale processors have a USBOTG controller,
+-	   which supports device mode.
+-
+-	   Say "y" to link the driver statically, or "m" to build a
+-	   dynamically linked module called "arc_udc" and force all
+-	   gadget drivers to also be dynamically linked.
+-
+-config USB_STATIC_IRAM_PPH
+-	bool "Apply static IRAM patch"
+-	depends on USB_GADGET_ARC && (ARCH_MX37 || ARCH_MX3 || ARCH_MX25 || ARCH_MX51)
+-	help
+-	   Apply static IRAM patch to peripheral driver.
+-
+-config USB_ARC
+-	tristate
+-	depends on USB_GADGET_ARC
+-	default USB_GADGET
+-	select USB_GADGET_SELECTED
+-
+ config USB_GADGET_LANGWELL
+ 	boolean "Intel Langwell USB Device Controller"
+ 	depends on PCI
+-- 
+1.7.7.4
+

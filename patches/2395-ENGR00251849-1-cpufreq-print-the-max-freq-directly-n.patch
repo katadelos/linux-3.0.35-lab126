@@ -1,0 +1,38 @@
+From b63f6f1eb52f7e20efe1d5ddbb4177284ccbc874 Mon Sep 17 00:00:00 2001
+From: Robin Gong <b38343@freescale.com>
+Date: Tue, 26 Feb 2013 16:04:09 +0800
+Subject: [PATCH 2395/2463] ENGR00251849-1 cpufreq:print the max freq
+ directly, not obscure number
+
+You can see "arm_max_freq=1GHz" log directly from console during boot.
+not "arm_max_freq=1" before.
+
+Signed-off-by: Robin Gong <b38343@freescale.com>
+---
+ arch/arm/mach-mx6/cpu_op-mx6.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/cpu_op-mx6.c b/arch/arm/mach-mx6/cpu_op-mx6.c
+index 5124c5e..5418618 100644
+--- a/arch/arm/mach-mx6/cpu_op-mx6.c
++++ b/arch/arm/mach-mx6/cpu_op-mx6.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2010-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2010-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -353,7 +353,8 @@ void mx6_cpu_op_init(void)
+ 		arm_max_freq = (reg > arm_max_freq) ? arm_max_freq : reg;
+ 	} else
+ 		arm_max_freq = CPU_AT_1GHz;/*mx6dl/sl max freq is 1Ghz*/
+-	printk(KERN_INFO "arm_max_freq=%x\n", arm_max_freq);
++	printk(KERN_INFO "arm_max_freq=%s\n", (arm_max_freq == CPU_AT_1_2GHz) ?
++		"1.2GHz" : ((arm_max_freq == CPU_AT_1GHz) ? "1GHz" : "800MHz"));
+ 	get_cpu_op = mx6_get_cpu_op;
+ 	set_num_cpu_op = mx6_set_num_cpu_op;
+ 
+-- 
+1.7.7.4
+

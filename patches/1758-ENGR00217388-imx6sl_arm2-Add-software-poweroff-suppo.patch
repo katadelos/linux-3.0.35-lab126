@@ -1,0 +1,48 @@
+From ad537f734b64e47fb890a87db54108f2b35a9815 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Tue, 17 Jul 2012 14:14:35 +0800
+Subject: [PATCH 1758/2463] ENGR00217388: imx6sl_arm2: Add software poweroff
+ support via SNVS
+
+Add s/w poweroff support via SNVS setting.
+Use `poweroff' command to power down ARM2 board.
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6sl_arm2.c |   13 +++++++++++++
+ 1 files changed, 13 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 7258526..1053b15 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -1207,6 +1207,17 @@ static void __init elan_ts_init(void)
+ 	gpio_direction_output(MX6SL_ARM2_ELAN_CE, 1);
+ }
+ 
++#define SNVS_LPCR 0x38
++static void mx6_snvs_poweroff(void)
++{
++	u32 value;
++	void __iomem *mx6_snvs_base = MX6_IO_ADDRESS(MX6Q_SNVS_BASE_ADDR);
++
++	value = readl(mx6_snvs_base + SNVS_LPCR);
++	/* set TOP and DP_EN bit */
++	writel(value | 0x60, mx6_snvs_base + SNVS_LPCR);
++}
++
+ /*!
+  * Board specific initialization.
+  */
+@@ -1285,6 +1296,8 @@ static void __init mx6_arm2_init(void)
+ 	imx_add_viv_gpu(&imx6_gpu_data, &imx6q_gpu_pdata);
+ 	imx6sl_add_imx_keypad(&mx6sl_arm2_map_data);
+ 	imx6q_add_busfreq();
++
++	pm_power_off = mx6_snvs_poweroff;
+ }
+ 
+ extern void __iomem *twd_base;
+-- 
+1.7.7.4
+

@@ -1,0 +1,181 @@
+From 29e156d209a2618d47c640d71e166c7fb3ec8192 Mon Sep 17 00:00:00 2001
+From: Robin Gong <b38343@freescale.com>
+Date: Sat, 11 Aug 2012 17:41:52 +0800
+Subject: [PATCH 1886/2463] ENGR00220154 GPT mx6: move mx6_timer_rate to
+ clock.c
+
+System will report oops as below. To fix it we will move mx6_timer_rate to
+clock.c, so that we can avoid use clk_get_sys which cause schedule after
+spin_lock.
+
+oops log:
+BUG: scheduling while atomic: kinteractiveup/1403/0x00000002
+Modules linked in:
+(unwind_backtrace+0x0/0xfc) from [<804f05f0>] (__schedule+0x4b8/0x6b0)
+(__schedule+0x4b8/0x6b0) from [<804f12ac>] (__mutex_lock_slowpath+0x138/0x208)
+(__mutex_lock_slowpath+0x138/0x208) from [<804f13b4>] (mutex_lock+0x38/0x3c)
+mutex_lock+0x38/0x3c) from [<803b9134>] (clk_get_sys+0x1c/0xec)
+(clk_get_sys+0x1c/0xec) from [<8005f814>] (mx6_timer_rate+0x14/0x7c)
+(mx6_timer_rate+0x14/0x7c) from [<80056a20>] (_clk_gpt_get_rate+0x18/0x2c)
+(_clk_gpt_get_rate+0x18/0x2c) from [<8005e89c>] (clk_get_rate+0x34/0x40)
+(clk_get_rate+0x34/0x40) from [<80055f3c>] (_clk_pll_enable+0xa8/0x1ec)
+(_clk_pll_enable+0xa8/0x1ec) from [<80056088>] (_clk_pll1_enable+0x8/0x20)
+(_clk_pll1_enable+0x8/0x20) from [<80056998>] (_clk_arm_set_rate+0x278/0x2e8)
+(_clk_arm_set_rate+0x278/0x2e8) from [<8005e824>] (clk_set_rate+0x54/0x68)
+(clk_set_rate+0x54/0x68) from [<80061660>] (set_cpu_freq+0xb8/0x160)
+(set_cpu_freq+0xb8/0x160) from [<800618b4>] (mxc_set_target+0xf0/0x20c)
+(mxc_set_target+0xf0/0x20c) from [<80372388>](__cpufreq_driver_target+0x54/0x60)
+Signed-off-by: Robin Gong <b38343@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c               |   28 ++++++++++++++++++++++++++++
+ arch/arm/mach-mx6/clock_mx6sl.c         |   28 ++++++++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/common.h |    1 -
+ arch/arm/plat-mxc/time.c                |   28 ----------------------------
+ 4 files changed, 56 insertions(+), 29 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 5b74e2d..0a01c31 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -90,6 +90,11 @@ DEFINE_SPINLOCK(clk_lock);
+ #define V2_TCN			0x24
+ #define V2_TSTAT		0x08
+ #define V2_TSTAT_ROV	(1 << 5)
++#define V2_TCTL_CLK_OSC_DIV8	 (5 << 6)
++#define MXC_TCTL		0x00
++#define MXC_TPRER		0x04
++#define V2_TPRER_PRE24M_OFFSET	12
++#define V2_TPRER_PRE24M_MASK	0xF
+ 
+ /* We need to check the exp status again after timer expiration,
+  * as there might be interrupt coming between the first time exp
+@@ -1997,6 +2002,29 @@ static struct clk vdoa_clk[] = {
+ 	},
+ };
+ 
++static unsigned long mx6_timer_rate()
++{
++	u32 parent_rate = clk_get_rate(&osc_clk);
++
++	u32 reg = __raw_readl(timer_base + MXC_TCTL);
++	u32 div;
++
++	if ((reg & V2_TCTL_CLK_OSC_DIV8) == V2_TCTL_CLK_OSC_DIV8) {
++		if (cpu_is_mx6q())
++			/* For MX6Q, only options are 24MHz or 24MHz/8*/
++			return parent_rate / 8;
++		else {
++			/* For MX6DLS and MX6Solo, the rate is based on the
++			  * divider value set in prescalar register. */
++			div = __raw_readl(timer_base + MXC_TPRER);
++			div = (div >> V2_TPRER_PRE24M_OFFSET) &
++					V2_TPRER_PRE24M_MASK;
++			return parent_rate / (div + 1);
++		}
++	}
++	return 0;
++}
++
+ static unsigned long _clk_gpt_get_rate(struct clk *clk)
+ {
+ 	unsigned long rate;
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 6e0bcc4..3b2d9e5 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -82,6 +82,11 @@ DEFINE_SPINLOCK(mx6sl_clk_lock);
+ #define V2_TCN			0x24
+ #define V2_TSTAT		0x08
+ #define V2_TSTAT_ROV	(1 << 5)
++#define V2_TCTL_CLK_OSC_DIV8	 (5 << 6)
++#define MXC_TCTL		0x00
++#define MXC_TPRER		0x04
++#define V2_TPRER_PRE24M_OFFSET	12
++#define V2_TPRER_PRE24M_MASK	0xF
+ 
+ /* We need to check the exp status again after timer expiration,
+  * as there might be interrupt coming between the first time exp
+@@ -1760,6 +1765,29 @@ static struct clk sdma_clk[] = {
+ 	},
+ };
+ 
++static unsigned long mx6_timer_rate()
++{
++	u32 parent_rate = clk_get_rate(&osc_clk);
++
++	u32 reg = __raw_readl(timer_base + MXC_TCTL);
++	u32 div;
++
++	if ((reg & V2_TCTL_CLK_OSC_DIV8) == V2_TCTL_CLK_OSC_DIV8) {
++		if (cpu_is_mx6q())
++			/* For MX6Q, only options are 24MHz or 24MHz/8*/
++			return parent_rate / 8;
++		else {
++			/* For MX6DLS and MX6Solo, the rate is based on the
++			  * divider value set in prescalar register. */
++			div = __raw_readl(timer_base + MXC_TPRER);
++			div = (div >> V2_TPRER_PRE24M_OFFSET) &
++					V2_TPRER_PRE24M_MASK;
++			return parent_rate / (div + 1);
++		}
++	}
++	return 0;
++}
++
+ static unsigned long _clk_gpt_get_rate(struct clk *clk)
+ {
+ 	unsigned long rate;
+diff --git a/arch/arm/plat-mxc/include/mach/common.h b/arch/arm/plat-mxc/include/mach/common.h
+index 4edcaea..3dfc664 100755
+--- a/arch/arm/plat-mxc/include/mach/common.h
++++ b/arch/arm/plat-mxc/include/mach/common.h
+@@ -89,7 +89,6 @@ extern void mx51_efikamx_reset(void);
+ extern int mx53_revision(void);
+ extern int mx50_revision(void);
+ extern int mx53_display_revision(void);
+-extern unsigned long mx6_timer_rate(void);
+ extern int mxs_reset_block(void __iomem *);
+ extern void early_console_setup(unsigned long base, struct clk *clk);
+ extern void mx6_cpu_regulator_init(void);
+diff --git a/arch/arm/plat-mxc/time.c b/arch/arm/plat-mxc/time.c
+index 3f99628..aaeedb6 100644
+--- a/arch/arm/plat-mxc/time.c
++++ b/arch/arm/plat-mxc/time.c
+@@ -294,34 +294,6 @@ static int __init mxc_clockevent_init(struct clk *timer_clk)
+ 	return 0;
+ }
+ 
+-#ifdef CONFIG_ARCH_MX6
+-unsigned long mx6_timer_rate()
+-{
+-	struct clk *osc_clk = clk_get(NULL, "osc");
+-	u32 parent_rate = clk_get_rate(osc_clk);
+-
+-	u32 reg = __raw_readl(timer_base + MXC_TCTL);
+-	u32 div;
+-
+-	clk_put(osc_clk);
+-
+-	if ((reg & V2_TCTL_CLK_OSC_DIV8) == V2_TCTL_CLK_OSC_DIV8) {
+-		if (cpu_is_mx6q())
+-			/* For MX6Q, only options are 24MHz or 24MHz/8*/
+-			return parent_rate / 8;
+-		else {
+-			/* For MX6DLS and MX6Solo, the rate is based on the
+-			  * divider value set in prescalar register. */
+-			div = __raw_readl(timer_base + MXC_TPRER);
+-			div = (div >> V2_TPRER_PRE24M_OFFSET) &
+-					V2_TPRER_PRE24M_MASK;
+-			return parent_rate / (div + 1);
+-		}
+-	}
+-	return 0;
+-}
+-#endif
+-
+ void __init mxc_timer_init(struct clk *timer_clk, void __iomem *base, int irq)
+ {
+ 	uint32_t tctl_val;
+-- 
+1.7.7.4
+

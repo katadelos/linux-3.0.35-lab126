@@ -1,0 +1,68 @@
+From 124b8114d388fc905456ef7d02187d6b4fb161a1 Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Mon, 2 Jul 2012 10:48:50 +0800
+Subject: [PATCH 1682/2463] ENGR00215489-2 WDOG :add watchdog irq in device
+ structure
+
+1.add watchdog irq in device structure
+2.modify watchdog irq macro define to meet _SOC_
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ arch/arm/plat-mxc/devices/platform-imx2-wdt.c   |    5 +++++
+ arch/arm/plat-mxc/include/mach/devices-common.h |    1 +
+ arch/arm/plat-mxc/include/mach/mx6.h            |    4 ++--
+ 3 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/platform-imx2-wdt.c b/arch/arm/plat-mxc/devices/platform-imx2-wdt.c
+index 872515a..53cfb8d 100644
+--- a/arch/arm/plat-mxc/devices/platform-imx2-wdt.c
++++ b/arch/arm/plat-mxc/devices/platform-imx2-wdt.c
+@@ -15,6 +15,7 @@
+ 		.id = _id,						\
+ 		.iobase = soc ## _WDOG ## _hwid ## _BASE_ADDR,		\
+ 		.iosize = _size,					\
++		.irq = soc ## _INT_WDOG ## _hwid,			\
+ 	}
+ #define imx_imx2_wdt_data_entry(soc, _id, _hwid, _size)			\
+ 	[_id] = imx_imx2_wdt_data_entry_single(soc, _id, _hwid, _size)
+@@ -79,6 +80,10 @@ struct platform_device *__init imx_add_imx2_wdt(
+ 			.start = data->iobase,
+ 			.end = data->iobase + data->iosize - 1,
+ 			.flags = IORESOURCE_MEM,
++		}, {
++			.start = data->irq,
++			.end = data->irq,
++			.flags = IORESOURCE_IRQ,
+ 		},
+ 	};
+ 	return imx_add_platform_device("imx2-wdt", data->id,
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 8aa1322..4b61107 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -80,6 +80,7 @@ struct imx_imx2_wdt_data {
+ 	int id;
+ 	resource_size_t iobase;
+ 	resource_size_t iosize;
++	resource_size_t irq;
+ };
+ struct platform_device *__init imx_add_imx2_wdt(
+ 		const struct imx_imx2_wdt_data *data);
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index bb4423e..95a211c 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -415,8 +415,8 @@
+ #define MXC_INT_GPIO6_INT31_16_NUM	109
+ #define MXC_INT_GPIO7_INT15_0_NUM	110
+ #define MXC_INT_GPIO7_INT31_16_NUM	111
+-#define MXC_INT_WDOG1			112
+-#define MXC_INT_WDOG2			113
++#define MX6Q_INT_WDOG1			112
++#define MX6Q_INT_WDOG2			113
+ #define MXC_INT_KPP			114
+ #define MX6SL_INT_KPP			114
+ #define MX6Q_INT_PWM1			115
+-- 
+1.7.7.4
+

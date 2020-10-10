@@ -1,0 +1,54 @@
+From b4963f501f3d2a85d5ddf5f25222836b6345ef07 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Wed, 27 Jun 2012 16:08:49 +0800
+Subject: [PATCH 1677/2463] ENGR00215041-2 MX6 SabreSD:Set clko parent to be
+ clko2
+
+On MX6 SabreSD board, gpio_0 is muxed to clko to be
+audio mclk and camera mclk. 24MHz osc clk is a stable
+clock source, which can meet the requirement of audio
+mclk and camera mclk. This patch sets clko parent
+clock to be clko2 clock so that camera mclk and audio
+mclk can source from osc clk.
+There are 2 benifits after applying this patch:
+1) clko's original parent clock(pll4_audio_main_clk)
+can be gated off to save power or used by another
+module.
+2) ov5640/ov5642 camera most settings can reach
+claimed 15fps or 30fps with no human eye recognizable
+video quality downgrade.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit ace3723ceff0d546e0176f74ad38d58a6d11b7ee)
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |    7 ++++++-
+ 1 files changed, 6 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index eaf1d77..7f8add9 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1599,7 +1599,7 @@ static void __init mx6_sabresd_board_init(void)
+ {
+ 	int i;
+ 	int ret;
+-	struct clk *clko2;
++	struct clk *clko, *clko2;
+ 	struct clk *new_parent;
+ 	int rate;
+ 
+@@ -1779,6 +1779,11 @@ static void __init mx6_sabresd_board_init(void)
+ 	clk_set_rate(clko2, rate);
+ 	clk_enable(clko2);
+ 
++	/* Camera and audio use osc clock */
++	clko = clk_get(NULL, "clko_clk");
++	if (!IS_ERR(clko))
++		clk_set_parent(clko, clko2);
++
+ 	/* Enable Aux_5V */
+ 	gpio_request(SABRESD_AUX_5V_EN, "aux_5v_en");
+ 	gpio_direction_output(SABRESD_AUX_5V_EN, 1);
+-- 
+1.7.7.4
+

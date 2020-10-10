@@ -1,0 +1,63 @@
+From 3549c7dcdef945b149d55d776076a29526e491fd Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Mon, 13 Aug 2012 15:52:19 +0800
+Subject: [PATCH 1888/2463] ENGR00220181-1 DMA: remove noncacheable memory
+ allocation limit.
+
+DMA interface dma_alloc_noncacheable() is only used by USB. HDMI audio
+driver also need the interface to allocate C=0 B=0 type memory.
+
+In this patch, remove MACRO limitation and make dma_alloc_noncacheable()
+common code for other modules.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ arch/arm/include/asm/dma-mapping.h |    3 ---
+ arch/arm/mm/dma-mapping.c          |    3 ---
+ 2 files changed, 0 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/include/asm/dma-mapping.h b/arch/arm/include/asm/dma-mapping.h
+index b52c063..635c940 100644
+--- a/arch/arm/include/asm/dma-mapping.h
++++ b/arch/arm/include/asm/dma-mapping.h
+@@ -198,8 +198,6 @@ extern void *dma_alloc_coherent(struct device *, size_t, dma_addr_t *, gfp_t);
+  */
+ extern void *dma_alloc_writethrough(struct device *, size_t, dma_addr_t *, gfp_t);
+ 
+-
+-#ifdef CONFIG_FSL_UTP
+ /**
+  * dma_alloc_noncacheable - allocate consistent memory for DMA
+  * @dev: valid struct device pointer, or NULL for ISA and EISA-like devices
+@@ -212,7 +210,6 @@ extern void *dma_alloc_writethrough(struct device *, size_t, dma_addr_t *, gfp_t
+  * device-viewed address.
+  */
+ extern void *dma_alloc_noncacheable(struct device *, size_t, dma_addr_t *, gfp_t);
+-#endif
+ 
+ /**
+  * dma_free_coherent - free memory allocated by dma_alloc_coherent
+diff --git a/arch/arm/mm/dma-mapping.c b/arch/arm/mm/dma-mapping.c
+index e134cff..0f0badd 100644
+--- a/arch/arm/mm/dma-mapping.c
++++ b/arch/arm/mm/dma-mapping.c
+@@ -369,8 +369,6 @@ dma_alloc_writethrough(struct device *dev, size_t size, dma_addr_t *handle, gfp_
+ }
+ EXPORT_SYMBOL(dma_alloc_writethrough);
+ 
+-
+-#ifdef CONFIG_FSL_UTP
+ /*
+  *  Allocate noncacheable memory space and return both the kernel remapped
+  * virtual and bus address for that space.
+@@ -383,7 +381,6 @@ dma_alloc_noncacheable(struct device *dev, size_t size, dma_addr_t *handle, gfp_
+ 			  pgprot_noncached(pgprot_kernel));
+ }
+ EXPORT_SYMBOL(dma_alloc_noncacheable);
+-#endif
+ 
+ static int dma_mmap(struct device *dev, struct vm_area_struct *vma,
+ 		    void *cpu_addr, dma_addr_t dma_addr, size_t size)
+-- 
+1.7.7.4
+

@@ -1,0 +1,93 @@
+From 69c287e64e302237bfad6dc9068987251063690e Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Wed, 13 Apr 2011 11:48:00 -0500
+Subject: [PATCH 0095/2463] ENGR00142020-2: MX50: Add SPI and MC13892 support
+
+Add PMIC and SPI support for MX50
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/configs/imx5_defconfig              |    5 +++--
+ arch/arm/plat-mxc/devices/platform-spi_imx.c |   11 ++++++++++-
+ arch/arm/plat-mxc/include/mach/mx50.h        |    4 +++-
+ 3 files changed, 16 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/configs/imx5_defconfig b/arch/arm/configs/imx5_defconfig
+index 627e89f..477667c 100755
+--- a/arch/arm/configs/imx5_defconfig
++++ b/arch/arm/configs/imx5_defconfig
+@@ -989,7 +989,7 @@ CONFIG_SPI_MASTER=y
+ # CONFIG_SPI_GPIO is not set
+ CONFIG_SPI_IMX_VER_0_7=y
+ CONFIG_SPI_IMX_VER_2_3=y
+-# CONFIG_SPI_IMX is not set
++CONFIG_SPI_IMX=y
+ # CONFIG_SPI_PXA2XX_PCI is not set
+ # CONFIG_SPI_XILINX is not set
+ # CONFIG_SPI_DESIGNWARE is not set
+@@ -1176,7 +1176,7 @@ CONFIG_PMIC_DIALOG=y
+ # CONFIG_PMIC_DA9052 is not set
+ # CONFIG_PMIC_DA9053AA is not set
+ CONFIG_PMIC_DA9053Bx=y
+-# CONFIG_MFD_MC13XXX is not set
++CONFIG_MFD_MC13XXX=y
+ # CONFIG_ABX500_CORE is not set
+ # CONFIG_EZX_PCAP is not set
+ # CONFIG_MFD_TPS6586X is not set
+@@ -1200,6 +1200,7 @@ CONFIG_REGULATOR_FIXED_VOLTAGE=y
+ # CONFIG_REGULATOR_AD5398 is not set
+ # CONFIG_REGULATOR_TPS6524X is not set
+ CONFIG_REGULATOR_DA9052=y
++CONFIG_REGULATOR_MC13892=y
+ CONFIG_MEDIA_SUPPORT=y
+ 
+ #
+diff --git a/arch/arm/plat-mxc/devices/platform-spi_imx.c b/arch/arm/plat-mxc/devices/platform-spi_imx.c
+index f97eb36..8f8fce8 100644
+--- a/arch/arm/plat-mxc/devices/platform-spi_imx.c
++++ b/arch/arm/plat-mxc/devices/platform-spi_imx.c
+@@ -78,6 +78,16 @@ const struct imx_spi_imx_data imx35_cspi_data[] __initconst = {
+ };
+ #endif /* ifdef CONFIG_SOC_IMX35 */
+ 
++#ifdef CONFIG_SOC_IMX50
++const struct imx_spi_imx_data imx50_cspi_data[] __initconst = {
++#define imx50_cspi_data_entry(_id, _hwid)				\
++	imx_spi_imx_data_entry(MX50, CSPI, "imx50-cspi", _id, _hwid, SZ_4K)
++	imx50_cspi_data_entry(1, 1),
++	imx50_cspi_data_entry(2, 2),
++	imx50_cspi_data_entry(3, 3),
++};
++#endif /* ifdef CONFIG_SOC_IMX50 */
++
+ #ifdef CONFIG_SOC_IMX51
+ const struct imx_spi_imx_data imx51_cspi_data __initconst =
+ 	imx_spi_imx_data_entry_single(MX51, CSPI, "imx51-cspi", 2, , SZ_4K);
+@@ -117,7 +127,6 @@ struct platform_device *__init imx_add_spi_imx(
+ 			.flags = IORESOURCE_IRQ,
+ 		},
+ 	};
+-
+ 	return imx_add_platform_device(data->devid, data->id,
+ 			res, ARRAY_SIZE(res), pdata, sizeof(*pdata));
+ }
+diff --git a/arch/arm/plat-mxc/include/mach/mx50.h b/arch/arm/plat-mxc/include/mach/mx50.h
+index b9ad53a..c3a1af4 100755
+--- a/arch/arm/plat-mxc/include/mach/mx50.h
++++ b/arch/arm/plat-mxc/include/mach/mx50.h
+@@ -256,9 +256,11 @@
+ #define MX50_INT_UART3		33
+ #define MX50_INT_RESV34		34
+ #define MX50_INT_RESV35		35
++/* eCSPI interrupts */
+ #define MX50_INT_CSPI1		36
+ #define MX50_INT_CSPI2		37
+-#define MX50_INT_CSPI		38
++/* CSPI interrupt */
++#define MX50_INT_CSPI3		38
+ #define MX50_INT_GPT		39
+ #define MX50_INT_EPIT1		40
+ #define MX50_INT_GPIO1_INT7	42
+-- 
+1.7.7.4
+

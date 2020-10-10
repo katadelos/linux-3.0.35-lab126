@@ -1,0 +1,70 @@
+From ce75a3ffeb2b88dcf64d28eb4fa3623039cd6ad3 Mon Sep 17 00:00:00 2001
+From: wu guoxing <b39297@freescale.com>
+Date: Fri, 16 Dec 2011 12:15:05 +0800
+Subject: [PATCH 0754/2463] ENGR00170452: gpu-viv: change from
+ dma_sync_single_for_device to outer_clean_range
+
+dma_sync_single_for_device can only used for kernel physical memory,
+while in gpu, we will also clean user physical memory for pixmap,
+direct texture, etc. outer_clean_range can operate on both.
+
+Signed-off-by: Wu Guoxing <b39297@freescale.com>
+Acked-by: Lily Zhang <r58066@freescale.com>
+---
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |   26 ++++++-------------
+ 1 files changed, 8 insertions(+), 18 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index c22aa46..eacee27 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -4957,16 +4957,8 @@ OnError:
+ 
+         for (i = 0; i < pageCount; i++)
+         {
+-            /* Flush(clean) the data cache. */
+-#if !defined(ANDROID)
+-            dma_sync_single_for_device(
+-                        gcvNULL,
+-                        page_to_phys(pages[i]),
+-                        PAGE_SIZE,
+-                        DMA_TO_DEVICE);
+-#else
+-            flush_dcache_page(pages[i]);
+-#endif
++            unsigned long paddr = page_to_phys(pages[i]);
++            outer_clean_range(paddr, paddr + PAGE_SIZE);
+         }
+ 
+ #if gcdENABLE_VG
+@@ -5267,6 +5259,8 @@ OnError:
+         /* Release the page cache. */
+         for (i = 0; i < pageCount; i++)
+         {
++            unsigned long paddr = page_to_phys(pages[i]);
++
+             gcmkTRACE_ZONE(
+                 gcvLEVEL_INFO, gcvZONE_OS,
+                 "%s(%d): pages[%d]: 0x%X.",
+@@ -5279,14 +5273,10 @@ OnError:
+                 SetPageDirty(pages[i]);
+             }
+ 
+-#if !defined(ANDROID)
+-            /* Invalidate the data cache. */
+-            dma_sync_single_for_device(
+-                        gcvNULL,
+-                        page_to_phys(pages[i]),
+-                        PAGE_SIZE,
+-                        DMA_FROM_DEVICE);
+-#endif
++            flush_dcache_page(pages[i]);
++
++            outer_inv_range(paddr, paddr + PAGE_SIZE);
++
+             page_cache_release(pages[i]);
+         }
+ 
+-- 
+1.7.7.4
+

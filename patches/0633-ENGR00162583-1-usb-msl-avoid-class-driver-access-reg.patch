@@ -1,0 +1,61 @@
+From 59739f22b18099cb425972e99333caa345d6de33 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Fri, 18 Nov 2011 13:57:47 +0800
+Subject: [PATCH 0633/2463] ENGR00162583-1 usb msl: avoid class driver access
+ register after usb is off
+
+- An well-behavior class driver should disable their endpoints
+after being notified disconnect with host, we use all endpoints
+are stopped (ep->stopped)  to indicates the class
+driver will not visit device driver any more.
+the ep-stopped will be initialized as 1 for non-control endpoint
+it will be 0 after fsl_ep_enable, and be 1 after fsl_ep_disable.
+Where is a non-sleep wait routine at disconnect event for waiting all
+endpoints are stopped
+- Some controller's (like i.mx6q) DP will change from J
+to SE0 slowly after the cable disconnects with host, in that case there
+will be a wakeup interrupt after driver enables the wakeup interrupt.
+For i.mx6q, there is a discharge routine for DP after the disconnection.
+- Should not wait vbus to low during first otg switch, as the wait will
+be timeout when the usb cable is connecting to host.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ arch/arm/mach-mx6/usb_dr.c |   14 ++++++++++++++
+ 1 files changed, 14 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index de84a4d..957b021 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -365,6 +365,19 @@ static void host_wakeup_handler(struct fsl_usb2_platform_data *pdata)
+ 
+ #ifdef CONFIG_USB_GADGET_ARC
+ /* Beginning of device related operation for DR port */
++static void _gadget_discharge_dp(bool enable)
++{
++	void __iomem *phy_reg = MX6_IO_ADDRESS(USB_PHY0_BASE_ADDR);
++	if (enable) {
++		__raw_writel(BF_USBPHY_DEBUG_ENHSTPULLDOWN(0x2), phy_reg + HW_USBPHY_DEBUG_SET);
++		__raw_writel(BF_USBPHY_DEBUG_HSTPULLDOWN(0x2), phy_reg + HW_USBPHY_DEBUG_SET);
++	} else {
++		__raw_writel(BF_USBPHY_DEBUG_ENHSTPULLDOWN(0x2), phy_reg + HW_USBPHY_DEBUG_CLR);
++		__raw_writel(BF_USBPHY_DEBUG_HSTPULLDOWN(0x2), phy_reg + HW_USBPHY_DEBUG_CLR);
++	}
++
++}
++
+ static void _device_phy_lowpower_suspend(struct fsl_usb2_platform_data *pdata, bool enable)
+ {
+ 	__phy_lowpower_suspend(pdata, enable, ENABLED_BY_DEVICE);
+@@ -450,6 +463,7 @@ void __init mx6_usb_dr_init(void)
+ 	dr_utmi_config.wake_up_enable = _device_wakeup_enable;
+ 	dr_utmi_config.phy_lowpower_suspend = _device_phy_lowpower_suspend;
+ 	dr_utmi_config.is_wakeup_event = _is_device_wakeup;
++	dr_utmi_config.gadget_discharge_dp = _gadget_discharge_dp;
+ 	dr_utmi_config.wakeup_pdata = &dr_wakeup_config;
+ 	dr_utmi_config.wakeup_handler = device_wakeup_handler;
+ 	pdev = imx6q_add_fsl_usb2_udc(&dr_utmi_config);
+-- 
+1.7.7.4
+

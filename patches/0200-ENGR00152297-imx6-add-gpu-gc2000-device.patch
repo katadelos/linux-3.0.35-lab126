@@ -1,0 +1,264 @@
+From 4bfbe3970a40daaad078ccd0ad7b3bf145c2e990 Mon Sep 17 00:00:00 2001
+From: Richard Zhao <richard.zhao@freescale.com>
+Date: Thu, 30 Jun 2011 15:21:44 +0800
+Subject: [PATCH 0200/2463] ENGR00152297 imx6: add gpu gc2000 device
+
+-add platform-viv_gpu.c in plat-mxc/devices.
+-add gc2000 device in board file.
+
+Signed-off-by: Richard Zhao <richard.zhao@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig                       |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c        |   20 +++++++
+ arch/arm/mach-mx6/devices-imx6q.h               |    4 ++
+ arch/arm/plat-mxc/devices/Kconfig               |    3 +
+ arch/arm/plat-mxc/devices/Makefile              |    1 +
+ arch/arm/plat-mxc/devices/platform-viv_gpu.c    |   64 +++++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h |   10 ++++
+ arch/arm/plat-mxc/include/mach/mx6.h            |    1 -
+ arch/arm/plat-mxc/include/mach/viv_gpu.h        |   23 ++++++++
+ 9 files changed, 126 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 2b00fe3..de2743e 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -25,6 +25,7 @@ config MACH_MX6Q_SABREAUTO
+ 	select IMX_HAVE_PLATFORM_SDHCI_ESDHC_IMX
+ 	select IMX_HAVE_PLATFORM_SPI_IMX
+ 	select IMX_HAVE_PLATFORM_IMX_I2C
++	select IMX_HAVE_PLATFORM_VIV_GPU
+ 	help
+ 	  Include support for i.MX 6Quad SABRE Automotive Infotainment platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index be0fbbb..6851a1f 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -44,6 +44,7 @@
+ #include <linux/mxcfb.h>
+ #include <linux/pwm_backlight.h>
+ #include <linux/fec.h>
++#include <linux/memblock.h>
+ #include <mach/common.h>
+ #include <mach/hardware.h>
+ #include <asm/irq.h>
+@@ -55,6 +56,7 @@
+ #include <mach/memory.h>
+ #include <mach/iomux-mx6q.h>
+ #include <mach/imx-uart.h>
++#include <mach/viv_gpu.h>
+ #include <linux/gpio.h>
+ 
+ #include "devices-imx6q.h"
+@@ -212,6 +214,10 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ 	},
+ };
+ 
++static struct viv_gpu_platform_data imx6q_gc2000_pdata __initdata = {
++	.reserved_mem_size = SZ_128M,
++};
++
+ /*!
+  * Board specific initialization.
+  */
+@@ -227,6 +233,7 @@ static void __init mx6_board_init(void)
+ 			ARRAY_SIZE(mxc_i2c2_board_info));
+ 
+ 	imx6q_add_sdhci_usdhc_imx(3, &mx6q_sabreauto_sd4_data);
++	imx_add_viv_gpu("gc2000", &imx6_gc2000_data, &imx6q_gc2000_pdata);
+ }
+ 
+ extern void __iomem *twd_base;
+@@ -247,6 +254,18 @@ static struct sys_timer mxc_timer = {
+ 	.init   = mx6_timer_init,
+ };
+ 
++static void __init mx6q_reserve(void)
++{
++	phys_addr_t phys;
++
++	if (imx6q_gc2000_pdata.reserved_mem_size) {
++		phys = memblock_alloc(imx6q_gc2000_pdata.reserved_mem_size, SZ_4K);
++		memblock_free(phys, imx6q_gc2000_pdata.reserved_mem_size);
++		memblock_remove(phys, imx6q_gc2000_pdata.reserved_mem_size);
++		imx6q_gc2000_pdata.reserved_mem_base = phys;
++	}
++}
++
+ /*
+  * initialize __mach_desc_MX6Q_SABREAUTO data structure.
+  */
+@@ -258,4 +277,5 @@ MACHINE_START(MX6Q_SABREAUTO, "Freescale i.MX 6Quad SABRE Auto Board")
+ 	.init_irq = mx6_init_irq,
+ 	.init_machine = mx6_board_init,
+ 	.timer = &mxc_timer,
++	.reserve = mx6q_reserve,
+ MACHINE_END
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 5fbf73a..65a2e44 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -41,3 +41,7 @@ extern const struct imx_spi_imx_data imx6q_ecspi_data[] __initconst;
+ extern const struct imx_imx_i2c_data imx6q_imx_i2c_data[] __initconst;
+ #define imx6q_add_imx_i2c(id, pdata)	\
+ 	imx_add_imx_i2c(&imx6q_imx_i2c_data[id], pdata)
++
++extern const struct imx_viv_gpu_data imx6_gc2000_data __initconst;
++extern const struct imx_viv_gpu_data imx6_gc320_data __initconst;
++extern const struct imx_viv_gpu_data imx6_gc355_data __initconst;
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index 986135d..8bfc234 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -130,3 +130,6 @@ config IMX_HAVE_PLATFORM_IMX_EPDC
+ 
+ config IMX_HAVE_PLATFORM_IMX_SPDIF
+ 	bool
++
++config IMX_HAVE_PLATFORM_VIV_GPU
++	bool
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index 4083008..b4c68e4 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -45,3 +45,4 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_EPDC) += platform-imx-epdc-fb.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_SPDIF) += platform-imx-spdif.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_SPDIF) += platform-imx-spdif-dai.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_SPDIF) += platform-imx-spdif-audio.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_VIV_GPU) +=  platform-viv_gpu.o
+diff --git a/arch/arm/plat-mxc/devices/platform-viv_gpu.c b/arch/arm/plat-mxc/devices/platform-viv_gpu.c
+new file mode 100644
+index 0000000..82d1758
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-viv_gpu.c
+@@ -0,0 +1,64 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++
++#ifdef CONFIG_ARCH_MX6
++const struct imx_viv_gpu_data imx6_gc2000_data __initconst = {
++	.iobase = GPU_3D_ARB_BASE_ADDR,
++	.irq = MXC_INT_GPU3D_IRQ,
++};
++
++const struct imx_viv_gpu_data imx6_gc320_data __initconst = {
++	.iobase = GPU_2D_ARB_BASE_ADDR,
++	.irq = MXC_INT_GPU2D_IRQ,
++};
++
++const struct imx_viv_gpu_data imx6_gc355_data __initconst = {
++	.iobase = OPENVG_ARB_BASE_ADDR,
++	.irq = MXC_INT_OPENVG_XAQ2,
++};
++#endif
++
++struct platform_device *__init imx_add_viv_gpu(
++		const char *name,
++		const struct imx_viv_gpu_data *data,
++		const struct viv_gpu_platform_data *pdata)
++{
++	struct resource res[] = {
++		{
++			.name = "gpu_base",
++			.start = data->iobase,
++			.end = data->iobase + SZ_16K - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.name = "gpu_irq",
++			.start = data->irq,
++			.end = data->irq,
++			.flags = IORESOURCE_IRQ,
++		},
++	};
++
++	return imx_add_platform_device_dmamask(name, 0,
++			res, ARRAY_SIZE(res),
++			pdata, sizeof(*pdata),
++			DMA_BIT_MASK(32));
++}
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index b7cc93d..2ee4e6c 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -447,6 +447,16 @@ struct platform_device *__init imx_add_spdif_dai(
+ 		const struct imx_spdif_dai_data *data);
+ 
+ struct platform_device *__init imx_add_spdif_audio_device(void);
++
++#include <mach/viv_gpu.h>
++struct imx_viv_gpu_data {
++	resource_size_t irq;
++	resource_size_t iobase;
++};
++struct platform_device *__init imx_add_viv_gpu(
++		const char *name,
++		const struct imx_viv_gpu_data *data,
++		const struct viv_gpu_platform_data *pdata);
+ struct platform_device *__init imx_add_perfmon(
+ 		const struct imx_perfmon_data *data);
+ 		const struct mxc_gpu_platform_data *pdata);
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 202f1ae..36bcd5f 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -87,7 +87,6 @@
+ #define GPU_2D_ARB_END_ADDR             0x00137FFF
+ #define DTCP_ARB_BASE_ADDR              0x00138000
+ #define DTCP_ARB_END_ADDR               0x0013BFFF
+-#define GPU_MEM_BASE_ADDR               GPU_3D_ARB_BASE_ADDR
+ 
+ /* GPV - PL301 configuration ports */
+ #define GPV0_BASE_ADDR                  0x00B00000
+diff --git a/arch/arm/plat-mxc/include/mach/viv_gpu.h b/arch/arm/plat-mxc/include/mach/viv_gpu.h
+new file mode 100644
+index 0000000..f3136ce
+--- /dev/null
++++ b/arch/arm/plat-mxc/include/mach/viv_gpu.h
+@@ -0,0 +1,23 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc.
++ *
++ * This program is free software; you can redistribute it and/or modify it
++ * under the terms of the GNU General Public License as published by the
++ * Free Software Foundation; either version 2 of the License, or (at your
++ * option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
++ * or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
++ * for more details.
++ */
++
++#ifndef __MACH_VIV_GPU_H_
++#define __MACH_VIV_GPU_H_
++
++struct viv_gpu_platform_data {
++	resource_size_t reserved_mem_base;
++	resource_size_t reserved_mem_size;
++};
++
++#endif /* __MACH_VIV_GPU_H_ */
+-- 
+1.7.7.4
+

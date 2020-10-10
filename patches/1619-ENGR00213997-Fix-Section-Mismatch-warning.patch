@@ -1,0 +1,36 @@
+From af7cdcde4ff1237382ea20793b1b1af7b3122973 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Mon, 18 Jun 2012 19:46:41 +0800
+Subject: [PATCH 1619/2463] ENGR00213997: Fix Section Mismatch warning
+
+Fix:
+WARNING: vmlinux.o(.data+0x8c28): Section mismatch in reference from the
+variable mx6_gpmi_nand_platform_data to the function
+.init.text:gpmi_nand_platform_init()
+The variable mx6_gpmi_nand_platform_data references
+the function __init gpmi_nand_platform_init()
+If the reference is valid then annotate the
+variable with __init* or __refdata (see linux/init.h) or name the variable:
+*_template, *_timer, *_sht, *_ops, *_probe, *_probe_one, *_console
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 0d9c847..1e87db5 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -320,7 +320,7 @@ static int __init gpmi_nand_platform_init(void)
+ }
+ 
+ static struct gpmi_nand_platform_data
+-mx6_gpmi_nand_platform_data = {
++mx6_gpmi_nand_platform_data __initdata = {
+ 	.platform_init           = gpmi_nand_platform_init,
+ 	.min_prop_delay_in_ns    = 5,
+ 	.max_prop_delay_in_ns    = 9,
+-- 
+1.7.7.4
+

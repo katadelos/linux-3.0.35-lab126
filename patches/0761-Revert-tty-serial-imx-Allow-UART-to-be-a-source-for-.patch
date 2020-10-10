@@ -1,0 +1,99 @@
+From f2306c8468eac4a9863257d596930e17bf9199e2 Mon Sep 17 00:00:00 2001
+From: Alan Tull <alan.tull@freescale.com>
+Date: Fri, 16 Dec 2011 14:09:13 -0600
+Subject: [PATCH 0761/2463] Revert "tty: serial: imx: Allow UART to be a
+ source for wakeup"
+
+This reverts commit 6565023ad182d3347972aad3f1a13ba57266e81a.
+---
+ drivers/tty/serial/imx.c |   44 ++++++++++++++++++++++++++++++--------------
+ 1 files changed, 30 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/tty/serial/imx.c b/drivers/tty/serial/imx.c
+index 65cc4dd..f31fa1e 100644
+--- a/drivers/tty/serial/imx.c
++++ b/drivers/tty/serial/imx.c
+@@ -626,10 +626,10 @@ static irqreturn_t imx_int(int irq, void *dev_id)
+ 
+ 	if (sts & USR1_RTSD)
+ 		imx_rtsint(irq, dev_id);
+-
++#ifdef CONFIG_PM
+ 	if (sts & USR1_AWAKE)
+ 		writel(USR1_AWAKE, sport->port.membase + USR1);
+-
++#endif
+ 	return IRQ_HANDLED;
+ }
+ 
+@@ -1057,7 +1057,9 @@ static int imx_startup(struct uart_port *port)
+ 	}
+ 
+ 	tty = sport->port.state->port.tty;
+-
++#ifdef CONFIG_PM
++	device_set_wakeup_enable(tty->dev, 1);
++#endif
+ 	return 0;
+ 
+ error_out3:
+@@ -1554,11 +1556,17 @@ static int serial_imx_suspend(struct platform_device *dev, pm_message_t state)
+ 	struct imx_port *sport = platform_get_drvdata(dev);
+ 	unsigned int val;
+ 
+-	/* Enable i.MX UART wakeup */
+-	val = readl(sport->port.membase + UCR3);
+-	val |= UCR3_AWAKEN;
+-	writel(val, sport->port.membase + UCR3);
+-
++	if (device_may_wakeup(&dev->dev)) {
++		enable_irq_wake(sport->rxirq);
++#ifdef CONFIG_PM
++		if (sport->port.line == 0) {
++			/* enable awake for MX6 */
++			val = readl(sport->port.membase + UCR3);
++			val |= UCR3_AWAKEN;
++			writel(val, sport->port.membase + UCR3);
++		}
++#endif
++	}
+ 	if (sport)
+ 		uart_suspend_port(&imx_reg, &sport->port);
+ 
+@@ -1573,12 +1581,17 @@ static int serial_imx_resume(struct platform_device *dev)
+ 	if (sport)
+ 		uart_resume_port(&imx_reg, &sport->port);
+ 
+-	/* Disable i.MX UART wakeup */
+-	val = readl(sport->port.membase + UCR3);
+-	val &= ~UCR3_AWAKEN;
+-	writel(val, sport->port.membase + UCR3);
+-
+-return 0;
++	if (device_may_wakeup(&dev->dev)) {
++#ifdef CONFIG_PM
++		if (sport->port.line == 0) {
++			val = readl(sport->port.membase + UCR3);
++			val &= ~UCR3_AWAKEN;
++			writel(val, sport->port.membase + UCR3);
++		}
++#endif
++		disable_irq_wake(sport->rxirq);
++	}
++	return 0;
+ }
+ 
+ static int serial_imx_probe(struct platform_device *pdev)
+@@ -1657,6 +1670,9 @@ static int serial_imx_probe(struct platform_device *pdev)
+ 		goto deinit;
+ 	platform_set_drvdata(pdev, &sport->port);
+ 
++#ifdef CONFIG_PM
++	device_init_wakeup(&pdev->dev, 1);
++#endif
+ 	return 0;
+ deinit:
+ 	if (pdata && pdata->exit)
+-- 
+1.7.7.4
+

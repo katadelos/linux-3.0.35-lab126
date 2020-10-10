@@ -1,0 +1,47 @@
+From 7b4530142e628b5715e40414ebcabf93c583af08 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Mon, 21 Nov 2011 14:10:49 +0800
+Subject: [PATCH 0645/2463] ENGR00161644 usb-gadget: prime directly for status
+ dTD of ep0
+
+During the setup transfer, if prime status just after prime the data,
+but before the data completes, there is a potential problem:
+The device's qTD has NO direction bit, If the IN request(Status Stage)
+is added to qTD list while the OUT (Data Stage) is priming,
+then the IN will not prime by software, it will prime automatically
+by controller as OUT.
+
+We met one usb hang issue during repeat plug in/out test at i.mx6q
+that the data status has finished but status has never finished,
+it is most likely above issue.
+
+After this fix, the repeat plug in/out test passes successfully.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    9 +++++++--
+ 1 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 91f9939..391ba58 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -865,8 +865,13 @@ static int fsl_queue_td(struct fsl_ep *ep, struct fsl_req *req)
+ 		? (1 << (ep_index(ep) + 16))
+ 		: (1 << (ep_index(ep)));
+ 
+-	/* check if the pipe is empty */
+-	if (!(list_empty(&ep->queue))) {
++	/*
++	 * check if
++	 * - the request is empty, and
++	 * - the request is not the status request for ep0
++	 */
++	if (!(list_empty(&ep->queue)) &&
++		!((ep_index(ep) == 0) && (req->req.length == 0))) {
+ 		/* Add td to the end */
+ 		struct fsl_req *lastreq;
+ 		lastreq = list_entry(ep->queue.prev, struct fsl_req, queue);
+-- 
+1.7.7.4
+

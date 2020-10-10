@@ -1,0 +1,33 @@
+From feae5e0f9085f97f4d0be9c2fe6e2962998cea0e Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Fri, 18 Nov 2011 21:11:04 +0800
+Subject: [PATCH 0636/2463] ENGR00162612 [Mx6]Change arm core voltage of
+ suspend for 1G cpufreq
+
+Previous setting for ARM core is 1V during suspend, it
+is working for 800MHz cpu freq, but not enough for
+1G cpu freq, actually, we didn't need to change ARM core
+LDO's setting during suspend, hardware will auto change it.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/system.c |    3 +--
+ 1 files changed, 1 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 418e23e..72ffc77 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -133,8 +133,7 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 			__raw_writel(anatop_val, anatop_base + ANATOP_REG_2P5_OFFSET);
+ 			/* Set ARM core power domain to 1V and PU domain set to off */
+ 			anatop_val = __raw_readl(anatop_base + ANATOP_REG_CORE_OFFSET);
+-			anatop_val &= 0xfffc0000;
+-			anatop_val |= 0xc;
++			anatop_val &= 0xfffc001f;
+ 			__raw_writel(anatop_val, anatop_base + ANATOP_REG_CORE_OFFSET);
+ 			__raw_writel(__raw_readl(MXC_CCM_CCR) | MXC_CCM_CCR_RBC_EN, MXC_CCM_CCR);
+ 			ccm_clpcr |= MXC_CCM_CLPCR_WB_PER_AT_LPM;
+-- 
+1.7.7.4
+

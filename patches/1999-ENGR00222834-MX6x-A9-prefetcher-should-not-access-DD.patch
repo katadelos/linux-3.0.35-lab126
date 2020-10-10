@@ -1,0 +1,64 @@
+From 13a526ea4bb722ca8cb50eb347377ba141d55a62 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Sun, 2 Sep 2012 10:32:35 -0500
+Subject: [PATCH 1999/2463] ENGR00222834 MX6x-A9 prefetcher should not access
+ DDR before IO is restored
+
+Add enough nops to suspend code when exiting due to a pending
+interrupt. This is required so that we can guarantee that the
+prefetch unit will not bring DDR out of self-refresh before
+all of the DDR's IO pads are restored.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/mx6_suspend.S |   34 ++++++++++++++++++++++++++++++++++
+ 1 files changed, 34 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mx6_suspend.S b/arch/arm/mach-mx6/mx6_suspend.S
+index 0b9dc57..0533ad1 100644
+--- a/arch/arm/mach-mx6/mx6_suspend.S
++++ b/arch/arm/mach-mx6/mx6_suspend.S
+@@ -884,6 +884,40 @@ sl_io_restore:
+ 	sl_ddr_io_restore
+ 
+ ddr_io_restore_done:
++	/* Add enough nops so that the
++	  * prefetcher will not get instructions
++	  * from DDR before its IO pads
++	  * are restored.
++	  */
++	nop
++	nop
++	nop
++	nop
++	nop
++
++	nop
++	nop
++	nop
++	nop
++	nop
++
++	nop
++	nop
++	nop
++	nop
++	nop
++
++	nop
++	nop
++	nop
++	nop
++	nop
++
++	nop
++	nop
++	nop
++	nop
++	nop
+ 
+ 	mrc	p15, 0, r1, c1, c0, 0
+ 	orr	r1, r1, #(1 << 2)	@ Enable the C bit
+-- 
+1.7.7.4
+

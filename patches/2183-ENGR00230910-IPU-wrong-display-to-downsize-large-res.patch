@@ -1,0 +1,102 @@
+From 3bb213bd813a40e80f0e7d17ddcc388f9eeb99cc Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Wed, 24 Oct 2012 09:36:00 +0800
+Subject: [PATCH 2183/2463] ENGR00230910 IPU: wrong display to downsize large
+ resolution frame on split mode
+
+Fix bug: IPU IC resize ratio overflow when downsizing large resolution frame
+using split mode, for example downsize 4080x2720 frame into 1920x1080 frame.
+Otherwise, the downsized frame is wrong.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_ic.c   |   24 ++++++++++++++++++------
+ drivers/mxc/ipu3/ipu_regs.h |    2 ++
+ 2 files changed, 20 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_ic.c b/drivers/mxc/ipu3/ipu_ic.c
+index 84dcbb1..b0b79ad 100644
+--- a/drivers/mxc/ipu3/ipu_ic.c
++++ b/drivers/mxc/ipu3/ipu_ic.c
+@@ -240,7 +240,9 @@ void _ipu_ic_init_prpvf(struct ipu_soc *ipu, ipu_channel_params_t *params, bool
+ 	ipu_color_space_t in_fmt, out_fmt;
+ 
+ 	/* Setup vertical resizing */
+-	if (!(params->mem_prp_vf_mem.outv_resize_ratio)) {
++	if (!(params->mem_prp_vf_mem.outv_resize_ratio) ||
++		(params->mem_prp_vf_mem.outv_resize_ratio >=
++						IC_RSZ_MAX_RESIZE_RATIO)) {
+ 		_calc_resize_coeffs(ipu, params->mem_prp_vf_mem.in_height,
+ 				params->mem_prp_vf_mem.out_height,
+ 				&resizeCoeff, &downsizeCoeff);
+@@ -250,7 +252,9 @@ void _ipu_ic_init_prpvf(struct ipu_soc *ipu, ipu_channel_params_t *params, bool
+ 
+ 	/* Setup horizontal resizing */
+ 	/* Upadeted for IC split case */
+-	if (!(params->mem_prp_vf_mem.outh_resize_ratio)) {
++	if (!(params->mem_prp_vf_mem.outh_resize_ratio) ||
++		(params->mem_prp_vf_mem.outh_resize_ratio >=
++						IC_RSZ_MAX_RESIZE_RATIO)) {
+ 		_calc_resize_coeffs(ipu, params->mem_prp_vf_mem.in_width,
+ 				params->mem_prp_vf_mem.out_width,
+ 				&resizeCoeff, &downsizeCoeff);
+@@ -365,7 +369,9 @@ void _ipu_ic_init_prpenc(struct ipu_soc *ipu, ipu_channel_params_t *params, bool
+ 	ipu_color_space_t in_fmt, out_fmt;
+ 
+ 	/* Setup vertical resizing */
+-	if (!(params->mem_prp_enc_mem.outv_resize_ratio)) {
++	if (!(params->mem_prp_enc_mem.outv_resize_ratio) ||
++		(params->mem_prp_enc_mem.outv_resize_ratio >=
++						IC_RSZ_MAX_RESIZE_RATIO)) {
+ 		_calc_resize_coeffs(ipu, params->mem_prp_enc_mem.in_height,
+ 				params->mem_prp_enc_mem.out_height,
+ 				&resizeCoeff, &downsizeCoeff);
+@@ -375,7 +381,9 @@ void _ipu_ic_init_prpenc(struct ipu_soc *ipu, ipu_channel_params_t *params, bool
+ 
+ 	/* Setup horizontal resizing */
+ 	/* Upadeted for IC split case */
+-	if (!(params->mem_prp_enc_mem.outh_resize_ratio)) {
++	if (!(params->mem_prp_enc_mem.outh_resize_ratio) ||
++		(params->mem_prp_enc_mem.outh_resize_ratio >=
++						IC_RSZ_MAX_RESIZE_RATIO)) {
+ 		_calc_resize_coeffs(ipu, params->mem_prp_enc_mem.in_width,
+ 				params->mem_prp_enc_mem.out_width,
+ 				&resizeCoeff, &downsizeCoeff);
+@@ -444,7 +452,9 @@ void _ipu_ic_init_pp(struct ipu_soc *ipu, ipu_channel_params_t *params)
+ 	ipu_color_space_t in_fmt, out_fmt;
+ 
+ 	/* Setup vertical resizing */
+-	if (!(params->mem_pp_mem.outv_resize_ratio)) {
++	if (!(params->mem_pp_mem.outv_resize_ratio) ||
++		(params->mem_pp_mem.outv_resize_ratio >=
++						IC_RSZ_MAX_RESIZE_RATIO)) {
+ 		_calc_resize_coeffs(ipu, params->mem_pp_mem.in_height,
+ 			    params->mem_pp_mem.out_height,
+ 			    &resizeCoeff, &downsizeCoeff);
+@@ -455,7 +465,9 @@ void _ipu_ic_init_pp(struct ipu_soc *ipu, ipu_channel_params_t *params)
+ 
+ 	/* Setup horizontal resizing */
+ 	/* Upadeted for IC split case */
+-	if (!(params->mem_pp_mem.outh_resize_ratio)) {
++	if (!(params->mem_pp_mem.outh_resize_ratio) ||
++		(params->mem_pp_mem.outh_resize_ratio >=
++						IC_RSZ_MAX_RESIZE_RATIO)) {
+ 		_calc_resize_coeffs(ipu, params->mem_pp_mem.in_width,
+ 							params->mem_pp_mem.out_width,
+ 							&resizeCoeff, &downsizeCoeff);
+diff --git a/drivers/mxc/ipu3/ipu_regs.h b/drivers/mxc/ipu3/ipu_regs.h
+index f6dff36..458b0e0 100644
+--- a/drivers/mxc/ipu3/ipu_regs.h
++++ b/drivers/mxc/ipu3/ipu_regs.h
+@@ -459,6 +459,8 @@ enum {
+ 	IC_CONF_RWS_EN = 0x40000000,
+ 	IC_CONF_CSI_MEM_WR_EN = 0x80000000,
+ 
++	IC_RSZ_MAX_RESIZE_RATIO = 0x00004000,
++
+ 	IC_IDMAC_1_CB0_BURST_16 = 0x00000001,
+ 	IC_IDMAC_1_CB1_BURST_16 = 0x00000002,
+ 	IC_IDMAC_1_CB2_BURST_16 = 0x00000004,
+-- 
+1.7.7.4
+

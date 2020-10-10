@@ -1,0 +1,42 @@
+From 7f97147b3da5580bf92e99e9d268c0907ac12f99 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Mon, 28 May 2012 17:44:29 +0800
+Subject: [PATCH 1557/2463] ENGR00211679 - SPDC : fix mode4 fresh issue.
+
+- Modify lut to fix DC VCOM fading and mode4 close
+  over push issue.
+
+Signed-off-by: Fugang Duan <B38611@freescale.com>
+---
+ drivers/video/mxc/mxc_spdc_fb.c |    8 +++++++-
+ 1 files changed, 7 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_spdc_fb.c b/drivers/video/mxc/mxc_spdc_fb.c
+index 1659724..449e606 100644
+--- a/drivers/video/mxc/mxc_spdc_fb.c
++++ b/drivers/video/mxc/mxc_spdc_fb.c
+@@ -17,7 +17,7 @@
+  *
+  */
+ /*
+- * Based on MXC EPDC Driver, Freescale Solutions, Inc All Rights Reserved.
++ * Based on MXC EPDC Driver, Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ #include "mxc_spdc_fb.h"
+@@ -529,6 +529,12 @@ static int spdc_init_sequence(mxc_spdc_t *fb_data)
+ 		return ret;
+ 	}
+ 
++	/* modify lut to fix DC com fading issue,
++	 * and fix mode4 close over push
++	 */
++	__raw_writel(0x00003906, fb_data->hwp + SPDC_LUT_PARA_UPDATE);
++	__raw_writel(0x00003300, fb_data->hwp + SPDC_LUT_PARA_UPDATE);
++
+ 	/* init SPDC setting, the setting get from platform data */
+ 	fb_data->panel_set.yoe_pol = init_set->yoe_pol;
+ 	fb_data->panel_set.dual_gate = init_set->dual_gate;
+-- 
+1.7.7.4
+

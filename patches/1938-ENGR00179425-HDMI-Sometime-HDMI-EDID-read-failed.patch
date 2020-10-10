@@ -1,0 +1,34 @@
+From 613b00c1fd8f91695f328cceb7da9a033e153a09 Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Tue, 21 Aug 2012 16:49:28 +0800
+Subject: [PATCH 1938/2463] ENGR00179425 HDMI: Sometime HDMI EDID read failed
+
+EDID read will failed sometimes on some boards.
+Read EDID twice if first one failed.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ drivers/video/mxc_hdmi.c |    7 +++++++
+ 1 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index ec50d19..d5f3b5d 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -1678,6 +1678,13 @@ static void mxc_hdmi_cable_connected(struct mxc_hdmi *hdmi)
+ 	/* HDMI Initialization Step C */
+ 	edid_status = mxc_hdmi_read_edid(hdmi);
+ 
++	/* Read EDID again if first EDID read failed */
++	if (edid_status == HDMI_EDID_NO_MODES ||
++			edid_status == HDMI_EDID_FAIL) {
++		dev_info(&hdmi->pdev->dev, "Read EDID again\n");
++		edid_status = mxc_hdmi_read_edid(hdmi);
++	}
++
+ 	/* HDMI Initialization Steps D, E, F */
+ 	switch (edid_status) {
+ 	case HDMI_EDID_SUCCESS:
+-- 
+1.7.7.4
+

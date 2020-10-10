@@ -1,0 +1,40 @@
+From 00aad2872633b2876e9fcc4e878f707bace4f1cd Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Wed, 11 Jan 2012 13:34:40 +0800
+Subject: [PATCH 0862/2463] ENGR00171622 - FEC : workaround for Gb enet in
+ sabrelite board.
+
+Micrel phy KSZ9021 Gb speed cannot work well in i.MX6 sabrelite
+board. Advertise PHY is not 1000Base-T capable.
+
+If nfs boot kernel, phy will work at 100Mbps, or else phy will
+work at Gbps mode. And if hot-plugin cable, phy will work at Gbps
+mode. Enet can work well in all of them.
+
+But in Gbps mode, uDMA sometime cannot write  frame "L" bit in
+exuberate transfer, so driver will print some warning message:
+"FEC ENET: rcv is not +last"
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index f723048..cb22baa 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -428,8 +428,8 @@ static inline void mx6q_sabrelite_init_uart(void)
+ 
+ static int mx6q_sabrelite_fec_phy_init(struct phy_device *phydev)
+ {
+-	/* prefer master mode, 1000 Base-T capable */
+-	phy_write(phydev, 0x9, 0x0f00);
++	/* prefer master mode, disable 1000 Base-T capable */
++	phy_write(phydev, 0x9, 0x1c00);
+ 
+ 	/* min rx data delay */
+ 	phy_write(phydev, 0x0b, 0x8105);
+-- 
+1.7.7.4
+

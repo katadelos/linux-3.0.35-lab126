@@ -1,0 +1,77 @@
+From 667a18df042cb7ad971b712033254c1e70076359 Mon Sep 17 00:00:00 2001
+From: B38613 <B38613@freescale.com>
+Date: Fri, 18 May 2012 18:14:56 +0800
+Subject: [PATCH 1490/2463] ENGR00209686-1:sdio:suspend/resume issue
+
+1.add MMC_PM_WAKE_SDIO_IRQ capability, it should be
+used together with MMC_PM_KEEP_POWER although not support
+SDIO wakeup in function.
+2.add MMC_CAP_NONREMOVABLE to describe imx6's three sdhc
+devices's removable feature.Now emmc is permanent,sdio and
+sd is removable instead of all default were permanent before.
+According to this feature, detimine whether reinit card
+or not in resume.
+
+Signed-off-by: B38613 <B38613@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |    3 +++
+ arch/arm/plat-mxc/include/mach/esdhc.h |    8 ++++++++
+ 2 files changed, 11 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 66c9df9..3b0e86c 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -216,6 +216,7 @@ static const struct esdhc_platform_data mx6q_sabresd_sd2_data __initconst = {
+ 	.keep_power_at_suspend = 1,
+ 	.support_8bit = 1,
+ 	.delay_line = 0,
++	.cd_type = ESDHC_CD_CONTROLLER,
+ };
+ 
+ static const struct esdhc_platform_data mx6q_sabresd_sd3_data __initconst = {
+@@ -224,6 +225,7 @@ static const struct esdhc_platform_data mx6q_sabresd_sd3_data __initconst = {
+ 	.keep_power_at_suspend = 1,
+ 	.support_8bit = 1,
+ 	.delay_line = 0,
++	.cd_type = ESDHC_CD_CONTROLLER,
+ };
+ 
+ static const struct esdhc_platform_data mx6q_sabresd_sd4_data __initconst = {
+@@ -231,6 +233,7 @@ static const struct esdhc_platform_data mx6q_sabresd_sd4_data __initconst = {
+ 	.keep_power_at_suspend = 1,
+ 	.support_8bit = 1,
+ 	.delay_line = 0,
++	.cd_type = ESDHC_CD_PERMANENT,
+ };
+ 
+ static const struct anatop_thermal_platform_data
+diff --git a/arch/arm/plat-mxc/include/mach/esdhc.h b/arch/arm/plat-mxc/include/mach/esdhc.h
+index 1862c70..71ce149 100644
+--- a/arch/arm/plat-mxc/include/mach/esdhc.h
++++ b/arch/arm/plat-mxc/include/mach/esdhc.h
+@@ -10,6 +10,13 @@
+ #ifndef __ASM_ARCH_IMX_ESDHC_H
+ #define __ASM_ARCH_IMX_ESDHC_H
+ 
++enum cd_types {
++	ESDHC_CD_NONE,          /* no CD, neither controller nor gpio */
++	ESDHC_CD_CONTROLLER,    /* mmc controller internal CD */
++	ESDHC_CD_GPIO,          /* external gpio pin for CD */
++	ESDHC_CD_PERMANENT,     /* no CD, card permanently wired to host */
++};
++
+ /**
+  * struct esdhc_platform_data - optional platform data for esdhc on i.MX
+  *
+@@ -22,6 +29,7 @@
+ struct esdhc_platform_data {
+ 	unsigned int wp_gpio;
+ 	unsigned int cd_gpio;
++	enum cd_types cd_type;
+ 	unsigned int always_present;
+ 	unsigned int support_18v;
+ 	unsigned int support_8bit;
+-- 
+1.7.7.4
+

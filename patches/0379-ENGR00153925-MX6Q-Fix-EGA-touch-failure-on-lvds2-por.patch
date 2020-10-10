@@ -1,0 +1,54 @@
+From 1009ccfbc9346ff0b726071a8592c5ef5cc8150d Mon Sep 17 00:00:00 2001
+From: Frank Li <Frank.Li@freescale.com>
+Date: Mon, 29 Aug 2011 13:58:48 +0800
+Subject: [PATCH 0379/2463] ENGR00153925 MX6Q: Fix EGA touch failure on lvds2
+ port
+
+lvds2 port use i2c3 port.
+Add EGA i2c register data to i2c port3.
+but two touch can't work at the same time because irq conflict.
+
+Signed-off-by: Frank Li <Frank.Li@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   17 ++++-------------
+ 1 files changed, 4 insertions(+), 13 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 9034c16..08e523c 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -435,15 +435,11 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ 		.platform_data = &sabr_ddc_dvi_data,
+ 		.irq = gpio_to_irq(MX6Q_SABREAUTO_DISP0_DET_INT),
+ 	},
+-};
+-
+-static int p1003_ts_hw_status(void)
+-{
+-	return gpio_get_value(MX6Q_SABREAUTO_CAP_TCH_INT);
+-}
++	{
++		I2C_BOARD_INFO("egalax_ts", 0x4),
++		.irq = gpio_to_irq(MX6Q_SABREAUTO_CAP_TCH_INT),
++	},
+ 
+-static struct p1003_ts_platform_data p1003_ts_data = {
+-	.hw_status = p1003_ts_hw_status,
+ };
+ 
+ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+@@ -452,11 +448,6 @@ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+ 		.irq = gpio_to_irq(MX6Q_SABREAUTO_CAP_TCH_INT),
+ 	},
+ 	{
+-		I2C_BOARD_INFO("p1003_fwv33", 0x41),
+-		.irq = gpio_to_irq(MX6Q_SABREAUTO_CAP_TCH_INT),
+-		.platform_data = &p1003_ts_data,
+-	},
+-	{
+ 		I2C_BOARD_INFO("mxc_hdmi_i2c", 0x50),
+ 	},
+ };
+-- 
+1.7.7.4
+

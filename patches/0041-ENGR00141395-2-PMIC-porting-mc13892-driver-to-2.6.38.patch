@@ -1,0 +1,59 @@
+From a08c964b8db0b67d6157ca784fe498b7c3fee521 Mon Sep 17 00:00:00 2001
+From: Zhou Jingyu <b02241@freescale.com>
+Date: Thu, 3 Mar 2011 14:16:26 +0800
+Subject: [PATCH 0041/2463] ENGR00141395-2 PMIC: porting mc13892 driver to
+ 2.6.38
+
+Add pmic13892
+
+Signed-off-by: Zhou Jingyu <Jingyu.Zhou@freescale.com>
+---
+ drivers/mxc/pmic/core/pmic_core_i2c.c |    3 ---
+ drivers/mxc/pmic/core/pmic_core_spi.c |    3 ---
+ drivers/mxc/pmic/mc13892/pmic_adc.c   |    2 +-
+ 3 files changed, 1 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/mxc/pmic/core/pmic_core_i2c.c b/drivers/mxc/pmic/core/pmic_core_i2c.c
+index 40d029a..09172b3 100644
+--- a/drivers/mxc/pmic/core/pmic_core_i2c.c
++++ b/drivers/mxc/pmic/core/pmic_core_i2c.c
+@@ -226,9 +226,6 @@ static int __devinit pmic_probe(struct i2c_client *client,
+ 	/* Initialize the PMIC event handling */
+ 	pmic_event_list_init();
+ 
+-	/* Initialize GPIO for PMIC Interrupt */
+-	gpio_pmic_active();
+-
+ 	/* Get the PMIC Version */
+ 	pmic_get_revision(&mxc_pmic_version);
+ 	if (mxc_pmic_version.revision < 0) {
+diff --git a/drivers/mxc/pmic/core/pmic_core_spi.c b/drivers/mxc/pmic/core/pmic_core_spi.c
+index df0a895..f02b427 100644
+--- a/drivers/mxc/pmic/core/pmic_core_spi.c
++++ b/drivers/mxc/pmic/core/pmic_core_spi.c
+@@ -166,9 +166,6 @@ static int __devinit pmic_probe(struct spi_device *spi)
+ 	/* Initialize the PMIC event handling */
+ 	pmic_event_list_init();
+ 
+-	/* Initialize GPIO for PMIC Interrupt */
+-	gpio_pmic_active();
+-
+ 	/* Get the PMIC Version */
+ 	pmic_get_revision(&mxc_pmic_version);
+ 	if (mxc_pmic_version.revision < 0) {
+diff --git a/drivers/mxc/pmic/mc13892/pmic_adc.c b/drivers/mxc/pmic/mc13892/pmic_adc.c
+index cc74078..fb6eb50 100644
+--- a/drivers/mxc/pmic/mc13892/pmic_adc.c
++++ b/drivers/mxc/pmic/mc13892/pmic_adc.c
+@@ -195,7 +195,7 @@ static bool adc_ts;
+ static bool wait_ts;
+ static bool monitor_en;
+ static bool monitor_adc;
+-static DECLARE_MUTEX(convert_mutex);
++static DEFINE_SEMAPHORE(convert_mutex);
+ 
+ static DECLARE_WAIT_QUEUE_HEAD(queue_adc_busy);
+ static t_adc_state adc_dev[2];
+-- 
+1.7.7.4
+

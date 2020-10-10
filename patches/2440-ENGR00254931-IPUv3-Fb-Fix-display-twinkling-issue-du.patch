@@ -1,0 +1,61 @@
+From 34016e798e5d369082cee5c9d8dbab007491d474 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Tue, 19 Mar 2013 09:38:04 +0800
+Subject: [PATCH 2440/2463] ENGR00254931 IPUv3 Fb: Fix display twinkling issue
+ during suspend/resume
+
+Fix display twinkling issue when video playback on LVDS during suspend/resume.
+The issue happens when the rootfs application Xfbdev calls fb_set_var() for IPU
+BG fb to unblank the console, so it wants to reinitialize the IPU BG. However,
+IPU FG is still being used for video playback.It is reasonable to refuse
+reprogramme because of the resources confilct.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |   15 +++++++++++++--
+ 1 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 4c98d51..0818a32 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -447,9 +447,15 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 	if (mxc_fbi->ovfbi)
+ 		mxc_fbi_fg = (struct mxcfb_info *)mxc_fbi->ovfbi->par;
+ 
+-	if (mxc_fbi->ovfbi && mxc_fbi_fg)
+-		if (mxc_fbi_fg->next_blank == FB_BLANK_UNBLANK)
++	if (mxc_fbi->ovfbi && mxc_fbi_fg) {
++		if (mxc_fbi_fg->cur_blank == FB_BLANK_UNBLANK) {
++			dev_warn(fbi->device, "overlay is still on.\n");
++			return 0;
++		}
++		if ((mxc_fbi_fg->next_blank == FB_BLANK_UNBLANK) &&
++			mxcfb_need_to_set_par(mxc_fbi->ovfbi))
+ 			ovfbi_enable = true;
++	}
+ 
+ 	if (!mxcfb_need_to_set_par(fbi))
+ 		return 0;
+@@ -473,6 +479,7 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 		ipu_disable_irq(mxc_fbi_fg->ipu, mxc_fbi_fg->ipu_ch_nf_irq);
+ 		ipu_disable_channel(mxc_fbi_fg->ipu, mxc_fbi_fg->ipu_ch, true);
+ 		ipu_uninit_channel(mxc_fbi_fg->ipu, mxc_fbi_fg->ipu_ch);
++		mxc_fbi_fg->cur_blank = FB_BLANK_POWERDOWN;
+ 	}
+ 
+ 	ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+@@ -656,6 +663,10 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 	}
+ 
+ 	mxc_fbi->cur_var = fbi->var;
++	if (ovfbi_enable) {
++		mxc_fbi_fg->cur_blank = FB_BLANK_UNBLANK;
++		mxc_fbi_fg->cur_var = mxc_fbi->ovfbi->var;
++	}
+ 
+ 	return retval;
+ }
+-- 
+1.7.7.4
+

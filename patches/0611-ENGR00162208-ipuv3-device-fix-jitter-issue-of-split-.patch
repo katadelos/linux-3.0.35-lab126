@@ -1,0 +1,43 @@
+From 86a5a1bf2bad4e6e2267c7b2ea61b57bc5fda9eb Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Tue, 15 Nov 2011 17:33:15 +0800
+Subject: [PATCH 0611/2463] ENGR00162208 ipuv3 device: fix jitter issue of
+ split mode
+
+if play video with split mode, there is chance to see jitter of split stripe.
+fix it by correct sync method of split mode kthreads.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_device.c |    8 ++++----
+ 1 files changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_device.c b/drivers/mxc/ipu3/ipu_device.c
+index b6b0721..0f68441 100644
+--- a/drivers/mxc/ipu3/ipu_device.c
++++ b/drivers/mxc/ipu3/ipu_device.c
+@@ -940,8 +940,9 @@ static int split_task_thread(void *data)
+ 
+ 	t->ret = ipu_queue_sp_task(t);
+ 
+-	while (!kthread_should_stop())
+-		wait_event_interruptible(t->waitq, t->could_finish);
++	t->could_finish = true;
++
++	wake_up_interruptible(&t->waitq);
+ 
+ 	return 0;
+ }
+@@ -1174,8 +1175,7 @@ static int queue_split_task(struct ipu_task_entry *t)
+ 		return ret;
+ 	} else {
+ 		for (i = 0; i < size; i++) {
+-			sp_task[i].could_finish = true;
+-			wake_up_interruptible(&sp_task[i].waitq);
++			wait_event_interruptible(sp_task[i].waitq, sp_task[i].could_finish);
+ 			kthread_stop(sp_task[i].thread);
+ 			if (sp_task[i].ret < 0) {
+ 				ret = sp_task[i].ret;
+-- 
+1.7.7.4
+

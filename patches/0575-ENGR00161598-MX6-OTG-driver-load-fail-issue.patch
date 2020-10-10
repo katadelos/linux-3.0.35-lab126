@@ -1,0 +1,45 @@
+From e60c085b2c6c2ef438d74f8bb74a96d46e7c3655 Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Tue, 8 Nov 2011 14:54:28 +0800
+Subject: [PATCH 0575/2463] ENGR00161598 [MX6]OTG driver: load fail issue
+
+[MX6] OTG load fail when remove all usb module
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ arch/arm/mach-mx6/usb_dr.c |    7 ++++---
+ 1 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_dr.c b/arch/arm/mach-mx6/usb_dr.c
+index f498d6e..de84a4d 100644
+--- a/arch/arm/mach-mx6/usb_dr.c
++++ b/arch/arm/mach-mx6/usb_dr.c
+@@ -141,12 +141,12 @@ static int usbotg_init_ext(struct platform_device *pdev)
+ 	if (!otg_used) {
+ 		usbotg_internal_phy_clock_gate(true);
+ 		usb_phy_enable(pdev->dev.platform_data);
+-		otg_used++;
+ 		/*after the phy reset,can not read the readingvalue for id/vbus at
+ 		* the register of otgsc ,cannot  read at once ,need delay 3 ms
+ 		*/
+ 		mdelay(3);
+ 	}
++	otg_used++;
+ 
+ 	return ret;
+ }
+@@ -457,8 +457,9 @@ void __init mx6_usb_dr_init(void)
+ #endif
+ 	/* register wakeup device */
+ 	pdev_wakeup = imx6q_add_fsl_usb2_otg_wakeup(&dr_wakeup_config);
+-	((struct fsl_usb2_platform_data *)(pdev->dev.platform_data))->wakeup_pdata =
+-		(struct fsl_usb2_wakeup_platform_data *)(pdev_wakeup->dev.platform_data);
++	if (pdev != NULL)
++		((struct fsl_usb2_platform_data *)(pdev->dev.platform_data))->wakeup_pdata =
++			(struct fsl_usb2_wakeup_platform_data *)(pdev_wakeup->dev.platform_data);
+ 
+ 	/* Some phy and power's special controls for otg
+ 	 * 1. The external charger detector needs to be disabled
+-- 
+1.7.7.4
+

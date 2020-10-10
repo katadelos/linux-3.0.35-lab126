@@ -1,0 +1,65 @@
+From a8d8fc28a65973a8e96777127a7de43b523e2060 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Wed, 20 Jun 2012 12:55:13 +0800
+Subject: [PATCH 1626/2463] ENGR00214337 MX6: Enable AXI cache for
+ VDOA/VPU/IPU and set IPU high priority
+
+set IPU AXI-id0 Qos=0xf(bypass) and  AXI-id1 Qos=0x7,
+mx6q use AXI-id0 for IPU display channel, it should has
+highest priority(bypass), and AXI-id1 for other IPU channel,
+it has high priority.
+
+Also, clear OCRAM_CTL bits to disable OCRAM read/write pipeline control.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ arch/arm/mach-mx6/cpu.c      |   14 ++++++++++++++
+ arch/arm/mach-mx6/crm_regs.h |    7 +++++++
+ 2 files changed, 21 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index 2822d2d..651b1ff 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -152,6 +152,20 @@ static int __init post_cpu_init(void)
+ 	gpc_base = MX6_IO_ADDRESS(GPC_BASE_ADDR);
+ 	ccm_base = MX6_IO_ADDRESS(CCM_BASE_ADDR);
+ 
++	/* enable AXI cache for VDOA/VPU/IPU
++	 * set IPU AXI-id0 Qos=0xf(bypass) AXI-id1 Qos=0x7
++	 * clear OCRAM_CTL bits to disable pipeline control
++	 */
++	reg = __raw_readl(IOMUXC_GPR3);
++	reg &= ~IOMUXC_GPR3_OCRAM_CTL_EN;
++	__raw_writel(reg, IOMUXC_GPR3);
++	reg = __raw_readl(IOMUXC_GPR4);
++	reg |= IOMUXC_GPR4_VDOA_CACHE_EN | IOMUXC_GPR4_VPU_CACHE_EN |
++		IOMUXC_GPR4_IPU_CACHE_EN;
++	__raw_writel(reg, IOMUXC_GPR4);
++	__raw_writel(IOMUXC_GPR6_IPU1_QOS, IOMUXC_GPR6);
++	__raw_writel(IOMUXC_GPR7_IPU2_QOS, IOMUXC_GPR7);
++
+ 	num_cpu_idle_lock = 0x0;
+ 	if (cpu_is_mx6dl())
+ 		num_cpu_idle_lock = 0xffff0000;
+diff --git a/arch/arm/mach-mx6/crm_regs.h b/arch/arm/mach-mx6/crm_regs.h
+index 10fd663..c99caad 100644
+--- a/arch/arm/mach-mx6/crm_regs.h
++++ b/arch/arm/mach-mx6/crm_regs.h
+@@ -28,6 +28,13 @@
+ #define IOMUXC_GPR12			(MXC_IOMUXC_BASE + 0x30)
+ #define IOMUXC_GPR13			(MXC_IOMUXC_BASE + 0x34)
+ 
++#define IOMUXC_GPR3_OCRAM_CTL_EN	(0xf << 21)
++#define IOMUXC_GPR4_VDOA_CACHE_EN	(0xf << 28)
++#define IOMUXC_GPR4_VPU_CACHE_EN	(0xcc)
++#define IOMUXC_GPR4_IPU_CACHE_EN	(0x3)
++#define IOMUXC_GPR6_IPU1_QOS		(0x007f007f)
++#define IOMUXC_GPR7_IPU2_QOS		(0x007f007f)
++
+ /* MMDC */
+ #define MXC_MMDC_P0_BASE		MX6_IO_ADDRESS(MMDC_P0_BASE_ADDR)
+ #define MMDC_MDMISC_OFFSET		(MXC_MMDC_P0_BASE + 0x18)
+-- 
+1.7.7.4
+

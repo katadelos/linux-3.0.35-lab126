@@ -1,0 +1,99 @@
+From 7856bddae15702a703110e4a92c4f305c8195c49 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Mon, 6 Aug 2012 16:34:17 +0800
+Subject: [PATCH 1866/2463] ENGR00219501 - FEC : Enable puase frame flow
+
+ENET pause frame has two issues (ticket TKT116501):
+1. RX status fifo full.
+2. XOFF has higher priority than XON when both XOFF and
+   XON have pending request.
+
+Both of the issues can cause RX FIFO overruns when RX bandwidth
+is over 120Mbps.
+
+The issue has been fixed on Rigel TO1.1 and Arik TO1.2. Pause
+frame has been enabled to avoid the overrun issue.
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ drivers/net/fec.c |   34 ++++++++++++++++++++++++++++++++++
+ drivers/net/fec.h |    4 ++++
+ 2 files changed, 38 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index 1ae6cb0..f007bf0 100755
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -156,6 +156,13 @@ MODULE_PARM_DESC(macaddr, "FEC Ethernet MAC address");
+ #define PKT_MINBUF_SIZE		64
+ #define PKT_MAXBLR_SIZE		1520
+ 
++/* Pause frame feild and FIFO threshold */
++#define FEC_ENET_FCE		(1 << 5)
++#define FEC_ENET_RSEM_V		0x84
++#define FEC_ENET_RSFL_V		16
++#define FEC_ENET_RAEM_V		0x8
++#define FEC_ENET_RAFL_V		0x8
++#define FEC_ENET_OPD_V		0xFFF0
+ 
+ /*
+  * The 5270/5271/5280/5282/532x RX control register also contains maximum frame
+@@ -1617,6 +1624,16 @@ fec_restart(struct net_device *dev, int duplex)
+ 		else
+ 			val |= (1 << 9);
+ 
++		/* Enable pause frame
++		 * ENET pause frame has two issues as ticket TKT116501
++		 * The issues have been fixed on Rigel TO1.1 and Arik TO1.2
++		 */
++		if ((cpu_is_mx6q() &&
++			(mx6q_revision() >= IMX_CHIP_REVISION_1_2)) ||
++			(cpu_is_mx6dl() &&
++			(mx6dl_revision() >= IMX_CHIP_REVISION_1_1)))
++			val |= FEC_ENET_FCE;
++
+ 		writel(val, fep->hwp + FEC_R_CNTRL);
+ 	}
+ 
+@@ -1670,6 +1687,23 @@ fec_restart(struct net_device *dev, int duplex)
+ 		fep->phy_dev->speed == SPEED_1000)
+ 		val |= (0x1 << 5);
+ 
++	/* RX FIFO threshold setting for ENET pause frame feature
++	 * Only set the parameters after ticket TKT116501 fixed.
++	 * The issue has been fixed on Rigel TO1.1 and Arik TO1.2
++	 */
++	if ((cpu_is_mx6q() &&
++		(mx6q_revision() >= IMX_CHIP_REVISION_1_2)) ||
++		(cpu_is_mx6dl() &&
++		(mx6dl_revision() >= IMX_CHIP_REVISION_1_1))) {
++		writel(FEC_ENET_RSEM_V, fep->hwp + FEC_R_FIFO_RSEM);
++		writel(FEC_ENET_RSFL_V, fep->hwp + FEC_R_FIFO_RSFL);
++		writel(FEC_ENET_RAEM_V, fep->hwp + FEC_R_FIFO_RAEM);
++		writel(FEC_ENET_RAFL_V, fep->hwp + FEC_R_FIFO_RAFL);
++
++		/* OPD */
++		writel(FEC_ENET_OPD_V, fep->hwp + FEC_OPD);
++	}
++
+ 	if (cpu_is_mx6q() || cpu_is_mx6dl()) {
+ 		/* enable endian swap */
+ 		val |= (0x1 << 8);
+diff --git a/drivers/net/fec.h b/drivers/net/fec.h
+index 1c4063c..0c26c6c 100644
+--- a/drivers/net/fec.h
++++ b/drivers/net/fec.h
+@@ -45,6 +45,10 @@
+ #define FEC_R_DES_START		0x180 /* Receive descriptor ring */
+ #define FEC_X_DES_START		0x184 /* Transmit descriptor ring */
+ #define FEC_R_BUFF_SIZE		0x188 /* Maximum receive buff size */
++#define FEC_R_FIFO_RSFL		0x190 /* Receive FIFO section full threshold */
++#define FEC_R_FIFO_RSEM		0x194 /* Receive FIFO section empty threshold */
++#define FEC_R_FIFO_RAEM		0x198 /* Receive FIFO almost empty threshold */
++#define FEC_R_FIFO_RAFL		0x19c /* Receive FIFO almost full threshold */
+ #define FEC_MIIGSK_CFGR		0x300 /* MIIGSK Configuration reg */
+ #define FEC_MIIGSK_ENR		0x308 /* MIIGSK Enable reg */
+ 
+-- 
+1.7.7.4
+

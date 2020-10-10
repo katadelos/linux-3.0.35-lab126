@@ -1,0 +1,55 @@
+From 09c1e70f637169fe0fc09e3925a332de3f3d65e8 Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Wed, 18 Apr 2012 13:59:05 -0700
+Subject: [PATCH 1391/2463] ENGR00180943-10: Add register I/O primitives for
+ ARM compatibility
+
+Add register I/O primitives for ARM compatibility.
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+---
+ drivers/crypto/caam/regs.h |   16 +++++++++++-----
+ 1 files changed, 11 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/crypto/caam/regs.h b/drivers/crypto/caam/regs.h
+index aee394e..888706d 100644
+--- a/drivers/crypto/caam/regs.h
++++ b/drivers/crypto/caam/regs.h
+@@ -1,7 +1,7 @@
+ /*
+  * CAAM hardware register-level view
+  *
+- * Copyright 2008-2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2008-2012 Freescale Semiconductor, Inc.
+  */
+ 
+ #ifndef REGS_H
+@@ -74,15 +74,21 @@
+ #endif
+ #else
+ #ifdef __LITTLE_ENDIAN
+-#define wr_reg32(reg, data) __raw_writel(reg, data)
+-#define rd_reg32(reg) __raw_readl(reg)
++#define wr_reg32(reg, data) writel(data, reg)
++#define rd_reg32(reg) readl(reg)
+ #ifdef CONFIG_64BIT
+-#define wr_reg64(reg, data) __raw_writeq(reg, data)
+-#define rd_reg64(reg) __raw_readq(reg)
++#define wr_reg64(reg, data) writeq(data, reg)
++#define rd_reg64(reg) readq(reg)
+ #endif
+ #endif
+ #endif
+ 
++#ifdef CONFIG_ARM
++/* These are common macros for Power, put here for ARMs */
++#define setbits32(_addr, _v) writel((readl(_addr) | (_v)), (_addr))
++#define clrbits32(_addr, _v) writel((readl(_addr) & ~(_v)), (_addr))
++#endif
++
+ #ifndef CONFIG_64BIT
+ static inline void wr_reg64(u64 __iomem *reg, u64 data)
+ {
+-- 
+1.7.7.4
+

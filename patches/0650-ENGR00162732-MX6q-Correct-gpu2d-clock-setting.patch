@@ -1,0 +1,31 @@
+From 647a953a7f86203d1f6f63a221133b89acf45555 Mon Sep 17 00:00:00 2001
+From: Larry Li <b20787@freescale.com>
+Date: Mon, 21 Nov 2011 17:43:45 +0800
+Subject: [PATCH 0650/2463] ENGR00162732 [MX6q] Correct gpu2d clock setting
+
+In MX6 gpu2d core clock setting, gpu3d core clock field is misued
+to set 2d core clock rate. Correct it to use the right clock field
+
+Signed-off-by: Larry Li <b20787@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 37912ca..560ed67 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4199,8 +4199,8 @@ static int _clk_gpu2d_core_set_rate(struct clk *clk, unsigned long rate)
+ 		return -EINVAL;
+ 
+ 	reg = __raw_readl(MXC_CCM_CBCMR);
+-	reg &= ~MXC_CCM_CBCMR_GPU3D_CORE_PODF_MASK;
+-	reg |= (div - 1) << MXC_CCM_CBCMR_GPU3D_CORE_PODF_OFFSET;
++	reg &= ~MXC_CCM_CBCMR_GPU2D_CORE_PODF_MASK;
++	reg |= (div - 1) << MXC_CCM_CBCMR_GPU2D_CORE_PODF_OFFSET;
+ 	__raw_writel(reg, MXC_CCM_CBCMR);
+ 
+ 	return 0;
+-- 
+1.7.7.4
+

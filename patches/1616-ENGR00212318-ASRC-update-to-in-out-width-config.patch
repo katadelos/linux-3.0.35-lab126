@@ -1,0 +1,404 @@
+From d85b9d666cc6d6a6fdbfe7567cce4a7a9d08780f Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Mon, 11 Jun 2012 15:08:18 +0800
+Subject: [PATCH 1616/2463] ENGR00212318 ASRC:update to in/out width config
+
+The origin ASRC driver did not support input and output wordwidth
+config but an total wordwidth config instead. And the input wordwith
+and output wordwidth are all fixed to 24 bit.
+
+In this path, we do things below:
+
+1 Update to use input wordwidth and output wordwidth config seperately
+ instead of an total wordwidth config.
+2 Set corresponding DMA(input/output) buswidth according ASRC's input
+and output wordwidth config.
+3 Support 16/24 bit input wordwidth and 24 bit output wordwidth.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/mxc/asrc/mxc_asrc.c     |   89 ++++++++++++++++++++++++++++----------
+ include/linux/mxc_asrc.h        |   12 +++++-
+ sound/soc/imx/imx-cs42888.c     |   30 ++++++-------
+ sound/soc/imx/imx-pcm-dma-mx2.c |   12 +++++-
+ sound/soc/imx/imx-pcm.h         |    3 +-
+ 5 files changed, 103 insertions(+), 43 deletions(-)
+
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index b4ec41a..db20cbf 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -156,7 +156,8 @@ struct dma_async_tx_descriptor *imx_asrc_dma_config(
+ 					struct asrc_pair_params *params,
+ 					struct dma_chan *chan,
+ 					u32 dma_addr, dma_addr_t buf_addr,
+-					u32 buf_len, bool in);
++					u32 buf_len, bool in,
++					enum asrc_word_width word_width);
+ 
+ static int asrc_set_clock_ratio(enum asrc_pair_index index,
+ 				int input_sample_rate, int output_sample_rate)
+@@ -435,10 +436,9 @@ int asrc_config_pair(struct asrc_config *config)
+ 							 input_sample_rate);
+ 			reg |= tmp << AICPA;
+ 		} else {
+-			if (config->word_width == 16 || config->word_width == 8)
++			if (config->input_word_width == ASRC_WIDTH_16_BIT)
+ 				reg |= 5 << AICPA;
+-			else if (config->word_width == 32
+-				 || config->word_width == 24)
++			else if (config->input_word_width == ASRC_WIDTH_24_BIT)
+ 				reg |= 6 << AICPA;
+ 			else
+ 				err = -EFAULT;
+@@ -454,10 +454,9 @@ int asrc_config_pair(struct asrc_config *config)
+ 							 output_sample_rate);
+ 			reg |= tmp << AOCPA;
+ 		} else {
+-			if (config->word_width == 16 || config->word_width == 8)
++			if (config->output_word_width == ASRC_WIDTH_16_BIT)
+ 				reg |= 5 << AOCPA;
+-			else if (config->word_width == 32
+-				 || config->word_width == 24)
++			else if (config->output_word_width == ASRC_WIDTH_24_BIT)
+ 				reg |= 6 << AOCPA;
+ 			else
+ 				err = -EFAULT;
+@@ -479,10 +478,9 @@ int asrc_config_pair(struct asrc_config *config)
+ 							 input_sample_rate);
+ 			reg |= tmp << AICPB;
+ 		} else {
+-			if (config->word_width == 16 || config->word_width == 8)
++			if (config->input_word_width == ASRC_WIDTH_16_BIT)
+ 				reg |= 5 << AICPB;
+-			else if (config->word_width == 32
+-				 || config->word_width == 24)
++			else if (config->input_word_width == ASRC_WIDTH_24_BIT)
+ 				reg |= 6 << AICPB;
+ 			else
+ 				err = -EFAULT;
+@@ -498,10 +496,9 @@ int asrc_config_pair(struct asrc_config *config)
+ 							 output_sample_rate);
+ 			reg |= tmp << AOCPB;
+ 		} else {
+-			if (config->word_width == 16 || config->word_width == 8)
++			if (config->output_word_width == ASRC_WIDTH_16_BIT)
+ 				reg |= 5 << AOCPB;
+-			else if (config->word_width == 32
+-				 || config->word_width == 24)
++			else if (config->output_word_width == ASRC_WIDTH_24_BIT)
+ 				reg |= 6 << AOCPB;
+ 			else
+ 				err = -EFAULT;
+@@ -523,10 +520,9 @@ int asrc_config_pair(struct asrc_config *config)
+ 							 input_sample_rate);
+ 			reg |= tmp << AICPC;
+ 		} else {
+-			if (config->word_width == 16 || config->word_width == 8)
++			if (config->input_word_width == ASRC_WIDTH_16_BIT)
+ 				reg |= 5 << AICPC;
+-			else if (config->word_width == 32
+-				 || config->word_width == 24)
++			else if (config->input_word_width == ASRC_WIDTH_24_BIT)
+ 				reg |= 6 << AICPC;
+ 			else
+ 				err = -EFAULT;
+@@ -542,10 +538,9 @@ int asrc_config_pair(struct asrc_config *config)
+ 							 output_sample_rate);
+ 			reg |= tmp << AOCPC;
+ 		} else {
+-			if (config->word_width == 16 || config->word_width == 8)
++			if (config->output_word_width == ASRC_WIDTH_16_BIT)
+ 				reg |= 5 << AOCPC;
+-			else if (config->word_width == 32
+-				 || config->word_width == 24)
++			else if (config->output_word_width == ASRC_WIDTH_24_BIT)
+ 				reg |= 6 << AOCPC;
+ 			else
+ 				err = -EFAULT;
+@@ -588,6 +583,36 @@ int asrc_config_pair(struct asrc_config *config)
+ 		}
+ 	}
+ 
++	/* Config input and output wordwidth */
++	reg = __raw_readl(
++		g_asrc->vaddr + ASRC_ASRMCR1A_REG + (config->pair << 2));
++	/* BIT 11-9 stands for input word width,
++	 * BIT 0 stands for output word width */
++	reg &= ~0xE01;
++	switch (config->input_word_width) {
++	case ASRC_WIDTH_16_BIT:
++		reg |= 1 << 9;
++		break;
++	case ASRC_WIDTH_24_BIT:
++		reg |= 0 << 9;
++		break;
++	default:
++		return -EINVAL;
++	}
++
++	switch (config->output_word_width) {
++	case ASRC_WIDTH_16_BIT:
++		reg |= 1;
++		break;
++	case ASRC_WIDTH_24_BIT:
++		reg |= 0;
++		break;
++	default:
++		return -EINVAL;
++	}
++	__raw_writel(reg,
++		 g_asrc->vaddr + ASRC_ASRMCR1A_REG + (config->pair << 2));
++
+ 	return err;
+ }
+ 
+@@ -924,21 +949,35 @@ struct dma_async_tx_descriptor *imx_asrc_dma_config(
+ 				struct asrc_pair_params *params,
+ 				struct dma_chan *chan,
+ 				u32 dma_addr, dma_addr_t buf_addr,
+-				u32 buf_len, bool in)
++				u32 buf_len, bool in,
++				enum asrc_word_width word_width)
+ {
+ 	struct dma_slave_config slave_config;
++	enum dma_slave_buswidth buswidth;
+ 	int ret;
+ 
++	switch (word_width) {
++	case ASRC_WIDTH_16_BIT:
++		buswidth = DMA_SLAVE_BUSWIDTH_2_BYTES;
++		break;
++	case ASRC_WIDTH_24_BIT:
++		buswidth = DMA_SLAVE_BUSWIDTH_4_BYTES;
++		break;
++	default:
++		pr_err("Error word_width\n");
++		return NULL;
++	}
++
+ 	if (in) {
+ 		slave_config.direction = DMA_MEM_TO_DEV;
+ 		slave_config.dst_addr = dma_addr;
+-		slave_config.dst_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
++		slave_config.dst_addr_width = buswidth;
+ 		slave_config.dst_maxburst =
+ 			ASRC_INPUTFIFO_THRESHOLD * params->channel_nums;
+ 	} else {
+ 		slave_config.direction = DMA_DEV_TO_MEM;
+ 		slave_config.src_addr = dma_addr;
+-		slave_config.src_addr_width = DMA_SLAVE_BUSWIDTH_4_BYTES;
++		slave_config.src_addr_width = buswidth;
+ 		slave_config.src_maxburst =
+ 			ASRC_OUTPUTFIFO_THRESHOLD * params->channel_nums;
+ 	}
+@@ -1055,7 +1094,8 @@ static long asrc_ioctl(struct file *file,
+ 					params->input_dma_channel,
+ 					asrc_get_per_addr(params->index, 1),
+ 					params->input_dma[0].dma_paddr,
+-					params->input_buffer_size, 1);
++					params->input_buffer_size, 1,
++					config.input_word_width);
+ 			if (params->desc_in) {
+ 				params->desc_in->callback =
+ 						asrc_input_dma_callback;
+@@ -1075,7 +1115,8 @@ static long asrc_ioctl(struct file *file,
+ 					params->output_dma_channel,
+ 					asrc_get_per_addr(params->index, 0),
+ 					params->output_dma[0].dma_paddr,
+-					params->output_buffer_size, 0);
++					params->output_buffer_size, 0,
++					config.output_word_width);
+ 			if (params->desc_out) {
+ 				params->desc_out->callback =
+ 						asrc_output_dma_callback;
+diff --git a/include/linux/mxc_asrc.h b/include/linux/mxc_asrc.h
+index 4ccf8cb..72556a5 100644
+--- a/include/linux/mxc_asrc.h
++++ b/include/linux/mxc_asrc.h
+@@ -72,6 +72,12 @@ enum asrc_outclk {
+ 	OUTCLK_ASRCK1_CLK = 0x0f,
+ };
+ 
++enum asrc_word_width {
++	ASRC_WIDTH_24_BIT = 0,
++	ASRC_WIDTH_16_BIT = 1,
++	ASRC_WIDTH_8_BIT = 2,
++};
++
+ struct asrc_config {
+ 	enum asrc_pair_index pair;
+ 	unsigned int channel_num;
+@@ -79,7 +85,8 @@ struct asrc_config {
+ 	unsigned int dma_buffer_size;
+ 	unsigned int input_sample_rate;
+ 	unsigned int output_sample_rate;
+-	unsigned int word_width;
++	enum asrc_word_width input_word_width;
++	enum asrc_word_width output_word_width;
+ 	enum asrc_inclk inclk;
+ 	enum asrc_outclk outclk;
+ };
+@@ -170,6 +177,9 @@ enum asrc_error_status {
+ #define ASRC_ASRFSTB_REG    0xAC
+ #define ASRC_ASRMCRC_REG    0xB0
+ #define ASRC_ASRFSTC_REG    0xB4
++#define ASRC_ASRMCR1A_REG   0xC0
++#define ASRC_ASRMCR1B_REG   0xC4
++#define ASRC_ASRMCR1C_REG   0xC8
+ 
+ 
+ struct dma_block {
+diff --git a/sound/soc/imx/imx-cs42888.c b/sound/soc/imx/imx-cs42888.c
+index 3fc420c..5a22939 100644
+--- a/sound/soc/imx/imx-cs42888.c
++++ b/sound/soc/imx/imx-cs42888.c
+@@ -60,6 +60,7 @@ struct asrc_esai {
+ static struct asrc_esai asrc_esai_data;
+ static bool asrc_support = 1;
+ static int asrc_func;
++enum asrc_word_width asrcp2p_output_bit = ASRC_WIDTH_24_BIT;
+ 
+ static const char *asrc_function[] = {
+ 	"disable", "24KHz", "32KHz", "44.1KHz",
+@@ -94,16 +95,14 @@ static const struct snd_kcontrol_new asrc_controls[] = {
+ 		     asrc_set_rate),
+ };
+ 
+-static int get_format_width(struct snd_pcm_hw_params *params)
++static enum asrc_word_width get_asrc_input_width(
++			struct snd_pcm_hw_params *params)
+ {
+ 	switch (params_format(params)) {
+-	case SNDRV_PCM_FORMAT_S8:
+-	case SNDRV_PCM_FORMAT_U8:
+-		return 8;
+ 	case SNDRV_PCM_FORMAT_U16:
+ 	case SNDRV_PCM_FORMAT_S16_LE:
+ 	case SNDRV_PCM_FORMAT_S16_BE:
+-		return 16;
++		return ASRC_WIDTH_16_BIT;
+ 	case SNDRV_PCM_FORMAT_S20_3LE:
+ 	case SNDRV_PCM_FORMAT_S20_3BE:
+ 	case SNDRV_PCM_FORMAT_S24_3LE:
+@@ -114,12 +113,13 @@ static int get_format_width(struct snd_pcm_hw_params *params)
+ 	case SNDRV_PCM_FORMAT_U24_LE:
+ 	case SNDRV_PCM_FORMAT_U24_3BE:
+ 	case SNDRV_PCM_FORMAT_U24_3LE:
+-		return 24;
++		return ASRC_WIDTH_24_BIT;
++	case SNDRV_PCM_FORMAT_S8:
++	case SNDRV_PCM_FORMAT_U8:
+ 	case SNDRV_PCM_FORMAT_S32:
+ 	case SNDRV_PCM_FORMAT_U32:
+-		return 32;
+ 	default:
+-		pr_err("Format is not support!\r\n");
++		pr_err("Format is not support!\n");
+ 		return -EINVAL;
+ 	}
+ }
+@@ -129,21 +129,18 @@ static int config_asrc(struct snd_pcm_substream *substream,
+ {
+ 	unsigned int rate = params_rate(params);
+ 	unsigned int channel = params_channels(params);
+-	unsigned int wordwidth = get_format_width(params);
+ 	struct imx_pcm_runtime_data *pcm_data =
+ 				substream->runtime->private_data;
+ 	struct asrc_config config = {0};
+ 	int ret = 0;
+ 
+-	if ((rate == asrc_esai_data.input_sample_rate) || (asrc_func == 0))
++	if ((rate == asrc_esai_data.input_sample_rate)
++			|| !asrc_func)
+ 		return -EINVAL;
+ 
+ 	if (channel != 2)
+ 		return -EINVAL;
+ 
+-	if (wordwidth != 24)
+-		return -EINVAL;
+-
+ 	ret = asrc_req_pair(channel, &asrc_esai_data.asrc_index);
+ 	if (ret < 0) {
+ 		pr_err("Fail to request asrc pair\n");
+@@ -152,12 +149,13 @@ static int config_asrc(struct snd_pcm_substream *substream,
+ 		return -EINVAL;
+ 	}
+ 
++	config.input_word_width = get_asrc_input_width(params);
++	config.output_word_width = asrcp2p_output_bit;
+ 	config.pair = asrc_esai_data.asrc_index;
+ 	config.channel_num = channel;
+ 	config.input_sample_rate = asrc_esai_data.input_sample_rate;
+ 	config.output_sample_rate = rate;
+ 	config.inclk = OUTCLK_ASRCK1_CLK;
+-	config.word_width = wordwidth;
+ 	config.outclk = OUTCLK_ESAI_TX;
+ 
+ 	ret = asrc_config_pair(&config);
+@@ -167,8 +165,8 @@ static int config_asrc(struct snd_pcm_substream *substream,
+ 		asrc_finish_conv(asrc_esai_data.asrc_index);
+ 		return ret;
+ 	}
+-	/*now our asrc driver support 24bit output*/
+-	pcm_data->output_bit = 24;
++	/*now our asrc driver only support 24bit output*/
++	pcm_data->output_bit = asrcp2p_output_bit;
+ 	pcm_data->asrc_index = asrc_esai_data.asrc_index;
+ 	pcm_data->asrc_enable = 1;
+ 
+diff --git a/sound/soc/imx/imx-pcm-dma-mx2.c b/sound/soc/imx/imx-pcm-dma-mx2.c
+index 2547d2b..9c6dcd2 100644
+--- a/sound/soc/imx/imx-pcm-dma-mx2.c
++++ b/sound/soc/imx/imx-pcm-dma-mx2.c
+@@ -134,7 +134,16 @@ static int imx_ssi_asrc_dma_alloc(struct snd_pcm_substream *substream,
+ 	if (!iprtd->asrc_p2p_dma_chan)
+ 		goto error;
+ 
+-	buswidth = DMA_SLAVE_BUSWIDTH_4_BYTES;
++	switch (iprtd->output_bit) {
++	case ASRC_WIDTH_16_BIT:
++		buswidth = DMA_SLAVE_BUSWIDTH_2_BYTES;
++		break;
++	case ASRC_WIDTH_24_BIT:
++		buswidth = DMA_SLAVE_BUSWIDTH_4_BYTES;
++		break;
++	default:
++		return -EINVAL;
++	}
+ 
+ 	slave_config.direction = DMA_DEV_TO_DEV;
+ 	slave_config.src_addr = asrc_get_per_addr(iprtd->asrc_index, 0);
+@@ -412,6 +421,7 @@ static int snd_imx_open(struct snd_pcm_substream *substream)
+ 	iprtd = kzalloc(sizeof(*iprtd), GFP_KERNEL);
+ 	if (iprtd == NULL)
+ 		return -ENOMEM;
++
+ 	runtime->private_data = iprtd;
+ 
+ 	ret = snd_pcm_hw_constraint_integer(substream->runtime,
+diff --git a/sound/soc/imx/imx-pcm.h b/sound/soc/imx/imx-pcm.h
+index ede1382..86d6e36 100644
+--- a/sound/soc/imx/imx-pcm.h
++++ b/sound/soc/imx/imx-pcm.h
+@@ -33,6 +33,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/slab.h>
+ #include <linux/dmaengine.h>
++#include <linux/mxc_asrc.h>
+ 
+ #include <sound/core.h>
+ #include <sound/initval.h>
+@@ -63,7 +64,7 @@ struct imx_pcm_runtime_data {
+ 	struct dma_async_tx_descriptor *asrc_p2p_desc;
+ 	struct dma_chan *asrc_p2p_dma_chan;
+ 	struct imx_dma_data asrc_p2p_dma_data;
+-	unsigned int output_bit;
++	enum asrc_word_width output_bit;
+ #endif
+ };
+ #endif
+-- 
+1.7.7.4
+

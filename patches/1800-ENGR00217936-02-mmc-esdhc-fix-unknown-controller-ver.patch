@@ -1,0 +1,35 @@
+From 4bd49edd9a394aadffb25b317ca9a56d829e845c Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Tue, 24 Jul 2012 12:33:40 +0800
+Subject: [PATCH 1800/2463] ENGR00217936-02 mmc: esdhc: fix unknown controller
+ version for usdhc
+
+- Add cpu_is_mx6dq, cpu_is_mx6dl to strengthen the condition.
+
+Note: mx6sl has no such issue because it's fixed by IC, in other word,
+mx6sl aligns with sdhc specification.
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/host/sdhci-esdhc-imx.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci-esdhc-imx.c b/drivers/mmc/host/sdhci-esdhc-imx.c
+index 1111185..3f809a6 100644
+--- a/drivers/mmc/host/sdhci-esdhc-imx.c
++++ b/drivers/mmc/host/sdhci-esdhc-imx.c
+@@ -364,8 +364,9 @@ static u16 esdhc_readw_le(struct sdhci_host *host, int reg)
+ 	case SDHCI_HOST_VERSION:
+ 		reg ^= 2;
+ 		val = readl(host->ioaddr + reg);
+-		if (((val & SDHCI_SPEC_VER_MASK) >> SDHCI_SPEC_VER_SHIFT)
+-				== SDHCI_FSL_SVN_300) {
++		if ((cpu_is_mx6q() || cpu_is_mx6dl()) &&
++			((val & SDHCI_SPEC_VER_MASK) >> SDHCI_SPEC_VER_SHIFT)
++			== SDHCI_FSL_SVN_300) {
+ 			val &= ~SDHCI_SPEC_VER_MASK;
+ 			val |= SDHCI_SPEC_300;
+ 		}
+-- 
+1.7.7.4
+

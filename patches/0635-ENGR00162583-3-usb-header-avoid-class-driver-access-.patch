@@ -1,0 +1,41 @@
+From 1d706eb12adc5a5e13fe508bd8ef61ec0e4c5a0d Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Fri, 18 Nov 2011 14:02:45 +0800
+Subject: [PATCH 0635/2463] ENGR00162583-3 usb header: avoid class driver
+ access register after usb is off
+
+- An well-behavior class driver should disable their endpoints
+after being notified disconnect with host, we use all endpoints
+are stopped (ep->stopped)  to indicates the class
+driver will not visit device driver any more.
+the ep-stopped will be initialized as 1 for non-control endpoint
+it will be 0 after fsl_ep_enable, and be 1 after fsl_ep_disable.
+Where is a non-sleep wait routine at disconnect event for waiting all
+endpoints are stopped
+- Some controller's (like i.mx6q) DP will change from J
+to SE0 slowly after the cable disconnects with host, in that case there
+will be a wakeup interrupt after driver enables the wakeup interrupt.
+For i.mx6q, there is a discharge routine for DP after the disconnection.
+- Should not wait vbus to low during first otg switch, as the wait will
+be timeout when the usb cable is connecting to host.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ include/linux/fsl_devices.h |    1 +
+ 1 files changed, 1 insertions(+), 0 deletions(-)
+
+diff --git a/include/linux/fsl_devices.h b/include/linux/fsl_devices.h
+index 7508142..d528828 100644
+--- a/include/linux/fsl_devices.h
++++ b/include/linux/fsl_devices.h
+@@ -123,6 +123,7 @@ struct fsl_usb2_platform_data {
+ 	enum usb_wakeup_event (*is_wakeup_event)(struct fsl_usb2_platform_data *);
+ 	void (*wakeup_handler)(struct fsl_usb2_platform_data *);
+ 	void (*hsic_post_ops)(void);
++	void (*gadget_discharge_dp) (bool);
+ 
+ 	struct fsl_usb2_wakeup_platform_data *wakeup_pdata;
+ 	struct platform_device *pdev;
+-- 
+1.7.7.4
+

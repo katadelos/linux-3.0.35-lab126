@@ -1,0 +1,148 @@
+From 4e139825c10d7d9ab81f89f263261a1606c2f4df Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Thu, 21 Jul 2011 17:28:47 +0800
+Subject: [PATCH 0327/2463] ENGR00139247-3 MTD : add GPMI driver for IMX6Q
+
+add the gpmi driver for imx6q.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/mtd/nand/Kconfig             |    2 +-
+ drivers/mtd/nand/gpmi-nfc/Makefile   |    1 +
+ drivers/mtd/nand/gpmi-nfc/gpmi-nfc.c |   31 ++++++++++++++++++++++++++++---
+ drivers/mtd/nand/gpmi-nfc/gpmi-nfc.h |    2 ++
+ drivers/mtd/nand/gpmi-nfc/hal-mx50.c |    4 ++++
+ 5 files changed, 36 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mtd/nand/Kconfig b/drivers/mtd/nand/Kconfig
+index 88dec53..01ccf52 100644
+--- a/drivers/mtd/nand/Kconfig
++++ b/drivers/mtd/nand/Kconfig
+@@ -425,7 +425,7 @@ config MTD_NAND_NANDSIM
+ 
+ config MTD_NAND_GPMI_NFC
+         bool "GPMI NAND Flash Controller driver"
+-        depends on MTD_NAND && (SOC_IMX23 || SOC_IMX28 || SOC_IMX50)
++        depends on MTD_NAND && (SOC_IMX23 || SOC_IMX28 || SOC_IMX50 || SOC_IMX6Q)
+ 	select MTD_PARTITIONS
+ 	select MTD_CMDLINE_PARTS
+         help
+diff --git a/drivers/mtd/nand/gpmi-nfc/Makefile b/drivers/mtd/nand/gpmi-nfc/Makefile
+index 2b32cf6..b3c3369 100644
+--- a/drivers/mtd/nand/gpmi-nfc/Makefile
++++ b/drivers/mtd/nand/gpmi-nfc/Makefile
+@@ -3,3 +3,4 @@ gpmi_nfc-objs += gpmi-nfc.o
+ obj-$(CONFIG_SOC_IMX23) += hal-mxs.o
+ obj-$(CONFIG_SOC_IMX28) += hal-mxs.o
+ obj-$(CONFIG_SOC_IMX50) += hal-mx50.o
++obj-$(CONFIG_SOC_IMX6Q) += hal-mx50.o
+diff --git a/drivers/mtd/nand/gpmi-nfc/gpmi-nfc.c b/drivers/mtd/nand/gpmi-nfc/gpmi-nfc.c
+index e4edf5d..2be4036 100644
+--- a/drivers/mtd/nand/gpmi-nfc/gpmi-nfc.c
++++ b/drivers/mtd/nand/gpmi-nfc/gpmi-nfc.c
+@@ -377,6 +377,23 @@ static void dma_irq_callback(void *param)
+ 	}
+ }
+ 
++/* This is very useful! */
++void gpmi_show_regs(struct gpmi_nfc_data *this)
++{
++	struct resources *r = &this->resources;
++	u32 reg;
++	int i;
++	int n;
++
++	n = 0xc0 / 0x10 + 1;
++
++	pr_info("-------------- Show GPMI registers ----------\n");
++	for (i = 0; i <= n; i++) {
++		reg = __raw_readl(r->gpmi_regs + i * 0x10);
++		pr_info("offset 0x%.3x : 0x%.8x\n", i * 0x10, reg);
++	}
++	pr_info("-------------- Show GPMI registers end ----------\n");
++}
+ int start_dma_without_bch_irq(struct gpmi_nfc_data *this,
+ 				struct dma_async_tx_descriptor *desc)
+ {
+@@ -393,8 +410,11 @@ int start_dma_without_bch_irq(struct gpmi_nfc_data *this,
+ 	err = wait_for_completion_timeout(&nfc->dma_done,
+ 					msecs_to_jiffies(1000));
+ 	err = (!err) ? -ETIMEDOUT : 0;
+-	if (err)
++	if (err) {
+ 		pr_info("DMA timeout!!!\n");
++		gpmi_show_regs(this);
++		panic("----------------");
++	}
+ 	return err;
+ }
+ 
+@@ -1148,8 +1168,8 @@ static int __devinit set_up_nfc_hal(struct gpmi_nfc_data *this)
+ 	if (GPMI_IS_MX23(this) || GPMI_IS_MX28(this))
+ 		nfc = &gpmi_nfc_hal_imx23_imx28;
+ #endif
+-#if defined(CONFIG_SOC_IMX50)
+-	if (GPMI_IS_MX50(this))
++#if defined(CONFIG_SOC_IMX50) || defined(CONFIG_SOC_IMX6Q)
++	if (GPMI_IS_MX50(this) || GPMI_IS_MX6Q(this))
+ 		nfc = &gpmi_nfc_hal_mx50;
+ #endif
+ 	BUG_ON(nfc == NULL);
+@@ -1380,6 +1400,7 @@ static void mil_cmd_ctrl(struct mtd_info *mtd, int data, unsigned int ctrl)
+ 	mil->command_length = 0;
+ }
+ 
++
+ static int mil_dev_ready(struct mtd_info *mtd)
+ {
+ 	struct nand_chip *nand = mtd->priv;
+@@ -2437,6 +2458,9 @@ static const struct platform_device_id gpmi_ids[] = {
+ 	}, {
+ 		.name = "imx50-gpmi-nfc",
+ 		.driver_data = IS_MX50,
++	}, {
++		.name = "imx6q-gpmi-nfc",
++		.driver_data = IS_MX6Q,
+ 	}, {},
+ };
+ 
+@@ -2473,6 +2497,7 @@ static void __exit gpmi_nfc_exit(void)
+ static int __init gpmi_debug_setup(char *__unused)
+ {
+ 	gpmi_debug = GPMI_DEBUG_INIT;
++	enable_gpmi_nand = true;
+ 	return 1;
+ }
+ __setup("gpmi_debug_init", gpmi_debug_setup);
+diff --git a/drivers/mtd/nand/gpmi-nfc/gpmi-nfc.h b/drivers/mtd/nand/gpmi-nfc/gpmi-nfc.h
+index dfa9cd1..bdf13c2 100644
+--- a/drivers/mtd/nand/gpmi-nfc/gpmi-nfc.h
++++ b/drivers/mtd/nand/gpmi-nfc/gpmi-nfc.h
+@@ -491,7 +491,9 @@ extern int gpmi_debug;
+ #define IS_MX23			0x1
+ #define IS_MX28			0x2
+ #define IS_MX50			0x4
++#define IS_MX6Q			0x8
+ #define GPMI_IS_MX23(x)		((x)->pdev->id_entry->driver_data == IS_MX23)
+ #define GPMI_IS_MX28(x)		((x)->pdev->id_entry->driver_data == IS_MX28)
+ #define GPMI_IS_MX50(x)		((x)->pdev->id_entry->driver_data == IS_MX50)
++#define GPMI_IS_MX6Q(x)		((x)->pdev->id_entry->driver_data == IS_MX6Q)
+ #endif
+diff --git a/drivers/mtd/nand/gpmi-nfc/hal-mx50.c b/drivers/mtd/nand/gpmi-nfc/hal-mx50.c
+index 4230e8b..ee0d318 100644
+--- a/drivers/mtd/nand/gpmi-nfc/hal-mx50.c
++++ b/drivers/mtd/nand/gpmi-nfc/hal-mx50.c
+@@ -299,6 +299,10 @@ static inline bool is_board_support_ddr(struct gpmi_nfc_data *this)
+ /* To check if we need to initialize something else*/
+ static int extra_init(struct gpmi_nfc_data *this)
+ {
++	/* mx6q do not need the extra clocks, while the mx50 needs. */
++	if (GPMI_IS_MX6Q(this))
++		return 0;
++
+ 	ddr_clk = clk_get(NULL, "ddr_clk");
+ 	if (IS_ERR(ddr_clk)) {
+ 		printk(KERN_ERR "The ddr clock is gone!");
+-- 
+1.7.7.4
+

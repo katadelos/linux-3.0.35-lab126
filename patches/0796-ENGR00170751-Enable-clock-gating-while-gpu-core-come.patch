@@ -1,0 +1,375 @@
+From 47770e0e0e1258e3b18aa7562ba2e9b0d46967a2 Mon Sep 17 00:00:00 2001
+From: Loren Huang <b02279@freescale.com>
+Date: Mon, 26 Dec 2011 15:46:06 +0800
+Subject: [PATCH 0796/2463] ENGR00170751 Enable clock gating while gpu core
+ comes to idle
+
+-Correct gc355 initial power state to poweroff.
+-Separate clock gating operation in function gckOS_SetGPUPower().
+-Turn on clock while suspend GPU cores.
+-Remove clock switch in drv_open().
+
+Signed-off-by: Loren Huang <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../GC350/hal/kernel/gc_hal_kernel_hardware_vg.c   |    5 +-
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c  |    9 ++-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h        |    4 +
+ .../hal/os/linux/kernel/gc_hal_kernel_device.c     |   45 +++++++++++++++
+ .../hal/os/linux/kernel/gc_hal_kernel_device.h     |    6 ++
+ .../hal/os/linux/kernel/gc_hal_kernel_driver.c     |   55 +-----------------
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |   60 +++++++++++++++++++-
+ 7 files changed, 123 insertions(+), 61 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+index 20c79b8..a9aec14 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+@@ -246,7 +246,7 @@ gckVGHARDWARE_Construct(
+ 
+         hardware->powerMutex            = gcvNULL;
+         hardware->idleSemaphore         = gcvNULL;
+-        hardware->chipPowerState        = gcvPOWER_ON;
++        hardware->chipPowerState        = gcvPOWER_OFF;
+         hardware->chipPowerStateGlobal  = gcvPOWER_ON;
+         hardware->clockState            = gcvTRUE;
+         hardware->powerState            = gcvTRUE;
+@@ -1678,7 +1678,7 @@ gckVGHARDWARE_SetPowerManagementState(
+     if (flag & (gcvPOWER_FLAG_INITIALIZE | gcvPOWER_FLAG_CLOCK_ON))
+     {
+         /* Turn on the power. */
+-        gcmkONERROR(gckOS_SetGPUPower(os, gcvTRUE, gcvTRUE));
++        gcmkONERROR(gckOS_SetGPUPower(os, gcvCORE_VG , gcvTRUE, gcvTRUE));
+ 
+         /* Mark clock and power as enabled. */
+         Hardware->clockState = gcvTRUE;
+@@ -1749,6 +1749,7 @@ gckVGHARDWARE_SetPowerManagementState(
+         /* Turn off the GPU power. */
+         gcmkONERROR(
+             gckOS_SetGPUPower(os,
++                              gcvCORE_VG,
+                               (flag & gcvPOWER_FLAG_CLOCK_OFF) ? gcvFALSE
+                                                                : gcvTRUE,
+                               (flag & gcvPOWER_FLAG_POWER_OFF) ? gcvFALSE
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+index 0ceced9..5321a2d 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+@@ -421,7 +421,7 @@ gckHARDWARE_Construct(
+     gcmkVERIFY_ARGUMENT(Hardware != gcvNULL);
+ 
+     /* Enable the GPU. */
+-    gcmkONERROR(gckOS_SetGPUPower(Os, gcvTRUE, gcvTRUE));
++    gcmkONERROR(gckOS_SetGPUPower(Os, Core, gcvTRUE, gcvTRUE));
+     gcmkONERROR(gckOS_WriteRegisterEx(Os, Core, 0x00000, 0));
+ 
+     status = _ResetGPU(Os, Core);
+@@ -527,7 +527,7 @@ OnError:
+     if (hardware != gcvNULL)
+     {
+         /* Turn off the power. */
+-        gcmkVERIFY_OK(gckOS_SetGPUPower(Os, gcvFALSE, gcvFALSE));
++        gcmkVERIFY_OK(gckOS_SetGPUPower(Os, hardware->core, gcvFALSE, gcvFALSE));
+ 
+         if (hardware->globalSemaphore != gcvNULL)
+         {
+@@ -585,7 +585,7 @@ gckHARDWARE_Destroy(
+     gcmkVERIFY_OBJECT(Hardware, gcvOBJ_HARDWARE);
+ 
+     /* Turn off the power. */
+-    gcmkVERIFY_OK(gckOS_SetGPUPower(Hardware->os, gcvFALSE, gcvFALSE));
++    gcmkVERIFY_OK(gckOS_SetGPUPower(Hardware->os, Hardware->core, gcvFALSE, gcvFALSE));
+ 
+     /* Destroy the power semaphore. */
+     gcmkVERIFY_OK(gckOS_DestroySemaphore(Hardware->os,
+@@ -3749,7 +3749,7 @@ gckHARDWARE_SetPowerManagementState(
+     if (flag & (gcvPOWER_FLAG_INITIALIZE | gcvPOWER_FLAG_CLOCK_ON))
+     {
+         /* Turn on the power. */
+-        gcmkONERROR(gckOS_SetGPUPower(os, gcvTRUE, gcvTRUE));
++        gcmkONERROR(gckOS_SetGPUPower(os, Hardware->core, gcvTRUE, gcvTRUE));
+ 
+         /* Mark clock and power as enabled. */
+         Hardware->clockState = gcvTRUE;
+@@ -3896,6 +3896,7 @@ gckHARDWARE_SetPowerManagementState(
+         /* Turn off the GPU power. */
+         gcmkONERROR(
+             gckOS_SetGPUPower(os,
++                              Hardware->core,
+                               (flag & gcvPOWER_FLAG_CLOCK_OFF) ? gcvFALSE
+                                                                : gcvTRUE,
+                               (flag & gcvPOWER_FLAG_POWER_OFF) ? gcvFALSE
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
+index 2dfa3e7..e2a6b66 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
+@@ -1243,6 +1243,9 @@ gckOS_BroadcastCalibrateSpeed(
+ **      gckOS Os
+ **          Pointer to a gckOS object.ß
+ **
++**      gceCORE Core
++**          Core type.
++**
+ **      gctBOOL Clock
+ **          gcvTRUE to turn on the clock, or gcvFALSE to turn off the clock.
+ **
+@@ -1256,6 +1259,7 @@ gckOS_BroadcastCalibrateSpeed(
+ gceSTATUS
+ gckOS_SetGPUPower(
+     IN gckOS Os,
++    IN gceCORE Core,
+     IN gctBOOL Clock,
+     IN gctBOOL Power
+     );
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+index 7c0c5be..6d3b91b 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+@@ -376,6 +376,34 @@ gckGALDEVICE_Construct(
+ 
+     memset(device, 0, sizeof(struct _gckGALDEVICE));
+ 
++    /*Initialize the clock structure*/
++    if (IrqLine != -1) {
++        device->clk_3d_core = clk_get(NULL, "gpu3d_clk");
++        if (!IS_ERR(device->clk_3d_core)) {
++            device->clk_3d_shader = clk_get(NULL, "gpu3d_shader_clk");
++            if (IS_ERR(device->clk_3d_shader)) {
++                IrqLine = -1;
++                clk_put(device->clk_3d_core);
++                device->clk_3d_core = NULL;
++                device->clk_3d_shader = NULL;
++                gckOS_Print("galcore: clk_get gpu3d_shader_clk failed, disable 3d!\n");
++            }
++        } else {
++            IrqLine = -1;
++            device->clk_3d_core = NULL;
++            gckOS_Print("galcore: clk_get gpu3d_clk failed, disable 3d!\n");
++        }
++    }
++    if ((IrqLine2D != -1) || (IrqLineVG != -1)) {
++        device->clk_2d_core = clk_get(NULL, "gpu2d_clk");
++        if (IS_ERR(device->clk_2d_core)) {
++            IrqLine2D = -1;
++            IrqLineVG = -1;
++            device->clk_2d_core = NULL;
++            gckOS_Print("galcore: clk_get 2d clock failed, disable 2d/vg!\n");
++        }
++    }
++
+     if (IrqLine != -1)
+     {
+         device->requestedRegisterMemBases[gcvCORE_MAJOR]    = RegisterMemBase;
+@@ -941,6 +969,23 @@ gckGALDEVICE_Destroy(
+             }
+         }
+ 
++        /*Disable clock*/
++        if (Device->clk_3d_core) {
++           clk_disable(Device->clk_3d_core);
++           clk_put(Device->clk_3d_core);
++           Device->clk_3d_core = NULL;
++        }
++        if (Device->clk_3d_shader) {
++           clk_disable(Device->clk_3d_shader);
++           clk_put(Device->clk_3d_shader);
++           Device->clk_3d_shader = NULL;
++        }
++        if (Device->clk_2d_core) {
++           clk_disable(Device->clk_2d_core);
++           clk_put(Device->clk_2d_core);
++           Device->clk_2d_core = NULL;
++        }
++
+         /* Destroy the gckOS object. */
+         if (Device->os != gcvNULL)
+         {
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
+index 08c5e82..86333ba 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
+@@ -82,6 +82,12 @@ typedef struct _gckGALDEVICE
+     /* Core mapping */
+     gceCORE             coreMapping[8];
+ 
++    /* Clock management.*/
++    struct clk         *clk_3d_core;
++    struct clk         *clk_3d_shader;
++    struct clk         *clk_2d_core;
++    gctBOOL clk_flag[gcdCORE_COUNT];
++
+ #if gcdPOWEROFF_TIMEOUT
+     struct task_struct  *pmThreadCtxts;
+     gctBOOL             pmThreadInitializeds;
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+index e4ef19b..86ef0c6 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+@@ -111,10 +111,6 @@ module_param(showArgs, int, 0644);
+     module_param(coreClock, ulong, 0644);
+ #endif
+ 
+-static struct clk * clk_3d_core;
+-static struct clk * clk_3d_shader;
+-static struct clk * clk_2d_core;
+-
+ static int drv_open(
+     struct inode* inode,
+     struct file* filp
+@@ -709,38 +705,6 @@ static int drv_init(void)
+ #if defined(CONFIG_PXA_DVFM) && (LINUX_VERSION_CODE > KERNEL_VERSION(2,6,29))
+         gc_pwr(1);
+ #   endif
+-# else
+-    if (irqLine != -1) {
+-        clk_3d_core = clk_get(NULL, "gpu3d_clk");
+-        if (!IS_ERR(clk_3d_core)) {
+-            clk_3d_shader = clk_get(NULL, "gpu3d_shader_clk");
+-            if (!IS_ERR(clk_3d_shader)) {
+-                clk_enable(clk_3d_core);
+-                clk_enable(clk_3d_shader);
+-            } else {
+-                irqLine = -1;
+-                clk_put(clk_3d_core);
+-                clk_3d_core = NULL;
+-                clk_3d_shader = NULL;
+-                printk(KERN_ERR "galcore: clk_get gpu3d_shader_clk failed, disable 3d!\n");
+-            }
+-        } else {
+-            irqLine = -1;
+-            clk_3d_core = NULL;
+-            printk(KERN_ERR "galcore: clk_get gpu3d_clk failed, disable 3d!\n");
+-        }
+-    }
+-    if ((irqLine2D != -1) || (irqLineVG != -1)) {
+-        clk_2d_core = clk_get(NULL, "gpu2d_clk");
+-        if (IS_ERR(clk_2d_core)) {
+-            irqLine2D = -1;
+-            irqLineVG = -1;
+-            clk_2d_core = NULL;
+-            printk(KERN_ERR "galcore: clk_get 2d clock failed, disable 2d/vg!\n");
+-        } else {
+-            clk_enable(clk_2d_core);
+-        }
+-    }
+ # endif
+     }
+ #endif
+@@ -913,22 +877,6 @@ static void drv_exit(void)
+ #endif
+         clk = clk_get(NULL, "GCCLK");
+         clk_disable(clk);
+-# else
+-    if (clk_3d_core) {
+-       clk_disable(clk_3d_core);
+-       clk_put(clk_3d_core);
+-       clk_3d_core = NULL;
+-    }
+-    if (clk_3d_shader) {
+-       clk_disable(clk_3d_shader);
+-       clk_put(clk_3d_shader);
+-       clk_3d_shader = NULL;
+-    }
+-    if (clk_2d_core) {
+-        clk_disable(clk_2d_core);
+-        clk_put(clk_2d_core);
+-        clk_2d_core = NULL;
+-    }
+ # endif
+     }
+ #endif
+@@ -1038,7 +986,8 @@ static int __devinit gpu_suspend(struct platform_device *dev, pm_message_t state
+             {
+                 status = gckHARDWARE_SetPowerManagementState(device->kernels[i]->hardware, gcvPOWER_OFF);
+             }
+-
++            /*gpu clock must be turned on before power down*/
++            gckOS_SetGPUPower(device->os, i, gcvTRUE, gcvFALSE);
+             if (gcmIS_ERROR(status))
+             {
+                 return -1;
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index eacee27..619cd76 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -6287,6 +6287,9 @@ gckOS_GetThreadID(
+ **      gckOS Os
+ **          Pointer to a gckOS object.
+ **
++**      gceCORE Core
++**          Core type.
++**
+ **      gctBOOL Clock
+ **          gcvTRUE to turn on the clock, or gcvFALSE to turn off the clock.
+ **
+@@ -6300,12 +6303,65 @@ gckOS_GetThreadID(
+ gceSTATUS
+ gckOS_SetGPUPower(
+     IN gckOS Os,
++    IN gceCORE Core,
+     IN gctBOOL Clock,
+     IN gctBOOL Power
+     )
+ {
+-    gcmkHEADER_ARG("Os=0x%X Clock=%d Power=%d", Os, Clock, Power);
+-
++    struct clk *clk_3dcore = Os->device->clk_3d_core;
++    struct clk *clk_3dshader = Os->device->clk_3d_shader;
++    struct clk *clk_2dcore = Os->device->clk_2d_core;
++
++    gcmkHEADER_ARG("Os=0x%X Core=%d Clock=%d Power=%d", Os, Core, Clock, Power);
++    if (Clock == gcvTRUE) {
++        switch (Core) {
++        case gcvCORE_MAJOR:
++            if (!Os->device->clk_flag[gcvCORE_MAJOR]) {
++                clk_enable(clk_3dcore);
++                clk_enable(clk_3dshader);
++            }
++            Os->device->clk_flag[gcvCORE_MAJOR] = gcvTRUE;
++            break;
++        case gcvCORE_2D:
++            if (!(Os->device->clk_flag[gcvCORE_2D] || Os->device->clk_flag[gcvCORE_VG])) {
++                clk_enable(clk_2dcore);
++            }
++            Os->device->clk_flag[gcvCORE_2D] = gcvTRUE;
++            break;
++        case gcvCORE_VG:
++            if (!(Os->device->clk_flag[gcvCORE_2D] || Os->device->clk_flag[gcvCORE_VG])) {
++                clk_enable(clk_2dcore);
++            }
++            Os->device->clk_flag[gcvCORE_VG] = gcvTRUE;
++            break;
++        default:
++            break;
++        }
++    } else {
++        switch (Core) {
++        case gcvCORE_MAJOR:
++            if (Os->device->clk_flag[gcvCORE_MAJOR]) {
++                clk_disable(clk_3dshader);
++                clk_disable(clk_3dcore);
++            }
++            Os->device->clk_flag[gcvCORE_MAJOR] = gcvFALSE;
++            break;
++        case gcvCORE_2D:
++            if (Os->device->clk_flag[gcvCORE_2D] && (!Os->device->clk_flag[gcvCORE_VG])) {
++                clk_disable(clk_2dcore);
++            }
++            Os->device->clk_flag[gcvCORE_2D] = gcvFALSE;
++            break;
++        case gcvCORE_VG:
++            if ((!Os->device->clk_flag[gcvCORE_2D]) && Os->device->clk_flag[gcvCORE_VG]) {
++                clk_disable(clk_2dcore);
++            }
++            Os->device->clk_flag[gcvCORE_VG] = gcvFALSE;
++            break;
++        default:
++            break;
++        }
++    }
+     /* TODO: Put your code here. */
+ 
+     gcmkFOOTER_NO();
+-- 
+1.7.7.4
+

@@ -1,0 +1,34 @@
+From 2b5955e635b4c0057d99969f4f8018ef7f96c302 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 12 Jun 2012 18:50:42 +0800
+Subject: [PATCH 1593/2463] ENGR00180930 [MX6]Fix low bus mode bug when there
+ is no CPUFreq change
+
+If the CPUFreq change is done before enabling low bus freq driver,
+the bus freq will be staying at high freq until there is new request
+of entering low bus freq. So we need to put the bus freq into low
+point if all the conditions are met when we enable bus freq.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/bus_freq.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index 36a8190..c7f8fef 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -322,6 +322,10 @@ static ssize_t bus_freq_scaling_enable_store(struct device *dev,
+ 	if (strncmp(buf, "1", 1) == 0) {
+ 		bus_freq_scaling_is_active = 1;
+ 		set_high_bus_freq(0);
++		/* Make sure system can enter low bus mode if it should be in
++		low bus mode */
++		if (low_freq_bus_used() && !low_bus_freq_mode)
++			set_low_bus_freq();
+ 	} else if (strncmp(buf, "0", 1) == 0) {
+ 		if (bus_freq_scaling_is_active)
+ 			set_high_bus_freq(1);
+-- 
+1.7.7.4
+

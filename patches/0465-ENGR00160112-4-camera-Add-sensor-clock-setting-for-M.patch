@@ -1,0 +1,34 @@
+From e184404f6d3dbe3b7ae377d1747ac39cbe8baf19 Mon Sep 17 00:00:00 2001
+From: Yuxi <b36102@freescale.com>
+Date: Mon, 17 Oct 2011 13:50:30 +0800
+Subject: [PATCH 0465/2463] ENGR00160112-4 camera: Add sensor clock setting
+ for MX6
+
+When the platform is MX6, set mclk = cko1_clk0
+
+Signed-off-by: Yuxi Sun <b36102@freescale.com>
+---
+ drivers/media/video/mxc/capture/sensor_clock.c |    7 +++++++
+ 1 files changed, 7 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/sensor_clock.c b/drivers/media/video/mxc/capture/sensor_clock.c
+index 31560b5..357c01f 100644
+--- a/drivers/media/video/mxc/capture/sensor_clock.c
++++ b/drivers/media/video/mxc/capture/sensor_clock.c
+@@ -70,6 +70,13 @@ void set_mclk_rate(uint32_t *p_mclk_freq, uint32_t csi)
+ 			pr_err("invalid csi num %d\n", csi);
+ 			return;
+ 		}
++	} else if (cpu_is_mx6q()) {
++		if (csi == 0) {
++			mclk = "cko1_clk0";
++		} else {
++			pr_err("invalid csi num %d\n", csi);
++			return;
++		};
+ 	} else {
+ 		if (csi == 0) {
+ 			mclk = "csi_mclk1";
+-- 
+1.7.7.4
+

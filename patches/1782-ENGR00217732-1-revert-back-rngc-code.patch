@@ -1,0 +1,55 @@
+From d0e9d9a51f2cce0ecbf09ed513209c43cb51d534 Mon Sep 17 00:00:00 2001
+From: Terry Lv <r65388@freescale.com>
+Date: Fri, 20 Jul 2012 11:01:29 +0800
+Subject: [PATCH 1782/2463] ENGR00217732-1: revert back rngc code
+
+Revert to rngc code before as we will add dummy clock for it.
+
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/char/hw_random/fsl-rngc.c |   15 +++++++++------
+ 1 files changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/char/hw_random/fsl-rngc.c b/drivers/char/hw_random/fsl-rngc.c
+index 5efe810..0ce3299 100644
+--- a/drivers/char/hw_random/fsl-rngc.c
++++ b/drivers/char/hw_random/fsl-rngc.c
+@@ -135,7 +135,7 @@ static int fsl_rngc_data_present(struct hwrng *rng, int wait)
+ 	return level > 0 ? 1 : 0;
+ }
+ 
+-static int fsl_rngc_data_read(struct hwrng *rng, u32 *data)
++static int fsl_rngc_data_read(struct hwrng *rng, u32 * data)
+ {
+ 	int err;
+ 	u32 rngc_base = (u32) rng->priv;
+@@ -293,10 +293,13 @@ static int __init fsl_rngc_probe(struct platform_device *pdev)
+ 
+ 	clk = clk_get(&pdev->dev, "rng_clk");
+ 
+-	if (IS_ERR(clk))
+-		dev_warn(&pdev->dev, "No rng_clk specified\n");
+-	else
+-		clk_enable(clk);
++	if (IS_ERR(clk)) {
++		dev_err(&pdev->dev, "Can not get rng_clk\n");
++		err = PTR_ERR(clk);
++		return err;
++	}
++
++	clk_enable(clk);
+ 
+ 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+ 
+@@ -337,7 +340,7 @@ static int __exit fsl_rngc_remove(struct platform_device *pdev)
+ 	clk = clk_get(&pdev->dev, "rng_clk");
+ 
+ 	if (IS_ERR(clk))
+-		dev_warn(&pdev->dev, "No rng_clk specified\n");
++		dev_err(&pdev->dev, "Can not get rng_clk\n");
+ 	else
+ 		clk_disable(clk);
+ 
+-- 
+1.7.7.4
+

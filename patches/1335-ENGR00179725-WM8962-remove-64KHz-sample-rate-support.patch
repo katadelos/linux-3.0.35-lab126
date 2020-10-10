@@ -1,0 +1,48 @@
+From 94193f31bb7fbeb65aeb838c4dd2d8bbf11ab831 Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Tue, 17 Apr 2012 11:17:18 +0800
+Subject: [PATCH 1335/2463] ENGR00179725 WM8962: remove 64KHz sample rate
+ support
+
+because wm8962 codec does not support 64KHz sample
+rate, no longer declare to support 64KHz:
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ sound/soc/codecs/wm8962.c  |    3 ++-
+ sound/soc/imx/imx-wm8962.c |    4 ++--
+ 2 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/sound/soc/codecs/wm8962.c b/sound/soc/codecs/wm8962.c
+index b8be06b..824a6fa 100644
+--- a/sound/soc/codecs/wm8962.c
++++ b/sound/soc/codecs/wm8962.c
+@@ -3520,7 +3520,8 @@ static int wm8962_mute(struct snd_soc_dai *dai, int mute)
+ 				   WM8962_DAC_MUTE, val);
+ }
+ 
+-#define WM8962_RATES SNDRV_PCM_RATE_8000_96000
++#define WM8962_RATES (SNDRV_PCM_RATE_8000_48000 |\
++			SNDRV_PCM_RATE_88200 | SNDRV_PCM_RATE_96000)
+ 
+ #define WM8962_FORMATS (SNDRV_PCM_FMTBIT_S16_LE | SNDRV_PCM_FMTBIT_S20_3LE |\
+ 			SNDRV_PCM_FMTBIT_S24_LE | SNDRV_PCM_FMTBIT_S32_LE)
+diff --git a/sound/soc/imx/imx-wm8962.c b/sound/soc/imx/imx-wm8962.c
+index 2885d3a..74950ad 100644
+--- a/sound/soc/imx/imx-wm8962.c
++++ b/sound/soc/imx/imx-wm8962.c
+@@ -326,9 +326,9 @@ static int imx_wm8962_init(struct snd_soc_pcm_runtime *rtd)
+ 
+ 		/* if amic is inserted, disable DMIC */
+ 		if (priv->amic_status != plat->mic_active_low)
+-			snd_soc_dapm_nc_pin(&gcodec->dapm, "DMIC");
++			snd_soc_dapm_nc_pin(&codec->dapm, "DMIC");
+ 		else
+-			snd_soc_dapm_enable_pin(&gcodec->dapm, "DMIC");
++			snd_soc_dapm_enable_pin(&codec->dapm, "DMIC");
+ 	}
+ 
+ 	return 0;
+-- 
+1.7.7.4
+

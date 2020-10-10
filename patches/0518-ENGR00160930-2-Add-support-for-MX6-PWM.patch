@@ -1,0 +1,93 @@
+From ce8a0a5fb4b286fd6b56d3b6119864229773d210 Mon Sep 17 00:00:00 2001
+From: Mahesh Mahadevan <r9aadq@freescale.com>
+Date: Thu, 27 Oct 2011 06:52:46 -0500
+Subject: [PATCH 0518/2463] ENGR00160930-2 Add support for MX6 PWM
+
+Add support for the PWM module under MX6. Sabre-lite uses
+this for controlling the LVDS backlight
+
+Signed-off-by: Mahesh Mahadevan <r9aadq@freescale.com>
+---
+ arch/arm/mach-mx6/devices-imx6q.h            |    8 ++++++++
+ arch/arm/plat-mxc/devices/platform-mxc_pwm.c |   11 +++++++++++
+ arch/arm/plat-mxc/include/mach/mx6.h         |   16 ++++++++--------
+ 3 files changed, 27 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 90d5c69..9673f9e 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -155,6 +155,14 @@ extern const struct imx_viv_gpu_data imx6_gc2000_data __initconst;
+ extern const struct imx_viv_gpu_data imx6_gc320_data __initconst;
+ extern const struct imx_viv_gpu_data imx6_gc355_data __initconst;
+ 
++extern const struct imx_mxc_pwm_data imx6q_mxc_pwm_data[] __initconst;
++#define imx6q_add_mxc_pwm(id)	\
++	imx_add_mxc_pwm(&imx6q_mxc_pwm_data[id])
++
++#define imx6q_add_mxc_pwm_backlight(id, pdata)	   \
++	platform_device_register_resndata(NULL, "pwm-backlight",\
++			id, NULL, 0, pdata, sizeof(*pdata));
++
+ extern const struct imx_spdif_data imx6q_imx_spdif_data __initconst;
+ #define imx6q_add_spdif(pdata)	imx_add_spdif(&imx6q_imx_spdif_data, pdata)
+ 
+diff --git a/arch/arm/plat-mxc/devices/platform-mxc_pwm.c b/arch/arm/plat-mxc/devices/platform-mxc_pwm.c
+index 18cfd07..a8521b9 100755
+--- a/arch/arm/plat-mxc/devices/platform-mxc_pwm.c
++++ b/arch/arm/plat-mxc/devices/platform-mxc_pwm.c
+@@ -58,6 +58,17 @@ const struct imx_mxc_pwm_data imx53_mxc_pwm_data[] __initconst = {
+ };
+ #endif /* ifdef CONFIG_SOC_IMX53 */
+ 
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_mxc_pwm_data imx6q_mxc_pwm_data[] __initconst = {
++#define imx6q_mxc_pwm_data_entry(_id, _hwid)				\
++	imx_mxc_pwm_data_entry(MX6Q, _id, _hwid, SZ_16K)
++	imx6q_mxc_pwm_data_entry(0, 1),
++	imx6q_mxc_pwm_data_entry(1, 2),
++	imx6q_mxc_pwm_data_entry(2, 3),
++	imx6q_mxc_pwm_data_entry(3, 4),
++};
++#endif /* ifdef CONFIG_SOC_IMX6Q */
++
+ struct platform_device *__init imx_add_mxc_pwm(
+ 		const struct imx_mxc_pwm_data *data)
+ {
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index d4e100d..17419d9 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -152,10 +152,10 @@
+ /* ATZ#1- Off Platform */
+ #define AIPS1_OFF_BASE_ADDR             (ATZ1_BASE_ADDR + 0x80000)
+ 
+-#define PWM1_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x0000)
+-#define PWM2_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x4000)
+-#define PWM3_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x8000)
+-#define PWM4_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0xC000)
++#define MX6Q_PWM1_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x0000)
++#define MX6Q_PWM2_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x4000)
++#define MX6Q_PWM3_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x8000)
++#define MX6Q_PWM4_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0xC000)
+ #define CAN1_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x10000)
+ #define CAN2_BASE_ADDR              (AIPS1_OFF_BASE_ADDR + 0x14000)
+ #define GPT_BASE_ADDR               (AIPS1_OFF_BASE_ADDR + 0x18000)
+@@ -361,10 +361,10 @@
+ #define MXC_INT_WDOG1                              112
+ #define MXC_INT_WDOG2                              113
+ #define MXC_INT_KPP                                114
+-#define MXC_INT_PWM1                               115
+-#define MXC_INT_PWM2                               116
+-#define MXC_INT_PWM3                               117
+-#define MXC_INT_PWM4                               118
++#define MX6Q_INT_PWM1                               115
++#define MX6Q_INT_PWM2                               116
++#define MX6Q_INT_PWM3                               117
++#define MX6Q_INT_PWM4                               118
+ #define MXC_INT_CCM_INT1_NUM                               119
+ #define MXC_INT_CCM_INT2_NUM                               120
+ #define MX6Q_INT_GPC1                                 121
+-- 
+1.7.7.4
+

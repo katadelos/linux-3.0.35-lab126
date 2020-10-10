@@ -1,0 +1,76 @@
+From e2dc80107eeaa87626f02adba60ab904c41de82e Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Thu, 16 Aug 2012 19:20:51 +0800
+Subject: [PATCH 1919/2463] ENGR00219926-1 ESAI ASRC: use ideal ratio for ASRC
+ P2P playback
+
+When use no ideal-ratio mode for ESAI playback, CPU should provide
+accurate clock for input clock, which means input clock should be
+divided by input sample rate. However, all our clock is from 24M crystal
+and if the input sample rate equal to 44.1k or so, CPU can't provide
+these clock.
+
+In this patch, use ideal ratio mode thus CPU need not provide accurate
+clock which can be divided by 44.1k.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/mxc/asrc/mxc_asrc.c |   12 +++++++++---
+ sound/soc/imx/imx-cs42888.c |    3 +--
+ 2 files changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/mxc/asrc/mxc_asrc.c b/drivers/mxc/asrc/mxc_asrc.c
+index ed32569..cd4d9ee 100644
+--- a/drivers/mxc/asrc/mxc_asrc.c
++++ b/drivers/mxc/asrc/mxc_asrc.c
+@@ -583,17 +583,23 @@ int asrc_config_pair(struct asrc_config *config)
+ 		}
+ 	}
+ 
+-	if ((config->inclk == INCLK_ASRCK1_CLK) &&
++	if ((config->inclk == INCLK_NONE) &&
+ 			(config->outclk == OUTCLK_ESAI_TX)) {
+ 		reg = __raw_readl(g_asrc->vaddr + ASRC_ASRCTR_REG);
+-		reg |= (1 << (20 + config->pair));
+-		reg |= (0x02 << (13 + (config->pair << 1)));
++		reg &= ~(1 << (20 + config->pair));
++		reg |= (0x03 << (13 + (config->pair << 1)));
+ 		__raw_writel(reg, g_asrc->vaddr + ASRC_ASRCTR_REG);
+ 		err = asrc_set_clock_ratio(config->pair,
+ 					   config->input_sample_rate,
+ 					   config->output_sample_rate);
+ 		if (err < 0)
+ 			return err;
++		err = asrc_set_process_configuration(config->pair,
++						     config->input_sample_rate,
++						     config->
++						     output_sample_rate);
++		if (err < 0)
++			return err;
+ 	}
+ 
+ 	/* Config input and output wordwidth */
+diff --git a/sound/soc/imx/imx-cs42888.c b/sound/soc/imx/imx-cs42888.c
+index 11ba165..acec900 100644
+--- a/sound/soc/imx/imx-cs42888.c
++++ b/sound/soc/imx/imx-cs42888.c
+@@ -94,7 +94,7 @@ static int config_asrc(struct snd_pcm_substream *substream,
+ 	config.channel_num = channel;
+ 	config.input_sample_rate = rate;
+ 	config.output_sample_rate = iprtd->p2p->p2p_rate;
+-	config.inclk = INCLK_ASRCK1_CLK;
++	config.inclk = INCLK_NONE;
+ 	config.outclk = OUTCLK_ESAI_TX;
+ 
+ 	ret = asrc_config_pair(&config);
+@@ -131,7 +131,6 @@ static void imx_3stack_shutdown(struct snd_pcm_substream *substream)
+ {
+ 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+ 	struct snd_soc_dai *cpu_dai = rtd->cpu_dai;
+-	struct imx_pcm_runtime_data *iprtd = substream->runtime->private_data;
+ 
+ 	if (!cpu_dai->active)
+ 		hw_state.hw = 0;
+-- 
+1.7.7.4
+

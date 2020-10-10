@@ -1,0 +1,39 @@
+From 2446be8eb39f6636b44534f59e0d18ccad7504ee Mon Sep 17 00:00:00 2001
+From: Zeng Zhaoming <b32542@freescale.com>
+Date: Fri, 29 Apr 2011 02:34:05 +0800
+Subject: [PATCH 0140/2463] ENGR00142734 SDMA: Fix sdma incorrect lock usage.
+
+In very seldom, play audio will caused system hangs in 2.6.38 kernel.
+
+This is caused by new sdma driver wrongly enable irq after enable channel.
+
+Signed-off-by: Zeng Zhaoming <b32542@freescale.com>
+---
+ drivers/dma/imx-sdma.c |    5 +++--
+ 1 files changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/dma/imx-sdma.c b/drivers/dma/imx-sdma.c
+index a681051..e11d754 100644
+--- a/drivers/dma/imx-sdma.c
++++ b/drivers/dma/imx-sdma.c
+@@ -794,14 +794,15 @@ static dma_cookie_t sdma_tx_submit(struct dma_async_tx_descriptor *tx)
+ 	struct sdma_channel *sdmac = to_sdma_chan(tx->chan);
+ 	struct sdma_engine *sdma = sdmac->sdma;
+ 	dma_cookie_t cookie;
++	int flag;
+ 
+-	spin_lock_irq(&sdmac->lock);
++	spin_lock_irqsave(&sdmac->lock, flag);
+ 
+ 	cookie = sdma_assign_cookie(sdmac);
+ 
+ 	sdma_enable_channel(sdma, sdmac->channel);
+ 
+-	spin_unlock_irq(&sdmac->lock);
++	spin_unlock_irqrestore(&sdmac->lock, flag);
+ 
+ 	return cookie;
+ }
+-- 
+1.7.7.4
+

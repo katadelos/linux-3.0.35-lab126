@@ -1,0 +1,351 @@
+From 65528d13033d7edf68ee434cc982b2f13d46c5d5 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Fri, 30 Sep 2011 16:50:30 +0800
+Subject: [PATCH 0444/2463] ENGR00159007 [MX6]Add cpufreq cooling device
+
+Add cpufreq as cooling device.
+
+1.Default cooling device is cpufreq, to select
+  cpuhotplug as cooling device, need to add
+  cooling_device=cpuhotplug to cmdline.
+
+2.Cooling device can be disabled via adding
+  no_cooling_device to cmdline.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ drivers/mxc/thermal/anatop_driver.h |    2 +
+ drivers/mxc/thermal/cooling.c       |  173 ++++++++++++++++++++++++++++-------
+ drivers/mxc/thermal/thermal.c       |   44 ++++++++--
+ 3 files changed, 178 insertions(+), 41 deletions(-)
+
+diff --git a/drivers/mxc/thermal/anatop_driver.h b/drivers/mxc/thermal/anatop_driver.h
+index 51837cc..63cbdc7 100644
+--- a/drivers/mxc/thermal/anatop_driver.h
++++ b/drivers/mxc/thermal/anatop_driver.h
+@@ -132,6 +132,8 @@ static inline void *anatop_driver_data(struct anatop_device *d)
+ 
+ extern void anatop_thermal_cpufreq_init(void);
+ extern int anatop_thermal_cpu_hotplug(bool cpu_on);
++extern int anatop_thermal_cpufreq_up(void);
++extern int anatop_thermal_cpufreq_down(void);
+ extern struct thermal_cooling_device_ops imx_processor_cooling_ops;
+ extern void arch_reset(char mode, const char *cmd);
+ 
+diff --git a/drivers/mxc/thermal/cooling.c b/drivers/mxc/thermal/cooling.c
+index b1d90be..714bbfc5 100644
+--- a/drivers/mxc/thermal/cooling.c
++++ b/drivers/mxc/thermal/cooling.c
+@@ -24,16 +24,122 @@
+ #include <linux/io.h>
+ #include <linux/thermal.h>
+ #include <linux/syscalls.h>
+-#include "anatop_driver.h"
+ 
+-#define	CPUx_SHUTDOWN		"/sys/devices/system/cpu/cpu"
+ 
+-extern unsigned long temperature_hotplug;
+-static unsigned char cpu_shutdown[40];
++struct cpu_op {
++	u32 pll_reg;
++	u32 pll_rate;
++	u32 cpu_rate;
++	u32 pdr0_reg;
++	u32 pdf;
++	u32 mfi;
++	u32 mfd;
++	u32 mfn;
++	u32 cpu_voltage;
++	u32 cpu_podf;
++};
++
++#define	CPUx		"/sys/devices/system/cpu/cpu"
++
++extern unsigned long temperature_cooling;
++extern bool cooling_cpuhotplug;
++extern struct cpu_op *(*get_cpu_op)(int *op);
++static unsigned char cpu_sys_file[80];
+ static unsigned int cpu_mask;
+ static unsigned int anatop_thermal_cpufreq_is_init;
++static struct cpu_op *cpu_op_tbl;
++static int cpu_op_nr, cpu_op_cur;
++static unsigned int cpufreq;
++static unsigned int cpufreq_new;
++static char cpufreq_new_str[10];
++static int cpufreq_change_count;
+ static DEFINE_PER_CPU(unsigned int, cpufreq_thermal_reduction_pctg);
+ 
++
++int anatop_thermal_cpufreq_get_cur(void)
++{
++	int i;
++
++	cpufreq = cpufreq_quick_get(0);
++	cpufreq *= 1000;
++
++	for (i = 0; i < cpu_op_nr; i++) {
++		if (cpufreq == cpu_op_tbl[i].cpu_rate)
++			break;
++	}
++
++	if (i >= cpu_op_nr) {
++		printk(KERN_WARNING "%s: can't get cpufreq\
++			current operating point!\n", __func__);
++		return -EINVAL;
++	}
++	cpu_op_cur = i;
++
++	return 1;
++
++}
++
++int anatop_thermal_cpufreq_up(void)
++{
++	int fd;
++	char cpu_number[30];
++
++	anatop_thermal_cpufreq_get_cur();
++	if (cpu_op_cur == 0 || cpu_op_cur >= cpu_op_nr)
++		printk(KERN_ERR "%s: Bad cpu_op_cur!\n", __func__);
++
++	cpufreq_new = cpu_op_tbl[cpu_op_cur - 1].cpu_rate;
++	printk(KERN_INFO "%s: cpufreq up from %d to %d\n",
++		__func__, cpufreq, cpufreq_new);
++	cpufreq_new /= 1000;
++
++	strcpy(cpu_sys_file, CPUx);
++	sprintf(cpu_number, "%d%s", 0, "/cpufreq/scaling_setspeed");
++	sprintf(cpufreq_new_str, "%ld", cpufreq_new);
++	strcat(cpu_sys_file, cpu_number);
++
++	fd = sys_open((const char __user __force *)cpu_sys_file,
++	  O_RDWR, 0700);
++	if (fd >= 0) {
++		sys_write(fd, cpufreq_new_str, strlen(cpufreq_new_str));
++		sys_close(fd);
++	}
++	cpufreq_change_count++;
++
++	return 1;
++}
++int anatop_thermal_cpufreq_down(void)
++{
++	int fd;
++	char cpu_number[30];
++
++	anatop_thermal_cpufreq_get_cur();
++	if (cpu_op_cur == (cpu_op_nr - 1) || cpu_op_cur >= cpu_op_nr)
++		printk(KERN_ERR "%s: Bad cpu_op_cur!\n", __func__);
++
++	cpufreq_new = cpu_op_tbl[cpu_op_cur + 1].cpu_rate;
++
++	printk(KERN_INFO "%s: cpufreq down from %d to %d\n",
++		__func__, cpufreq, cpufreq_new);
++	cpufreq_new /= 1000;
++
++	strcpy(cpu_sys_file, CPUx);
++	sprintf(cpu_number, "%d%s", 0, "/cpufreq/scaling_setspeed");
++	sprintf(cpufreq_new_str, "%ld", cpufreq_new);
++	strcat(cpu_sys_file, cpu_number);
++
++	fd = sys_open((const char __user __force *)cpu_sys_file,
++	  O_RDWR, 0700);
++	if (fd >= 0) {
++		sys_write(fd, cpufreq_new_str, strlen(cpufreq_new_str));
++		sys_close(fd);
++	}
++	cpufreq_change_count--;
++
++	return 1;
++}
++
++
+ int anatop_thermal_cpu_hotplug(bool cpu_on)
+ {
+ 	unsigned int ret, i;
+@@ -44,10 +150,10 @@ int anatop_thermal_cpu_hotplug(bool cpu_on)
+ 	ret = -EINVAL;
+ 	if (cpu_on) {
+ 		for (i = 1; i < 4; i++) {
+-			strcpy(cpu_shutdown, CPUx_SHUTDOWN);
++			strcpy(cpu_sys_file, CPUx);
+ 			sprintf(cpu_number, "%d%s", i, "/online");
+-			strcat(cpu_shutdown, cpu_number);
+-			fd = sys_open((const char __user __force *)cpu_shutdown,
++			strcat(cpu_sys_file, cpu_number);
++			fd = sys_open((const char __user __force *)cpu_sys_file,
+ 			  O_RDWR, 0700);
+ 			if (fd >= 0) {
+ 				sys_read(fd, &online, 1);
+@@ -62,10 +168,10 @@ int anatop_thermal_cpu_hotplug(bool cpu_on)
+ 		}
+ 	} else {
+ 		for (i = 3; i > 0; i--) {
+-			strcpy(cpu_shutdown, CPUx_SHUTDOWN);
++			strcpy(cpu_sys_file, CPUx);
+ 			sprintf(cpu_number, "%d%s", i, "/online");
+-			strcat(cpu_shutdown, cpu_number);
+-			fd = sys_open((const char __user __force *)cpu_shutdown,
++			strcat(cpu_sys_file, cpu_number);
++			fd = sys_open((const char __user __force *)cpu_sys_file,
+ 					O_RDWR, 0700);
+ 			if (fd >= 0) {
+ 				sys_read(fd, &online, 1);
+@@ -107,16 +213,28 @@ imx_processor_set_cur_state(struct thermal_cooling_device *cdev,
+ 
+ 	/* state =0 means we are at a low temp, we should try to attach the
+ 	secondary CPUs that detached by thermal driver */
+-	if (!state) {
+-		for (i = 1; i < 4; i++) {
+-			if (cpu_mask && (0x1 << i)) {
+-				anatop_thermal_cpu_hotplug(true);
+-				temperature_hotplug = 0;
+-				break;
++	if (cooling_cpuhotplug) {
++		if (!state) {
++			for (i = 1; i < 4; i++) {
++				if (cpu_mask && (0x1 << i)) {
++					anatop_thermal_cpu_hotplug(true);
++					temperature_cooling = 0;
++					break;
++				}
+ 			}
+-		}
+-	} else
+-		printk(KERN_DEBUG "Temperature is about to reach hot point!\n");
++		} else
++			printk(KERN_DEBUG "Temperature is about to reach hot point!\n");
++	} else {
++		if (!state) {
++			if (cpufreq_change_count < 0)
++				anatop_thermal_cpufreq_up();
++			else if (cpufreq_change_count > 0)
++				anatop_thermal_cpufreq_down();
++			temperature_cooling = 0;
++		} else
++			printk(KERN_DEBUG "Temperature is about to reach hot point!\n");
++	}
++
+ 	return result;
+ }
+ 
+@@ -145,25 +263,12 @@ static struct notifier_block anatop_thermal_cpufreq_notifier_block = {
+ 
+ void anatop_thermal_cpufreq_init(void)
+ {
+-	int i;
+-
+-	for (i = 0; i < nr_cpu_ids; i++)
+-		if (cpu_present(i))
+-			per_cpu(cpufreq_thermal_reduction_pctg, i) = 0;
+-
+-	i = cpufreq_register_notifier(&anatop_thermal_cpufreq_notifier_block,
+-				      CPUFREQ_POLICY_NOTIFIER);
+-	if (!i)
+-		anatop_thermal_cpufreq_is_init = 1;
++	cpu_op_tbl = get_cpu_op(&cpu_op_nr);
++	anatop_thermal_cpufreq_is_init = 1;
+ }
+ 
+ void anatop_thermal_cpufreq_exit(void)
+ {
+-	if (anatop_thermal_cpufreq_is_init)
+-		cpufreq_unregister_notifier
+-		    (&anatop_thermal_cpufreq_notifier_block,
+-		     CPUFREQ_POLICY_NOTIFIER);
+-
+ 	anatop_thermal_cpufreq_is_init = 0;
+ }
+ 
+diff --git a/drivers/mxc/thermal/thermal.c b/drivers/mxc/thermal/thermal.c
+index 6ec7406..6683261 100644
+--- a/drivers/mxc/thermal/thermal.c
++++ b/drivers/mxc/thermal/thermal.c
+@@ -129,7 +129,9 @@
+ /* variables */
+ unsigned long anatop_base;
+ static bool full_run = true;
+-unsigned long temperature_hotplug;
++bool cooling_cpuhotplug;
++bool cooling_device_disable;
++unsigned long temperature_cooling;
+ static const struct anatop_device_id thermal_device_ids[] = {
+ 	{ANATOP_THERMAL_HID},
+ 	{""},
+@@ -522,6 +524,9 @@ static int anatop_thermal_notify(struct thermal_zone_device *thermal, int trip,
+ 	const char *cmd = "reboot";
+ 	struct anatop_thermal *tz = thermal->devdata;
+ 
++	if (cooling_device_disable)
++		return ret;
++
+ 	if (trip_type == THERMAL_TRIP_CRITICAL) {
+ 		type = ANATOP_THERMAL_NOTIFY_CRITICAL;
+ 		printk(KERN_WARNING "thermal_notify: trip_critical reached!\n");
+@@ -530,17 +535,23 @@ static int anatop_thermal_notify(struct thermal_zone_device *thermal, int trip,
+ 		printk(KERN_DEBUG "thermal_notify: trip_hot reached!\n");
+ 		type = ANATOP_THERMAL_NOTIFY_HOT;
+ 		/* if temperature increase, continue to detach secondary CPUs*/
+-		if (tz->temperature > (temperature_hotplug + 1)) {
+-			anatop_thermal_cpu_hotplug(false);
+-			temperature_hotplug = tz->temperature;
++		if (tz->temperature > (temperature_cooling + 1)) {
++			if (cooling_cpuhotplug)
++				anatop_thermal_cpu_hotplug(false);
++			else
++				anatop_thermal_cpufreq_down();
++			temperature_cooling = tz->temperature;
+ 		}
+ 		if (ret)
+ 			printk(KERN_INFO "No secondary CPUs detached!\n");
+ 		full_run = false;
+ 	} else {
+ 		if (!full_run) {
+-			temperature_hotplug = 0;
+-			anatop_thermal_cpu_hotplug(true);
++			temperature_cooling = 0;
++			if (cooling_cpuhotplug)
++				anatop_thermal_cpu_hotplug(true);
++			else
++				anatop_thermal_cpufreq_up();
+ 			if (ret)
+ 				printk(KERN_INFO "No secondary CPUs attached!\n");
+ 		}
+@@ -740,6 +751,24 @@ end:
+ 	return result;
+ }
+ 
++static int __init anatop_thermal_cooling_device_setup(char *str)
++{
++	if (!strcmp(str, "cpuhotplug")) {
++		cooling_cpuhotplug = 1;
++		pr_info("%s: cooling device set to hotplug!\n", __func__);
++	}
++	return 1;
++}
++__setup("cooling_device=", anatop_thermal_cooling_device_setup);
++
++static int __init anatop_thermal_cooling_device_disable(char *str)
++{
++	cooling_device_disable = 1;
++	pr_info("%s: cooling device is disabled!\n", __func__);
++	return 1;
++}
++__setup("no_cooling_device", anatop_thermal_cooling_device_disable);
++
+ static int anatop_thermal_probe(struct platform_device *pdev)
+ {
+ 	int retval = 0;
+@@ -770,7 +799,8 @@ static int anatop_thermal_probe(struct platform_device *pdev)
+ 	anatop_base = (unsigned long)base;
+ 
+ 	anatop_thermal_add(device);
+-	/* anatop_thermal_cpufreq_init(); */
++	anatop_thermal_cpufreq_init();
++	pr_info("%s: default cooling device is cpufreq!\n", __func__);
+ 
+ 	goto success;
+ anatop_failed:
+-- 
+1.7.7.4
+

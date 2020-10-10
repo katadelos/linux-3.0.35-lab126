@@ -1,0 +1,86 @@
+From 3d248d1c069504c98c76a0b7fb04d739270ab837 Mon Sep 17 00:00:00 2001
+From: Michael Minnick <michael.minnick@freescale.com>
+Date: Tue, 6 Nov 2012 13:21:50 -0600
+Subject: [PATCH 2236/2463] ENGR00232660 EPDC: Wrong panel loaded at boot
+
+The wrong EPDC panel can be loaded at boot time if the machine
+board file has multiple panel entries with the same video mode
+parameter values. To reproduce, select a particular panel with
+u-boot kernel command line parameters, for example:
+video=mxcepdcfb:XYZZY
+
+Add panel XYZZY to arch/arm/mach-mx6/board-mx6sl_evk.c after
+an existing entry. Use the same video mode parameter settings
+as the existing entry. On boot, the existing panel will be loaded
+instead of the XYZZY panel because it comes earlier in the list
+and happens to have the same video mode parameter values.
+
+Solution: If the video mode parameter settings specified in
+the call to msc_epdc_fb_set_par() match those of the panel
+already loaded by mxc_epdc_fb_probe(), don't execute a
+search for a new matching panel.
+
+Signed-off-by: Michael Minnick <michael.minnick@freescale.com>
+---
+ drivers/video/mxc/mxc_epdc_fb.c |   37 ++++++++++++++++++++++++-------------
+ 1 files changed, 24 insertions(+), 13 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_epdc_fb.c b/drivers/video/mxc/mxc_epdc_fb.c
+index 2df4404..f3c8ea8 100644
+--- a/drivers/video/mxc/mxc_epdc_fb.c
++++ b/drivers/video/mxc/mxc_epdc_fb.c
+@@ -1492,7 +1492,6 @@ static int mxc_epdc_fb_set_par(struct fb_info *info)
+ 	 */
+ 	if (!fb_data->hw_ready) {
+ 		struct fb_videomode mode;
+-		bool found_match = false;
+ 		u32 xres_temp;
+ 
+ 		fb_var_to_videomode(&mode, screeninfo);
+@@ -1506,19 +1505,31 @@ static int mxc_epdc_fb_set_par(struct fb_info *info)
+ 			mode.yres = xres_temp;
+ 		}
+ 
+-		/* Match videomode against epdc modes */
+-		for (i = 0; i < fb_data->pdata->num_modes; i++) {
+-			if (!fb_mode_is_equal(epdc_modes[i].vmode, &mode))
+-				continue;
+-			fb_data->cur_mode = &epdc_modes[i];
+-			found_match = true;
+-			break;
+-		}
++		/*
++		* If requested video mode does not match current video
++		* mode, search for a matching panel.
++		*/
++		if (fb_data->cur_mode &&
++			!fb_mode_is_equal(fb_data->cur_mode->vmode,
++			&mode)) {
++			bool found_match = false;
++
++			/* Match videomode against epdc modes */
++			for (i = 0; i < fb_data->pdata->num_modes; i++) {
++				if (!fb_mode_is_equal(epdc_modes[i].vmode,
++					&mode))
++					continue;
++				fb_data->cur_mode = &epdc_modes[i];
++				found_match = true;
++				break;
++			}
+ 
+-		if (!found_match) {
+-			dev_err(fb_data->dev,
+-				"Failed to match requested video mode\n");
+-			return EINVAL;
++			if (!found_match) {
++				dev_err(fb_data->dev,
++					"Failed to match requested "
++					"video mode\n");
++				return EINVAL;
++			}
+ 		}
+ 
+ 		/* Found a match - Grab timing params */
+-- 
+1.7.7.4
+

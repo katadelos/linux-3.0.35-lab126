@@ -1,0 +1,80 @@
+From 97f3abd7852ec270f921c95c33a325d16688f2b9 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Wed, 5 Sep 2012 16:47:02 +0800
+Subject: [PATCH 2019/2463] mtd: nand: pass proper 'oob_required' parameter
+
+We now have an interface for notifying the nand_ecc_ctrl functions when OOB
+data must be returned to the upper layers and when it may be left untouched.
+This patch fills in the 'oob_required' parameter properly from
+nand_do_{read,write}_ops. When utilized properly in the lower layers, this
+parameter can improve performance and/or reduce complexity for NAND HW and SW
+that can simply avoid transferring the OOB data.
+
+Signed-off-by: Brian Norris <computersforpeace@gmail.com>
+Reviewed-by: Shmulik Ladkani <shmulik.ladkani@gmail.com>
+Acked-by: Jiandong Zheng <jdzheng@broadcom.com>
+Signed-off-by: Artem Bityutskiy <artem.bityutskiy@linux.intel.com>
+Signed-off-by: David Woodhouse <David.Woodhouse@intel.com>
+---
+ drivers/mtd/nand/nand_base.c |   12 ++++++++----
+ 1 files changed, 8 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mtd/nand/nand_base.c b/drivers/mtd/nand/nand_base.c
+index 003ce95..f016d0f 100644
+--- a/drivers/mtd/nand/nand_base.c
++++ b/drivers/mtd/nand/nand_base.c
+@@ -1449,7 +1449,7 @@ static uint8_t *nand_transfer_oob(struct nand_chip *chip, uint8_t *oob,
+ int nand_do_read_ops(struct mtd_info *mtd, loff_t from,
+ 			    struct mtd_oob_ops *ops)
+ {
+-	int chipnr, page, realpage, col, bytes, aligned;
++	int chipnr, page, realpage, col, bytes, aligned, oob_required;
+ 	struct nand_chip *chip = mtd->priv;
+ 	struct mtd_ecc_stats stats;
+ 	int blkcheck = (1 << (chip->phys_erase_shift - chip->page_shift)) - 1;
+@@ -1474,6 +1474,7 @@ int nand_do_read_ops(struct mtd_info *mtd, loff_t from,
+ 
+ 	buf = ops->datbuf;
+ 	oob = ops->oobbuf;
++	oob_required = oob ? 1 : 0;
+ 
+ 	while (1) {
+ 		bytes = min(mtd->writesize - col, readlen);
+@@ -1491,13 +1492,15 @@ int nand_do_read_ops(struct mtd_info *mtd, loff_t from,
+ 			/* Now read the page into the buffer */
+ 			if (unlikely(ops->mode == MTD_OOB_RAW))
+ 				ret = chip->ecc.read_page_raw(mtd, chip,
+-							      bufpoi, 1, page);
++							      bufpoi,
++							      oob_required,
++							      page);
+ 			else if (!aligned && NAND_SUBPAGE_READ(chip) && !oob)
+ 				ret = chip->ecc.read_subpage(mtd, chip,
+ 							col, bytes, bufpoi);
+ 			else
+ 				ret = chip->ecc.read_page(mtd, chip, bufpoi,
+-							  1, page);
++							  oob_required, page);
+ 			if (ret < 0)
+ 				break;
+ 
+@@ -2190,6 +2193,7 @@ int nand_do_write_ops(struct mtd_info *mtd, loff_t to,
+ 	uint8_t *oob = ops->oobbuf;
+ 	uint8_t *buf = ops->datbuf;
+ 	int ret, subpage;
++	int oob_required = oob ? 1 : 0;
+ 
+ 	ops->retlen = 0;
+ 	if (!writelen)
+@@ -2252,7 +2256,7 @@ int nand_do_write_ops(struct mtd_info *mtd, loff_t to,
+ 			memset(chip->oob_poi, 0xff, mtd->oobsize);
+ 		}
+ 
+-		ret = chip->write_page(mtd, chip, wbuf, 1, page, cached,
++		ret = chip->write_page(mtd, chip, wbuf, oob_required, page, cached,
+ 				       (ops->mode == MTD_OOB_RAW));
+ 		if (ret)
+ 			break;
+-- 
+1.7.7.4
+

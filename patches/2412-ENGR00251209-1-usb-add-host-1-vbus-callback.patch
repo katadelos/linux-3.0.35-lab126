@@ -1,0 +1,81 @@
+From 456627186832cb315805b16a9e3a44034cc7a2b2 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Fri, 1 Mar 2013 15:33:24 +0800
+Subject: [PATCH 2412/2463] ENGR00251209-1 usb: add host 1 vbus callback
+
+The callback will be used at probe and remove
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |   11 ++++++++++-
+ arch/arm/mach-mx6/usb_h1.c             |    7 ++-----
+ 2 files changed, 12 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 8a9645f..8cbf7fb 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1094,6 +1094,14 @@ static void imx6q_sabresd_usbotg_vbus(bool on)
+ 		gpio_set_value(SABRESD_USB_OTG_PWR, 0);
+ }
+ 
++static void imx6q_sabresd_host1_vbus(bool on)
++{
++	if (on)
++		gpio_set_value(SABRESD_USB_H1_PWR, 1);
++	else
++		gpio_set_value(SABRESD_USB_H1_PWR, 0);
++}
++
+ static void __init imx6q_sabresd_init_usb(void)
+ {
+ 	int ret = 0;
+@@ -1116,13 +1124,14 @@ static void __init imx6q_sabresd_init_usb(void)
+ 			ret);
+ 		return;
+ 	}
+-	gpio_direction_output(SABRESD_USB_H1_PWR, 1);
++	gpio_direction_output(SABRESD_USB_H1_PWR, 0);
+ 	if (board_is_mx6_reva())
+ 		mxc_iomux_set_gpr_register(1, 13, 1, 1);
+ 	else
+ 		mxc_iomux_set_gpr_register(1, 13, 1, 0);
+ 
+ 	mx6_set_otghost_vbus_func(imx6q_sabresd_usbotg_vbus);
++	mx6_set_host1_vbus_func(imx6q_sabresd_host1_vbus);
+ 
+ }
+ 
+diff --git a/arch/arm/mach-mx6/usb_h1.c b/arch/arm/mach-mx6/usb_h1.c
+index eb79bf3..d983e28 100644
+--- a/arch/arm/mach-mx6/usb_h1.c
++++ b/arch/arm/mach-mx6/usb_h1.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -401,8 +401,7 @@ static int  __init mx6_usb_h1_init(void)
+ 		imx_mxc_ehci_data_entry_single(MX6SL, 1, HS1)};
+ 
+ 	mx6_get_host1_vbus_func(&mx6_set_usb_host1_vbus);
+-	if (mx6_set_usb_host1_vbus)
+-		mx6_set_usb_host1_vbus(true);
++	usbh1_config.platform_driver_vbus = mx6_set_usb_host1_vbus;
+ 
+ 	/* Some phy and power's special controls for host1
+ 	 * 1. The external charger detector needs to be disabled
+@@ -457,8 +456,6 @@ static void __exit mx6_usb_h1_exit(void)
+ 			| BM_ANADIG_USB2_PLL_480_CTRL_POWER \
+ 			| BM_ANADIG_USB2_PLL_480_CTRL_EN_USB_CLKS, \
+ 			anatop_base_addr + HW_ANADIG_USB2_PLL_480_CTRL_CLR);
+-	if (mx6_set_usb_host1_vbus)
+-		mx6_set_usb_host1_vbus(false);
+ 
+ 	return ;
+ }
+-- 
+1.7.7.4
+

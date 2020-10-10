@@ -1,0 +1,203 @@
+From 3052b56745ce89d440c106922a7015d8bf11627c Mon Sep 17 00:00:00 2001
+From: Robin Gong <B38343@freescale.com>
+Date: Wed, 29 Aug 2012 16:08:01 +0800
+Subject: [PATCH 1985/2463] ENGR00221867 sabresd : support adjust VDDSOC if
+ enable LDO bypass
+
+support adjust VDDSOC if enable LDO bypass on mx6_sabresd board
+Signed-off-by: Robin Gong <B38343@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c         |   11 ++++++-----
+ arch/arm/mach-mx6/board-mx6sl_arm2.c           |   12 ++++++------
+ arch/arm/mach-mx6/board-mx6sl_evk.c            |   12 ++++++------
+ arch/arm/mach-mx6/mx6q_sabresd_pmic_pfuze100.c |   23 ++++++++++++++++++++---
+ 4 files changed, 38 insertions(+), 20 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 1da30f1..59ea80c 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1581,13 +1581,14 @@ static struct platform_pwm_backlight_data mx6_sabresd_pwm_backlight_data = {
+ };
+ 
+ static struct mxc_dvfs_platform_data sabresd_dvfscore_data = {
+-	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	.reg_id = "VDDCORE",
+-	#else
++	.soc_id	= "VDDSOC",
++#else
+ 	.reg_id = "cpu_vddgp",
+ 	.soc_id = "cpu_vddsoc",
+ 	.pu_id = "cpu_vddvpu",
+-	#endif
++#endif
+ 	.clk1_id = "cpu_clk",
+ 	.clk2_id = "gpc_dvfs_clk",
+ 	.gpc_cntr_offset = MXC_GPC_CNTR_OFFSET,
+@@ -1801,9 +1802,9 @@ static void __init mx6_sabresd_board_init(void)
+ 	imx6q_add_dma();
+ 
+ 	imx6q_add_dvfs_core(&sabresd_dvfscore_data);
+-	#ifndef CONFIG_MX6_INTER_LDO_BYPASS
++#ifndef CONFIG_MX6_INTER_LDO_BYPASS
+ 	mx6_cpu_regulator_init();
+-	#endif
++#endif
+ 	imx6q_add_device_buttons();
+ 
+ 	/* enable sensor 3v3 and 1v8 */
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index 7ff3b3e..4302b68 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -580,14 +580,14 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ };
+ 
+ static struct mxc_dvfs_platform_data mx6sl_arm2_dvfscore_data = {
+-	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	.reg_id			= "VDDCORE",
+ 	.soc_id			= "VDDSOC",
+-	#else
++#else
+ 	.reg_id			= "cpu_vddgp",
+ 	.soc_id			= "cpu_vddsoc",
+ 	.pu_id			= "cpu_vddvpu",
+-	#endif
++#endif
+ 	.clk1_id		= "cpu_clk",
+ 	.clk2_id		= "gpc_dvfs_clk",
+ 	.gpc_cntr_offset	= MXC_GPC_CNTR_OFFSET,
+@@ -1188,15 +1188,15 @@ static void __init mx6_arm2_init(void)
+ 
+ 	elan_ts_init();
+ 
+-	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	gp_reg_id = mx6sl_arm2_dvfscore_data.reg_id;
+ 	soc_reg_id = mx6sl_arm2_dvfscore_data.soc_id;
+-	#else
++#else
+ 	gp_reg_id = mx6sl_arm2_dvfscore_data.reg_id;
+ 	soc_reg_id = mx6sl_arm2_dvfscore_data.soc_id;
+ 	pu_reg_id = mx6sl_arm2_dvfscore_data.pu_id;
+ 	mx6_cpu_regulator_init();
+-	#endif
++#endif
+ 
+ 	imx6q_add_imx_snvs_rtc();
+ 
+diff --git a/arch/arm/mach-mx6/board-mx6sl_evk.c b/arch/arm/mach-mx6/board-mx6sl_evk.c
+index f1a1b45..81654a0 100644
+--- a/arch/arm/mach-mx6/board-mx6sl_evk.c
++++ b/arch/arm/mach-mx6/board-mx6sl_evk.c
+@@ -593,14 +593,14 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ };
+ 
+ static struct mxc_dvfs_platform_data mx6sl_evk_dvfscore_data = {
+-	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	.reg_id			= "VDDCORE",
+ 	.soc_id			= "VDDSOC",
+-	#else
++#else
+ 	.reg_id			= "cpu_vddgp",
+ 	.soc_id			= "cpu_vddsoc",
+ 	.pu_id			= "cpu_vddvpu",
+-	#endif
++#endif
+ 	.clk1_id		= "cpu_clk",
+ 	.clk2_id		= "gpc_dvfs_clk",
+ 	.gpc_cntr_offset	= MXC_GPC_CNTR_OFFSET,
+@@ -1195,15 +1195,15 @@ static void __init mx6_evk_init(void)
+ 
+ 	elan_ts_init();
+ 
+-	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	gp_reg_id = mx6sl_evk_dvfscore_data.reg_id;
+ 	soc_reg_id = mx6sl_evk_dvfscore_data.soc_id;
+-	#else
++#else
+ 	gp_reg_id = mx6sl_evk_dvfscore_data.reg_id;
+ 	soc_reg_id = mx6sl_evk_dvfscore_data.soc_id;
+ 	pu_reg_id = mx6sl_evk_dvfscore_data.pu_id;
+ 	mx6_cpu_regulator_init();
+-	#endif
++#endif
+ 
+ 	imx6q_add_imx_snvs_rtc();
+ 
+diff --git a/arch/arm/mach-mx6/mx6q_sabresd_pmic_pfuze100.c b/arch/arm/mach-mx6/mx6q_sabresd_pmic_pfuze100.c
+index a53036c..69daddf 100644
+--- a/arch/arm/mach-mx6/mx6q_sabresd_pmic_pfuze100.c
++++ b/arch/arm/mach-mx6/mx6q_sabresd_pmic_pfuze100.c
+@@ -74,6 +74,9 @@
+ #define PFUZE100_SW1ACON		36
+ #define PFUZE100_SW1ACON_SPEED_VAL	(0x1<<6)	/*default */
+ #define PFUZE100_SW1ACON_SPEED_M	(0x3<<6)
++#define PFUZE100_SW1CCON		49
++#define PFUZE100_SW1CCON_SPEED_VAL	(0x1<<6)	/*default */
++#define PFUZE100_SW1CCON_SPEED_M	(0x3<<6)
+ 
+ extern u32 arm_max_freq;
+ 
+@@ -83,6 +86,11 @@ static struct regulator_consumer_supply sw1_consumers[] = {
+ 		.supply	   = "VDDCORE",
+ 	}
+ };
++static struct regulator_consumer_supply sw1c_consumers[] = {
++	{
++		.supply	   = "VDDSOC",
++	},
++};
+ #endif
+ 
+ static struct regulator_consumer_supply sw2_consumers[] = {
+@@ -160,10 +168,10 @@ static struct regulator_init_data sw1a_init = {
+ 			.always_on = 1,
+ 			},
+ 
+-	#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
+ 	.num_consumer_supplies = ARRAY_SIZE(sw1_consumers),
+ 	.consumer_supplies = sw1_consumers,
+-	#endif
++#endif
+ };
+ 
+ static struct regulator_init_data sw1b_init = {
+@@ -188,6 +196,10 @@ static struct regulator_init_data sw1c_init = {
+ 			.always_on = 1,
+ 			.boot_on = 1,
+ 			},
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++	.num_consumer_supplies = ARRAY_SIZE(sw1c_consumers),
++	.consumer_supplies = sw1c_consumers,
++#endif
+ };
+ 
+ static struct regulator_init_data sw2_init = {
+@@ -421,12 +433,17 @@ static int pfuze100_init(struct mc_pfuze *pfuze)
+ 			    PFUZE100_SW1CSTANDBY_STBY_VAL);
+ 	if (ret)
+ 		goto err;
+-	/*set SW1ABDVSPEED as 25mV step each 4us,quick than 16us before.*/
++	/*set SW1AB/1C DVSPEED as 25mV step each 4us,quick than 16us before.*/
+ 	ret = pfuze_reg_rmw(pfuze, PFUZE100_SW1ACON,
+ 			    PFUZE100_SW1ACON_SPEED_M,
+ 			    PFUZE100_SW1ACON_SPEED_VAL);
+ 	if (ret)
+ 		goto err;
++	ret = pfuze_reg_rmw(pfuze, PFUZE100_SW1CCON,
++			    PFUZE100_SW1CCON_SPEED_M,
++			    PFUZE100_SW1CCON_SPEED_VAL);
++	if (ret)
++		goto err;
+ 	return 0;
+ err:
+ 	printk(KERN_ERR "pfuze100 init error!\n");
+-- 
+1.7.7.4
+

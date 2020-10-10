@@ -1,0 +1,86 @@
+From cddb05c90d1bbb040ab76821e9fddaf99bd3c740 Mon Sep 17 00:00:00 2001
+From: Wu Guoxing <b39297@freescale.com>
+Date: Fri, 24 Feb 2012 09:12:31 +0800
+Subject: [PATCH 1093/2463] ENGR00175305:gpu-viv:don't open 2d clock when
+ operate only on 3d
+
+mx6dl do not have shader clock, and the shader clock is used
+as 2d clock. so, operate differently for mx6q & mx6dl
+
+Signed-off-by: Wu Guoxing <b39297@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../hal/os/linux/kernel/gc_hal_kernel_device.c     |   17 ++++++++++-------
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |    7 +++++--
+ 2 files changed, 15 insertions(+), 9 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+index 62aac98..ed980bc 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+@@ -27,6 +27,7 @@
+ #include <linux/mm.h>
+ #include <linux/mman.h>
+ #include <linux/slab.h>
++#include <mach/hardware.h>
+ 
+ #define _GC_OBJ_ZONE    gcvZONE_DEVICE
+ 
+@@ -382,13 +383,15 @@ gckGALDEVICE_Construct(
+     if (IrqLine != -1) {
+         device->clk_3d_core = clk_get(NULL, "gpu3d_clk");
+         if (!IS_ERR(device->clk_3d_core)) {
+-            device->clk_3d_shader = clk_get(NULL, "gpu3d_shader_clk");
+-            if (IS_ERR(device->clk_3d_shader)) {
+-                IrqLine = -1;
+-                clk_put(device->clk_3d_core);
+-                device->clk_3d_core = NULL;
+-                device->clk_3d_shader = NULL;
+-                gckOS_Print("galcore: clk_get gpu3d_shader_clk failed, disable 3d!\n");
++            if (cpu_is_mx6q()) {
++	            device->clk_3d_shader = clk_get(NULL, "gpu3d_shader_clk");
++	            if (IS_ERR(device->clk_3d_shader)) {
++	                IrqLine = -1;
++	                clk_put(device->clk_3d_core);
++	                device->clk_3d_core = NULL;
++	                device->clk_3d_shader = NULL;
++	                gckOS_Print("galcore: clk_get gpu3d_shader_clk failed, disable 3d!\n");
++	            }
+             }
+         } else {
+             IrqLine = -1;
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index 0f0d05c..3cd8e24 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -31,6 +31,7 @@
+ #include <asm/atomic.h>
+ #include <linux/dma-mapping.h>
+ #include <linux/slab.h>
++#include <mach/hardware.h>
+ #if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,23)
+ #include <linux/math64.h>
+ #endif
+@@ -6854,7 +6855,8 @@ gckOS_SetGPUPower(
+         case gcvCORE_MAJOR:
+             if (!Os->device->clk_flag[gcvCORE_MAJOR]) {
+                 clk_enable(clk_3dcore);
+-                clk_enable(clk_3dshader);
++                if (cpu_is_mx6q())
++                    clk_enable(clk_3dshader);
+             }
+             Os->device->clk_flag[gcvCORE_MAJOR] = gcvTRUE;
+             break;
+@@ -6877,7 +6879,8 @@ gckOS_SetGPUPower(
+         switch (Core) {
+         case gcvCORE_MAJOR:
+             if (Os->device->clk_flag[gcvCORE_MAJOR]) {
+-                clk_disable(clk_3dshader);
++                if (cpu_is_mx6q())
++                    clk_disable(clk_3dshader);
+                 clk_disable(clk_3dcore);
+             }
+             Os->device->clk_flag[gcvCORE_MAJOR] = gcvFALSE;
+-- 
+1.7.7.4
+

@@ -1,0 +1,226 @@
+From 9ad10aed8a60547a198e3d17f1f86314dfe7b408 Mon Sep 17 00:00:00 2001
+From: Steve Cornelius <steve.cornelius@freescale.com>
+Date: Thu, 28 Jun 2012 15:40:43 -0700
+Subject: [PATCH 1670/2463] ENGR00215228-14: Add in RNG4 kickstart function
+
+Add in RNG4 kickstart function
+
+Signed-off-by: Steve Cornelius <steve.cornelius@freescale.com>
+---
+ drivers/crypto/caam/ctrl.c |  126 ++++++++++++++++++++++++++++++++++++++++++++
+ drivers/crypto/caam/regs.h |   48 ++++++++++++++++-
+ 2 files changed, 173 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/crypto/caam/ctrl.c b/drivers/crypto/caam/ctrl.c
+index 89699e1..1b49033 100644
+--- a/drivers/crypto/caam/ctrl.c
++++ b/drivers/crypto/caam/ctrl.c
+@@ -9,6 +9,8 @@
+ #include "regs.h"
+ #include "intern.h"
+ #include "jr.h"
++#include "desc_constr.h"
++#include "error.h"
+ 
+ static int caam_remove(struct platform_device *pdev)
+ {
+@@ -58,6 +60,116 @@ static int caam_remove(struct platform_device *pdev)
+ 	return ret;
+ }
+ 
++/*
++ * Descriptor to instantiate RNG State Handle 0 in normal mode and
++ * load the JDKEK, TDKEK and TDSK registers
++ */
++static void build_instantiation_desc(u32 *desc)
++{
++	u32 *jump_cmd;
++
++	init_job_desc(desc, 0);
++
++	/* INIT RNG in non-test mode */
++	append_operation(desc, OP_TYPE_CLASS1_ALG | OP_ALG_ALGSEL_RNG |
++			 OP_ALG_AS_INIT);
++
++	/* wait for done */
++	jump_cmd = append_jump(desc, JUMP_CLASS_CLASS1);
++	set_jump_tgt_here(desc, jump_cmd);
++
++	/*
++	 * load 1 to clear written reg:
++	 * resets the done interrrupt and returns the RNG to idle.
++	 */
++	append_load_imm_u32(desc, 1, LDST_SRCDST_WORD_CLRW);
++
++	/* generate secure keys (non-test) */
++	append_operation(desc, OP_TYPE_CLASS1_ALG | OP_ALG_ALGSEL_RNG |
++			 OP_ALG_RNG4_SK);
++}
++
++struct instantiate_result {
++	struct completion completion;
++	int err;
++};
++
++static void rng4_init_done(struct device *dev, u32 *desc, u32 err,
++			   void *context)
++{
++	struct instantiate_result *instantiation = context;
++
++	if (err) {
++		char tmp[CAAM_ERROR_STR_MAX];
++
++		dev_err(dev, "%08x: %s\n", err, caam_jr_strstatus(tmp, err));
++	}
++
++	instantiation->err = err;
++	complete(&instantiation->completion);
++}
++
++static int instantiate_rng(struct device *jrdev)
++{
++	struct instantiate_result instantiation;
++
++	dma_addr_t desc_dma;
++	u32 *desc;
++	int ret;
++
++	desc = kmalloc(CAAM_CMD_SZ * 6, GFP_KERNEL | GFP_DMA);
++	if (!desc) {
++		dev_err(jrdev, "cannot allocate RNG init descriptor memory\n");
++		return -ENOMEM;
++	}
++
++	build_instantiation_desc(desc);
++	desc_dma = dma_map_single(jrdev, desc, desc_bytes(desc), DMA_TO_DEVICE);
++	init_completion(&instantiation.completion);
++	ret = caam_jr_enqueue(jrdev, desc, rng4_init_done, &instantiation);
++	if (!ret) {
++		wait_for_completion_interruptible(&instantiation.completion);
++		ret = instantiation.err;
++		if (ret)
++			dev_err(jrdev, "unable to instantiate RNG\n");
++	}
++
++	dma_unmap_single(jrdev, desc_dma, desc_bytes(desc), DMA_TO_DEVICE);
++
++	kfree(desc);
++
++	return ret;
++}
++
++/*
++ * By default, the TRNG runs for 200 clocks per sample;
++ * 1600 clocks per sample generates better entropy.
++ */
++static void kick_trng(struct platform_device *pdev)
++{
++	struct device *ctrldev = &pdev->dev;
++	struct caam_drv_private *ctrlpriv = dev_get_drvdata(ctrldev);
++	struct caam_full __iomem *topregs;
++	struct rng4tst __iomem *r4tst;
++	u32 val;
++
++	topregs = (struct caam_full __iomem *)ctrlpriv->ctrl;
++	r4tst = &topregs->ctrl.r4tst[0];
++
++	/* put RNG4 into program mode */
++	setbits32(&r4tst->rtmctl, RTMCTL_PRGM);
++	/* 1600 clocks per sample */
++	val = rd_reg32(&r4tst->rtsdctl);
++	val = (val & ~RTSDCTL_ENT_DLY_MASK) | (1600 << RTSDCTL_ENT_DLY_SHIFT);
++	wr_reg32(&r4tst->rtsdctl, val);
++	/* min. freq. count */
++	wr_reg32(&r4tst->rtfrqmin, 400);
++	/* max. freq. count */
++	wr_reg32(&r4tst->rtfrqmax, 6400);
++	/* put RNG4 into run mode */
++	clrbits32(&r4tst->rtmctl, RTMCTL_PRGM);
++}
++
+ /* Probe routine for CAAM top (controller) level */
+ static int caam_probe(struct platform_device *pdev)
+ {
+@@ -243,6 +355,20 @@ static int caam_probe(struct platform_device *pdev)
+ 		return -ENOMEM;
+ 	}
+ 
++	/*
++	 * RNG4 based SECs (v5+ | >= i.MX6) need special initialization prior
++	 * to executing any descriptors
++	 */
++	if ((rd_reg64(&topregs->ctrl.perfmon.cha_id) & CHA_VID_RNG_MASK)
++	    == CHA_VID_RNG_4) {
++		kick_trng(pdev);
++		ret = instantiate_rng(ctrlpriv->jrdev[0]);
++		if (ret) {
++			caam_remove(pdev);
++			return ret;
++		}
++	}
++
+ 	/* NOTE: RTIC detection ought to go here, around Si time */
+ 
+ 	/* Initialize queue allocator lock */
+diff --git a/drivers/crypto/caam/regs.h b/drivers/crypto/caam/regs.h
+index 6f2eda1..868cf19 100644
+--- a/drivers/crypto/caam/regs.h
++++ b/drivers/crypto/caam/regs.h
+@@ -119,7 +119,53 @@ struct jr_outentry {
+  * Spans f00-fff wherever instantiated
+  */
+ 
+-/* Number of DECOs */
++/* CHA version IDs for cha_id register */
++#define CHA_VID_JR_SHIFT	60
++#define CHA_VID_JR_MASK		(0xfull << CHA_VID_JR_SHIFT)
++
++#define CHA_VID_DECO_SHIFT	56
++#define CHA_VID_DECO_MASK	(0xfull << CHA_VID_DECO_SHIFT)
++
++#define CHA_VID_ZA_SHIFT	44
++#define CHA_VID_ZA_MASK		(0xfull << CHA_VID_ZA_SHIFT)
++
++#define CHA_VID_ZE_SHIFT	40
++#define CHA_VID_ZE_MASK		(0xfull << CHA_VID_ZE_SHIFT)
++
++#define CHA_VID_SNW9_SHIFT	36
++#define CHA_VID_SNW9_MASK	(0xfull << CHA_VID_SNW9_SHIFT)
++
++#define CHA_VID_CRC_SHIFT	32
++#define CHA_VID_CRC_MASK	(0xfull << CHA_VID_CRC_SHIFT)
++
++#define CHA_VID_PK_SHIFT	28
++#define CHA_VID_PK_MASK		(0xfull << CHA_VID_PK_SHIFT)
++
++#define CHA_VID_KAS_SHIFT	24
++#define CHA_VID_KAS_MASK	(0xfull << CHA_VID_KAS_SHIFT)
++
++#define CHA_VID_SNW8_SHIFT	20
++#define CHA_VID_SNW8_MASK	(0xfull << CHA_VID_SNW8_SHIFT)
++
++#define CHA_VID_RNG_SHIFT	16
++#define CHA_VID_RNG_MASK	(0xfull << CHA_VID_RNG_SHIFT)
++#define CHA_VID_RNG_A		(0x1ull << CHA_VID_RNG_SHIFT)
++#define CHA_VID_RNG_B		(0x2ull << CHA_VID_RNG_SHIFT)
++#define CHA_VID_RNG_4		(0x4ull << CHA_VID_RNG_SHIFT)
++
++#define CHA_VID_MD_SHIFT	12
++#define CHA_VID_MD_MASK		(0xfull << CHA_VID_MD_SHIFT)
++
++#define CHA_VID_ARC4_SHIFT	8
++#define CHA_VID_ARC4_MASK	(0xfull << CHA_VID_ARC4_SHIFT)
++
++#define CHA_VID_DES_SHIFT	4
++#define CHA_VID_DES_MASK	(0xfull << CHA_VID_DES_SHIFT)
++
++#define CHA_VID_AES_SHIFT	0
++#define CHA_VID_AES_MASK	(0xfull << CHA_VID_AES_SHIFT)
++
++/* Number of DECOs for cha_num register*/
+ #define CHA_NUM_DECONUM_SHIFT	56
+ #define CHA_NUM_DECONUM_MASK	(0xfull << CHA_NUM_DECONUM_SHIFT)
+ 
+-- 
+1.7.7.4
+

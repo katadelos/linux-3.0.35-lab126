@@ -1,0 +1,90 @@
+From d97facbcd6a346b56fea434ba3a3d03b6b724733 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Mon, 9 Jan 2012 13:11:57 +0800
+Subject: [PATCH 0882/2463] ENGR00172374-4: remove platform _adjust_dma_zone
+ function
+
+fix the compiling warnings when upgrade to v3.0
+
+arch/arm/mm/init.c:215: warning: 'arm_adjust_dma_zone' defined but not used
+
+The commit: be20902 ARM: use ARM_DMA_ZONE_SIZE to adjust the zone sizes by
+Russell has make the _adjust_dma_zone function the common help function, thus
+we can remove platform _adjust_dma_zone function by just define:ARM_DMA_ZONE_SIZE
+
+commit be20902ba67de70b38c995903321f4152dee57b7
+Author: Russell King <rmk+kernel@arm.linux.org.uk>
+Date:   Wed May 11 15:39:00 2011 +0100
+
+    ARM: use ARM_DMA_ZONE_SIZE to adjust the zone sizes
+
+    Rather than each platform providing its own function to adjust the
+    zone sizes, use the new ARM_DMA_ZONE_SIZE definition to perform this
+    adjustment.  This ensures that the actual DMA zone size and the
+    ISA_DMA_THRESHOLD/MAX_DMA_ADDRESS definitions are consistent with
+    each other, and moves this complexity out of the platform code.
+
+    Acked-by: Nicolas Pitre <nicolas.pitre@linaro.org>
+    Acked-by: Catalin Marinas <catalin.marinas@arm.com>
+    Signed-off-by: Russell King <rmk+kernel@arm.linux.org.uk>
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/plat-mxc/include/mach/memory.h |   31 +++----------------------------
+ 1 files changed, 3 insertions(+), 28 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/include/mach/memory.h b/arch/arm/plat-mxc/include/mach/memory.h
+index 55b08d9..f478eb8 100755
+--- a/arch/arm/plat-mxc/include/mach/memory.h
++++ b/arch/arm/plat-mxc/include/mach/memory.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright 2004-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright 2004-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -64,38 +64,13 @@
+ #else
+ 
+ #if defined(CONFIG_ARCH_MX5) || defined(CONFIG_ARCH_MX6)
+-#define CONSISTENT_DMA_SIZE     (184 * SZ_1M)
++#define ARM_DMA_ZONE_SIZE	(184 * SZ_1M)
++#define CONSISTENT_DMA_SIZE	ARM_DMA_ZONE_SIZE
+ #else
+ #define CONSISTENT_DMA_SIZE     (32 * SZ_1M)
+ #endif
+ 
+ #endif /* CONFIG_MX1_VIDEO || CONFIG_VIDEO_MX2_HOSTSUPPORT */
+ 
+-#ifndef __ASSEMBLY__
+-
+-#ifdef CONFIG_DMA_ZONE_SIZE
+-#define MXC_DMA_ZONE_SIZE       ((CONFIG_DMA_ZONE_SIZE * SZ_1M) >> PAGE_SHIFT)
+-#else
+-#define MXC_DMA_ZONE_SIZE       ((12 * SZ_1M) >> PAGE_SHIFT)
+-#endif
+-
+-static inline void __arch_adjust_zones(unsigned long *zone_size,
+-		unsigned long *zhole_size)
+-{
+-#ifdef CONFIG_ZONE_DMA
+-	/* Create separate zone to reserve memory for DMA */
+-	if ((zone_size[0] - zhole_size[0]) > MXC_DMA_ZONE_SIZE) {
+-		zone_size[1] = zone_size[0] - MXC_DMA_ZONE_SIZE;
+-		zone_size[0] = MXC_DMA_ZONE_SIZE;
+-		zhole_size[1] = zhole_size[0];
+-		zhole_size[0] = 0;
+-	}
+-#endif
+-}
+-
+-#define arch_adjust_zones(size, holes) \
+-	__arch_adjust_zones(size, holes)
+-
+-#endif
+ 
+ #endif /* __ASM_ARCH_MXC_MEMORY_H__ */
+-- 
+1.7.7.4
+

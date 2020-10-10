@@ -1,0 +1,62 @@
+From 43a747d290145dd9b5865c7a89a5439e50cd19ae Mon Sep 17 00:00:00 2001
+From: Terry Lv <r65388@freescale.com>
+Date: Tue, 27 Dec 2011 18:25:05 +0800
+Subject: [PATCH 0812/2463] ENGR00170969: Remove build warnings in MLB driver
+
+Remove build warnings in MLB driver.
+
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/mxc/mlb/mxc_mlb150.c |   20 --------------------
+ 1 files changed, 0 insertions(+), 20 deletions(-)
+
+diff --git a/drivers/mxc/mlb/mxc_mlb150.c b/drivers/mxc/mlb/mxc_mlb150.c
+index 55bb99e..83f50e2 100755
+--- a/drivers/mxc/mlb/mxc_mlb150.c
++++ b/drivers/mxc/mlb/mxc_mlb150.c
+@@ -683,20 +683,6 @@ static s32 mlb150_dev_ctr_write(u32 ctr_offset, const u32 *ctr_val)
+ 	return 0;
+ }
+ 
+-static s32 mlb150_dev_cat_read(u32 ctr_offset, u32 ch, u16 *cat_val)
+-{
+-	u16 ctr_val[8] = { 0 };
+-
+-	if (unlikely(mlb150_dev_ctr_read(ctr_offset, (u32 *)ctr_val)))
+-		return -ETIME;
+-
+-	/* Use u16 array to get u32 array value,
+-	 * need to convert */
+-	*cat_val = ctr_val[ch % 8];
+-
+-	return 0;
+-}
+-
+ static s32 mlb150_dev_cat_write(u32 ctr_offset, u32 ch, const u16 cat_val)
+ {
+ 	u16 ctr_val[8] = { 0 };
+@@ -704,8 +690,6 @@ static s32 mlb150_dev_cat_write(u32 ctr_offset, u32 ch, const u16 cat_val)
+ 	if (unlikely(mlb150_dev_ctr_read(ctr_offset, (u32 *)ctr_val)))
+ 		return -ETIME;
+ 
+-	/* Use u16 array to write u32 array value,
+-	 * need to convert */
+ 	ctr_val[ch % 8] = cat_val;
+ 	if (unlikely(mlb150_dev_ctr_write(ctr_offset, (u32 *)ctr_val)))
+ 		return -ETIME;
+@@ -713,12 +697,8 @@ static s32 mlb150_dev_cat_write(u32 ctr_offset, u32 ch, const u16 cat_val)
+ 	return 0;
+ }
+ 
+-#define mlb150_dev_cat_mlb_read(ch, cat_val)	\
+-	mlb150_dev_cat_read(MLB150_BUF_CAT_MLB_OFFSET + (ch >> 3), ch, cat_val)
+ #define mlb150_dev_cat_mlb_write(ch, cat_val)	\
+ 	mlb150_dev_cat_write(MLB150_BUF_CAT_MLB_OFFSET + (ch >> 3), ch, cat_val)
+-#define mlb150_dev_cat_hbi_read(ch, cat_val)	\
+-	mlb150_dev_cat_read(MLB150_BUF_CAT_HBI_OFFSET + (ch >> 3), ch, cat_val)
+ #define mlb150_dev_cat_hbi_write(ch, cat_val)	\
+ 	mlb150_dev_cat_write(MLB150_BUF_CAT_HBI_OFFSET + (ch >> 3), ch, cat_val)
+ 
+-- 
+1.7.7.4
+

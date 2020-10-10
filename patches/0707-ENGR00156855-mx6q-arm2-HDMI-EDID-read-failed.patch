@@ -1,0 +1,58 @@
+From fbeb63cf242cd093627564e0860d661452e4a4cd Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Thu, 8 Dec 2011 14:35:13 +0800
+Subject: [PATCH 0707/2463] ENGR00156855 [mx6q arm2] HDMI EDID read failed
+
+It cause by some HDMI sink device not support I2C 400kbps access.
+Change EDID I2C speed from 400kbps to 100bps.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c |   14 +++++++++-----
+ 1 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 6dbaee5..0bfebc8 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -731,14 +731,18 @@ static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
+ 	},
+ };
+ 
+-static struct imxi2c_platform_data mx6q_arm2_i2c_data = {
+-	.bitrate = 400000,
++static struct imxi2c_platform_data mx6q_arm2_i2c0_data = {
++	.bitrate = 100000,
+ };
+ 
+-static struct imxi2c_platform_data mx6q_arm2_i2c0_data = {
++static struct imxi2c_platform_data mx6q_arm2_i2c1_data = {
+ 	.bitrate = 100000,
+ };
+ 
++static struct imxi2c_platform_data mx6q_arm2_i2c2_data = {
++	.bitrate = 400000,
++};
++
+ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ 	{
+ 		I2C_BOARD_INFO("max7310", 0x1F),
+@@ -1490,13 +1494,13 @@ static void __init mx6_board_init(void)
+ 	imx6q_add_imx_snvs_rtc();
+ 
+ 	imx6q_add_imx_i2c(0, &mx6q_arm2_i2c0_data);
+-	imx6q_add_imx_i2c(1, &mx6q_arm2_i2c_data);
++	imx6q_add_imx_i2c(1, &mx6q_arm2_i2c1_data);
+ 	i2c_register_board_info(0, mxc_i2c0_board_info,
+ 			ARRAY_SIZE(mxc_i2c0_board_info));
+ 	i2c_register_board_info(1, mxc_i2c1_board_info,
+ 			ARRAY_SIZE(mxc_i2c1_board_info));
+ 	if (!spdif_en) {
+-		imx6q_add_imx_i2c(2, &mx6q_arm2_i2c_data);
++		imx6q_add_imx_i2c(2, &mx6q_arm2_i2c2_data);
+ 		i2c_register_board_info(2, mxc_i2c2_board_info,
+ 				ARRAY_SIZE(mxc_i2c2_board_info));
+ 	}
+-- 
+1.7.7.4
+

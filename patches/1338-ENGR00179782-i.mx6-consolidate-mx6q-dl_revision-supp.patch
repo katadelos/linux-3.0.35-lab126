@@ -1,0 +1,246 @@
+From 207f80453c77bc32e04b5fef863f6fe50a7fd1a8 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Tue, 17 Apr 2012 18:53:53 +0800
+Subject: [PATCH 1338/2463] ENGR00179782: i.mx6: consolidate
+ mx6q/dl_revision() support
+
+The idea is to get the soc silicon revision from DIGPROG register Of
+ANATOP(USB_ANALOG_DIGPROG), which will make kernel code independent
+with bootloader which need pass the system_rev by ATAG.
+
+This patch also will print the chip name and revision when kernel boot
+up since this information is important for customer to know.
+
+on i.mx6q TO1.1, it will print as the following:
+
+CPU identified as i.MX6Q, silicon rev 1.1
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c               |    1 -
+ arch/arm/mach-mx6/cpu.c                 |   42 ++++++++++++++++++------------
+ arch/arm/mach-mx6/mm.c                  |    8 +++--
+ arch/arm/mach-mx6/system.c              |    1 -
+ arch/arm/plat-mxc/cpu.c                 |   12 ++++++++-
+ arch/arm/plat-mxc/include/mach/common.h |    1 +
+ arch/arm/plat-mxc/include/mach/mx6.h    |    5 +++
+ arch/arm/plat-mxc/include/mach/mxc.h    |    5 ---
+ arch/arm/plat-mxc/time.c                |    4 ---
+ 9 files changed, 47 insertions(+), 32 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index b766627..3b815fe 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -47,7 +47,6 @@ extern struct regulator *cpu_regulator;
+ extern struct cpu_op *(*get_cpu_op)(int *op);
+ extern int lp_high_freq;
+ extern int lp_med_freq;
+-extern int mx6q_revision(void);
+ 
+ void __iomem *apll_base;
+ static struct clk pll1_sys_main_clk;
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index 6f3765e..581a2ac 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -46,35 +46,27 @@ void __iomem *gpc_base;
+ void __iomem *ccm_base;
+ 
+ static int cpu_silicon_rev = -1;
+-#define SI_REV_OFFSET 	0x48
++#define MX6_USB_ANALOG_DIGPROG  0x260
+ 
+-static int get_mx6q_srev(void)
++static int mx6_get_srev(void)
+ {
+-	void __iomem *romcp = ioremap(BOOT_ROM_BASE_ADDR, SZ_8K);
++	void __iomem *anatop = MX6_IO_ADDRESS(ANATOP_BASE_ADDR);
+ 	u32 rev;
+ 
+-	if (!romcp) {
+-		cpu_silicon_rev = -EINVAL;
+-		return 0;
+-	}
+-
+-	rev = __raw_readl(romcp + SI_REV_OFFSET);
++	rev = __raw_readl(anatop + MX6_USB_ANALOG_DIGPROG);
+ 	rev &= 0xff;
+ 
+-	iounmap(romcp);
+-	if (rev == 0x10)
++	if (rev == 0)
+ 		return IMX_CHIP_REVISION_1_0;
+-	else if (rev == 0x11)
++	else if (rev == 1)
+ 		return IMX_CHIP_REVISION_1_1;
+-	else if (rev == 0x20)
+-		return IMX_CHIP_REVISION_2_0;
+-	return 0;
++
++	return IMX_CHIP_REVISION_UNKNOWN;
+ }
+ 
+ /*
+  * Returns:
+  *	the silicon revision of the cpu
+- *	-EINVAL - not a mx50
+  */
+ int mx6q_revision(void)
+ {
+@@ -82,12 +74,28 @@ int mx6q_revision(void)
+ 		return -EINVAL;
+ 
+ 	if (cpu_silicon_rev == -1)
+-		cpu_silicon_rev = get_mx6q_srev();
++		cpu_silicon_rev = mx6_get_srev();
+ 
+ 	return cpu_silicon_rev;
+ }
+ EXPORT_SYMBOL(mx6q_revision);
+ 
++/*
++ * Returns:
++ *	the silicon revision of the cpu
++ */
++int mx6dl_revision(void)
++{
++	if (!cpu_is_mx6dl())
++		return -EINVAL;
++
++	if (cpu_silicon_rev == -1)
++		cpu_silicon_rev = mx6_get_srev();
++
++	return cpu_silicon_rev;
++}
++EXPORT_SYMBOL(mx6dl_revision);
++
+ static int __init post_cpu_init(void)
+ {
+ 	unsigned int reg;
+diff --git a/arch/arm/mach-mx6/mm.c b/arch/arm/mach-mx6/mm.c
+index 6e80f0a..c706c49 100644
+--- a/arch/arm/mach-mx6/mm.c
++++ b/arch/arm/mach-mx6/mm.c
+@@ -62,11 +62,13 @@ static void mx6_set_cpu_type(void)
+ 	u32 cpu_type = readl(IO_ADDRESS(ANATOP_BASE_ADDR + 0x260));
+ 
+ 	cpu_type >>= 16;
+-	if (cpu_type == 0x63)
++	if (cpu_type == 0x63) {
+ 		mxc_set_cpu_type(MXC_CPU_MX6Q);
+-	else if (cpu_type == 0x61)
++		imx_print_silicon_rev("i.MX6Q", mx6q_revision());
++	} else if (cpu_type == 0x61) {
+ 		mxc_set_cpu_type(MXC_CPU_MX6DL);
+-	else
++		imx_print_silicon_rev("i.MX6DL/SOLO", mx6dl_revision());
++	} else
+ 		pr_err("Unknown CPU type: %x\n", cpu_type);
+ }
+ 
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 8210f9a..fb0b0ad 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -45,7 +45,6 @@
+ #define MODULE_SFTRST		(1 << 31)
+ 
+ extern unsigned int gpc_wake_irq[4];
+-extern int mx6q_revision(void);
+ 
+ static void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ 
+diff --git a/arch/arm/plat-mxc/cpu.c b/arch/arm/plat-mxc/cpu.c
+index 143a9b7..073c237 100755
+--- a/arch/arm/plat-mxc/cpu.c
++++ b/arch/arm/plat-mxc/cpu.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -18,6 +18,7 @@
+ 
+ #include <linux/module.h>
+ #include <mach/clock.h>
++#include <mach/hardware.h>
+ 
+ unsigned int __mxc_cpu_type;
+ EXPORT_SYMBOL(__mxc_cpu_type);
+@@ -29,6 +30,15 @@ void mxc_set_cpu_type(unsigned int type)
+ 	__mxc_cpu_type = type;
+ }
+ 
++void imx_print_silicon_rev(const char *cpu, int srev)
++{
++	if (srev == IMX_CHIP_REVISION_UNKNOWN)
++		pr_info("CPU identified as %s, unknown revision\n", cpu);
++	else
++		pr_info("CPU identified as %s, silicon rev %d.%d\n",
++				cpu, (srev >> 4) & 0xf, srev & 0xf);
++}
++
+ int mxc_jtag_enabled;		/* OFF: 0 (default), ON: 1 */
+ int uart_at_24; 			/* OFF: 0 (default); ON: 1 */
+ /*
+diff --git a/arch/arm/plat-mxc/include/mach/common.h b/arch/arm/plat-mxc/include/mach/common.h
+index 89bc884..de91ac7 100755
+--- a/arch/arm/plat-mxc/include/mach/common.h
++++ b/arch/arm/plat-mxc/include/mach/common.h
+@@ -93,4 +93,5 @@ extern void early_console_setup(unsigned long base, struct clk *clk);
+ extern void mx6_cpu_regulator_init(void);
+ extern int mx6q_sabreauto_init_pfuze100(u32 int_gpio);
+ extern int mx6q_sabresd_init_pfuze100(u32 int_gpio);
++extern void imx_print_silicon_rev(const char *cpu, int srev);
+ #endif
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index d4b31ea..67d00df 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -506,4 +506,9 @@
+ #define MX6Q_DMA_REQ_SSI3_TX0		46
+ #define MX6Q_DMA_REQ_DTCP		47
+ 
++#if !defined(__ASSEMBLY__) && !defined(__MXC_BOOT_UNCOMPRESS)
++extern int mx6q_revision(void);
++extern int mx6dl_revision(void);
++#endif
++
+ #endif				/*  __ASM_ARCH_MXC_MX6_H__ */
+diff --git a/arch/arm/plat-mxc/include/mach/mxc.h b/arch/arm/plat-mxc/include/mach/mxc.h
+index 6e7dfcc..7c2fa99 100755
+--- a/arch/arm/plat-mxc/include/mach/mxc.h
++++ b/arch/arm/plat-mxc/include/mach/mxc.h
+@@ -240,11 +240,6 @@ extern unsigned int __mxc_cpu_type;
+ #endif
+ 
+ #ifndef __ASSEMBLY__
+-#ifdef CONFIG_SOC_IMX6Q
+-extern int mx6q_revision(void);
+-#else
+-#define mx6q_revision(void)    (0)
+-#endif
+ 
+ struct cpu_op {
+ 	u32 pll_reg;
+diff --git a/arch/arm/plat-mxc/time.c b/arch/arm/plat-mxc/time.c
+index 437921f..7b00a69 100644
+--- a/arch/arm/plat-mxc/time.c
++++ b/arch/arm/plat-mxc/time.c
+@@ -79,10 +79,6 @@ static enum clock_event_mode clockevent_mode = CLOCK_EVT_MODE_UNUSED;
+ 
+ static void __iomem *timer_base;
+ 
+-#ifdef CONFIG_ARCH_MX6
+-extern int mx6q_revision(void);
+-#endif
+-
+ static inline void gpt_irq_disable(void)
+ {
+ 	unsigned int tmp;
+-- 
+1.7.7.4
+

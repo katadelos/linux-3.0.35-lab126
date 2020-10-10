@@ -1,0 +1,39 @@
+From 814656410b40c67a10b25300e51b0477b2bb96d1 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Mon, 25 Jul 2011 16:14:24 +0800
+Subject: [PATCH 0283/2463] ENGR00153601 [MX6]Adjust L2 cache parameter
+
+Adjust L2 cache parameter to improve both
+performance and power consumption.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/mm.c |   12 ++++++++++++
+ 1 files changed, 12 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/mm.c b/arch/arm/mach-mx6/mm.c
+index ab91c38..f1d6d6d 100644
+--- a/arch/arm/mach-mx6/mm.c
++++ b/arch/arm/mach-mx6/mm.c
+@@ -66,6 +66,18 @@ void __init mx6_map_io(void)
+ #ifdef CONFIG_CACHE_L2X0
+ static int mxc_init_l2x0(void)
+ {
++	unsigned int val;
++
++	writel(0x132, IO_ADDRESS(L2_BASE_ADDR + L2X0_TAG_LATENCY_CTRL));
++	writel(0x132, IO_ADDRESS(L2_BASE_ADDR + L2X0_DATA_LATENCY_CTRL));
++
++	val = readl(IO_ADDRESS(L2_BASE_ADDR + L2X0_PREFETCH_CTRL));
++	val |= 0x40800000;
++	writel(val, IO_ADDRESS(L2_BASE_ADDR + L2X0_PREFETCH_CTRL));
++	val = readl(IO_ADDRESS(L2_BASE_ADDR + L2X0_POWER_CTRL));
++	val |= L2X0_DYNAMIC_CLK_GATING_EN;
++	val |= L2X0_STNDBY_MODE_EN;
++	writel(val, IO_ADDRESS(L2_BASE_ADDR + L2X0_POWER_CTRL));
+ 
+ 	l2x0_init(IO_ADDRESS(L2_BASE_ADDR), 0x0, ~0x00000000);
+ 	return 0;
+-- 
+1.7.7.4
+

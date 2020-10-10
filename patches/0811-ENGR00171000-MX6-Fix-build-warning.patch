@@ -1,0 +1,65 @@
+From 3e96d6c821f80da79483ba0661841f4b7e92e6dc Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Wed, 28 Dec 2011 10:59:02 +0800
+Subject: [PATCH 0811/2463] ENGR00171000 [MX6]Fix build warning
+
+Fix the following build warning:
+
+1.arch/arm/mach-mx6/cpu.c:36: warning: function declaration isn't a
+prototype
+
+2.arch/arm/mach-mx6/system.c:55: warning: function declaration isn't a
+prototype
+
+3.arch/arm/mach-mx6/board-mx6q_sabreauto.c:751: warning: unused variable
+'iterations'
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |    2 +-
+ arch/arm/mach-mx6/cpu.c                  |    2 +-
+ arch/arm/mach-mx6/system.c               |    2 +-
+ 3 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 3dfbb39..e5dde07 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -748,7 +748,7 @@ static struct viv_gpu_platform_data imx6q_gpu_pdata __initdata = {
+ static int mx6q_sabreauto_sata_init(struct device *dev, void __iomem *addr)
+ {
+ 	u32 tmpdata;
+-	int ret = 0, iterations = 20;
++	int ret = 0;
+ 	struct clk *clk;
+ 
+ 	sata_clk = clk_get(dev, "imx_sata_clk");
+diff --git a/arch/arm/mach-mx6/cpu.c b/arch/arm/mach-mx6/cpu.c
+index 81f691c..da7d442 100644
+--- a/arch/arm/mach-mx6/cpu.c
++++ b/arch/arm/mach-mx6/cpu.c
+@@ -33,7 +33,7 @@
+ 
+ 
+ void *mx6_wait_in_iram_base;
+-void (*mx6_wait_in_iram)();
++void (*mx6_wait_in_iram)(void);
+ extern void mx6_wait(void);
+ 
+ 
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 8d8e0c7..8ce35e0 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -52,7 +52,7 @@ extern int mx6q_revision(void);
+ 
+ static void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ 
+-extern void (*mx6_wait_in_iram)();
++extern void (*mx6_wait_in_iram)(void);
+ extern void mx6_wait(void);
+ extern void *mx6_wait_in_iram_base;
+ extern bool enable_wait_mode;
+-- 
+1.7.7.4
+

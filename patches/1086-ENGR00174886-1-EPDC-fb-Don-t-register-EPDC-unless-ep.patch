@@ -1,0 +1,116 @@
+From a527da1c4561fbe4a9a0794cebd4dbd870899d1b Mon Sep 17 00:00:00 2001
+From: Danny Nold <dannynold@freescale.com>
+Date: Wed, 22 Feb 2012 12:59:38 -0600
+Subject: [PATCH 1086/2463] ENGR00174886-1 - EPDC fb: Don't register EPDC
+ unless "epdc" kernel option set
+
+- Add E Ink support as a default for MX6 platforms
+- Conditionalize registration of EPDC-related modules based on "epdc"
+kernel command line option
+
+Signed-off-by: Danny Nold <dannynold@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig     |    6 ++++--
+ arch/arm/mach-mx6/board-mx6q_arm2.c |    9 ++++++++-
+ arch/arm/mach-mx6/clock.c           |   10 +++++-----
+ 3 files changed, 17 insertions(+), 8 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 2b9ddad..899533e 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1338,7 +1338,7 @@ CONFIG_HWMON=y
+ # CONFIG_SENSORS_MAX1619 is not set
+ # CONFIG_SENSORS_MAX6639 is not set
+ # CONFIG_SENSORS_MAX6642 is not set
+-# CONFIG_SENSORS_MAX17135 is not set
++CONFIG_SENSORS_MAX17135=y
+ # CONFIG_SENSORS_MAX6650 is not set
+ # CONFIG_SENSORS_PC87360 is not set
+ # CONFIG_SENSORS_PC87427 is not set
+@@ -1692,6 +1692,7 @@ CONFIG_FB_CFB_IMAGEBLIT=y
+ # CONFIG_FB_FOREIGN_ENDIAN is not set
+ # CONFIG_FB_SYS_FOPS is not set
+ # CONFIG_FB_WMT_GE_ROPS is not set
++CONFIG_FB_DEFERRED_IO=y
+ # CONFIG_FB_SVGALIB is not set
+ # CONFIG_FB_MACMODES is not set
+ # CONFIG_FB_BACKLIGHT is not set
+@@ -1733,7 +1734,8 @@ CONFIG_FB_MXC_TRULY_WVGA_SYNC_PANEL=y
+ # CONFIG_FB_MXC_CH7026 is not set
+ # CONFIG_FB_MXC_TVOUT_CH7024 is not set
+ # CONFIG_FB_MXC_ASYNC_PANEL is not set
+-# CONFIG_FB_MXC_EINK_PANEL is not set
++CONFIG_FB_MXC_EINK_PANEL=y
++# CONFIG_FB_MXC_EINK_AUTO_UPDATE_MODE is not set
+ # CONFIG_FB_MXC_ELCDIF_FB is not set
+ CONFIG_FB_MXC_HDMI=y
+ 
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 71c2612..39cc06d 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -162,6 +162,7 @@ static int flexcan_en;
+ extern struct regulator *(*get_cpu_regulator)(void);
+ extern void (*put_cpu_regulator)(void);
+ extern char *gp_reg_id;
++extern int epdc_enabled;
+ extern void mx6_cpu_regulator_init(void);
+ static int max17135_regulator_init(struct max17135 *max17135);
+ 
+@@ -768,6 +769,12 @@ static int __init max17135_regulator_init(struct max17135 *max17135)
+ 	struct max17135_platform_data *pdata = &max17135_pdata;
+ 	int i, ret;
+ 
++	if (!epdc_enabled) {
++		printk(KERN_DEBUG
++			"max17135_regulator_init abort: EPDC not enabled\n");
++		return 0;
++	}
++
+ 	max17135->gvee_pwrup = pdata->gvee_pwrup;
+ 	max17135->vneg_pwrup = pdata->vneg_pwrup;
+ 	max17135->vpos_pwrup = pdata->vpos_pwrup;
+@@ -2090,7 +2097,7 @@ static void __init mx6_arm2_init(void)
+ 	imx6q_add_perfmon(2);
+ 	imx6q_add_mlb150(&mx6_arm2_mlb150_data);
+ 
+-	if (cpu_is_mx6dl()) {
++	if (cpu_is_mx6dl() && epdc_enabled) {
+ 		imx6dl_add_imx_pxp();
+ 		imx6dl_add_imx_pxp_client();
+ 		mxc_register_device(&max17135_sensor_device, NULL);
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index a75011e..17251f9 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -107,13 +107,13 @@ static unsigned long anaclk_1_reference, anaclk_2_reference;
+  * parameters, in order to set the EPDC parent clock to the Video PLL.
+  * This will have an impact on the behavior of HDMI and LVDS.
+  */
+-static int epdc_use_video_pll;
+-static int __init epdc_clk_setup(char *__unused)
++int epdc_enabled;
++static int __init epdc_setup(char *__unused)
+ {
+-	epdc_use_video_pll = 1;
++	epdc_enabled = 1;
+ 	return 1;
+ }
+-__setup("epdc", epdc_clk_setup);
++__setup("epdc", epdc_setup);
+ 
+ static void __calc_pre_post_dividers(u32 max_podf, u32 div, u32 *pre, u32 *post)
+ {
+@@ -5379,7 +5379,7 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	}
+ 
+ 	if (cpu_is_mx6dl()) {
+-		if (epdc_use_video_pll)
++		if (epdc_enabled)
+ 			clk_set_parent(&ipu2_di_clk[1], &pll5_video_main_clk);
+ 		else
+ 			clk_set_parent(&ipu2_di_clk[1], &pll3_pfd_540M);
+-- 
+1.7.7.4
+

@@ -1,0 +1,107 @@
+From 018958f464e10cbe044b38c5a9e062502de49d37 Mon Sep 17 00:00:00 2001
+From: Nicolin Chen <b42378@freescale.com>
+Date: Fri, 8 Mar 2013 11:03:27 +0800
+Subject: [PATCH 2424/2463] ENGR00253290-2 ASoC: imx-wm8962: fix continuous
+ playback distortion issue
+
+  If DAC volume's set to a value that's lower than 0xd8, contineously FLL
+setting of wm8962 in machine driver would cause playback distortion issue,
+which happens to ENGR219882. so we have to put some another code in machine
+driver to prevent distortion issue.
+
+Acked-by: Wang Shengjiu <b02247@freescale.com>
+Signed-off-by: Nicolin Chen <b42378@freescale.com>
+---
+ sound/soc/imx/imx-wm8962.c |   48 ++++++++++++++++++++++++++++++++++++++++++++
+ 1 files changed, 48 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/imx/imx-wm8962.c b/sound/soc/imx/imx-wm8962.c
+index 23f9a17..a19e527 100644
+--- a/sound/soc/imx/imx-wm8962.c
++++ b/sound/soc/imx/imx-wm8962.c
+@@ -53,6 +53,8 @@ struct imx_priv {
+ 	int amic_irq;
+ 	int amic_status;
+ 	struct platform_device *pdev;
++	struct snd_pcm_substream *first_stream;
++	struct snd_pcm_substream *second_stream;
+ };
+ unsigned int sample_format = SNDRV_PCM_FMTBIT_S16_LE;
+ static struct imx_priv card_priv;
+@@ -126,6 +128,11 @@ static int imx_hifi_hw_params(struct snd_pcm_substream *substream,
+ 	u32 dai_format;
+ 	unsigned int pll_out;
+ 
++	if (!priv->first_stream)
++		priv->first_stream = substream;
++	else
++		priv->second_stream = substream;
++
+ 	dai_format = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF |
+ 		SND_SOC_DAIFMT_CBM_CFM;
+ 
+@@ -174,6 +181,43 @@ static int imx_hifi_hw_params(struct snd_pcm_substream *substream,
+ 	return 0;
+ }
+ 
++
++static int imx_hifi_hw_free(struct snd_pcm_substream *substream)
++{
++	struct snd_soc_pcm_runtime *rtd = substream->private_data;
++	struct snd_soc_dai *codec_dai = rtd->codec_dai;
++	struct imx_priv *priv = &card_priv;
++	int ret;
++
++	if (priv->first_stream == substream)
++		priv->first_stream = priv->second_stream;
++	priv->second_stream = NULL;
++
++	if (!priv->first_stream) {
++		/*
++		 * wm8962 doesn't allow us to continuously setting FLL,
++		 * So we set MCLK as sysclk once, which'd remove the limitation.
++		 */
++		ret = snd_soc_dai_set_sysclk(codec_dai, WM8962_SYSCLK_MCLK,
++				0, SND_SOC_CLOCK_IN);
++		if (ret < 0) {
++			pr_err("Failed to set SYSCLK: %d\n", ret);
++			return ret;
++		}
++
++		/*
++		 * Continuously setting FLL would cause playback distortion.
++		 * We can fix it just by mute codec after playback.
++		 */
++		ret = snd_soc_dai_digital_mute(codec_dai, 1);
++		if (ret < 0) {
++			pr_err("Failed to set MUTE: %d\n", ret);
++			return ret;
++		}
++	}
++	return 0;
++}
++
+ static void imx_resume_event(struct work_struct *wor)
+ {
+ 	struct imx_priv *priv = &card_priv;
+@@ -433,6 +477,7 @@ static struct snd_soc_ops imx_hifi_ops = {
+ 	.startup = imx_hifi_startup,
+ 	.shutdown = imx_hifi_shutdown,
+ 	.hw_params = imx_hifi_hw_params,
++	.hw_free = imx_hifi_hw_free,
+ 	.trigger = imx_hifi_trigger,
+ };
+ 
+@@ -497,6 +542,9 @@ static int __devinit imx_wm8962_probe(struct platform_device *pdev)
+ 
+ 	priv->sysclk = plat->sysclk;
+ 
++	priv->first_stream = NULL;
++	priv->second_stream = NULL;
++
+ 	return ret;
+ }
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,46 @@
+From faac2f14b8b4f6ebb40e172cbb8e3b4474fc73de Mon Sep 17 00:00:00 2001
+From: Robin Gong <b38343@freescale.com>
+Date: Tue, 13 Mar 2012 14:50:15 +0800
+Subject: [PATCH 1164/2463] ENGR00176649-3 regulator:Support regulator set in
+ sysfs
+
+By default, regulator set is disabled by kernel, but if enable the function
+we can easily set regulator in sysfs, it's useful for unit test of pfuze
+regulator.
+Signed-off-by: Robin Gong <b38343@freescale.com>
+---
+ drivers/regulator/core.c |   18 +++++++++++++++++-
+ 1 files changed, 17 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/regulator/core.c b/drivers/regulator/core.c
+index d3e3879..bffd22f 100644
+--- a/drivers/regulator/core.c
++++ b/drivers/regulator/core.c
+@@ -275,7 +275,23 @@ static ssize_t regulator_uV_show(struct device *dev,
+ 
+ 	return ret;
+ }
+-static DEVICE_ATTR(microvolts, 0444, regulator_uV_show, NULL);
++static ssize_t regulator_uV_store(struct device *dev,
++				struct device_attribute *attr, char *buf,
++				size_t count)
++{
++	struct regulator_dev *rdev = dev_get_drvdata(dev);
++	ssize_t ret;
++	int uV;
++	uV = simple_strtoul(buf, NULL, 10);
++	mutex_lock(&rdev->mutex);
++	ret = _regulator_do_set_voltage(rdev, uV, uV);
++	if (ret)
++		rdev_err(rdev, "failed to set microvolts!!\n");
++	mutex_unlock(&rdev->mutex);
++
++	return count;
++}
++static DEVICE_ATTR(microvolts, 0666, regulator_uV_show, regulator_uV_store);
+ 
+ static ssize_t regulator_uA_show(struct device *dev,
+ 				struct device_attribute *attr, char *buf)
+-- 
+1.7.7.4
+

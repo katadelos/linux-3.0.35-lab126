@@ -1,0 +1,146 @@
+From d382b95fd4f6fda5007683191354e688bbfe9f54 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Tue, 19 Apr 2011 16:34:02 +0800
+Subject: [PATCH 0126/2463] ENGR00141152-2 imx5X MSL: make default display
+ option
+
+Change MSL files.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/mach-mx5/board-mx51_babbage.c  |    2 ++
+ arch/arm/mach-mx5/board-mx53_evk.c      |   11 ++++++-----
+ arch/arm/mach-mx5/board-mx53_loco.c     |    4 +++-
+ arch/arm/mach-mx5/board-mx53_smd.c      |    3 +++
+ arch/arm/plat-mxc/include/mach/ipu-v3.h |    3 +++
+ 5 files changed, 17 insertions(+), 6 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/board-mx51_babbage.c b/arch/arm/mach-mx5/board-mx51_babbage.c
+index 2961fbc..f9ea66d 100755
+--- a/arch/arm/mach-mx5/board-mx51_babbage.c
++++ b/arch/arm/mach-mx5/board-mx51_babbage.c
+@@ -446,6 +446,7 @@ static struct imx_ipuv3_platform_data ipu_data = {
+ 	.rev = 2,
+ 	.fb_head0_platform_data = &bbg_fb_di0_data,
+ 	.fb_head1_platform_data = &bbg_fb_di1_data,
++	.primary_di = MXC_PRI_DI0,
+ };
+ 
+ static struct platform_pwm_backlight_data bbg_pwm_backlight_data = {
+@@ -496,6 +497,7 @@ static struct fsl_mxc_ddc_platform_data bbg_ddc_dvi_data = {
+ 	.di = 0,
+ 	.init = ddc_dvi_init,
+ 	.update = ddc_dvi_update,
++	.boot_enable = 1,
+ };
+ 
+ static struct i2c_board_info mxc_i2c1_board_info[] __initdata = {
+diff --git a/arch/arm/mach-mx5/board-mx53_evk.c b/arch/arm/mach-mx5/board-mx53_evk.c
+index 20a5c91..300d56e 100755
+--- a/arch/arm/mach-mx5/board-mx53_evk.c
++++ b/arch/arm/mach-mx5/board-mx53_evk.c
+@@ -387,24 +387,25 @@ static struct fb_videomode video_modes[] = {
+ 	0,},
+ };
+ 
+-static struct ipuv3_fb_platform_data loco_fb_di0_data = {
++static struct ipuv3_fb_platform_data evk_fb_di0_data = {
+ 	.interface_pix_fmt = IPU_PIX_FMT_RGB565,
+ 	.mode_str = "CLAA-WVGA",
+ 	.modes = video_modes,
+ 	.num_modes = ARRAY_SIZE(video_modes),
+ };
+ 
+-static struct ipuv3_fb_platform_data loco_fb_di1_data = {
++static struct ipuv3_fb_platform_data evk_fb_di1_data = {
+ 	.interface_pix_fmt = IPU_PIX_FMT_GBR24,
+-	.mode_str = "1024x768M-16@60",
++	.mode_str = "VGA-XGA",
+ 	.modes = video_modes,
+ 	.num_modes = ARRAY_SIZE(video_modes),
+ };
+ 
+ static struct imx_ipuv3_platform_data ipu_data = {
+ 	.rev = 3,
+-	.fb_head0_platform_data = &loco_fb_di0_data,
+-	.fb_head1_platform_data = &loco_fb_di1_data,
++	.fb_head0_platform_data = &evk_fb_di0_data,
++	.fb_head1_platform_data = &evk_fb_di1_data,
++	.primary_di = MXC_PRI_DI0,
+ };
+ 
+ static struct platform_pwm_backlight_data evk_pwm_backlight_data = {
+diff --git a/arch/arm/mach-mx5/board-mx53_loco.c b/arch/arm/mach-mx5/board-mx53_loco.c
+index a08ab74..356349f 100755
+--- a/arch/arm/mach-mx5/board-mx53_loco.c
++++ b/arch/arm/mach-mx5/board-mx53_loco.c
+@@ -337,7 +337,7 @@ static struct ipuv3_fb_platform_data loco_fb_di0_data = {
+ 
+ static struct ipuv3_fb_platform_data loco_fb_di1_data = {
+ 	.interface_pix_fmt = IPU_PIX_FMT_GBR24,
+-	.mode_str = "1024x768M-16@60",
++	.mode_str = "VGA-XGA",
+ 	.modes = video_modes,
+ 	.num_modes = ARRAY_SIZE(video_modes),
+ };
+@@ -346,6 +346,7 @@ static struct imx_ipuv3_platform_data ipu_data = {
+ 	.rev = 3,
+ 	.fb_head0_platform_data = &loco_fb_di0_data,
+ 	.fb_head1_platform_data = &loco_fb_di1_data,
++	.primary_di = MXC_PRI_DI1,
+ };
+ 
+ static struct platform_pwm_backlight_data loco_pwm_backlight_data = {
+@@ -357,6 +358,7 @@ static struct platform_pwm_backlight_data loco_pwm_backlight_data = {
+ 
+ static struct fsl_mxc_tve_platform_data tve_data = {
+ 	.dac_reg = "DA9052_LDO7",
++	.boot_enable = MXC_TVE_VGA,
+ };
+ 
+ static struct mxc_dvfs_platform_data loco_dvfs_core_data = {
+diff --git a/arch/arm/mach-mx5/board-mx53_smd.c b/arch/arm/mach-mx5/board-mx53_smd.c
+index a77f919..18bca4f 100755
+--- a/arch/arm/mach-mx5/board-mx53_smd.c
++++ b/arch/arm/mach-mx5/board-mx53_smd.c
+@@ -368,6 +368,7 @@ static void sii9022_hdmi_reset(void)
+ static struct fsl_mxc_lcd_platform_data sii902x_hdmi_data = {
+ 	.reset = sii9022_hdmi_reset,
+ 	.analog_reg = "DA9052_LDO2",
++	.boot_enable = 1,
+ };
+ 
+ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+@@ -658,6 +659,7 @@ static struct imx_ipuv3_platform_data ipu_data = {
+ 	.rev = 3,
+ 	.fb_head0_platform_data = &smd_fb_di0_data,
+ 	.fb_head1_platform_data = &smd_fb_di1_data,
++	.primary_di = MXC_PRI_DI1,
+ };
+ 
+ static struct platform_pwm_backlight_data mxc_pwm_backlight_data = {
+@@ -669,6 +671,7 @@ static struct platform_pwm_backlight_data mxc_pwm_backlight_data = {
+ 
+ static struct fsl_mxc_ldb_platform_data ldb_data = {
+ 	.ext_ref = 1,
++	.boot_enable = MXC_LDBDI1,
+ };
+ 
+ static void __init mx53_smd_board_init(void)
+diff --git a/arch/arm/plat-mxc/include/mach/ipu-v3.h b/arch/arm/plat-mxc/include/mach/ipu-v3.h
+index 431befd..7d3cebe 100755
+--- a/arch/arm/plat-mxc/include/mach/ipu-v3.h
++++ b/arch/arm/plat-mxc/include/mach/ipu-v3.h
+@@ -33,6 +33,9 @@ struct imx_ipuv3_platform_data {
+ 	void (*pg) (int);
+ 	struct ipuv3_fb_platform_data	*fb_head0_platform_data;
+ 	struct ipuv3_fb_platform_data	*fb_head1_platform_data;
++#define MXC_PRI_DI0	1
++#define MXC_PRI_DI1	2
++	int primary_di;
+ };
+ 
+ #endif /* __MACH_IPU_V3_H_ */
+-- 
+1.7.7.4
+

@@ -1,0 +1,46 @@
+From 7797766907f39643e75c212db60843e36b06bf88 Mon Sep 17 00:00:00 2001
+From: Sandor Yu <R01008@freescale.com>
+Date: Thu, 27 Dec 2012 18:14:52 +0800
+Subject: [PATCH 2331/2463] ENGR00238391 MX6x HDMI: Add default EDID config
+ function when read EDID failed
+
+Add default EDID config function when read EDID failed.
+Fix HDMI no audio issue  when failed read EDID.
+
+Signed-off-by: Sandor Yu <R01008@freescale.com>
+---
+ drivers/video/mxc_hdmi.c |   10 +++++++++-
+ 1 files changed, 9 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index 284c6e5..09b8823 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -1560,6 +1560,12 @@ static void mxc_hdmi_edid_rebuild_modelist(struct mxc_hdmi *hdmi)
+ 	console_unlock();
+ }
+ 
++static void  mxc_hdmi_default_edid_cfg(struct mxc_hdmi *hdmi)
++{
++	/* Default setting HDMI working in HDMI mode */
++	hdmi->edid_cfg.hdmi_cap = true;
++}
++
+ static void  mxc_hdmi_default_modelist(struct mxc_hdmi *hdmi)
+ {
+ 	u32 i;
+@@ -1680,8 +1686,10 @@ static void mxc_hdmi_cable_connected(struct mxc_hdmi *hdmi)
+ 	case HDMI_EDID_SAME:
+ 		break;
+ 
+-	case HDMI_EDID_NO_MODES:
+ 	case HDMI_EDID_FAIL:
++		mxc_hdmi_default_edid_cfg(hdmi);
++		/* No break here  */
++	case HDMI_EDID_NO_MODES:
+ 	default:
+ 		mxc_hdmi_default_modelist(hdmi);
+ 		break;
+-- 
+1.7.7.4
+

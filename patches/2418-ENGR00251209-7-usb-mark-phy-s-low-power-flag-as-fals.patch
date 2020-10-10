@@ -1,0 +1,42 @@
+From c8bf2dbb5172999ef7abdc5d5a05c19c7d29a0f9 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Mon, 4 Mar 2013 17:40:34 +0800
+Subject: [PATCH 2418/2463] ENGR00251209-7 usb: mark phy's low power flag as
+ false at probe
+
+PHY's low power flag was false at former logic, so this
+change should not affect functions.
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    1 +
+ drivers/usb/host/ehci-arc.c     |    1 +
+ 2 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 9d9417f..c97eac3a 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -3075,6 +3075,7 @@ static int __devinit fsl_udc_probe(struct platform_device *pdev)
+ 	 * do platform specific init: check the clock, grab/config pins, etc.
+ 	 */
+ 	if (pdata->init && pdata->init(pdev)) {
++		pdata->lowpower = false;
+ 		ret = -ENODEV;
+ 		goto err2a;
+ 	}
+diff --git a/drivers/usb/host/ehci-arc.c b/drivers/usb/host/ehci-arc.c
+index 4a7c606..c79eea2 100755
+--- a/drivers/usb/host/ehci-arc.c
++++ b/drivers/usb/host/ehci-arc.c
+@@ -246,6 +246,7 @@ int usb_hcd_fsl_probe(const struct hc_driver *driver,
+ 	 * do platform specific init: check the clock, grab/config pins, etc.
+ 	 */
+ 	if (pdata->init && pdata->init(pdev)) {
++		pdata->lowpower = false;
+ 		retval = -ENODEV;
+ 		goto err4;
+ 	}
+-- 
+1.7.7.4
+

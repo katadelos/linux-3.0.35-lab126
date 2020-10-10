@@ -1,0 +1,54 @@
+From 04e48b5946950d61434f9857d6c345faa6b9c2d8 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Wed, 1 Feb 2012 07:32:32 -0600
+Subject: [PATCH 0939/2463] ENGR00173585: MX6: Added WAIT mode workaround for
+ MX6Q TO1.1
+
+There is small window where an interrupt can occur when the SOC is
+in the process of entering WAIT mode. The ARM core responds to this
+interrupt and can access the internal memories when their clocks are
+disabled.
+To avoid crashes generated due to this, WFI code should be executed
+from non-cacheable IRAM and enough delay should added after the
+WFI so that accesses to memories are prevented.
+
+This workaround assumes that all interrupts are routed to CPU0 only.
+This workaround is applicable to iMX6DL/Solo also.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/system.c |    7 +++----
+ 1 files changed, 3 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 9288b9f..fae4138 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -43,12 +43,12 @@
+ 
+ #define MODULE_CLKGATE		(1 << 30)
+ #define MODULE_SFTRST		(1 << 31)
+-/* static DEFINE_SPINLOCK(wfi_lock); */
++static DEFINE_SPINLOCK(wfi_lock);
+ 
+ extern unsigned int gpc_wake_irq[4];
+ extern int mx6q_revision(void);
+ 
+-/* static unsigned int cpu_idle_mask; */
++static unsigned int cpu_idle_mask;
+ 
+ static void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ 
+@@ -145,8 +145,7 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 		if ((num_online_cpus() == num_present_cpus())
+ 			&& mx6_wait_in_iram != NULL) {
+ 			mxc_cpu_lp_set(WAIT_UNCLOCKED_POWER_OFF);
+-			if (smp_processor_id() == 0 &&
+-				(mx6q_revision() <= IMX_CHIP_REVISION_1_0))
++			if (smp_processor_id() == 0)
+ 				mx6_wait_in_iram();
+ 			else
+ 				cpu_do_idle();
+-- 
+1.7.7.4
+

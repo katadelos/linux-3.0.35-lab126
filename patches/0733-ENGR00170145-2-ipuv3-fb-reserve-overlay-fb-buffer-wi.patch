@@ -1,0 +1,65 @@
+From 937e8f7f8443842e4697447608b0caec7041c6a1 Mon Sep 17 00:00:00 2001
+From: Xinyu Chen <xinyu.chen@freescale.com>
+Date: Tue, 13 Dec 2011 15:30:42 +0800
+Subject: [PATCH 0733/2463] ENGR00170145-2 ipuv3 fb: reserve overlay fb buffer
+ with valid resource
+
+Reserve the overlay fb triple buffer when we have a valid
+resource for start and end.
+Clear the GB fb buffers when we reserve memory for it.
+
+Signed-off-by: Xinyu Chen <xinyu.chen@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |   15 +++++++++++++--
+ 1 files changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index ba652d7..46cc9f7 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -1874,7 +1874,7 @@ static void mxcfb_unregister(struct fb_info *fbi)
+ }
+ 
+ static int mxcfb_setup_overlay(struct platform_device *pdev,
+-		struct fb_info *fbi_bg)
++		struct fb_info *fbi_bg, struct resource *res)
+ {
+ 	struct fb_info *ovfbi;
+ 	struct mxcfb_info *mxcfbi_bg = (struct mxcfb_info *)fbi_bg->par;
+@@ -1907,6 +1907,14 @@ static int mxcfb_setup_overlay(struct platform_device *pdev,
+ 	ovfbi->var.xres = 240;
+ 	ovfbi->var.yres = 320;
+ 
++	if (res && res->end) {
++		ovfbi->fix.smem_len = res->end - res->start + 1;
++		ovfbi->fix.smem_start = res->start;
++		ovfbi->screen_base = ioremap(
++					ovfbi->fix.smem_start,
++					ovfbi->fix.smem_len);
++	}
++
+ 	ret = mxcfb_register(ovfbi);
+ 	if (ret < 0)
+ 		goto register_ov_failed;
+@@ -1995,6 +2003,7 @@ static int mxcfb_probe(struct platform_device *pdev)
+ 		fbi->fix.smem_len = res->end - res->start + 1;
+ 		fbi->fix.smem_start = res->start;
+ 		fbi->screen_base = ioremap(fbi->fix.smem_start, fbi->fix.smem_len);
++		memset(fbi->screen_base, 0, fbi->fix.smem_len);
+ 	}
+ 
+ 	mxcfbi->ipu = ipu_get_soc(mxcfbi->ipu_id);
+@@ -2018,7 +2027,9 @@ static int mxcfb_probe(struct platform_device *pdev)
+ 		if (ret < 0)
+ 			goto mxcfb_register_failed;
+ 
+-		ret = mxcfb_setup_overlay(pdev, fbi);
++		res = platform_get_resource(pdev, IORESOURCE_MEM, 1);
++		ret = mxcfb_setup_overlay(pdev, fbi, res);
++
+ 		if (ret < 0) {
+ 			mxcfb_unregister(fbi);
+ 			goto mxcfb_setupoverlay_failed;
+-- 
+1.7.7.4
+

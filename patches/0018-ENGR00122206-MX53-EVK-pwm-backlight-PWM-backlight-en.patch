@@ -1,0 +1,39 @@
+From 50367b3f45efd896958d844310555623e36b589d Mon Sep 17 00:00:00 2001
+From: William Lai <b04597@freescale.com>
+Date: Thu, 1 Apr 2010 13:19:07 +0800
+Subject: [PATCH 0018/2463] ENGR00122206 MX53-EVK pwm-backlight: PWM backlight
+ enhancement
+
+Don't trun off the pwm backlight when blanking the fore-ground.
+
+Signed-off-by: William Lai <b04597@freescale.com>
+---
+ drivers/video/backlight/pwm_bl.c |   11 ++++++-----
+ 1 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/video/backlight/pwm_bl.c b/drivers/video/backlight/pwm_bl.c
+index b8f38ec..5754565 100644
+--- a/drivers/video/backlight/pwm_bl.c
++++ b/drivers/video/backlight/pwm_bl.c
+@@ -63,12 +63,13 @@ static int pwm_backlight_get_brightness(struct backlight_device *bl)
+ 	return bl->props.brightness;
+ }
+ 
+-static int pwm_backlight_check_fb(struct backlight_device *bl,
+-				  struct fb_info *info)
++static int pwm_backlight_check_fb(struct fb_info *info)
+ {
+-	struct pwm_bl_data *pb = dev_get_drvdata(&bl->dev);
+-
+-	return !pb->check_fb || pb->check_fb(pb->dev, info);
++	char *id = info->fix.id;
++	if (!strcmp(id, "DISP3 BG"))
++	    return 1;
++	else
++	return 0;
+ }
+ 
+ static const struct backlight_ops pwm_backlight_ops = {
+-- 
+1.7.7.4
+

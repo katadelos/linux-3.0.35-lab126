@@ -1,0 +1,55 @@
+From 7e35da36ea4c4285a4655e64d8f7f2c2f136fbbb Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Sat, 31 Dec 2011 14:12:18 +0800
+Subject: [PATCH 0829/2463] ENGR00171083 Revert "ENGR00170944 [MX6Q
+ MMC]suspend/resume crash"
+
+issue:
+	in the reverted patch, sdhc driver will claim host on its
+entering suspend state. and the wifi driver will hold host on
+its loading. so once system is about to enter suspend state,
+system will be pended on claiming host.
+
+fix:
+- Revert "ENGR00170944 [MX6Q MMC]suspend/resume crash"
+
+This reverts commit 3b2e3729dc57a5ff532552cde49de7ace4c5792c.
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+---
+ drivers/mmc/host/sdhci.c |    5 +----
+ 1 files changed, 1 insertions(+), 4 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci.c b/drivers/mmc/host/sdhci.c
+index b11f727..84ec611 100755
+--- a/drivers/mmc/host/sdhci.c
++++ b/drivers/mmc/host/sdhci.c
+@@ -2285,8 +2285,6 @@ int sdhci_suspend_host(struct sdhci_host *host, pm_message_t state)
+ {
+ 	int ret;
+ 
+-	mmc_claim_host(host->mmc);
+-
+ 	sdhci_enable_clk(host);
+ 	sdhci_disable_card_detection(host);
+ 
+@@ -2324,7 +2322,7 @@ int sdhci_resume_host(struct sdhci_host *host)
+ 	if (host->vmmc) {
+ 		ret = regulator_enable(host->vmmc);
+ 		if (ret)
+-			goto out;
++			return ret;
+ 	}
+ 
+ 	sdhci_enable_clk(host);
+@@ -2356,7 +2354,6 @@ out:
+ 	    (host->tuning_mode == SDHCI_TUNING_MODE_1))
+ 		host->flags |= SDHCI_NEEDS_RETUNING;
+ 
+-	mmc_release_host(host->mmc);
+ 	return ret;
+ }
+ 
+-- 
+1.7.7.4
+

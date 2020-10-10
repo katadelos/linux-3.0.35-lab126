@@ -1,0 +1,68 @@
+From a4f52314a1a6181b97d235f88bbc94fc2eb5df74 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Tue, 25 Mar 2008 21:57:06 -0500
+Subject: [PATCH 0005/2463] ENGR00069937 Community patch for Fix mount error
+ in case of MLC flash
+
+Even though we don't use the OOB for MLC nand flash,
+we should use the bad block information to skip the bad block.
+Patch url:
+http://patchwork.ozlabs.org/linux-mtd/patch?q=mlc&filter=none&id=15477
+Author:Kyungmin Park
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ fs/jffs2/scan.c |   24 ++++++++++++++----------
+ 1 files changed, 14 insertions(+), 10 deletions(-)
+
+diff --git a/fs/jffs2/scan.c b/fs/jffs2/scan.c
+index 8d8cd34..3e021cf 100644
+--- a/fs/jffs2/scan.c
++++ b/fs/jffs2/scan.c
+@@ -114,6 +114,8 @@ int jffs2_scan_medium(struct jffs2_sb_info *c)
+ 		   apparently */
+ 		if (jffs2_cleanmarker_oob(c))
+ 			try_size = c->sector_size;
++		if (c->mtd->type == MTD_NANDFLASH)
++			buf_size = c->sector_size;
+ 		else
+ 			try_size = PAGE_SIZE;
+ 
+@@ -454,22 +456,24 @@ static int jffs2_scan_eraseblock (struct jffs2_sb_info *c, struct jffs2_eraseblo
+ 	D1(printk(KERN_DEBUG "jffs2_scan_eraseblock(): Scanning block at 0x%x\n", ofs));
+ 
+ #ifdef CONFIG_JFFS2_FS_WRITEBUFFER
+-	if (jffs2_cleanmarker_oob(c)) {
++	if (c->mtd->type == MTD_NANDFLASH) {
+ 		int ret;
+ 
+ 		if (c->mtd->block_isbad(c->mtd, jeb->offset))
+ 			return BLK_STATE_BADBLOCK;
+ 
+-		ret = jffs2_check_nand_cleanmarker(c, jeb);
+-		D2(printk(KERN_NOTICE "jffs_check_nand_cleanmarker returned %d\n",ret));
++		if (jffs2_cleanmarker_oob(c)) {
++			ret = jffs2_check_nand_cleanmarker(c, jeb);
++			D2(printk(KERN_NOTICE "jffs_check_nand_cleanmarker returned %d\n", ret));
+ 
+-		/* Even if it's not found, we still scan to see
+-		   if the block is empty. We use this information
+-		   to decide whether to erase it or not. */
+-		switch (ret) {
+-		case 0:		cleanmarkerfound = 1; break;
+-		case 1: 	break;
+-		default: 	return ret;
++			/* Even if it's not found, we still scan to see
++			   if the block is empty. We use this information
++			   to decide whether to erase it or not. */
++			switch (ret) {
++			case 0:		cleanmarkerfound = 1; break;
++			case 1: 	break;
++			default: 	return ret;
++			}
+ 		}
+ 	}
+ #endif
+-- 
+1.7.7.4
+

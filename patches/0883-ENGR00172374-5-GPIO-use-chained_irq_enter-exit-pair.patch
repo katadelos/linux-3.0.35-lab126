@@ -1,0 +1,99 @@
+From 41db8d8bc9ecb17c8c6831341cb2f89257693fcf Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Mon, 9 Jan 2012 15:28:39 +0800
+Subject: [PATCH 0883/2463] ENGR00172374-5: GPIO: use chained_irq_enter/exit
+ pair
+
+Kernel oops when plug in/out sd card and throw out null pointer
+
+this is due to: commit: 1a01753 ARM: gic: use handle_fasteoi_irq for SPIs
+
+commit 1a01753ed90a4fb84357b9b592e50564c07737f7
+Author: Will Deacon <will.deacon@arm.com>
+Date:   Wed Feb 9 12:01:12 2011 +0000
+
+    ARM: gic: use handle_fasteoi_irq for SPIs
+
+    Currently, the gic uses handle_level_irq for handling SPIs (Shared
+    Peripheral Interrupts), requiring active interrupts to be masked at
+    the distributor level during IRQ handling.
+
+    On a virtualised system, only the CPU interfaces are virtualised in
+    hardware. Accesses to the distributor must be trapped by the
+    hypervisor, adding latency to the critical interrupt path in Linux.
+
+    This patch modifies the GIC code to use handle_fasteoi_irq for handling
+    interrupts, which only requires us to signal EOI to the CPU interface
+    when handling is complete. Cascaded IRQ handling is also updated to use
+    the chained IRQ enter/exit functions to honour the flow control of the
+    parent chip.
+
+    Note that commit 846afbd1 ("GIC: Dont disable INT in ack callback")
+    broke cascading interrupts by forgetting to add IRQ masking. This is
+    no longer an issue because the unmask call is now unnecessary.
+
+    Tested on Versatile Express and Realview EB (1176 w/ cascaded GICs).
+
+    Tested-and-reviewed-by: Abhijeet Dharmapurikar <adharmap@codeaurora.org>
+    Tested-and-acked-by: Santosh Shilimkar <santosh.shilimkar@ti.com>
+    Acked-by: Catalin Marinas <catalin.marinas@arm.com>
+    Signed-off-by: Will Deacon <will.deacon@arm.com>
+
+the above commit has removed the irq_ack from gic chip tus the following call:
+desc->irq_data.chip->irq_ack(&desc->irq_data);
+will trow the kernel oops, to fix it, just involve the pair to fix it.
+
+chained_irq_enter(chip, desc);
+chained_irq_exit(chip, desc);
+
+This also aligns the upstream kernel doing such as v3.2
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/plat-mxc/gpio.c |   10 ++++++----
+ 1 files changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/gpio.c b/arch/arm/plat-mxc/gpio.c
+index cd9958d..40f9799 100755
+--- a/arch/arm/plat-mxc/gpio.c
++++ b/arch/arm/plat-mxc/gpio.c
+@@ -3,7 +3,7 @@
+  * Copyright 2008 Juergen Beisert, kernel@pengutronix.de
+  *
+  * Based on code from Freescale,
+- * Copyright (C) 2004-2011 Freescale Semiconductor, Inc.
++ * Copyright (C) 2004-2012 Freescale Semiconductor, Inc.
+  *
+  * This program is free software; you can redistribute it and/or
+  * modify it under the terms of the GNU General Public License
+@@ -26,6 +26,7 @@
+ #include <linux/gpio.h>
+ #include <mach/hardware.h>
+ #include <asm-generic/bug.h>
++#include <asm/mach/irq.h>
+ 
+ static struct mxc_gpio_port *mxc_gpio_ports;
+ static int gpio_table_size;
+@@ -176,15 +177,16 @@ static void mx3_gpio_irq_handler(u32 irq, struct irq_desc *desc)
+ {
+ 	u32 irq_stat;
+ 	struct mxc_gpio_port *port = irq_get_handler_data(irq);
++	struct irq_chip *chip = irq_get_chip(irq);
+ 
+-#ifndef CONFIG_MXC_TZIC
+-	desc->irq_data.chip->irq_ack(&desc->irq_data);
+-#endif
++	chained_irq_enter(chip, desc);
+ 
+ 	irq_stat = __raw_readl(port->base + GPIO_ISR) &
+ 			__raw_readl(port->base + GPIO_IMR);
+ 
+ 	mxc_gpio_irq_handler(port, irq_stat);
++
++	chained_irq_exit(chip, desc);
+ }
+ 
+ /* MX2 has one interrupt *for all* gpio ports */
+-- 
+1.7.7.4
+

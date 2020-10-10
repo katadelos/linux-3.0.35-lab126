@@ -1,0 +1,50 @@
+From 6564ec61a737c8ae8dad30838fafe17af6cb0cec Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Mon, 20 Aug 2012 13:35:07 -0500
+Subject: [PATCH 1931/2463] ENGR00220818 [MX6SL] - Ensure the Enable bit is
+ set for all the PLLs.
+
+The ENABLE bit is not set for all PLLs by default. Ensure
+that the pll_enable() function sets this bit for all PLLs.
+The pll_disable() function should not clear this bit
+for PLL1, PLL2, PLL3 and PLL7. The output of these PLLs
+maybe used even if they are bypassed.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/clock_mx6sl.c |   12 ++++++++++++
+ 1 files changed, 12 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 2abdaa5..8fab0f2 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -448,6 +448,11 @@ static int _clk_pll_enable(struct clk *clk)
+ 				SPIN_DELAY))
+ 		panic("pll enable failed\n");
+ 
++	/* Enable the PLL output now*/
++	reg = __raw_readl(pllbase);
++	reg |= ANADIG_PLL_ENABLE;
++	__raw_writel(reg, pllbase);
++
+ 	return 0;
+ }
+ 
+@@ -470,6 +475,13 @@ static void _clk_pll_disable(struct clk *clk)
+ 	if (clk == &pll3_usb_otg_main_clk || clk == &pll7_usb_host_main_clk)
+ 		reg &= ~ANADIG_PLL_POWER_DOWN;
+ 
++	/* PLL1, PLL2, PLL3, PLL7 should not disable the ENABLE bit.
++	  * The output of these PLLs maybe used even if they are bypassed.
++	  */
++	if (clk == &pll4_audio_main_clk || clk == &pll5_video_main_clk ||
++		clk == &pll6_enet_main_clk)
++		reg &= ~ANADIG_PLL_ENABLE;
++
+ 	__raw_writel(reg, pllbase);
+ 
+ 	/*
+-- 
+1.7.7.4
+

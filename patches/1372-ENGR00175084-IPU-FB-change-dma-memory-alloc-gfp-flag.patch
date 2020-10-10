@@ -1,0 +1,98 @@
+From 52f3606c5f4584885ae526becdb3524e566cabb5 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Thu, 26 Apr 2012 12:53:52 +0800
+Subject: [PATCH 1372/2463] ENGR00175084 IPU-FB: change dma memory alloc gfp
+ flags to GFP_KERNEL
+
+We only needs the dma buffer, don't care if it is from DMA Zone on i.mx SOC.
+
+To fix the following bug:
+mxc_ipudev_test: page allocation failure: order:13, mode:0x1
+[<80042e08>] (unwind_backtrace+0x0/0xfc) from [<800b4dd8>]
+	(warn_alloc_failed+0x9c/0x118)
+[<800b4dd8>] (warn_alloc_failed+0x9c/0x118) from [<800b5ac4>]
+	(__alloc_pages_nodemask+0x494/0x6ec)
+[<800b5ac4>] (__alloc_pages_nodemask+0x494/0x6ec) from [<80046154>]
+	(__dma_alloc+0xd4/0x2fc)
+[<80046154>] (__dma_alloc+0xd4/0x2fc) from [<800463a0>]
+	(dma_alloc_writecombine+0x24/0x2c)
+[<800463a0>] (dma_alloc_writecombine+0x24/0x2c) from [<8024be34>]
+	(mxcfb_set_par+0x3e4/0x4c0)
+[<8024be34>] (mxcfb_set_par+0x3e4/0x4c0) from [<80235f08>]
+	(fb_set_var+0x168/0x2a4)
+[<80235f08>] (fb_set_var+0x168/0x2a4) from [<802363f8>](do_fb_ioctl+0x3b4/0x5f0)
+[<802363f8>] (do_fb_ioctl+0x3b4/0x5f0) from[<800f58d0>](do_vfs_ioctl+0x80/0x5e4)
+[<800f58d0>] (do_vfs_ioctl+0x80/0x5e4) from [<800f5e6c>] (sys_ioctl+0x38/0x60)
+[<800f5e6c>] (sys_ioctl+0x38/0x60) from [<8003d500>] (ret_fast_syscall+0x0/0x30)
+mxc_sdc_fb mxc_sdc_fb.0: Unable to allocate framebuffer memory
+detected fb_set_par error, error code: -12
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_device.c    |    4 ++--
+ drivers/video/mxc/mxc_ipuv3_fb.c |    8 ++++----
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_device.c b/drivers/mxc/ipu3/ipu_device.c
+index ae98278..8de791b 100644
+--- a/drivers/mxc/ipu3/ipu_device.c
++++ b/drivers/mxc/ipu3/ipu_device.c
+@@ -2580,7 +2580,7 @@ static void do_task(struct ipu_task_entry *t)
+ 			ipu->rot_dma[rot_idx].vaddr = dma_alloc_coherent(t->dev,
+ 						r_size,
+ 						&ipu->rot_dma[rot_idx].paddr,
+-						GFP_DMA | GFP_KERNEL);
++						GFP_KERNEL);
+ 			CHECK_RETCODE(ipu->rot_dma[rot_idx].vaddr == NULL,
+ 					"ic_and_rot", STATE_SYS_NO_MEM,
+ 					chan_setup, -ENOMEM);
+@@ -3279,7 +3279,7 @@ static long mxc_ipu_ioctl(struct file *file,
+ 
+ 			mem->cpu_addr = dma_alloc_coherent(ipu_dev, size,
+ 							   &mem->phy_addr,
+-							   GFP_DMA);
++							   GFP_KERNEL);
+ 			if (mem->cpu_addr == NULL) {
+ 				kfree(mem);
+ 				return -ENOMEM;
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 457c4ca..ce994f8 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -351,13 +351,13 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 					dma_alloc_coherent(fbi->device,
+ 						  alpha_mem_len,
+ 						  &mxc_fbi->alpha_phy_addr0,
+-						  GFP_DMA | GFP_KERNEL);
++						  GFP_KERNEL);
+ 
+ 			mxc_fbi->alpha_virt_addr1 =
+ 					dma_alloc_coherent(fbi->device,
+ 						  alpha_mem_len,
+ 						  &mxc_fbi->alpha_phy_addr1,
+-						  GFP_DMA | GFP_KERNEL);
++						  GFP_KERNEL);
+ 			if (mxc_fbi->alpha_virt_addr0 == NULL ||
+ 			    mxc_fbi->alpha_virt_addr1 == NULL) {
+ 				dev_err(fbi->device, "mxcfb: dma alloc for"
+@@ -1036,7 +1036,7 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 
+ 			mem->cpu_addr = dma_alloc_coherent(fbi->device, size,
+ 							   &mem->phy_addr,
+-							   GFP_DMA);
++							   GFP_KERNEL);
+ 			if (mem->cpu_addr == NULL) {
+ 				kfree(mem);
+ 				return -ENOMEM;
+@@ -1576,7 +1576,7 @@ static int mxcfb_map_video_memory(struct fb_info *fbi)
+ 	fbi->screen_base = dma_alloc_writecombine(fbi->device,
+ 				fbi->fix.smem_len,
+ 				(dma_addr_t *)&fbi->fix.smem_start,
+-				GFP_DMA);
++				GFP_KERNEL);
+ 	if (fbi->screen_base == 0) {
+ 		dev_err(fbi->device, "Unable to allocate framebuffer memory\n");
+ 		fbi->fix.smem_len = 0;
+-- 
+1.7.7.4
+

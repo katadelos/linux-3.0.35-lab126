@@ -1,0 +1,44 @@
+From 464e5eb0311c9c9ae2efc1d11efa4f476b913513 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Sun, 14 Oct 2012 07:41:05 -0500
+Subject: [PATCH 2145/2463] ENGR00229470-2 MX6SL-Add support for debug UART to
+ be sourced from 24MHz.
+
+If "debug_uart" is specified in the command line, uart will
+be sourced from 24MHz XTAL. This is required for getting the
+correct power measurements on MX6SL.
+Certain analog power optimizations are done only if ALL PLLs
+are bypassed on MX6SL. To verify this path, we need to ensure
+that UART is not sourced from PLL3.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ drivers/tty/serial/imx.c |    5 +++++
+ 1 files changed, 5 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/tty/serial/imx.c b/drivers/tty/serial/imx.c
+index 8a66f3e..5e9594d 100644
+--- a/drivers/tty/serial/imx.c
++++ b/drivers/tty/serial/imx.c
+@@ -1742,6 +1742,8 @@ static int serial_imx_resume(struct platform_device *dev)
+ 	return 0;
+ }
+ 
++extern int uart_at_24;
++
+ static int serial_imx_probe(struct platform_device *pdev)
+ {
+ 	struct imx_port *sport;
+@@ -1788,6 +1790,9 @@ static int serial_imx_probe(struct platform_device *pdev)
+ 		ret = PTR_ERR(sport->clk);
+ 		goto unmap;
+ 	}
++	if (uart_at_24)
++		clk_set_parent(sport->clk, clk_get(NULL, "osc"));
++
+ 	clk_enable(sport->clk);
+ 
+ 	sport->port.uartclk = clk_get_rate(sport->clk);
+-- 
+1.7.7.4
+

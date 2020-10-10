@@ -1,0 +1,44 @@
+From d8242b5bebe18db38d9f31f7a86245c2259b8afe Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Fri, 4 Nov 2011 16:21:31 +0800
+Subject: [PATCH 0564/2463] ENGR00159982 - [MX6Q]: Add FEC phy save power
+ function.
+
+- Set Phy AR8031 to saving power mode while no cable connect.
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c |   15 +++++++++++++++
+ 1 files changed, 15 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index a6e57d9..01a1520 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -497,8 +497,23 @@ static int mx6q_arm2_fec_phy_init(struct phy_device *phydev)
+ 	return 0;
+ }
+ 
++static int mx6q_arm2_fec_power_hibernate(struct phy_device *phydev)
++{
++	unsigned short val;
++
++	/*set AR8031 debug reg 0xb to hibernate power*/
++	phy_write(phydev, 0x1d, 0xb);
++	val = phy_read(phydev, 0x1e);
++
++	val |= 0x8000;
++	phy_write(phydev, 0x1e, val);
++
++	return 0;
++}
++
+ static struct fec_platform_data fec_data __initdata = {
+ 	.init = mx6q_arm2_fec_phy_init,
++	.power_hibernate = mx6q_arm2_fec_power_hibernate,
+ 	.phy = PHY_INTERFACE_MODE_RGMII,
+ };
+ 
+-- 
+1.7.7.4
+

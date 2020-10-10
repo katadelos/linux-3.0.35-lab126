@@ -1,0 +1,70 @@
+From e6eed75a155d2c02d418d535d8203c5a64136420 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Fri, 23 Mar 2012 11:21:30 +0800
+Subject: [PATCH 1219/2463] ENGR00177745-2 Add interactive cpufreq governor
+
+cpufreq: interactive: New 'interactive' governor
+
+This governor is designed for latency-sensitive workloads, such as
+interactive user interfaces.  The interactive governor aims to be
+significantly more responsive to ramp CPU quickly up when CPU-intensive
+activity begins.
+
+Existing governors sample CPU load at a particular rate, typically
+every X ms.  This can lead to under-powering UI threads for the period of
+time during which the user begins interacting with a previously-idle system
+until the next sample period happens.
+
+The 'interactive' governor uses a different approach. Instead of sampling
+the CPU at a specified rate, the governor will check whether to scale the
+CPU frequency up soon after coming out of idle.  When the CPU comes out of
+idle, a timer is configured to fire within 1-2 ticks.  If the CPU is very
+busy from exiting idle to when the timer fires then we assume the CPU is
+underpowered and ramp to MAX speed.
+
+If the CPU was not sufficiently busy to immediately ramp to MAX speed, then
+the governor evaluates the CPU load since the last speed adjustment,
+choosing the highest value between that longer-term load or the short-term
+load since idle exit to determine the CPU speed to ramp to.
+
+A realtime thread is used for scaling up, giving the remaining tasks the
+CPU performance benefit, unlike existing governors which are more likely to
+schedule rampup work to occur after your performance starved tasks have
+completed.
+
+The tuneables for this governor are:
+/sys/devices/system/cpu/cpufreq/interactive/min_sample_time:
+    The minimum amount of time to spend at the current frequency before
+    ramping down. This is to ensure that the governor has seen enough
+    historic CPU load data to determine the appropriate workload.
+/sys/devices/system/cpu/cpufreq/interactive/go_maxspeed_load
+    The CPU load at which to ramp to max speed.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/kernel/process.c |    2 ++
+ 1 files changed, 2 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/kernel/process.c b/arch/arm/kernel/process.c
+index 74ae833..63c9205 100644
+--- a/arch/arm/kernel/process.c
++++ b/arch/arm/kernel/process.c
+@@ -182,6 +182,7 @@ void cpu_idle(void)
+ 
+ 	/* endless idle loop with no priority at all */
+ 	while (1) {
++		idle_notifier_call_chain(IDLE_START);
+ 		tick_nohz_stop_sched_tick(1);
+ 		leds_event(led_idle_start);
+ 		while (!need_resched()) {
+@@ -212,6 +213,7 @@ void cpu_idle(void)
+ 		}
+ 		leds_event(led_idle_end);
+ 		tick_nohz_restart_sched_tick();
++		idle_notifier_call_chain(IDLE_END);
+ 		preempt_enable_no_resched();
+ 		schedule();
+ 		preempt_disable();
+-- 
+1.7.7.4
+

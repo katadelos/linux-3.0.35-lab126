@@ -1,0 +1,76 @@
+From c79e3fa5d6c35c09ed537cfed727554edd14673d Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Wed, 4 Jul 2012 04:09:37 +0800
+Subject: [PATCH 1708/2463] ENGR00215668 [MX6]Only restore PU field value
+ instead of whole reg value
+
+Only need to save and restore PU field register value instead of the
+whole CORE REG value to avoid changing SOC and ARM voltage.
+
+No need to increase BUS freq before CPU freq increase when system
+is in audio bus mode.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/bus_freq.c |    9 ++++++---
+ arch/arm/plat-mxc/cpufreq.c  |    3 +--
+ 2 files changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index 6ebd76c..cb4d6ea 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -203,7 +203,8 @@ static void reduce_bus_freq_handler(struct work_struct *work)
+ 		__raw_writel(reg, gpc_base + 0x14);
+ 
+ 		/* PU power gating. */
+-		org_ldo = reg = __raw_readl(ANADIG_REG_CORE);
++		reg = __raw_readl(ANADIG_REG_CORE);
++		org_ldo = reg & (ANADIG_REG_TARGET_MASK << ANADIG_REG1_PU_TARGET_OFFSET);
+ 		reg &= ~(ANADIG_REG_TARGET_MASK << ANADIG_REG1_PU_TARGET_OFFSET);
+ 		__raw_writel(reg, ANADIG_REG_CORE);
+ 
+@@ -212,6 +213,7 @@ static void reduce_bus_freq_handler(struct work_struct *work)
+ 		reg |= 0x80000000;
+ 		__raw_writel(reg, ANADIG_MISC1_REG);
+ 	}
++
+ 	mutex_unlock(&bus_freq_mutex);
+ }
+ 
+@@ -265,8 +267,9 @@ int set_high_bus_freq(int high_bus_freq)
+ 
+ 	/* Enable the PU LDO */
+ 	if (low_bus_freq_mode || audio_bus_freq_mode) {
+-		/* Set the voltage of VDDSOC as in normal mode. */
+-		__raw_writel(org_ldo, ANADIG_REG_CORE);
++		/* Set the voltage of VDDPU as in normal mode. */
++		__raw_writel(org_ldo | (__raw_readl(ANADIG_REG_CORE) &
++		(~(ANADIG_REG_TARGET_MASK << ANADIG_REG1_PU_TARGET_OFFSET))), ANADIG_REG_CORE);
+ 
+ 		/* Need to wait for the regulator to come back up */
+ 		/*
+diff --git a/arch/arm/plat-mxc/cpufreq.c b/arch/arm/plat-mxc/cpufreq.c
+index 2627327..b31970c 100755
+--- a/arch/arm/plat-mxc/cpufreq.c
++++ b/arch/arm/plat-mxc/cpufreq.c
+@@ -56,7 +56,6 @@ extern struct regulator *cpu_regulator;
+ extern int dvfs_core_is_active;
+ extern struct cpu_op *(*get_cpu_op)(int *op);
+ extern int low_bus_freq_mode;
+-extern int audio_bus_freq_mode;
+ extern int high_bus_freq_mode;
+ extern int set_low_bus_freq(void);
+ extern int set_high_bus_freq(int high_bus_speed);
+@@ -86,7 +85,7 @@ int set_cpu_freq(int freq)
+ #endif
+ 	/*Set the voltage for the GP domain. */
+ 	if (freq > org_cpu_rate) {
+-		if (low_bus_freq_mode || audio_bus_freq_mode)
++		if (low_bus_freq_mode)
+ 			set_high_bus_freq(0);
+ 		ret = regulator_set_voltage(cpu_regulator, gp_volt,
+ 					    gp_volt);
+-- 
+1.7.7.4
+

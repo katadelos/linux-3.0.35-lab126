@@ -1,0 +1,96 @@
+From 4c3318cdc9b3c58dc9a8439707f08fa02122e7e7 Mon Sep 17 00:00:00 2001
+From: make shi <b15407@freescale.com>
+Date: Tue, 8 May 2012 14:11:07 +0800
+Subject: [PATCH 1445/2463] ENGR00178933-1 [MX6] USB zero gadget: support USB
+ auto remote wake up test
+
+- add some parameters in zero.c to support USB auto remote wake up test
+- add zero_disconnect function to clear the test result
+
+Signed-off-by: make shi <b15407@freescale.com>
+---
+ drivers/usb/gadget/zero.c |   33 ++++++++++++++++++++++++++++-----
+ 1 files changed, 28 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/usb/gadget/zero.c b/drivers/usb/gadget/zero.c
+index 5440b0e..c6e5d05 100644
+--- a/drivers/usb/gadget/zero.c
++++ b/drivers/usb/gadget/zero.c
+@@ -107,16 +107,26 @@ module_param(loopdefault, bool, S_IRUGO|S_IWUSR);
+ #else
+ #define DRIVER_VENDOR_NUM	0x1a0a		/* OTG test device IDs */
+ #define DRIVER_PRODUCT_NUM	0xbadd
+-#define DEFAULT_AUTORESUME	5
++#define DEFAULT_AUTORESUME	5000
+ #endif
+ 
++static unsigned startms;
++
+ /* If the optional "autoresume" mode is enabled, it provides good
+  * functional coverage for the "USBCV" test harness from USB-IF.
+  * It's always set if OTG mode is enabled.
+  */
+-unsigned autoresume = DEFAULT_AUTORESUME;
++static unsigned autoresume = DEFAULT_AUTORESUME;
+ module_param(autoresume, uint, S_IRUGO);
+-MODULE_PARM_DESC(autoresume, "zero, or seconds before remote wakeup");
++MODULE_PARM_DESC(autoresume, "minimum milliseconds before sending remote wakeup");
++
++static unsigned interval;
++module_param(interval, uint, S_IRUGO);
++MODULE_PARM_DESC(interval, "zero, or milliseconds for interval remote wakeup time");
++
++static unsigned endms = 5000;
++module_param(endms, uint, S_IRUGO);
++MODULE_PARM_DESC(endms, "max milliseconds before sending remote wakeup");
+ 
+ /*-------------------------------------------------------------------------*/
+ 
+@@ -250,8 +260,11 @@ static void zero_suspend(struct usb_composite_dev *cdev)
+ 		return;
+ 
+ 	if (autoresume) {
+-		mod_timer(&autoresume_timer, jiffies + (HZ * autoresume));
+-		DBG(cdev, "suspend, wakeup in %d seconds\n", autoresume);
++		mod_timer(&autoresume_timer, jiffies + msecs_to_jiffies(startms));
++		DBG(cdev, "suspend, wakeup in %d milliseconds\n", startms);
++		startms += interval;
++		if (startms == endms)
++			startms = autoresume;
+ 	} else
+ 		DBG(cdev, "%s\n", __func__);
+ }
+@@ -327,6 +340,10 @@ static int __ref zero_bind(struct usb_composite_dev *cdev)
+ 		init_utsname()->sysname, init_utsname()->release,
+ 		gadget->name);
+ 
++	startms = autoresume;
++	if (autoresume > 0 && autoresume < 5)
++		pr_warning("%s: time before sending remote wakeup is less than 5ms, should not send resume signal.\n",
++			longname);
+ 	return 0;
+ }
+ 
+@@ -336,6 +353,11 @@ static int zero_unbind(struct usb_composite_dev *cdev)
+ 	return 0;
+ }
+ 
++static void  zero_disconnect(struct usb_composite_dev *cdev)
++{
++	startms = autoresume;
++}
++
+ static struct usb_composite_driver zero_driver = {
+ 	.name		= "zero",
+ 	.dev		= &device_desc,
+@@ -343,6 +365,7 @@ static struct usb_composite_driver zero_driver = {
+ 	.unbind		= zero_unbind,
+ 	.suspend	= zero_suspend,
+ 	.resume		= zero_resume,
++	.disconnect     = zero_disconnect,
+ };
+ 
+ MODULE_AUTHOR("David Brownell");
+-- 
+1.7.7.4
+

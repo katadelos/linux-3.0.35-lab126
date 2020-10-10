@@ -1,0 +1,46 @@
+From baca2279464019b44521e0a179d191ecb3a4eb6a Mon Sep 17 00:00:00 2001
+From: Sheng Nan <b38800@freescale.com>
+Date: Fri, 12 Oct 2012 17:21:17 +0800
+Subject: [PATCH 2141/2463] ENGR00229353 Capture: ov5640 mipi: XVLK rename and
+ value change
+
+- XVCLK equals MCLK/10000, currently XVCLK is hard set as 2200
+- rename it in lower case
+
+Signed-off-by: Sheng Nan <b38800@freescale.com>
+---
+ drivers/media/video/mxc/capture/ov5640_mipi.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/ov5640_mipi.c b/drivers/media/video/mxc/capture/ov5640_mipi.c
+index d5f0773..1b48d9c 100644
+--- a/drivers/media/video/mxc/capture/ov5640_mipi.c
++++ b/drivers/media/video/mxc/capture/ov5640_mipi.c
+@@ -707,7 +707,6 @@ static s32 ov5640_read_reg(u16 reg, u8 *val)
+ 
+ static int prev_sysclk, prev_HTS;
+ static int AE_low, AE_high, AE_Target = 52;
+-static int XVCLK = 2200;
+ 
+ void OV5640_stream_on(void)
+ {
+@@ -723,6 +722,7 @@ void OV5640_stream_off(void)
+ int OV5640_get_sysclk(void)
+ {
+ 	 /* calculate sysclk */
++	int xvclk = ov5640_data.mclk / 10000;
+ 	int temp1, temp2;
+ 	int Multiplier, PreDiv, VCO, SysDiv, Pll_rdiv, Bit_div2x = 1, sclk_rdiv, sysclk;
+ 	u8 temp;
+@@ -752,7 +752,7 @@ int OV5640_get_sysclk(void)
+ 	temp2 = temp1 & 0x03;
+ 	sclk_rdiv = sclk_rdiv_map[temp2];
+ 
+-	VCO = XVCLK * Multiplier / PreDiv;
++	VCO = xvclk * Multiplier / PreDiv;
+ 
+ 	sysclk = VCO / SysDiv / Pll_rdiv * 2 / Bit_div2x / sclk_rdiv;
+ 
+-- 
+1.7.7.4
+

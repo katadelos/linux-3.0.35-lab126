@@ -1,0 +1,43 @@
+From 34923c8ad84dd1ad4c8342ecb6f6719376aa4f28 Mon Sep 17 00:00:00 2001
+From: Felipe Balbi <balbi@ti.com>
+Date: Mon, 29 Aug 2011 11:54:08 +0300
+Subject: [PATCH 0758/2463] usb: gadget: audio: queue wLength-sized requests
+
+On Audio class, the wLength field of the Setup
+packet, contains the data payload size of the
+following Data phase. Instead of harcoding values,
+use wLength.
+
+This also fixes a bug where Gadget driver had to
+receive 3 bytes, but it was queueing a ZLP.
+
+Signed-off-by: Felipe Balbi <balbi@ti.com>
+---
+ drivers/usb/gadget/f_audio.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/gadget/f_audio.c b/drivers/usb/gadget/f_audio.c
+index fd5507f..979f92c 100644
+--- a/drivers/usb/gadget/f_audio.c
++++ b/drivers/usb/gadget/f_audio.c
+@@ -461,7 +461,7 @@ static int audio_set_endpoint_req(struct usb_function *f,
+ 
+ 	switch (ctrl->bRequest) {
+ 	case UAC_SET_CUR:
+-		value = 0;
++		value = len;
+ 		break;
+ 
+ 	case UAC_SET_MIN:
+@@ -500,7 +500,7 @@ static int audio_get_endpoint_req(struct usb_function *f,
+ 	case UAC_GET_MIN:
+ 	case UAC_GET_MAX:
+ 	case UAC_GET_RES:
+-		value = 3;
++		value = len;
+ 		break;
+ 	case UAC_GET_MEM:
+ 		break;
+-- 
+1.7.7.4
+

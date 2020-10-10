@@ -1,0 +1,37 @@
+From f7a9081a7a8e18e7dc79649b2fb40ec84bed0333 Mon Sep 17 00:00:00 2001
+From: Sammy He <r62914@freescale.com>
+Date: Fri, 10 Feb 2012 15:38:01 +0800
+Subject: [PATCH 1005/2463] ENGR00173463 i.mx6dl: vpu: disable iram usage
+
+Disable vpu iram since mx6dl platform iram isn't enough
+for vpu after VDOA/audio used it.
+
+Signed-off-by: Sammy He <r62914@freescale.com>
+---
+ arch/arm/plat-mxc/devices/platform-imx_vpu.c |    5 ++++-
+ 1 files changed, 4 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/plat-mxc/devices/platform-imx_vpu.c b/arch/arm/plat-mxc/devices/platform-imx_vpu.c
+index ed30bc7..c364391 100755
+--- a/arch/arm/plat-mxc/devices/platform-imx_vpu.c
++++ b/arch/arm/plat-mxc/devices/platform-imx_vpu.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  * Jason Chen <jason.chen@freescale.com>
+  *
+  * This program is free software; you can redistribute it and/or modify it under
+@@ -167,6 +167,9 @@ struct platform_device *__init imx_add_vpu(
+ 	pdata.iram_enable = data->iram_enable;
+ 	pdata.iram_size = data->iram_size;
+ 
++	if (cpu_is_mx6dl())
++		pdata.iram_enable = false;
++
+ 	return imx_add_platform_device("mxc_vpu", -1,
+ 			res, ARRAY_SIZE(res), &pdata, sizeof(pdata));
+ }
+-- 
+1.7.7.4
+

@@ -1,0 +1,95 @@
+From 8fb3a25a9560b9b22b1b17ff14e699f151b43a67 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Tue, 24 Apr 2012 11:39:29 +0800
+Subject: [PATCH 1378/2463] ENGR00180621-2: mx6dl_sabresd: Add pinmux setting
+ for elan driver
+
+Configure PINMUX for ELAN driver on MX6DL SABRESD
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig         |    1 +
+ arch/arm/mach-mx6/board-mx6dl_sabresd.h |    6 ++++++
+ arch/arm/mach-mx6/board-mx6q_sabresd.c  |   25 +++++++++++++++++++++++++
+ 3 files changed, 32 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index a4e56b4..b884f39 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1060,6 +1060,7 @@ CONFIG_INPUT_TOUCHSCREEN=y
+ # CONFIG_TOUCHSCREEN_HAMPSHIRE is not set
+ # CONFIG_TOUCHSCREEN_EETI is not set
+ CONFIG_TOUCHSCREEN_EGALAX=y
++CONFIG_TOUCHSCREEN_ELAN=y
+ # CONFIG_TOUCHSCREEN_FUJITSU is not set
+ # CONFIG_TOUCHSCREEN_GUNZE is not set
+ # CONFIG_TOUCHSCREEN_ELO is not set
+diff --git a/arch/arm/mach-mx6/board-mx6dl_sabresd.h b/arch/arm/mach-mx6/board-mx6dl_sabresd.h
+index b397163..35701a4 100644
+--- a/arch/arm/mach-mx6/board-mx6dl_sabresd.h
++++ b/arch/arm/mach-mx6/board-mx6dl_sabresd.h
+@@ -384,4 +384,10 @@ static iomux_v3_cfg_t mx6dl_sabresd_epdc_disable_pads[] = {
+ 	 */
+ };
+ 
++static iomux_v3_cfg_t mx6dl_arm2_elan_pads[] = {
++	MX6DL_PAD_EIM_A20__GPIO_2_18,
++	MX6DL_PAD_EIM_DA8__GPIO_3_8,
++	MX6DL_PAD_EIM_D28__GPIO_3_28,
++};
++
+ #endif
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index abb79eb..1c3545c 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -193,6 +193,9 @@
+ #define SABRESD_EPDC_VCOM	IMX_GPIO_NR(3, 17)
+ #define SABRESD_CHARGE_NOW	IMX_GPIO_NR(1, 2)
+ #define SABRESD_CHARGE_DONE	IMX_GPIO_NR(1, 1)
++#define SABRESD_ELAN_CE		IMX_GPIO_NR(2, 18)
++#define SABRESD_ELAN_RST	IMX_GPIO_NR(3, 8)
++#define SABRESD_ELAN_INT	IMX_GPIO_NR(3, 28)
+ 
+ static struct clk *sata_clk;
+ static int mma8451_position = 3;
+@@ -789,6 +792,9 @@ static struct i2c_board_info mxc_i2c2_board_info[] __initdata = {
+ 		I2C_BOARD_INFO("isl29023", 0x44),
+ 		.irq  = gpio_to_irq(SABRESD_ALS_INT),
+ 		.platform_data = &ls_data,
++	}, {
++		I2C_BOARD_INFO("elan-touch", 0x10),
++		.irq = gpio_to_irq(SABRESD_ELAN_INT),
+ 	},
+ };
+ 
+@@ -1721,6 +1727,25 @@ static void __init mx6_sabresd_board_init(void)
+ 	imx6q_add_busfreq();
+ 
+ 	imx6q_add_pcie(&mx6_sabresd_pcie_data);
++	if (cpu_is_mx6dl()) {
++		mxc_iomux_v3_setup_multiple_pads(mx6dl_arm2_elan_pads,
++						ARRAY_SIZE(mx6dl_arm2_elan_pads));
++
++		/* ELAN Touchscreen */
++		gpio_request(SABRESD_ELAN_INT, "elan-interrupt");
++		gpio_direction_input(SABRESD_ELAN_INT);
++
++		gpio_request(SABRESD_ELAN_CE, "elan-cs");
++		gpio_direction_output(SABRESD_ELAN_CE, 1);
++		gpio_direction_output(SABRESD_ELAN_CE, 0);
++
++		gpio_request(SABRESD_ELAN_RST, "elan-rst");
++		gpio_direction_output(SABRESD_ELAN_RST, 1);
++		gpio_direction_output(SABRESD_ELAN_RST, 0);
++		mdelay(1);
++		gpio_direction_output(SABRESD_ELAN_RST, 1);
++		gpio_direction_output(SABRESD_ELAN_CE, 1);
++	}
+ }
+ 
+ extern void __iomem *twd_base;
+-- 
+1.7.7.4
+

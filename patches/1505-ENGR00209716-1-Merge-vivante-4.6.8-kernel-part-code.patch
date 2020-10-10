@@ -1,0 +1,1294 @@
+From a8cc4702bf80182de4246276b1814475b7f2f794 Mon Sep 17 00:00:00 2001
+From: Loren Huang <b02279@freescale.com>
+Date: Fri, 18 May 2012 01:15:35 +0800
+Subject: [PATCH 1505/2463] ENGR00209716-1 Merge vivante 4.6.8 kernel part
+ code
+
+Merge vivante 4.6.8 kernel part code
+
+Signed-off-by: Loren Huang <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../GC350/hal/kernel/gc_hal_kernel_hardware_vg.c   |    4 +-
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_context.c   |    3 +-
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c  |   26 +++-
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c     |   40 +++++--
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h     |   10 +-
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c |    2 -
+ .../gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c  |   39 ------
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c   |    6 +-
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c   |   41 ++++++
+ drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c |    6 +-
+ .../hal/kernel/gc_hal_kernel_video_memory.c        |   12 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h        |    6 +-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h   |    9 ++
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h  |   20 +---
+ .../gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h    |   56 ++++++++-
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h |   22 +++
+ drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h   |    8 +
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h    |   13 ++
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h    |    4 +-
+ .../hal/os/linux/kernel/gc_hal_kernel_device.c     |   14 +-
+ .../hal/os/linux/kernel/gc_hal_kernel_device.h     |   24 ++--
+ .../hal/os/linux/kernel/gc_hal_kernel_driver.c     |   14 +-
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |  139 ++++++++++----------
+ 23 files changed, 323 insertions(+), 195 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+index 25a893c..c24439d 100644
+--- a/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
++++ b/drivers/mxc/gpu-viv/arch/GC350/hal/kernel/gc_hal_kernel_hardware_vg.c
+@@ -1476,7 +1476,7 @@ static gceSTATUS _CommandStall(
+         gcmkERR_BREAK(gckOS_WaitSignal(
+             command->os,
+             command->powerStallSignal,
+-            gcvINFINITE));
++            gcdGPU_TIMEOUT));
+ 
+ 
+     }
+@@ -1750,7 +1750,7 @@ gckVGHARDWARE_SetPowerManagementState(
+     if (flag & (gcvPOWER_FLAG_INITIALIZE | gcvPOWER_FLAG_CLOCK_ON))
+     {
+         /* Turn on the power. */
+-        gcmkONERROR(gckOS_SetGPUPower(os, gcvCORE_VG , gcvTRUE, gcvTRUE));
++        gcmkONERROR(gckOS_SetGPUPower(os, gcvCORE_VG, gcvTRUE, gcvTRUE));
+ 
+         /* Mark clock and power as enabled. */
+         Hardware->clockState = gcvTRUE;
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
+index 6ddbcee..a186bbe 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_context.c
+@@ -545,7 +545,8 @@ _InitializeContextBuffer(
+     index += _State(Context, index, 0x00A38 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x00A3C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+     index += _State(Context, index, 0x00A80 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+-    index += _State(Context, index, 0x00A84 >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
++    index += _State(Context, index, 0x00A84 >> 2, 0x00000000, 1, gcvTRUE, gcvFALSE);
++    index += _State(Context, index, 0x00A8C >> 2, 0x00000000, 1, gcvFALSE, gcvFALSE);
+ 
+     /* Setup states. */
+     index += _State(Context, index, 0x00C00 >> 2, 0x00000000, 1, gcvTRUE, gcvFALSE);
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+index 99b699d..6f50742 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+@@ -217,16 +217,23 @@ _IdentifyHardware(
+         }
+     }
+ 
++    /* If new HZ is available, disable other early z modes. */
++    if (((((gctUINT32) (Identity->chipMinorFeatures3)) >> (0 ? 26:26) & ((gctUINT32) ((((1 ? 26:26) - (0 ? 26:26) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 26:26) - (0 ? 26:26) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 26:26) - (0 ? 26:26) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 26:26) - (0 ? 26:26) + 1)))))))
++     || ((((gctUINT32) (Identity->chipMinorFeatures3)) >> (0 ? 8:8) & ((gctUINT32) ((((1 ? 8:8) - (0 ? 8:8) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:8) - (0 ? 8:8) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 8:8) - (0 ? 8:8) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:8) - (0 ? 8:8) + 1))))))))
++    {
++        /* Disable EZ. */
++        Identity->chipFeatures
++            = ((((gctUINT32) (Identity->chipFeatures)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 16:16) - (0 ? 16:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 16:16) - (0 ? 16:16) + 1))))))) << (0 ? 16:16))) | (((gctUINT32) (0x1 & ((gctUINT32) ((((1 ? 16:16) - (0 ? 16:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 16:16) - (0 ? 16:16) + 1))))))) << (0 ? 16:16)));
++    }
++
+ 	/* Disable HZ when EZ is present for older chips. */
+-    if (!((((gctUINT32) (Identity->chipMinorFeatures3)) >> (0 ? 8:8) & ((gctUINT32) ((((1 ? 8:8) - (0 ? 8:8) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:8) - (0 ? 8:8) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 8:8) - (0 ? 8:8) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 8:8) - (0 ? 8:8) + 1)))))))
+-        &&
+-        !((((gctUINT32) (Identity->chipFeatures)) >> (0 ? 16:16) & ((gctUINT32) ((((1 ? 16:16) - (0 ? 16:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 16:16) - (0 ? 16:16) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 16:16) - (0 ? 16:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 16:16) - (0 ? 16:16) + 1)))))))
+-        )
++    else if (!((((gctUINT32) (Identity->chipFeatures)) >> (0 ? 16:16) & ((gctUINT32) ((((1 ? 16:16) - (0 ? 16:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 16:16) - (0 ? 16:16) + 1)))))) == (0x1 & ((gctUINT32) ((((1 ? 16:16) - (0 ? 16:16) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 16:16) - (0 ? 16:16) + 1))))))))
+     {
+         /* Disable HIERARCHICAL_Z. */
+         Identity->chipMinorFeatures
+             = ((((gctUINT32) (Identity->chipMinorFeatures)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1))))))) << (0 ? 27:27))) | (((gctUINT32) (0x0 & ((gctUINT32) ((((1 ? 27:27) - (0 ? 27:27) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 27:27) - (0 ? 27:27) + 1))))))) << (0 ? 27:27)));
+     }
++
+     /* Disable rectangle primitive when chip is gc880_5_1_0_rc6*/
+     if ((Identity->chipModel == gcv880) && (Identity->chipRevision == 0x5106))
+     {
+@@ -234,6 +241,7 @@ _IdentifyHardware(
+         Identity->chipMinorFeatures2
+             = ((((gctUINT32) (Identity->chipMinorFeatures2)) & ~(((gctUINT32) (((gctUINT32) ((((1 ? 5:5) - (0 ? 5:5) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 5:5) - (0 ? 5:5) + 1))))))) << (0 ? 5:5))) | (((gctUINT32) (0x0 & ((gctUINT32) ((((1 ? 5:5) - (0 ? 5:5) + 1) == 32) ? ~0 : (~(~0 << ((1 ? 5:5) - (0 ? 5:5) + 1))))))) << (0 ? 5:5)));
+     }
++
+     gcmkTRACE_ZONE(gcvLEVEL_INFO, gcvZONE_HARDWARE,
+                    "Identity: chipFeatures=0x%08X",
+                    Identity->chipFeatures);
+@@ -494,7 +502,10 @@ gckHARDWARE_Construct(
+ 
+     /* Enable the GPU. */
+     gcmkONERROR(gckOS_SetGPUPower(Os, Core, gcvTRUE, gcvTRUE));
+-    gcmkONERROR(gckOS_WriteRegisterEx(Os, Core, 0x00000, 0));
++    gcmkONERROR(gckOS_WriteRegisterEx(Os,
++                                      Core,
++                                      0x00000,
++                                      0x00000900));
+ 
+     /* Allocate the gckHARDWARE object. */
+     gcmkONERROR(gckOS_Allocate(Os,
+@@ -609,7 +620,7 @@ OnError:
+     if (hardware != gcvNULL)
+     {
+         /* Turn off the power. */
+-        gcmkVERIFY_OK(gckOS_SetGPUPower(Os, hardware->core, gcvFALSE, gcvFALSE));
++        gcmkVERIFY_OK(gckOS_SetGPUPower(Os, Core, gcvFALSE, gcvFALSE));
+ 
+         if (hardware->globalSemaphore != gcvNULL)
+         {
+@@ -3534,7 +3545,8 @@ gckHARDWARE_SetPowerManagementState(
+                                     gcvPOWER_FLAG_DELAY     |
+                                     gcvPOWER_FLAG_CLOCK_ON,
+             /* OFF               */ gcvPOWER_FLAG_SAVE      |
+-                                    gcvPOWER_FLAG_POWER_OFF,
++                                    gcvPOWER_FLAG_POWER_OFF |
++                                    gcvPOWER_FLAG_CLOCK_OFF,
+             /* IDLE              */ gcvPOWER_FLAG_START     |
+                                     gcvPOWER_FLAG_DELAY     |
+                                     gcvPOWER_FLAG_CLOCK_ON,
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
+index 187b9cc..773a262 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.c
+@@ -289,7 +289,10 @@ OnError:
+             if (kernel->hardware != gcvNULL)
+             {
+                 /* Turn off the power. */
+-                gcmkVERIFY_OK(gckOS_SetGPUPower(kernel->hardware->os, kernel->hardware->core, gcvFALSE, gcvFALSE));
++                gcmkVERIFY_OK(gckOS_SetGPUPower(kernel->hardware->os,
++                                                kernel->hardware->core,
++                                                gcvFALSE,
++                                                gcvFALSE));
+                 gcmkVERIFY_OK(gckHARDWARE_Destroy(kernel->hardware));
+             }
+         }
+@@ -1037,7 +1040,7 @@ gckKERNEL_Dispatch(
+         break;
+ 
+     case gcvHAL_UNMAP_USER_MEMORY:
+-        address = Interface->u.MapUserMemory.address;
++        address = Interface->u.UnmapUserMemory.address;
+ 
+         /* Unmap user memory. */
+         gcmkONERROR(
+@@ -1169,9 +1172,10 @@ gckKERNEL_Dispatch(
+ #if gcdREGISTER_ACCESS_FROM_USER
+         {
+             gceCHIPPOWERSTATE power;
++
++            gckOS_AcquireMutex(Kernel->os, Kernel->hardware->powerMutex, gcvINFINITE);
+             gcmkONERROR(gckHARDWARE_QueryPowerManagementState(Kernel->hardware,
+                                                               &power));
+-
+             if (power == gcvPOWER_ON)
+             {
+                 /* Read a register. */
+@@ -1187,6 +1191,7 @@ gckKERNEL_Dispatch(
+                 Interface->u.ReadRegisterData.data = 0;
+                 status = gcvSTATUS_CHIP_NOT_READY;
+             }
++            gcmkONERROR(gckOS_ReleaseMutex(Kernel->os, Kernel->hardware->powerMutex));
+         }
+ #else
+         /* No access from user land to read registers. */
+@@ -1197,12 +1202,29 @@ gckKERNEL_Dispatch(
+ 
+     case gcvHAL_WRITE_REGISTER:
+ #if gcdREGISTER_ACCESS_FROM_USER
+-        /* Write a register. */
+-        gcmkONERROR(
+-            gckOS_WriteRegisterEx(Kernel->os,
+-                                  Kernel->core,
+-                                  Interface->u.WriteRegisterData.address,
+-                                  Interface->u.WriteRegisterData.data));
++        {
++            gceCHIPPOWERSTATE power;
++
++            gckOS_AcquireMutex(Kernel->os, Kernel->hardware->powerMutex, gcvINFINITE);
++            gcmkONERROR(gckHARDWARE_QueryPowerManagementState(Kernel->hardware,
++                                                                  &power));
++            if (power == gcvPOWER_ON)
++            {
++                /* Write a register. */
++                gcmkONERROR(
++                    gckOS_WriteRegisterEx(Kernel->os,
++                                          Kernel->core,
++                                          Interface->u.WriteRegisterData.address,
++                                          Interface->u.WriteRegisterData.data));
++            }
++            else
++            {
++                /* Chip is in power-state. */
++                Interface->u.WriteRegisterData.data = 0;
++                status = gcvSTATUS_CHIP_NOT_READY;
++            }
++            gcmkONERROR(gckOS_ReleaseMutex(Kernel->os, Kernel->hardware->powerMutex));
++        }
+ #else
+         /* No access from user land to write registers. */
+         status = gcvSTATUS_NOT_SUPPORTED;
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
+index bdc94bc..a9697a1 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel.h
+@@ -613,24 +613,24 @@ typedef union _gcuVIDMEM_NODE
+         gctSIZE_T               pageCount;
+ 
+         /* Used only when node is not contiguous */
+-        gctPOINTER              pageTables[gcdCORE_COUNT];
++        gctPOINTER              pageTables[gcdGPU_COUNT];
+         /* Pointer to gckKERNEL object who lock this. */
+-        gckKERNEL               lockKernels[gcdCORE_COUNT];
++        gckKERNEL               lockKernels[gcdGPU_COUNT];
+         /* Actual physical address */
+-        gctUINT32               addresses[gcdCORE_COUNT];
++        gctUINT32               addresses[gcdGPU_COUNT];
+ 
+         /* Mutex. */
+         gctPOINTER              mutex;
+ 
+         /* Locked counter. */
+-        gctINT32                lockeds[gcdCORE_COUNT];
++        gctINT32                lockeds[gcdGPU_COUNT];
+ 
+ #ifdef __QNXNTO__
+         /* Single linked list of nodes. */
+         gcuVIDMEM_NODE_PTR      next;
+ 
+         /* Unlock pending flag. */
+-        gctBOOL                 unlockPendings[gcdCORE_COUNT];
++        gctBOOL                 unlockPendings[gcdGPU_COUNT];
+ 
+         /* Free pending flag. */
+         gctBOOL                 freePending;
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
+index 14ac175..7a5e82e 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
+@@ -2480,8 +2480,6 @@ gckCOMMAND_Stall(
+         gcmkONERROR(gckOS_Broadcast(
+             os, hardware, gcvBROADCAST_GPU_STUCK
+             ));
+-
+-        gcmkONERROR(gcvSTATUS_GPU_NOT_RESPONDING);
+     }
+ 
+     /* Delete the signal. */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c
+index 3a29f02..227ab68 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command_vg.c
+@@ -1236,12 +1236,6 @@ _TaskUnmapUserMemory(
+     gcsBLOCK_TASK_ENTRY_PTR TaskHeader
+     );
+ 
+-static gceSTATUS
+-_TaskUnmapMemory(
+-    gckVGCOMMAND Command,
+-    gcsBLOCK_TASK_ENTRY_PTR TaskHeader
+-    );
+-
+ static gctTASKROUTINE _taskRoutine[] =
+ {
+     _TaskLink,                  /* gcvTASK_LINK                   */
+@@ -1254,7 +1248,6 @@ static gctTASKROUTINE _taskRoutine[] =
+     _TaskFreeVideoMemory,       /* gcvTASK_FREE_VIDEO_MEMORY      */
+     _TaskFreeContiguousMemory,  /* gcvTASK_FREE_CONTIGUOUS_MEMORY */
+     _TaskUnmapUserMemory,       /* gcvTASK_UNMAP_USER_MEMORY      */
+-    _TaskUnmapMemory,           /* gcvTASK_UNMAP_MEMORY           */
+ };
+ 
+ static gceSTATUS
+@@ -1676,38 +1669,6 @@ _TaskUnmapUserMemory(
+     return status;
+ }
+ 
+-static gceSTATUS
+-_TaskUnmapMemory(
+-    gckVGCOMMAND Command,
+-    gcsBLOCK_TASK_ENTRY_PTR TaskHeader
+-    )
+-{
+-    gceSTATUS status;
+-
+-    do
+-    {
+-        /* Cast the task pointer. */
+-        gcsTASK_UNMAP_MEMORY_PTR task
+-            = (gcsTASK_UNMAP_MEMORY_PTR) TaskHeader->task;
+-
+-        /* Unmap memory. */
+-        gcmkERR_BREAK(gckKERNEL_UnmapMemory(
+-            Command->kernel->kernel, task->physical, task->bytes, task->logical
+-            ));
+-
+-        /* Update the reference counter. */
+-        TaskHeader->container->referenceCount -= 1;
+-
+-        /* Update the task pointer. */
+-        TaskHeader->task = (gcsTASK_HEADER_PTR) (task + 1);
+-    }
+-    while (gcvFALSE);
+-
+-    /* Return status. */
+-    return status;
+-}
+-
+-
+ /******************************************************************************\
+ ************ Hardware Block Interrupt Handlers For Scheduled Events ************
+ \******************************************************************************/
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c
+index 77ea27a..00decd9 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_debug.c
+@@ -1596,7 +1596,7 @@ _GetOutputBuffer(
+ 
+ #if gcdTHREAD_BUFFERS > 1
+     /* Get the current thread ID. */
+-    gctUINT32 threadID = gcmkGETTHREADID();
++    gctUINT32 ThreadID = gcmkGETTHREADID();
+ 
+     /* Locate the output buffer for the thread. */
+     outputBuffer = _outputBufferHead;
+@@ -1629,10 +1629,14 @@ _GetOutputBuffer(
+ 
+         /* Reset the buffer. */
+         outputBuffer->threadID   = ThreadID;
++#if gcdBUFFERED_OUTPUT
+         outputBuffer->start      = 0;
+         outputBuffer->index      = 0;
+         outputBuffer->count      = 0;
++#endif
++#if gcdSHOW_LINE_NUMBER
+         outputBuffer->lineNumber = 0;
++#endif
+     }
+ #else
+     outputBuffer = _outputBufferHead;
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
+index 4f8628c..43363b9 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_event.c
+@@ -203,20 +203,54 @@ _TryToIdleGPU(
+ {
+     gceSTATUS status;
+     gctBOOL empty = gcvFALSE, idle = gcvFALSE;
++    gctUINT32 process, thread;
++    gctBOOL powerLocked = gcvFALSE;
++    gckHARDWARE hardware;
++
+ 
+     gcmkHEADER_ARG("Event=0x%x", Event);
+ 
+     /* Verify the arguments. */
+     gcmkVERIFY_OBJECT(Event, gcvOBJ_EVENT);
+ 
++    /* Grab gckHARDWARE object. */
++    hardware = Event->kernel->hardware;
++    gcmkVERIFY_OBJECT(hardware, gcvOBJ_HARDWARE);
++
++
+     /* Check whether the event queue is empty. */
+     gcmkONERROR(gckEVENT_IsEmpty(Event, &empty));
+ 
+     if (empty)
+     {
++        status = gckOS_AcquireMutex(hardware->os, hardware->powerMutex, 0);
++        if (status == gcvSTATUS_TIMEOUT)
++        {
++            gcmkONERROR(gckOS_GetProcessID(&process));
++            gcmkONERROR(gckOS_GetThreadID(&thread));
++
++            /* Just return to prevent deadlock. */
++            if ((hardware->powerProcess != process)
++            ||  (hardware->powerThread  != thread))
++            {
++                gcmkFOOTER_NO();
++                return gcvSTATUS_OK;
++            }
++        }
++        else
++        {
++            powerLocked = gcvTRUE;
++        }
++
+         /* Query whether the hardware is idle. */
+         gcmkONERROR(gckHARDWARE_QueryIdle(Event->kernel->hardware, &idle));
+ 
++        if (powerLocked)
++        {
++            gcmkONERROR(gckOS_ReleaseMutex(hardware->os, hardware->powerMutex));
++            powerLocked = gcvFALSE;
++        }
++
+         if (idle)
+         {
+             /* Inform the system of idle GPU. */
+@@ -230,6 +264,13 @@ _TryToIdleGPU(
+     return gcvSTATUS_OK;
+ 
+ OnError:
++
++    if (powerLocked)
++    {
++        gcmkONERROR(gckOS_ReleaseMutex(hardware->os, hardware->powerMutex));
++        powerLocked = gcvFALSE;
++    }
++
+     gcmkFOOTER();
+     return status;
+ }
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
+index deb658d..7062dd9 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_mmu.c
+@@ -68,7 +68,7 @@ typedef struct _gcsSharedPageTable
+     gckMMU          mmu;
+ 
+     /* Hardwares which use this shared pagetable. */
+-    gckHARDWARE     hardwares[gcdCORE_COUNT];
++    gckHARDWARE     hardwares[gcdGPU_COUNT];
+ 
+     /* Number of cores use this shared pagetable. */
+     gctUINT32       reference;
+@@ -1201,7 +1201,7 @@ gckMMU_Enable(
+         gcmkONERROR(_SetupDynamicSpace(Mmu));
+ 
+ #if gcdSHARED_PAGETABLE
+-        for(i = 0; i < gcdCORE_COUNT; i++)
++        for(i = 0; i < gcdGPU_COUNT; i++)
+         {
+             hardware = sharedPageTable->hardwares[i];
+             if (hardware != gcvNULL)
+@@ -1402,7 +1402,7 @@ gckMMU_Flush(
+     gckHARDWARE hardware;
+ #if gcdSHARED_PAGETABLE
+     gctINT i;
+-    for (i = 0; i < gcdCORE_COUNT; i++)
++    for (i = 0; i < gcdGPU_COUNT; i++)
+     {
+ #if gcdENABLE_VG
+         if (i == gcvCORE_VG)
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
+index 88e4d77..89a86a8 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_video_memory.c
+@@ -245,7 +245,7 @@ gckVIDMEM_ConstructVirtual(
+     node->Virtual.contiguous    = Contiguous;
+     node->Virtual.logical       = gcvNULL;
+ 
+-    for (i = 0; i < gcdCORE_COUNT; i++)
++    for (i = 0; i < gcdGPU_COUNT; i++)
+     {
+         node->Virtual.lockeds[i]        = 0;
+         node->Virtual.pageTables[i]     = gcvNULL;
+@@ -259,7 +259,7 @@ gckVIDMEM_ConstructVirtual(
+ #ifdef __QNXNTO__
+     node->Virtual.next          = gcvNULL;
+     node->Virtual.freePending   = gcvFALSE;
+-    for (i = 0; i < gcdCORE_COUNT; i++)
++    for (i = 0; i < gcdGPU_COUNT; i++)
+     {
+         node->Virtual.unlockPendings[i] = gcvFALSE;
+     }
+@@ -366,7 +366,7 @@ gckVIDMEM_DestroyVirtual(
+     /* Delete the mutex. */
+     gcmkVERIFY_OK(gckOS_DeleteMutex(os, Node->Virtual.mutex));
+ 
+-    for (i = 0; i < gcdCORE_COUNT; i++)
++    for (i = 0; i < gcdGPU_COUNT; i++)
+     {
+         if (Node->Virtual.pageTables[i] != gcvNULL)
+         {
+@@ -1392,7 +1392,7 @@ gckVIDMEM_Free(
+ 
+     acquired = gcvTRUE;
+ 
+-    for (i = 0, totalLocked = 0; i < gcdCORE_COUNT; i++)
++    for (i = 0, totalLocked = 0; i < gcdGPU_COUNT; i++)
+     {
+         totalLocked += Node->Virtual.lockeds[i];
+     }
+@@ -1590,7 +1590,7 @@ _NeedVirtualMapping(
+     gcmkVERIFY_ARGUMENT(Kernel != gcvNULL);
+     gcmkVERIFY_ARGUMENT(Node != gcvNULL);
+     gcmkVERIFY_ARGUMENT(NeedMapping != gcvNULL);
+-    gcmkVERIFY_ARGUMENT(Core < gcdCORE_COUNT);
++    gcmkVERIFY_ARGUMENT(Core < gcdGPU_COUNT);
+ 
+     if (Node->Virtual.contiguous)
+     {
+@@ -2052,7 +2052,7 @@ gckVIDMEM_Unlock(
+ #endif
+             }
+ 
+-            for (i = 0, totalLocked = 0; i < gcdCORE_COUNT; i++)
++            for (i = 0, totalLocked = 0; i < gcdGPU_COUNT; i++)
+             {
+                 totalLocked += Node->Virtual.lockeds[i];
+             }
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
+index 87b811d..f986e4e 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal.h
+@@ -137,7 +137,7 @@ typedef enum _gceCORE
+ }
+ gceCORE;
+ 
+-#define gcdCORE_COUNT               3
++#define gcdGPU_COUNT               3
+ 
+ /*******************************************************************************
+ **
+@@ -1226,8 +1226,8 @@ gckOS_BroadcastCalibrateSpeed(
+ **      gckOS Os
+ **          Pointer to a gckOS object.ß
+ **
+-**      gceCORE Core
+-**          Core type.
++**      gckCORE Core
++**          GPU whose power is set.
+ **
+ **      gctBOOL Clock
+ **          gcvTRUE to turn on the clock, or gcvFALSE to turn off the clock.
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
+index 5fafefb..b1e6b48 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_base.h
+@@ -129,6 +129,7 @@ typedef struct _gcsTLS
+ 	gco3D						engine3D;
+ #endif
+ 	gco2D						engine2D;
++    gctBOOL                     copied;
+ }
+ gcsTLS;
+ 
+@@ -642,6 +643,9 @@ gcoOS_GetTLS(
+     OUT gcsTLS_PTR * TLS
+     );
+ 
++    /* Copy the TLS from a source thread. */
++    gceSTATUS gcoOS_CopyTLS(IN gcsTLS_PTR Source);
++
+ /* Destroy the objects associated with the current thread. */
+ void
+ gcoOS_FreeThreadData(
+@@ -2061,6 +2065,11 @@ gcoDUMP_Delete(
+     IN gctUINT32 Address
+     );
+ 
++/* Enable dump or not. */
++gceSTATUS
++gcoDUMP_SetDumpFlag(
++    IN gctBOOL DumpState
++    );
+ 
+ /******************************************************************************\
+ ******************************* gcsRECT Structure ******************************
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h
+index fe57968..447663f 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_driver_vg.h
+@@ -109,8 +109,7 @@ typedef enum _gceTASK
+     gcvTASK_UNLOCK_VIDEO_MEMORY,
+     gcvTASK_FREE_VIDEO_MEMORY,
+     gcvTASK_FREE_CONTIGUOUS_MEMORY,
+-    gcvTASK_UNMAP_USER_MEMORY,
+-    gcvTASK_UNMAP_MEMORY
++    gcvTASK_UNMAP_USER_MEMORY
+ }
+ gceTASK;
+ 
+@@ -268,23 +267,6 @@ typedef struct _gcsTASK_UNMAP_USER_MEMORY
+ }
+ gcsTASK_UNMAP_USER_MEMORY;
+ 
+-typedef struct _gcsTASK_UNMAP_MEMORY * gcsTASK_UNMAP_MEMORY_PTR;
+-typedef struct _gcsTASK_UNMAP_MEMORY
+-{
+-    /* Task ID (gcvTASK_UNMAP_MEMORY). */
+-    IN gceTASK                  id;
+-
+-    /* Physical memory address to unmap. */
+-    IN gctPHYS_ADDR             physical;
+-
+-    /* Number of bytes in physical memory to unmap. */
+-    IN gctSIZE_T                bytes;
+-
+-    /* Address of mapped memory to unmap. */
+-    IN gctPOINTER               logical;
+-}
+-gcsTASK_UNMAP_MEMORY;
+-
+ #ifdef __cplusplus
+ }
+ #endif
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h
+index f4b7d28..b9bf7c8 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_eglplatform.h
+@@ -251,11 +251,63 @@ typedef struct __BITFIELDINFO{
+ } BITFIELDINFO;
+ 
+ #elif defined(LINUX) && defined(EGL_API_FB) && !defined(__APPLE__)
++
++#if defined(EGL_API_WL)
++/* Wayland platform. */
++
++#include <wayland-egl.h>
++
++#define WL_EGL_NUM_BACKBUFFERS 2
++
++struct wl_egl_buffer_info
++{
++   gctINT32 width;
++   gctINT32 height;
++   gctINT32 stride;
++   gctUINT32 physical;
++   gctPOINTER logical;
++   gceSURF_FORMAT format;
++   gcoSURF surface;
++};
++
++struct wl_egl_buffer
++{
++   struct wl_buffer* wl_buffer;
++   struct wl_egl_buffer_info info;
++};
++
++struct wl_egl_window_info
++{
++   gctUINT width;
++   gctUINT height;
++   gceSURF_FORMAT format;
++   gctUINT bpp;
++};
++
++struct wl_egl_window
++{
++/*   struct wl_egl_display *display;*/
++   struct wl_surface* surface;
++   struct wl_egl_window_info info;
++   struct wl_egl_buffer backbuffers[WL_EGL_NUM_BACKBUFFERS];
++   gctUINT current;
++   /*
++   int backbuffer;
++   int dx;
++   int dy;
++*/
++};
++
++
++typedef void*   HALNativeDisplayType;
++typedef void*   HALNativeWindowType;
++typedef void*   HALNativePixmapType;
++#else
+ /* Linux platform for FBDEV. */
+ typedef struct _FBDisplay * HALNativeDisplayType;
+ typedef struct _FBWindow *  HALNativeWindowType;
+ typedef struct _FBPixmap *  HALNativePixmapType;
+-
++#endif
+ #elif defined(__ANDROID__) || defined(ANDROID)
+ 
+ struct egl_native_pixmap_t;
+@@ -370,6 +422,8 @@ typedef struct _halDISPLAY_INFO
+     ** if the address is not known for the specified display. */
+     gctSIZE_T               physical;
+ 
++    gctBOOL                isCompositor;   /* true if compositor, false otherwise. */
++
+ #ifndef __QNXNTO__
+     /* 355_FB_MULTI_BUFFER */
+     gctINT                      multiBuffer;
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
+index f77cf58..7ad46da 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_engine.h
+@@ -1173,6 +1173,27 @@ gco3D_InvokeThreadWalker(
+     IN gcsTHREAD_WALKER_INFO_PTR Info
+     );
+ 
++#if gcdUSE_WCLIP_PATCH
++/* Set w clip and w plane limit value. */
++gceSTATUS
++gco3D_SetWClipEnable(
++	IN gco3D Engine,
++	IN gctBOOL Enable
++    );
++
++gceSTATUS
++gco3D_SetWPlaneLimitF(
++	IN gco3D Engine,
++	IN gctFLOAT Value
++    );
++
++gceSTATUS
++gco3D_SetWPlaneLimitX(
++	IN gco3D Engine,
++	IN gctFIXED_POINT Value
++    );
++#endif
++
+ /*----------------------------------------------------------------------------*/
+ /*-------------------------- gco3D Fragment Processor ------------------------*/
+ 
+@@ -1437,6 +1458,7 @@ gceSTATUS
+ gcoTEXTURE_AddMipMap(
+     IN gcoTEXTURE Texture,
+     IN gctINT Level,
++    IN gctINT imageFormat,
+     IN gceSURF_FORMAT Format,
+     IN gctUINT Width,
+     IN gctUINT Height,
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h
+index d10686a..18ddf5b 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_enum.h
+@@ -144,6 +144,7 @@ typedef enum _gceFEATURE
+     gcvFEATURE_RS_YUV_TARGET,
+     gcvFEATURE_2D_FC_SOURCE,
+ 	gcvFEATURE_PE_DITHER_FIX,
++    gcvFEATURE_2D_YUV_SEPARATE_STRIDE,
+ }
+ gceFEATURE;
+ 
+@@ -263,6 +264,13 @@ typedef enum _gceSURF_ROTATION
+ }
+ gceSURF_ROTATION;
+ 
++typedef enum _gceMIPMAP_IMAGE_FORMAT
++{
++    gcvUNKNOWN_MIPMAP_IMAGE_FORMAT  = -2
++}
++gceMIPMAP_IMAGE_FORMAT;
++
++
+ /* Surface formats. */
+ typedef enum _gceSURF_FORMAT
+ {
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+index 4727493..35743c6 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+@@ -769,4 +769,17 @@
+ #   define gcdALPHA_KILL_IN_SHADER              1
+ #endif
+ 
++/*  gcdHIGH_PRECISION_DELAY_ENABLE
++ *
++ *  Enable high precision schedule delay with 1ms unit. otherwise schedule delay up to 10ms.
++ *  Browser app performance will have obvious drop without this enablement
++ */
++#ifndef gcdHIGH_PRECISION_DELAY_ENABLE
++#   define gcdHIGH_PRECISION_DELAY_ENABLE        1
++#endif
++
++#ifndef gcdUSE_WCLIP_PATCH
++#   define gcdUSE_WCLIP_PATCH                   0
++#endif
++
+ #endif /* __gc_hal_options_h_ */
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
+index 132832c..0bc1ffc 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_version.h
+@@ -28,9 +28,9 @@
+ 
+ #define gcvVERSION_MINOR        6
+ 
+-#define gcvVERSION_PATCH        7
++#define gcvVERSION_PATCH        8
+ 
+-#define gcvVERSION_BUILD        1422
++#define gcvVERSION_BUILD        1443
+ 
+ #define gcvVERSION_DATE      __DATE__
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+index df75a8b..305b1cc 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+@@ -404,7 +404,7 @@ gckGALDEVICE_Construct(
+     device->requestedContiguousSize  = 0;
+ 
+ 
+-    for (i = 0; i < gcdCORE_COUNT; i++)
++    for (i = 0; i < gcdGPU_COUNT; i++)
+     {
+         physical = device->requestedRegisterMemBases[i];
+ 
+@@ -582,19 +582,19 @@ gckGALDEVICE_Construct(
+     device->irqLines[gcvCORE_VG]    = IrqLineVG;
+ 
+     /* Initialize the kernel thread semaphores. */
+-    for (i = 0; i < gcdCORE_COUNT; i++)
++    for (i = 0; i < gcdGPU_COUNT; i++)
+     {
+         if (device->irqLines[i] != -1) sema_init(&device->semas[i], 0);
+     }
+ 
+     device->signal = Signal;
+ 
+-    for (i = 0; i < gcdCORE_COUNT; i++)
++    for (i = 0; i < gcdGPU_COUNT; i++)
+     {
+         if (device->kernels[i] != gcvNULL) break;
+     }
+ 
+-    if (i == gcdCORE_COUNT) gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
++    if (i == gcdGPU_COUNT) gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
+ 
+ #if gcdENABLE_VG
+     if (i == gcvCORE_VG)
+@@ -854,7 +854,7 @@ gckGALDEVICE_Destroy(
+ 
+     if (Device != gcvNULL)
+     {
+-        for (i = 0; i < gcdCORE_COUNT; i++)
++        for (i = 0; i < gcdGPU_COUNT; i++)
+         {
+             if (Device->kernels[i] != gcvNULL)
+             {
+@@ -937,7 +937,7 @@ gckGALDEVICE_Destroy(
+             }
+         }
+ 
+-        for (i = 0; i < gcdCORE_COUNT; i++)
++        for (i = 0; i < gcdGPU_COUNT; i++)
+         {
+             if (Device->registerBases[i] != gcvNULL)
+             {
+@@ -1428,7 +1428,7 @@ gckGALDEVICE_Stop_Threads(
+ 
+     gcmkVERIFY_ARGUMENT(Device != NULL);
+ 
+-    for (i = 0; i < gcdCORE_COUNT; i++)
++    for (i = 0; i < gcdGPU_COUNT; i++)
+     {
+         /* Stop the kernel threads. */
+         if (Device->threadInitializeds[i])
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
+index 69c985c..9e4f5b4 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
+@@ -38,7 +38,7 @@ typedef struct _gckGALDEVICE
+ {
+     /* Objects. */
+     gckOS               os;
+-    gckKERNEL           kernels[gcdCORE_COUNT];
++    gckKERNEL           kernels[gcdGPU_COUNT];
+ 
+     /* Attributes. */
+     gctSIZE_T           internalSize;
+@@ -57,23 +57,23 @@ typedef struct _gckGALDEVICE
+     gctPOINTER          contiguousMappedUser;
+     gctSIZE_T           systemMemorySize;
+     gctUINT32           systemMemoryBaseAddress;
+-    gctPOINTER          registerBases[gcdCORE_COUNT];
+-    gctSIZE_T           registerSizes[gcdCORE_COUNT];
++    gctPOINTER          registerBases[gcdGPU_COUNT];
++    gctSIZE_T           registerSizes[gcdGPU_COUNT];
+     gctUINT32           baseAddress;
+-    gctUINT32           requestedRegisterMemBases[gcdCORE_COUNT];
+-    gctSIZE_T           requestedRegisterMemSizes[gcdCORE_COUNT];
++    gctUINT32           requestedRegisterMemBases[gcdGPU_COUNT];
++    gctSIZE_T           requestedRegisterMemSizes[gcdGPU_COUNT];
+     gctUINT32           requestedContiguousBase;
+     gctSIZE_T           requestedContiguousSize;
+ 
+     /* IRQ management. */
+-    gctINT              irqLines[gcdCORE_COUNT];
+-    gctBOOL             isrInitializeds[gcdCORE_COUNT];
+-    gctBOOL             dataReadys[gcdCORE_COUNT];
++    gctINT              irqLines[gcdGPU_COUNT];
++    gctBOOL             isrInitializeds[gcdGPU_COUNT];
++    gctBOOL             dataReadys[gcdGPU_COUNT];
+ 
+     /* Thread management. */
+-    struct task_struct  *threadCtxts[gcdCORE_COUNT];
+-    struct semaphore    semas[gcdCORE_COUNT];
+-    gctBOOL             threadInitializeds[gcdCORE_COUNT];
++    struct task_struct  *threadCtxts[gcdGPU_COUNT];
++    struct semaphore    semas[gcdGPU_COUNT];
++    gctBOOL             threadInitializeds[gcdGPU_COUNT];
+     gctBOOL             killThread;
+ 
+     /* Signal management. */
+@@ -83,7 +83,7 @@ typedef struct _gckGALDEVICE
+     gceCORE             coreMapping[8];
+ 
+     /* States before suspend. */
+-    gceCHIPPOWERSTATE   statesStored[gcdCORE_COUNT];
++    gceCHIPPOWERSTATE   statesStored[gcdGPU_COUNT];
+ 
+     /* Clock management.*/
+     struct clk         *clk_3d_core;
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+index 7d13148..c5ce248 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+@@ -85,7 +85,7 @@ module_param(contiguousSize, ulong, 0644);
+ static ulong contiguousBase = 0;
+ module_param(contiguousBase, ulong, 0644);
+ 
+-static ulong bankSize = 32 << 20;
++static ulong bankSize = 0;
+ module_param(bankSize, ulong, 0644);
+ 
+ static int fastClear = -1;
+@@ -182,7 +182,7 @@ int drv_open(
+     gcmkONERROR(gckOS_GetProcessID(&data->pidOpen));
+ 
+     /* Attached the process. */
+-    for (i = 0; i < gcdCORE_COUNT; i++)
++    for (i = 0; i < gcdGPU_COUNT; i++)
+     {
+         if (galDevice->kernels[i] != gcvNULL)
+         {
+@@ -225,7 +225,7 @@ OnError:
+ 
+     if (attached)
+     {
+-        for (i = 0; i < gcdCORE_COUNT; i++)
++        for (i = 0; i < gcdGPU_COUNT; i++)
+         {
+             if (galDevice->kernels[i] != gcvNULL)
+             {
+@@ -304,7 +304,7 @@ int drv_release(
+     }
+ 
+     /* A process gets detached. */
+-    for (i = 0; i < gcdCORE_COUNT; i++)
++    for (i = 0; i < gcdGPU_COUNT; i++)
+     {
+         if (galDevice->kernels[i] != gcvNULL)
+         {
+@@ -442,7 +442,7 @@ long drv_ioctl(
+     if (iface.command == gcvHAL_CHIP_INFO)
+     {
+         count = 0;
+-        for (i = 0; i < gcdCORE_COUNT; i++)
++        for (i = 0; i < gcdGPU_COUNT; i++)
+         {
+             if (device->kernels[i] != gcvNULL)
+             {
+@@ -959,7 +959,7 @@ static int __devinit gpu_suspend(struct platform_device *dev, pm_message_t state
+ 
+     device = platform_get_drvdata(dev);
+ 
+-    for (i = 0; i < gcdCORE_COUNT; i++)
++    for (i = 0; i < gcdGPU_COUNT; i++)
+     {
+         if (device->kernels[i] != gcvNULL)
+         {
+@@ -1010,7 +1010,7 @@ static int __devinit gpu_resume(struct platform_device *dev)
+ 
+     device = platform_get_drvdata(dev);
+ 
+-    for (i = 0; i < gcdCORE_COUNT; i++)
++    for (i = 0; i < gcdGPU_COUNT; i++)
+     {
+         if (device->kernels[i] != gcvNULL)
+         {
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index cbc7c84..6b97aa0 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -34,6 +34,7 @@
+ #include <linux/idr.h>
+ #include <mach/hardware.h>
+ #include <linux/workqueue.h>
++#include <linux/idr.h>
+ #if LINUX_VERSION_CODE > KERNEL_VERSION(2,6,23)
+ #include <linux/math64.h>
+ #endif
+@@ -161,6 +162,7 @@ struct _gckOS
+     gctUINT32                   kernelProcessID;
+ 
+     /* Signal management. */
++
+     /* Lock. */
+     gctPOINTER                  signalMutex;
+ 
+@@ -197,7 +199,6 @@ typedef struct _gcsSIGNAL
+ 
+     /* ID. */
+     gctUINT32 id;
+-
+ }
+ gcsSIGNAL;
+ 
+@@ -1063,9 +1064,9 @@ _FreeAllNonPagedMemoryCache(
+ 
+ #endif /* gcdUSE_NON_PAGED_MEMORY_CACHE */
+ 
+- /*******************************************************************************
+-+** Integer Id Management.
+-+*/
++/*******************************************************************************
++** Integer Id Management.
++*/
+ gceSTATUS
+ _AllocateIntegerId(
+     IN gcsINTEGER_DB_PTR Database,
+@@ -1108,7 +1109,6 @@ _QueryIntegerId(
+     OUT gctPOINTER * KernelPointer
+     )
+ {
+-    gceSTATUS status;
+     gctPOINTER pointer;
+ 
+     spin_lock(&Database->lock);
+@@ -1120,7 +1120,7 @@ _QueryIntegerId(
+     if(pointer)
+     {
+         *KernelPointer = pointer;
+-        status = gcvSTATUS_OK;
++        return gcvSTATUS_OK;
+     }
+     else
+     {
+@@ -1129,10 +1129,8 @@ _QueryIntegerId(
+                 "%s(%d) Id = %d is not found",
+                 __FUNCTION__, __LINE__, Id);
+ 
+-        status = gcvSTATUS_NOT_FOUND;
++        return gcvSTATUS_NOT_FOUND;
+     }
+-
+-    return status;
+ }
+ 
+ gceSTATUS
+@@ -1150,6 +1148,52 @@ _DestroyIntegerId(
+     return gcvSTATUS_OK;
+ }
+ 
++static void
++_UnmapUserLogical(
++    IN gctINT Pid,
++    IN gctPOINTER Logical,
++    IN gctUINT32  Size
++)
++{
++    struct task_struct *task;
++    struct mm_struct *mm;
++
++    /* Get the task_struct of the task with stored pid. */
++    rcu_read_lock();
++
++    task = FIND_TASK_BY_PID(Pid);
++
++    if (task == gcvNULL)
++    {
++        rcu_read_unlock();
++        return;
++    }
++
++    /* Get the mm_struct. */
++    mm = get_task_mm(task);
++
++    rcu_read_unlock();
++
++    if (mm == gcvNULL)
++    {
++        return;
++    }
++
++    down_write(&mm->mmap_sem);
++    if (do_munmap(mm, (unsigned long)Logical, Size) < 0)
++    {
++        gcmkTRACE_ZONE(
++                gcvLEVEL_WARNING, gcvZONE_OS,
++                "%s(%d): do_munmap failed",
++                __FUNCTION__, __LINE__
++                );
++    }
++    up_write(&mm->mmap_sem);
++
++    /* Dereference. */
++    mmput(mm);
++}
++
+ /*******************************************************************************
+ **
+ **  gckOS_Construct
+@@ -1329,7 +1373,6 @@ gckOS_Destroy(
+      */
+ 
+     /* Destroy the mutex. */
+-
+     gcmkVERIFY_OK(gckOS_DeleteMutex(Os, Os->signalMutex));
+ 
+     if (Os->heap != gcvNULL)
+@@ -1898,7 +1941,6 @@ gckOS_UnmapMemoryEx(
+ {
+     PLINUX_MDL_MAP          mdlMap;
+     PLINUX_MDL              mdl = (PLINUX_MDL)Physical;
+-    struct task_struct *    task;
+ 
+     gcmkHEADER_ARG("Os=0x%X Physical=0x%X Bytes=%lu Logical=0x%X PID=%d",
+                    Os, Physical, Bytes, Logical, PID);
+@@ -1924,24 +1966,7 @@ gckOS_UnmapMemoryEx(
+             return gcvSTATUS_INVALID_ARGUMENT;
+         }
+ 
+-        /* Get the current pointer for the task with stored pid. */
+-        task = FIND_TASK_BY_PID(mdlMap->pid);
+-
+-        if (task != gcvNULL && task->mm != gcvNULL)
+-        {
+-            down_write(&task->mm->mmap_sem);
+-            do_munmap(task->mm, (unsigned long)Logical, mdl->numPages*PAGE_SIZE);
+-            up_write(&task->mm->mmap_sem);
+-        }
+-        else
+-        {
+-            gcmkTRACE_ZONE(
+-                gcvLEVEL_INFO, gcvZONE_OS,
+-                "%s(%d): can't find the task with pid->%d. No unmapping",
+-                __FUNCTION__, __LINE__,
+-                mdlMap->pid
+-                );
+-        }
++        _UnmapUserLogical(PID, mdlMap->vmaAddr, mdl->numPages * PAGE_SIZE);
+ 
+         gcmkVERIFY_OK(_DestroyMdlMap(mdl, mdlMap));
+     }
+@@ -2287,7 +2312,6 @@ gceSTATUS gckOS_FreeNonPagedMemory(
+ {
+     PLINUX_MDL mdl;
+     PLINUX_MDL_MAP mdlMap;
+-    struct task_struct * task;
+ #ifdef NO_DMA_COHERENT
+     unsigned size;
+     gctPOINTER vaddr;
+@@ -2350,27 +2374,7 @@ gceSTATUS gckOS_FreeNonPagedMemory(
+     {
+         if (mdlMap->vmaAddr != gcvNULL)
+         {
+-            /* Get the current pointer for the task with stored pid. */
+-            task = FIND_TASK_BY_PID(mdlMap->pid);
+-
+-            if (task != gcvNULL && task->mm != gcvNULL)
+-            {
+-                down_write(&task->mm->mmap_sem);
+-
+-                if (do_munmap(task->mm,
+-                              (unsigned long)mdlMap->vmaAddr,
+-                              mdl->numPages * PAGE_SIZE) < 0)
+-                {
+-                    gcmkTRACE_ZONE(
+-                        gcvLEVEL_WARNING, gcvZONE_OS,
+-                        "%s(%d): do_munmap failed",
+-                        __FUNCTION__, __LINE__
+-                        );
+-                }
+-
+-                up_write(&task->mm->mmap_sem);
+-            }
+-
++            _UnmapUserLogical(mdlMap->pid, mdlMap->vmaAddr, mdl->numPages * PAGE_SIZE);
+             mdlMap->vmaAddr = gcvNULL;
+         }
+ 
+@@ -3761,13 +3765,18 @@ gckOS_Delay(
+     IN gctUINT32 Delay
+     )
+ {
+-    struct timeval now;
+-    unsigned long jiffies;
+-
+     gcmkHEADER_ARG("Os=0x%X Delay=%u", Os, Delay);
+ 
+     if (Delay > 0)
+     {
++#if gcdHIGH_PRECISION_DELAY_ENABLE
++        ktime_t wait = ns_to_ktime(Delay * 1000 * 1000);
++        set_current_state(TASK_INTERRUPTIBLE);
++        schedule_hrtimeout(&wait, HRTIMER_MODE_REL);
++#else
++        struct timeval now;
++        unsigned long jiffies;
++
+         /* Convert milliseconds into seconds and microseconds. */
+         now.tv_sec  = Delay / 1000;
+         now.tv_usec = (Delay % 1000) * 1000;
+@@ -3777,6 +3786,7 @@ gckOS_Delay(
+ 
+         /* Schedule timeout. */
+         schedule_timeout_interruptible(jiffies);
++#endif
+     }
+ 
+     /* Success. */
+@@ -4681,7 +4691,6 @@ gckOS_UnlockPages(
+ {
+     PLINUX_MDL_MAP          mdlMap;
+     PLINUX_MDL              mdl = (PLINUX_MDL)Physical;
+-    struct task_struct *    task;
+ 
+     gcmkHEADER_ARG("Os=0x%X Physical=0x%X Bytes=%u Logical=0x%X",
+                    Os, Physical, Bytes, Logical);
+@@ -4703,16 +4712,7 @@ gckOS_UnlockPages(
+     {
+         if ((mdlMap->vmaAddr != gcvNULL) && (_GetProcessID() == mdlMap->pid))
+         {
+-            /* Get the current pointer for the task with stored pid. */
+-            task = FIND_TASK_BY_PID(mdlMap->pid);
+-
+-            if (task != gcvNULL && task->mm != gcvNULL)
+-            {
+-                down_write(&task->mm->mmap_sem);
+-                do_munmap(task->mm, (unsigned long)mdlMap->vmaAddr, mdl->numPages * PAGE_SIZE);
+-                up_write(&task->mm->mmap_sem);
+-            }
+-
++            _UnmapUserLogical(mdlMap->pid, mdlMap->vmaAddr, mdl->numPages * PAGE_SIZE);
+             mdlMap->vmaAddr = gcvNULL;
+         }
+ 
+@@ -6908,8 +6908,8 @@ gckOS_GetThreadID(
+ **      gckOS Os
+ **          Pointer to a gckOS object.
+ **
+-**      gceCORE Core
+-**          Core type.
++**      gckCORE Core
++**          GPU whose power is set.
+ **
+ **      gctBOOL Clock
+ **          gcvTRUE to turn on the clock, or gcvFALSE to turn off the clock.
+@@ -7195,6 +7195,7 @@ gckOS_DestroySignal(
+     /* Success. */
+     gcmkFOOTER_NO();
+     return gcvSTATUS_OK;
++
+ OnError:
+     if (acquired)
+     {
+@@ -7600,7 +7601,6 @@ gckOS_MapSignal(
+ {
+     gceSTATUS status;
+     gcsSIGNAL_PTR signal;
+-
+     gcmkHEADER_ARG("Os=0x%X Signal=0x%X Process=0x%X", Os, Signal, Process);
+ 
+     gcmkVERIFY_ARGUMENT(Signal != gcvNULL);
+@@ -7608,7 +7608,7 @@ gckOS_MapSignal(
+ 
+     gcmkONERROR(_QueryIntegerId(&Os->signalDB, (gctUINT32)Signal, (gctPOINTER)&signal));
+ 
+-    if (atomic_inc_return(&signal->ref) <= 1)
++    if(atomic_inc_return(&signal->ref) <= 1)
+     {
+         /* The previous value is 0, it has been deleted. */
+         gcmkONERROR(gcvSTATUS_INVALID_ARGUMENT);
+@@ -7677,6 +7677,7 @@ gckOS_CreateUserSignal(
+     OUT gctINT * SignalID
+     )
+ {
++    /* Create a new signal. */
+     return gckOS_CreateSignal(Os, ManualReset, (gctSIGNAL *) SignalID);
+ }
+ 
+-- 
+1.7.7.4
+

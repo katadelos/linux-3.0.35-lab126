@@ -1,0 +1,47 @@
+From 5fed1e3fde2d63c80f414f204734d35ceecef561 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Fri, 8 Mar 2013 16:44:41 +0800
+Subject: [PATCH 2431/2463] ENGR00243315-3 MXC V4L2 Capture:Remove unnecessary
+ mclk setting
+
+commit f8e1a3bb62eecf93a31a51c4dbe08a0214fa1d57 added a hard
+coding for csi_parma.mclk setting to 27MHz. The comment added by
+that commit is totally wrong by telling that csi_param.mclk
+would be a kind of 'pixel clock' set in 'csi_data_dest' register.
+This patch removes the unnecessary mclk setting for csi_param.mclk
+variable, since it is only valid for CSI test mode.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+---
+ drivers/media/video/mxc/capture/mxc_v4l2_capture.c |   12 ++----------
+ 1 files changed, 2 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+index 59ba20863..40cd8e0 100644
+--- a/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
++++ b/drivers/media/video/mxc/capture/mxc_v4l2_capture.c
+@@ -1331,19 +1331,11 @@ static int mxc_v4l2_s_param(cam_data *cam, struct v4l2_streamparm *parm)
+ 	csi_param.csi = cam->csi;
+ 	csi_param.mclk = 0;
+ 
+-	/*This may not work on other platforms. Check when adding a new one.*/
+-	/*The mclk clock was never set correclty in the ipu register*/
+-	/*for now we are going to use this mclk as pixel clock*/
+-	/*to set csi0_data_dest register.*/
+-	/*This is a workaround which should be fixed*/
+ 	pr_debug("   clock_curr=mclk=%d\n", ifparm.u.bt656.clock_curr);
+-	if (ifparm.u.bt656.clock_curr == 0) {
++	if (ifparm.u.bt656.clock_curr == 0)
+ 		csi_param.clk_mode = IPU_CSI_CLK_MODE_CCIR656_INTERLACED;
+-		/*protocol bt656 use 27Mhz pixel clock */
+-		csi_param.mclk = 27000000;
+-	} else {
++	else
+ 		csi_param.clk_mode = IPU_CSI_CLK_MODE_GATED_CLK;
+-	}
+ 
+ 	csi_param.pixclk_pol = ifparm.u.bt656.latch_clk_inv;
+ 
+-- 
+1.7.7.4
+

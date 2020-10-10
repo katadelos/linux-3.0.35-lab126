@@ -1,0 +1,83 @@
+From 3b74e1b394c6522888a589da176b5dc7a37a9812 Mon Sep 17 00:00:00 2001
+From: Rong Dian <b38775@freescale.com>
+Date: Thu, 3 May 2012 20:04:27 +0800
+Subject: [PATCH 1416/2463] ENGR00181094-3:  MX6 SABRESD: remove MAX8903
+ interrupt pin config
+
+move max8903 interrupt pin config from board-mx6q_sabresd.c into
+sabresd_battery driver on SABRESD_rev.B board.
+
+Signed-off-by: Rong Dian <b38775@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig        |    2 +-
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |   34 +-------------------------------
+ 2 files changed, 2 insertions(+), 34 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 70be820..b5cf78f 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1286,7 +1286,7 @@ CONFIG_POWER_SUPPLY=y
+ # CONFIG_BATTERY_MAX17042 is not set
+ # CONFIG_CHARGER_ISP1704 is not set
+ # CONFIG_CHARGER_MAX8903 is not set
+-CONFIG_BATTERY_MAX8903=y
++CONFIG_SABRESD_MAX8903=y
+ # CONFIG_CHARGER_GPIO is not set
+ CONFIG_HWMON=y
+ # CONFIG_HWMON_VID is not set
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 83746e9..37e4e28 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -46,7 +46,7 @@
+ #include <linux/memblock.h>
+ #include <linux/gpio.h>
+ #include <linux/etherdevice.h>
+-#include <linux/power/max8903_battery.h>
++#include <linux/power/sabresd_battery.h>
+ #include <linux/regulator/anatop-regulator.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/regulator/machine.h>
+@@ -1629,38 +1629,6 @@ static void __init mx6_sabresd_board_init(void)
+ 		gpio_direction_input(SABRESD_PFUZE_INT);
+ 		mx6q_sabresd_init_pfuze100(SABRESD_PFUZE_INT);
+ 	}
+-	/* set DOK gpio input */
+-	ret = gpio_request(SABRESD_CHARGE_DOK_B, "max8903-DOK");
+-	if (ret) {
+-		printk(KERN_ERR"request max8903-DOK error!!\n");
+-		return;
+-	} else {
+-		gpio_direction_input(SABRESD_CHARGE_DOK_B);
+-	}
+-	/* set UOK gpio input */
+-	ret = gpio_request(SABRESD_CHARGE_UOK_B, "max8903-UOK");
+-	if (ret) {
+-		printk(KERN_ERR"request max8903-UOK error!!\n");
+-		return;
+-	} else {
+-		gpio_direction_input(SABRESD_CHARGE_UOK_B);
+-	}
+-	/* set FLT gpio input */
+-	ret = gpio_request(SABRESD_CHARGE_FLT_1_B, "max8903-FLT");
+-	if (ret) {
+-		printk(KERN_ERR"request max8903-FLT error!!\n");
+-		return;
+-	} else {
+-		gpio_direction_input(SABRESD_CHARGE_FLT_1_B);
+-	}
+-	/* set CHG gpio input */
+-	ret = gpio_request(SABRESD_CHARGE_CHG_1_B, "max8903-CHG");
+-	if (ret) {
+-		printk(KERN_ERR"request max8903-CHG error!!\n");
+-		return;
+-	} else {
+-		gpio_direction_input(SABRESD_CHARGE_CHG_1_B);
+-	}
+ 	/* SPI */
+ 	imx6q_add_ecspi(0, &mx6q_sabresd_spi_data);
+ 	spi_device_init();
+-- 
+1.7.7.4
+

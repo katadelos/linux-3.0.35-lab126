@@ -1,0 +1,851 @@
+From 97565401c7498065b2f817e495b9ccd344ede039 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Thu, 1 Dec 2011 19:52:39 +0800
+Subject: [PATCH 0694/2463] ENGR00163669-1 mxc fb: remove
+ FB_EVENT_PREMODE_CHANGE for mxc fb drivers
+
+remove FB_EVENT_PREMODE_CHANGE for mxc ldb/tve drivers
+add dispdrv setup interface for ldb/tve drivers
+re-structure the dispdrv framework for display devices
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/video/fbmem.c             |   11 ----
+ drivers/video/mxc/ldb.c           |   98 +++++++++++++++++++++----------------
+ drivers/video/mxc/mipi_dsi.c      |   17 +++---
+ drivers/video/mxc/mipi_dsi.h      |    2 +-
+ drivers/video/mxc/mxc_dispdrv.c   |   94 +++++++++++++++++------------------
+ drivers/video/mxc/mxc_dispdrv.h   |   35 ++++++++-----
+ drivers/video/mxc/mxc_dvi.c       |    9 ++--
+ drivers/video/mxc/mxc_ipuv3_fb.c  |   22 +++++++--
+ drivers/video/mxc/mxc_lcdif.c     |    9 ++--
+ drivers/video/mxc/mxcfb_sii902x.c |    9 ++--
+ drivers/video/mxc/tve.c           |   37 +++++++++-----
+ drivers/video/mxc_hdmi.c          |   10 ++--
+ include/linux/fb.h                |    2 -
+ 13 files changed, 193 insertions(+), 162 deletions(-)
+
+diff --git a/drivers/video/fbmem.c b/drivers/video/fbmem.c
+index c4be50b..7a41220 100644
+--- a/drivers/video/fbmem.c
++++ b/drivers/video/fbmem.c
+@@ -991,17 +991,6 @@ fb_set_var(struct fb_info *info, struct fb_var_screeninfo *var)
+ 			old_var = info->var;
+ 			info->var = *var;
+ 
+-			/* call pre-mode change */
+-			if (flags & FBINFO_MISC_USEREVENT) {
+-				struct fb_event event;
+-				int evnt = FB_EVENT_PREMODE_CHANGE;
+-
+-				info->flags &= ~FBINFO_MISC_USEREVENT;
+-				event.info = info;
+-				event.data = &mode;
+-				fb_notifier_call_chain(evnt, &event);
+-			}
+-
+ 			if (info->fbops->fb_set_par) {
+ 				ret = info->fbops->fb_set_par(info);
+ 
+diff --git a/drivers/video/mxc/ldb.c b/drivers/video/mxc/ldb.c
+index fe6efe9..7912cdb 100644
+--- a/drivers/video/mxc/ldb.c
++++ b/drivers/video/mxc/ldb.c
+@@ -80,7 +80,7 @@
+ 
+ struct ldb_data {
+ 	struct platform_device *pdev;
+-	struct mxc_dispdrv_entry *disp_ldb;
++	struct mxc_dispdrv_handle *disp_ldb;
+ 	uint32_t *reg;
+ 	uint32_t *control_reg;
+ 	uint32_t *gpr3_reg;
+@@ -209,6 +209,55 @@ static int find_ldb_setting(struct ldb_data *ldb, struct fb_info *fbi)
+ 	return -EINVAL;
+ }
+ 
++static int ldb_disp_setup(struct mxc_dispdrv_handle *disp, struct fb_info *fbi)
++{
++	uint32_t reg;
++	uint32_t pixel_clk, rounded_pixel_clk;
++	struct clk *ldb_clk_parent;
++	struct ldb_data *ldb = mxc_dispdrv_getdata(disp);
++	int setting_idx, di;
++
++	setting_idx = find_ldb_setting(ldb, fbi);
++	if (setting_idx < 0)
++		return setting_idx;
++
++	di = ldb->setting[setting_idx].di;
++
++	/* vsync setup */
++	reg = readl(ldb->control_reg);
++	if (fbi->var.sync & FB_SYNC_VERT_HIGH_ACT) {
++		if (di == 0)
++			reg = (reg & ~LDB_DI0_VS_POL_MASK)
++				| LDB_DI0_VS_POL_ACT_HIGH;
++		else
++			reg = (reg & ~LDB_DI1_VS_POL_MASK)
++				| LDB_DI1_VS_POL_ACT_HIGH;
++	} else {
++		if (di == 0)
++			reg = (reg & ~LDB_DI0_VS_POL_MASK)
++				| LDB_DI0_VS_POL_ACT_LOW;
++		else
++			reg = (reg & ~LDB_DI1_VS_POL_MASK)
++				| LDB_DI1_VS_POL_ACT_LOW;
++	}
++	writel(reg, ldb->control_reg);
++
++	/* clk setup */
++	pixel_clk = (PICOS2KHZ(fbi->var.pixclock)) * 1000UL;
++	ldb_clk_parent = clk_get_parent(ldb->ldb_di_clk[di]);
++	if ((ldb->mode == LDB_SPL_DI0) || (ldb->mode == LDB_SPL_DI1))
++		clk_set_rate(ldb_clk_parent, pixel_clk * 7 / 2);
++	else
++		clk_set_rate(ldb_clk_parent, pixel_clk * 7);
++	rounded_pixel_clk = clk_round_rate(ldb->ldb_di_clk[di],
++			pixel_clk);
++	clk_set_rate(ldb->ldb_di_clk[di], rounded_pixel_clk);
++	clk_enable(ldb->ldb_di_clk[di]);
++	ldb->setting[setting_idx].clk_en = true;
++
++	return 0;
++}
++
+ int ldb_fb_event(struct notifier_block *nb, unsigned long val, void *v)
+ {
+ 	struct ldb_data *ldb = container_of(nb, struct ldb_data, nb);
+@@ -237,45 +286,6 @@ int ldb_fb_event(struct notifier_block *nb, unsigned long val, void *v)
+ 	}
+ 
+ 	switch (val) {
+-	case FB_EVENT_PREMODE_CHANGE:
+-	{
+-		uint32_t reg;
+-		uint32_t pixel_clk, rounded_pixel_clk;
+-		struct clk *ldb_clk_parent;
+-
+-		/* vsync setup */
+-		reg = readl(ldb->control_reg);
+-		if (fbi->var.sync & FB_SYNC_VERT_HIGH_ACT) {
+-			if (di == 0)
+-				reg = (reg & ~LDB_DI0_VS_POL_MASK)
+-					| LDB_DI0_VS_POL_ACT_HIGH;
+-			else
+-				reg = (reg & ~LDB_DI1_VS_POL_MASK)
+-					| LDB_DI1_VS_POL_ACT_HIGH;
+-		} else {
+-			if (di == 0)
+-				reg = (reg & ~LDB_DI0_VS_POL_MASK)
+-					| LDB_DI0_VS_POL_ACT_LOW;
+-			else
+-				reg = (reg & ~LDB_DI1_VS_POL_MASK)
+-					| LDB_DI1_VS_POL_ACT_LOW;
+-		}
+-		writel(reg, ldb->control_reg);
+-
+-		/* clk setup */
+-		pixel_clk = (PICOS2KHZ(fbi->var.pixclock)) * 1000UL;
+-		ldb_clk_parent = clk_get_parent(ldb->ldb_di_clk[di]);
+-		if ((ldb->mode == LDB_SPL_DI0) || (ldb->mode == LDB_SPL_DI1))
+-			clk_set_rate(ldb_clk_parent, pixel_clk * 7 / 2);
+-		else
+-			clk_set_rate(ldb_clk_parent, pixel_clk * 7);
+-		rounded_pixel_clk = clk_round_rate(ldb->ldb_di_clk[di],
+-				pixel_clk);
+-		clk_set_rate(ldb->ldb_di_clk[di], rounded_pixel_clk);
+-		clk_enable(ldb->ldb_di_clk[di]);
+-		ldb->setting[setting_idx].clk_en = true;
+-		break;
+-	}
+ 	case FB_EVENT_BLANK:
+ 	{
+ 		if (*((int *)event->data) == FB_BLANK_UNBLANK) {
+@@ -406,11 +416,11 @@ static int ldb_ipu_ldb_route(int ipu, int di, struct ldb_data *ldb)
+ 	return 0;
+ }
+ 
+-static int ldb_disp_init(struct mxc_dispdrv_entry *disp)
++static int ldb_disp_init(struct mxc_dispdrv_handle *disp,
++	struct mxc_dispdrv_setting *setting)
+ {
+ 	int ret = 0, i;
+ 	struct ldb_data *ldb = mxc_dispdrv_getdata(disp);
+-	struct mxc_dispdrv_setting *setting = mxc_dispdrv_getsetting(disp);
+ 	struct fsl_mxc_ldb_platform_data *plat_data = ldb->pdev->dev.platform_data;
+ 	struct resource *res;
+ 	uint32_t base_addr;
+@@ -687,7 +697,7 @@ static int ldb_disp_init(struct mxc_dispdrv_entry *disp)
+ 	return ret;
+ }
+ 
+-static void ldb_disp_deinit(struct mxc_dispdrv_entry *disp)
++static void ldb_disp_deinit(struct mxc_dispdrv_handle *disp)
+ {
+ 	struct ldb_data *ldb = mxc_dispdrv_getdata(disp);
+ 	int i;
+@@ -708,6 +718,7 @@ static struct mxc_dispdrv_driver ldb_drv = {
+ 	.name 	= DISPDRV_LDB,
+ 	.init 	= ldb_disp_init,
+ 	.deinit	= ldb_disp_deinit,
++	.setup = ldb_disp_setup,
+ };
+ 
+ /*!
+@@ -744,6 +755,7 @@ static int ldb_remove(struct platform_device *pdev)
+ {
+ 	struct ldb_data *ldb = dev_get_drvdata(&pdev->dev);
+ 
++	mxc_dispdrv_puthandle(ldb->disp_ldb);
+ 	mxc_dispdrv_unregister(ldb->disp_ldb);
+ 	kfree(ldb);
+ 	return 0;
+diff --git a/drivers/video/mxc/mipi_dsi.c b/drivers/video/mxc/mipi_dsi.c
+index 8483041..757f65c 100644
+--- a/drivers/video/mxc/mipi_dsi.c
++++ b/drivers/video/mxc/mipi_dsi.c
+@@ -486,7 +486,8 @@ static void mipi_dsi_power_off(struct mipi_dsi_info *mipi_dsi)
+ 	}
+ }
+ 
+-static int mipi_dsi_lcd_init(struct mipi_dsi_info *mipi_dsi)
++static int mipi_dsi_lcd_init(struct mipi_dsi_info *mipi_dsi,
++	struct mxc_dispdrv_setting *setting)
+ {
+ 	int		err;
+ 	int		size;
+@@ -494,9 +495,7 @@ static int mipi_dsi_lcd_init(struct mipi_dsi_info *mipi_dsi)
+ 	struct  fb_videomode *mipi_lcd_modedb;
+ 	struct  fb_videomode mode;
+ 	struct  device		 *dev = &mipi_dsi->pdev->dev;
+-	struct  mxc_dispdrv_setting	  *setting;
+ 
+-	setting = mxc_dispdrv_getsetting(mipi_dsi->disp_mipi);
+ 	for (i = 0; i < ARRAY_SIZE(mipi_dsi_lcd_db); i++) {
+ 		if (!strcmp(mipi_dsi->lcd_panel,
+ 			mipi_dsi_lcd_db[i].lcd_panel)) {
+@@ -589,7 +588,8 @@ static int mipi_dsi_fb_event(struct notifier_block *nb,
+ 	return 0;
+ }
+ 
+-static int mipi_dsi_disp_init(struct mxc_dispdrv_entry *disp)
++static int mipi_dsi_disp_init(struct mxc_dispdrv_handle *disp,
++	struct mxc_dispdrv_setting *setting)
+ {
+ 	int	   err;
+ 	char   dphy_clk[] = "mipi_pllref_clk";
+@@ -597,12 +597,10 @@ static int mipi_dsi_disp_init(struct mxc_dispdrv_entry *disp)
+ 	struct resource *res_irq;
+ 	struct device	*dev;
+ 	struct mipi_dsi_info		  *mipi_dsi;
+-	struct mxc_dispdrv_setting	  *setting;
+ 	struct mipi_dsi_platform_data *pdata;
+ 
+ 	mipi_dsi = mxc_dispdrv_getdata(disp);
+-	setting = mxc_dispdrv_getsetting(disp);
+-	if (IS_ERR(mipi_dsi) || IS_ERR(setting)) {
++	if (IS_ERR(mipi_dsi)) {
+ 		pr_err("failed to get dispdrv data\n");
+ 		return -EINVAL;
+ 	}
+@@ -768,7 +766,7 @@ static int mipi_dsi_disp_init(struct mxc_dispdrv_entry *disp)
+ 		goto err_req_irq;
+ 	}
+ 
+-	err = mipi_dsi_lcd_init(mipi_dsi);
++	err = mipi_dsi_lcd_init(mipi_dsi, setting);
+ 	if (err < 0) {
+ 		dev_err(dev, "failed to init mipi dsi lcd\n");
+ 		goto err_dsi_lcd;
+@@ -808,7 +806,7 @@ err_ioremap:
+ 	return err;
+ }
+ 
+-static void mipi_dsi_disp_deinit(struct mxc_dispdrv_entry *disp)
++static void mipi_dsi_disp_deinit(struct mxc_dispdrv_handle *disp)
+ {
+ 	struct mipi_dsi_info    *mipi_dsi;
+ 	struct resource			*res;
+@@ -895,6 +893,7 @@ static int __devexit mipi_dsi_remove(struct platform_device *pdev)
+ {
+ 	struct mipi_dsi_info *mipi_dsi = dev_get_drvdata(&pdev->dev);
+ 
++	mxc_dispdrv_puthandle(mipi_dsi->disp_mipi);
+ 	mxc_dispdrv_unregister(mipi_dsi->disp_mipi);
+ 	kfree(mipi_dsi);
+ 	dev_set_drvdata(&pdev->dev, NULL);
+diff --git a/drivers/video/mxc/mipi_dsi.h b/drivers/video/mxc/mipi_dsi.h
+index a70a755..2dfa49f 100644
+--- a/drivers/video/mxc/mipi_dsi.h
++++ b/drivers/video/mxc/mipi_dsi.h
+@@ -69,7 +69,7 @@ struct mipi_dsi_info {
+ 	struct clk			*dphy_clk;
+ 	void __iomem			*mmio_base;
+ 	struct platform_device		*pdev;
+-	struct mxc_dispdrv_entry	*disp_mipi;
++	struct mxc_dispdrv_handle	*disp_mipi;
+ 	struct notifier_block		nb;
+ 	struct  fb_videomode		*mode;
+ 	struct  mipi_lcd_config		*lcd_config;
+diff --git a/drivers/video/mxc/mxc_dispdrv.c b/drivers/video/mxc/mxc_dispdrv.c
+index 06b7af9..3a8a8d2 100644
+--- a/drivers/video/mxc/mxc_dispdrv.c
++++ b/drivers/video/mxc/mxc_dispdrv.c
+@@ -22,8 +22,9 @@
+  * Move all dev_suspend() things into fb_notifier for SUSPEND, if there is;
+  * Move all dev_resume() things into fb_notifier for RESUME, if there is;
+  *
+- * ipuv3 fb driver could call mxc_dispdrv_init(setting) before a fb need be added, with fbi param
+- * passing by setting, after mxc_dispdrv_init() return, FB driver should get the basic setting
++ * ipuv3 fb driver could call mxc_dispdrv_gethandle(name, setting) before a fb
++ * need be added, with fbi param passing by setting, after
++ * mxc_dispdrv_gethandle() return, FB driver should get the basic setting
+  * about fbi info and ipuv3-hw (ipu_id and disp_id).
+  *
+  * @ingroup Framebuffer
+@@ -42,16 +43,14 @@ static LIST_HEAD(dispdrv_list);
+ static DEFINE_MUTEX(dispdrv_lock);
+ 
+ struct mxc_dispdrv_entry {
+-	const char *name;
+-	struct list_head list;
+-	int (*init) (struct mxc_dispdrv_entry *);
+-	void (*deinit) (struct mxc_dispdrv_entry *);
++	/* Note: drv always the first element */
++	struct mxc_dispdrv_driver *drv;
+ 	bool active;
+-	struct mxc_dispdrv_setting setting;
+ 	void *priv;
++	struct list_head list;
+ };
+ 
+-struct mxc_dispdrv_entry *mxc_dispdrv_register(struct mxc_dispdrv_driver *drv)
++struct mxc_dispdrv_handle *mxc_dispdrv_register(struct mxc_dispdrv_driver *drv)
+ {
+ 	struct mxc_dispdrv_entry *new;
+ 
+@@ -63,23 +62,21 @@ struct mxc_dispdrv_entry *mxc_dispdrv_register(struct mxc_dispdrv_driver *drv)
+ 		return ERR_PTR(-ENOMEM);
+ 	}
+ 
+-	new->name = drv->name;
+-	new->init = drv->init;
+-	new->deinit = drv->deinit;
+-
++	new->drv = drv;
+ 	list_add_tail(&new->list, &dispdrv_list);
++
+ 	mutex_unlock(&dispdrv_lock);
+ 
+-	return new;
++	return (struct mxc_dispdrv_handle *)new;
+ }
+ EXPORT_SYMBOL_GPL(mxc_dispdrv_register);
+ 
+-int mxc_dispdrv_unregister(struct mxc_dispdrv_entry *entry)
++int mxc_dispdrv_unregister(struct mxc_dispdrv_handle *handle)
+ {
++	struct mxc_dispdrv_entry *entry = (struct mxc_dispdrv_entry *)handle;
++
+ 	if (entry) {
+ 		mutex_lock(&dispdrv_lock);
+-		if (entry->active && entry->deinit)
+-			entry->deinit(entry);
+ 		list_del(&entry->list);
+ 		mutex_unlock(&dispdrv_lock);
+ 		kfree(entry);
+@@ -89,41 +86,48 @@ int mxc_dispdrv_unregister(struct mxc_dispdrv_entry *entry)
+ }
+ EXPORT_SYMBOL_GPL(mxc_dispdrv_unregister);
+ 
+-int mxc_dispdrv_init(char *name, struct mxc_dispdrv_setting *setting)
++struct mxc_dispdrv_handle *mxc_dispdrv_gethandle(char *name,
++	struct mxc_dispdrv_setting *setting)
+ {
+-	int ret = 0, found = 0;
+-	struct mxc_dispdrv_entry *disp;
++	int ret, found = 0;
++	struct mxc_dispdrv_entry *entry;
+ 
+ 	mutex_lock(&dispdrv_lock);
+-	list_for_each_entry(disp, &dispdrv_list, list) {
+-		if (!strcmp(disp->name, name)) {
+-			if (disp->init) {
+-				memcpy(&disp->setting, setting,
+-						sizeof(struct mxc_dispdrv_setting));
+-				ret = disp->init(disp);
+-				if (ret >= 0) {
+-					disp->active = true;
+-					/* setting may need fix-up */
+-					memcpy(setting, &disp->setting,
+-							sizeof(struct mxc_dispdrv_setting));
+-					found = 1;
+-					break;
+-				}
++	list_for_each_entry(entry, &dispdrv_list, list) {
++		if (!strcmp(entry->drv->name, name) && (entry->drv->init)) {
++			ret = entry->drv->init((struct mxc_dispdrv_handle *)
++				entry, setting);
++			if (ret >= 0) {
++				entry->active = true;
++				found = 1;
++				break;
+ 			}
+ 		}
+ 	}
++	mutex_unlock(&dispdrv_lock);
+ 
+-	if (!found)
+-		ret = -EINVAL;
++	return found ? (struct mxc_dispdrv_handle *)entry:ERR_PTR(-ENODEV);
++}
++EXPORT_SYMBOL_GPL(mxc_dispdrv_gethandle);
+ 
++void mxc_dispdrv_puthandle(struct mxc_dispdrv_handle *handle)
++{
++	struct mxc_dispdrv_entry *entry = (struct mxc_dispdrv_entry *)handle;
++
++	mutex_lock(&dispdrv_lock);
++	if (entry && entry->active && entry->drv->deinit) {
++		entry->drv->deinit(handle);
++		entry->active = false;
++	}
+ 	mutex_unlock(&dispdrv_lock);
+ 
+-	return ret;
+ }
+-EXPORT_SYMBOL_GPL(mxc_dispdrv_init);
++EXPORT_SYMBOL_GPL(mxc_dispdrv_puthandle);
+ 
+-int mxc_dispdrv_setdata(struct mxc_dispdrv_entry *entry, void *data)
++int mxc_dispdrv_setdata(struct mxc_dispdrv_handle *handle, void *data)
+ {
++	struct mxc_dispdrv_entry *entry = (struct mxc_dispdrv_entry *)handle;
++
+ 	if (entry) {
+ 		entry->priv = data;
+ 		return 0;
+@@ -132,21 +136,13 @@ int mxc_dispdrv_setdata(struct mxc_dispdrv_entry *entry, void *data)
+ }
+ EXPORT_SYMBOL_GPL(mxc_dispdrv_setdata);
+ 
+-void *mxc_dispdrv_getdata(struct mxc_dispdrv_entry *entry)
++void *mxc_dispdrv_getdata(struct mxc_dispdrv_handle *handle)
+ {
++	struct mxc_dispdrv_entry *entry = (struct mxc_dispdrv_entry *)handle;
++
+ 	if (entry) {
+ 		return entry->priv;
+ 	} else
+ 		return ERR_PTR(-EINVAL);
+ }
+ EXPORT_SYMBOL_GPL(mxc_dispdrv_getdata);
+-
+-struct mxc_dispdrv_setting
+-	*mxc_dispdrv_getsetting(struct mxc_dispdrv_entry *entry)
+-{
+-	if (entry) {
+-		return &entry->setting;
+-	} else
+-		return ERR_PTR(-EINVAL);
+-}
+-EXPORT_SYMBOL_GPL(mxc_dispdrv_getsetting);
+diff --git a/drivers/video/mxc/mxc_dispdrv.h b/drivers/video/mxc/mxc_dispdrv.h
+index f5f62a2..c6d05fa 100644
+--- a/drivers/video/mxc/mxc_dispdrv.h
++++ b/drivers/video/mxc/mxc_dispdrv.h
+@@ -12,13 +12,10 @@
+  */
+ #ifndef __MXC_DISPDRV_H__
+ #define __MXC_DISPDRV_H__
++#include <linux/fb.h>
+ 
+-struct mxc_dispdrv_entry;
+-
+-struct mxc_dispdrv_driver {
+-	const char *name;
+-	int (*init) (struct mxc_dispdrv_entry *);
+-	void (*deinit) (struct mxc_dispdrv_entry *);
++struct mxc_dispdrv_handle {
++	struct mxc_dispdrv_driver *drv;
+ };
+ 
+ struct mxc_dispdrv_setting {
+@@ -33,11 +30,23 @@ struct mxc_dispdrv_setting {
+ 	int disp_id;
+ };
+ 
+-struct mxc_dispdrv_entry *mxc_dispdrv_register(struct mxc_dispdrv_driver *drv);
+-int mxc_dispdrv_unregister(struct mxc_dispdrv_entry *entry);
+-int mxc_dispdrv_init(char *name, struct mxc_dispdrv_setting *setting);
+-int mxc_dispdrv_setdata(struct mxc_dispdrv_entry *entry, void *data);
+-void *mxc_dispdrv_getdata(struct mxc_dispdrv_entry *entry);
+-struct mxc_dispdrv_setting
+-	*mxc_dispdrv_getsetting(struct mxc_dispdrv_entry *entry);
++struct mxc_dispdrv_driver {
++	const char *name;
++	int (*init) (struct mxc_dispdrv_handle *, struct mxc_dispdrv_setting *);
++	void (*deinit) (struct mxc_dispdrv_handle *);
++	/* display driver enable function for extension */
++	int (*enable) (struct mxc_dispdrv_handle *);
++	/* display driver disable function, called at early part of fb_blank */
++	void (*disable) (struct mxc_dispdrv_handle *);
++	/* display driver setup function, called at early part of fb_set_par */
++	int (*setup) (struct mxc_dispdrv_handle *, struct fb_info *fbi);
++};
++
++struct mxc_dispdrv_handle *mxc_dispdrv_register(struct mxc_dispdrv_driver *drv);
++int mxc_dispdrv_unregister(struct mxc_dispdrv_handle *handle);
++struct mxc_dispdrv_handle *mxc_dispdrv_gethandle(char *name,
++	struct mxc_dispdrv_setting *setting);
++void mxc_dispdrv_puthandle(struct mxc_dispdrv_handle *handle);
++int mxc_dispdrv_setdata(struct mxc_dispdrv_handle *handle, void *data);
++void *mxc_dispdrv_getdata(struct mxc_dispdrv_handle *handle);
+ #endif
+diff --git a/drivers/video/mxc/mxc_dvi.c b/drivers/video/mxc/mxc_dvi.c
+index a392cb9..923db43 100644
+--- a/drivers/video/mxc/mxc_dvi.c
++++ b/drivers/video/mxc/mxc_dvi.c
+@@ -53,7 +53,7 @@
+ struct mxc_dvi_data {
+ 	struct i2c_client *client;
+ 	struct platform_device *pdev;
+-	struct mxc_dispdrv_entry *disp_dvi;
++	struct mxc_dispdrv_handle *disp_dvi;
+ 	struct delayed_work det_work;
+ 	struct fb_info *fbi;
+ 	struct mxc_edid_cfg edid_cfg;
+@@ -179,11 +179,11 @@ static irqreturn_t mxc_dvi_detect_handler(int irq, void *data)
+ 	return IRQ_HANDLED;
+ }
+ 
+-static int dvi_init(struct mxc_dispdrv_entry *disp)
++static int dvi_init(struct mxc_dispdrv_handle *disp,
++	struct mxc_dispdrv_setting *setting)
+ {
+ 	int ret = 0;
+ 	struct mxc_dvi_data *dvi = mxc_dispdrv_getdata(disp);
+-	struct mxc_dispdrv_setting *setting = mxc_dispdrv_getsetting(disp);
+ 	struct fsl_mxc_dvi_platform_data *plat = dvi->client->dev.platform_data;
+ 
+ 	setting->dev_id = dvi->ipu = plat->ipu_id;
+@@ -282,7 +282,7 @@ err:
+ 	return ret;
+ }
+ 
+-static void dvi_deinit(struct mxc_dispdrv_entry *disp)
++static void dvi_deinit(struct mxc_dispdrv_handle *disp)
+ {
+ 	struct mxc_dvi_data *dvi = mxc_dispdrv_getdata(disp);
+ 
+@@ -340,6 +340,7 @@ static int __devexit mxc_dvi_remove(struct i2c_client *client)
+ {
+ 	struct mxc_dvi_data *dvi = i2c_get_clientdata(client);
+ 
++	mxc_dispdrv_puthandle(dvi->disp_dvi);
+ 	mxc_dispdrv_unregister(dvi->disp_dvi);
+ 	platform_device_unregister(dvi->pdev);
+ 	kfree(dvi);
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index c43b2aa..ba652d7 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -91,6 +91,8 @@ struct mxcfb_info {
+ 
+ 	void *ipu;
+ 	struct fb_info *ovfbi;
++
++	struct mxc_dispdrv_handle *dispdrv;
+ };
+ 
+ struct mxcfb_alloc_list {
+@@ -288,6 +290,15 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 
+ 	dev_dbg(fbi->device, "Reconfiguring framebuffer\n");
+ 
++	if (mxc_fbi->dispdrv && mxc_fbi->dispdrv->drv->setup) {
++		retval = mxc_fbi->dispdrv->drv->setup(mxc_fbi->dispdrv, fbi);
++		if (retval < 0) {
++			dev_err(fbi->device, "setup error, dispdrv:%s.\n",
++					mxc_fbi->dispdrv->drv->name);
++			return -EINVAL;
++		}
++	}
++
+ 	ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+ 	ipu_disable_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+ 	ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_nf_irq);
+@@ -1152,6 +1163,8 @@ static int mxcfb_blank(int blank, struct fb_info *info)
+ 	case FB_BLANK_VSYNC_SUSPEND:
+ 	case FB_BLANK_HSYNC_SUSPEND:
+ 	case FB_BLANK_NORMAL:
++		if (mxc_fbi->dispdrv && mxc_fbi->dispdrv->drv->disable)
++			mxc_fbi->dispdrv->drv->disable(mxc_fbi->dispdrv);
+ 		ipu_disable_channel(mxc_fbi->ipu, mxc_fbi->ipu_ch, true);
+ 		if (mxc_fbi->ipu_di >= 0)
+ 			ipu_uninit_sync_panel(mxc_fbi->ipu, mxc_fbi->ipu_di);
+@@ -1656,10 +1669,11 @@ static int mxcfb_dispdrv_init(struct platform_device *pdev,
+ 
+ 	dev_info(&pdev->dev, "register mxc display driver %s\n", disp_dev);
+ 
+-	ret = mxc_dispdrv_init(disp_dev, &setting);
+-	if (ret < 0) {
+-		dev_err(&pdev->dev,
+-			"register mxc display driver failed with %d\n", ret);
++	mxcfbi->dispdrv = mxc_dispdrv_gethandle(disp_dev, &setting);
++	if (IS_ERR(mxcfbi->dispdrv)) {
++		ret = PTR_ERR(mxcfbi->dispdrv);
++		dev_err(&pdev->dev, "NO mxc display driver found!\n");
++		return ret;
+ 	} else {
+ 		/* fix-up  */
+ 		mxcfbi->ipu_di_pix_fmt = setting.if_fmt;
+diff --git a/drivers/video/mxc/mxc_lcdif.c b/drivers/video/mxc/mxc_lcdif.c
+index d9d7fa3..5cbdc73 100644
+--- a/drivers/video/mxc/mxc_lcdif.c
++++ b/drivers/video/mxc/mxc_lcdif.c
+@@ -21,7 +21,7 @@
+ 
+ struct mxc_lcdif_data {
+ 	struct platform_device *pdev;
+-	struct mxc_dispdrv_entry *disp_lcdif;
++	struct mxc_dispdrv_handle *disp_lcdif;
+ };
+ 
+ #define DISPDRV_LCD	"lcd"
+@@ -42,11 +42,11 @@ static struct fb_videomode lcdif_modedb[] = {
+ };
+ static int lcdif_modedb_sz = ARRAY_SIZE(lcdif_modedb);
+ 
+-static int lcdif_init(struct mxc_dispdrv_entry *disp)
++static int lcdif_init(struct mxc_dispdrv_handle *disp,
++	struct mxc_dispdrv_setting *setting)
+ {
+ 	int ret, i;
+ 	struct mxc_lcdif_data *lcdif = mxc_dispdrv_getdata(disp);
+-	struct mxc_dispdrv_setting *setting = mxc_dispdrv_getsetting(disp);
+ 	struct fsl_mxc_lcd_platform_data *plat_data
+ 			= lcdif->pdev->dev.platform_data;
+ 	struct fb_videomode *modedb = lcdif_modedb;
+@@ -77,7 +77,7 @@ static int lcdif_init(struct mxc_dispdrv_entry *disp)
+ 	return ret;
+ }
+ 
+-void lcdif_deinit(struct mxc_dispdrv_entry *disp)
++void lcdif_deinit(struct mxc_dispdrv_handle *disp)
+ {
+ 	/*TODO*/
+ }
+@@ -113,6 +113,7 @@ static int mxc_lcdif_remove(struct platform_device *pdev)
+ {
+ 	struct mxc_lcdif_data *lcdif = dev_get_drvdata(&pdev->dev);
+ 
++	mxc_dispdrv_puthandle(lcdif->disp_lcdif);
+ 	mxc_dispdrv_unregister(lcdif->disp_lcdif);
+ 	kfree(lcdif);
+ 	return 0;
+diff --git a/drivers/video/mxc/mxcfb_sii902x.c b/drivers/video/mxc/mxcfb_sii902x.c
+index f626f64..f917674 100644
+--- a/drivers/video/mxc/mxcfb_sii902x.c
++++ b/drivers/video/mxc/mxcfb_sii902x.c
+@@ -188,7 +188,7 @@
+ struct sii902x_data {
+ 	struct platform_device *pdev;
+ 	struct i2c_client *client;
+-	struct mxc_dispdrv_entry *disp_hdmi;
++	struct mxc_dispdrv_handle *disp_hdmi;
+ 	struct regulator *io_reg;
+ 	struct regulator *analog_reg;
+ 	struct delayed_work det_work;
+@@ -1064,11 +1064,11 @@ static int sii902x_TPI_init(struct i2c_client *client)
+ 	return 0;
+ }
+ 
+-static int sii902x_disp_init(struct mxc_dispdrv_entry *disp)
++static int sii902x_disp_init(struct mxc_dispdrv_handle *disp,
++	struct mxc_dispdrv_setting *setting)
+ {
+ 	int ret = 0;
+ 	struct sii902x_data *sii902x = mxc_dispdrv_getdata(disp);
+-	struct mxc_dispdrv_setting *setting = mxc_dispdrv_getsetting(disp);
+ 	struct fsl_mxc_lcd_platform_data *plat = sii902x->client->dev.platform_data;
+ 	bool found = false;
+ 	static bool inited;
+@@ -1215,7 +1215,7 @@ register_pltdev_failed:
+ 	return ret;
+ }
+ 
+-static void sii902x_disp_deinit(struct mxc_dispdrv_entry *disp)
++static void sii902x_disp_deinit(struct mxc_dispdrv_handle *disp)
+ {
+ 	struct sii902x_data *sii902x = mxc_dispdrv_getdata(disp);
+ 	struct fsl_mxc_lcd_platform_data *plat = sii902x->client->dev.platform_data;
+@@ -1273,6 +1273,7 @@ static int __devexit sii902x_remove(struct i2c_client *client)
+ {
+ 	struct sii902x_data *sii902x = i2c_get_clientdata(client);
+ 
++	mxc_dispdrv_puthandle(sii902x->disp_hdmi);
+ 	mxc_dispdrv_unregister(sii902x->disp_hdmi);
+ 	kfree(sii902x);
+ 	return 0;
+diff --git a/drivers/video/mxc/tve.c b/drivers/video/mxc/tve.c
+index 98b506d..7a5c3b5 100644
+--- a/drivers/video/mxc/tve.c
++++ b/drivers/video/mxc/tve.c
+@@ -120,8 +120,8 @@ struct tve_data {
+ 	struct delayed_work cd_work;
+ 	struct tve_reg_mapping *regs;
+ 	struct tve_reg_fields_mapping *reg_fields;
+-	struct mxc_dispdrv_entry *disp_tve;
+-	struct mxc_dispdrv_entry *disp_vga;
++	struct mxc_dispdrv_handle *disp_tve;
++	struct mxc_dispdrv_handle *disp_vga;
+ 	struct notifier_block nb;
+ };
+ 
+@@ -934,6 +934,15 @@ int tve_fb_setup(struct tve_data *tve, struct fb_info *fbi)
+ 	return 0;
+ }
+ 
++static inline int tve_disp_setup(struct mxc_dispdrv_handle *disp,
++	struct fb_info *fbi)
++{
++	struct tve_data *tve = mxc_dispdrv_getdata(disp);
++
++	tve_fb_setup(tve, fbi);
++	return 0;
++}
++
+ int tve_fb_event(struct notifier_block *nb, unsigned long val, void *v)
+ {
+ 	struct tve_data *tve = container_of(nb, struct tve_data, nb);
+@@ -945,11 +954,6 @@ int tve_fb_event(struct notifier_block *nb, unsigned long val, void *v)
+ 		return 0;
+ 
+ 	switch (val) {
+-	case FB_EVENT_PREMODE_CHANGE:
+-	{
+-		tve_fb_setup(tve, fbi);
+-		break;
+-	}
+ 	case FB_EVENT_BLANK:
+ 		if (fbi->mode == NULL)
+ 			return 0;
+@@ -1028,11 +1032,11 @@ static int _tve_get_revision(struct tve_data *tve)
+ 	return rev;
+ }
+ 
+-static int tve_drv_init(struct mxc_dispdrv_entry *disp, bool vga)
++static int tve_drv_init(struct mxc_dispdrv_handle *disp, bool vga,
++	struct mxc_dispdrv_setting *setting)
+ {
+ 	int ret;
+ 	struct tve_data *tve = mxc_dispdrv_getdata(disp);
+-	struct mxc_dispdrv_setting *setting = mxc_dispdrv_getsetting(disp);
+ 	struct fsl_mxc_tve_platform_data *plat_data
+ 			= tve->pdev->dev.platform_data;
+ 	struct resource *res;
+@@ -1190,17 +1194,19 @@ get_res_failed:
+ 
+ }
+ 
+-static int tvout_init(struct mxc_dispdrv_entry *disp)
++static int tvout_init(struct mxc_dispdrv_handle *disp,
++	struct mxc_dispdrv_setting *setting)
+ {
+-	return tve_drv_init(disp, 0);
++	return tve_drv_init(disp, 0, setting);
+ }
+ 
+-static int vga_init(struct mxc_dispdrv_entry *disp)
++static int vga_init(struct mxc_dispdrv_handle *disp,
++	struct mxc_dispdrv_setting *setting)
+ {
+-	return tve_drv_init(disp, 1);
++	return tve_drv_init(disp, 1, setting);
+ }
+ 
+-void tvout_deinit(struct mxc_dispdrv_entry *disp)
++void tvout_deinit(struct mxc_dispdrv_handle *disp)
+ {
+ 	struct tve_data *tve = mxc_dispdrv_getdata(disp);
+ 
+@@ -1217,6 +1223,7 @@ static struct mxc_dispdrv_driver tve_drv = {
+ 	.name 	= DISPDRV_TVE,
+ 	.init  	= tvout_init,
+ 	.deinit = tvout_deinit,
++	.setup = tve_disp_setup,
+ };
+ 
+ static struct mxc_dispdrv_driver vga_drv = {
+@@ -1236,6 +1243,8 @@ static int tve_dispdrv_init(struct tve_data *tve)
+ 
+ static void tve_dispdrv_deinit(struct tve_data *tve)
+ {
++	mxc_dispdrv_puthandle(tve->disp_tve);
++	mxc_dispdrv_puthandle(tve->disp_vga);
+ 	mxc_dispdrv_unregister(tve->disp_tve);
+ 	mxc_dispdrv_unregister(tve->disp_vga);
+ }
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index 0993015..0d1641f 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -117,7 +117,7 @@ struct hdmi_data_info {
+ struct mxc_hdmi {
+ 	struct platform_device *pdev;
+ 	struct platform_device *core_pdev;
+-	struct mxc_dispdrv_entry *disp_mxc_hdmi;
++	struct mxc_dispdrv_handle *disp_mxc_hdmi;
+ 	struct fb_info *fbi;
+ 	struct clk *hdmi_isfr_clk;
+ 	struct clk *hdmi_iahb_clk;
+@@ -1616,11 +1616,11 @@ static int mxc_hdmi_fb_event(struct notifier_block *nb,
+ 	return 0;
+ }
+ 
+-static int mxc_hdmi_disp_init(struct mxc_dispdrv_entry *disp)
++static int mxc_hdmi_disp_init(struct mxc_dispdrv_handle *disp,
++	struct mxc_dispdrv_setting *setting)
+ {
+ 	int ret = 0;
+ 	struct mxc_hdmi *hdmi = mxc_dispdrv_getdata(disp);
+-	struct mxc_dispdrv_setting *setting = mxc_dispdrv_getsetting(disp);
+ 	struct fsl_mxc_hdmi_platform_data *plat = hdmi->pdev->dev.platform_data;
+ 	int irq = platform_get_irq(hdmi->pdev, 0);
+ 	bool found = false;
+@@ -1810,7 +1810,7 @@ egetpins:
+ 	return ret;
+ }
+ 
+-static void mxc_hdmi_disp_deinit(struct mxc_dispdrv_entry *disp)
++static void mxc_hdmi_disp_deinit(struct mxc_dispdrv_handle *disp)
+ {
+ 	struct mxc_hdmi *hdmi = mxc_dispdrv_getdata(disp);
+ 	struct fsl_mxc_hdmi_platform_data *plat = hdmi->pdev->dev.platform_data;
+@@ -1892,6 +1892,8 @@ static int mxc_hdmi_remove(struct platform_device *pdev)
+ 
+ 	fb_unregister_client(&hdmi->nb);
+ 
++	mxc_dispdrv_puthandle(hdmi->disp_mxc_hdmi);
++	mxc_dispdrv_unregister(hdmi->disp_mxc_hdmi);
+ 	/* No new work will be scheduled, wait for running ISR */
+ 	free_irq(irq, hdmi);
+ 	kfree(hdmi);
+diff --git a/include/linux/fb.h b/include/linux/fb.h
+index d344507..f9d013d 100644
+--- a/include/linux/fb.h
++++ b/include/linux/fb.h
+@@ -549,8 +549,6 @@ struct fb_cursor_user {
+ #define FB_EVENT_FB_UNBIND              0x0E
+ /*      CONSOLE-SPECIFIC: remap all consoles to new fb - for vga switcheroo */
+ #define FB_EVENT_REMAP_ALL_CONSOLE      0x0F
+-/*	PRE MODE CHANGE added by fsl */
+-#define FB_EVENT_PREMODE_CHANGE		0x10
+ 
+ struct fb_event {
+ 	struct fb_info *info;
+-- 
+1.7.7.4
+

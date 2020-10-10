@@ -1,0 +1,40 @@
+From 0879e448f312a8ceb1324803e2e8a1d20239611c Mon Sep 17 00:00:00 2001
+From: Lionel Xu <Lionel.Xu@freescale.com>
+Date: Fri, 17 Aug 2012 16:06:32 +0800
+Subject: [PATCH 1927/2463] ENGR00220446 ESAI: channel swapped occasionally
+ when playing stereo wav
+
+There is channel swap happened when playing stereo wav. According to the spec,
+the initial words should be written to the ETDR register, at least one word
+per enabled transmitter slot, to avoid any potential problem.
+
+Signed-off-by: Lionel Xu <Lionel.Xu@freescale.com>
+---
+ sound/soc/imx/imx-esai.c |    4 ++++
+ 1 files changed, 4 insertions(+), 0 deletions(-)
+
+diff --git a/sound/soc/imx/imx-esai.c b/sound/soc/imx/imx-esai.c
+index b3cba9e..bc56d80 100644
+--- a/sound/soc/imx/imx-esai.c
++++ b/sound/soc/imx/imx-esai.c
+@@ -468,6 +468,7 @@ static int imx_esai_trigger(struct snd_pcm_substream *substream, int cmd,
+ {
+ 	struct imx_esai *esai = snd_soc_dai_get_drvdata(cpu_dai);
+ 	u32 reg, tfcr = 0, rfcr = 0;
++	int i;
+ 
+ 	if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+ 		tfcr = readl(esai->base + ESAI_TFCR);
+@@ -483,6 +484,9 @@ static int imx_esai_trigger(struct snd_pcm_substream *substream, int cmd,
+ 		if (substream->stream == SNDRV_PCM_STREAM_PLAYBACK) {
+ 			tfcr |= ESAI_TFCR_TFEN;
+ 			writel(tfcr, esai->base + ESAI_TFCR);
++			/* write initial words to ETDR register */
++			for (i = 0; i < substream->runtime->channels; i++)
++				writel(0x0, esai->base + ESAI_ETDR);
+ 			reg |= ESAI_TCR_TE(substream->runtime->channels);
+ 			writel(reg, esai->base + ESAI_TCR);
+ 		} else {
+-- 
+1.7.7.4
+

@@ -1,0 +1,113 @@
+From d54ea9bc52f91e5f8a23cdc23a7a5b43229dd2d6 Mon Sep 17 00:00:00 2001
+From: Robin Gong <b38343@freescale.com>
+Date: Tue, 25 Sep 2012 16:47:48 +0800
+Subject: [PATCH 2098/2463] ENGR00225735-3 GPU: add gpu regulator
+ disable/enable in gpu driver
+
+add gpu regulator management in gpu driver
+Signed-off-by: Robin Gong <b38343@freescale.com>
+Acked-by: Lily Zhang
+
+Signed-off-by: Robin Gong <b38343@freescale.com>
+---
+ .../hal/os/linux/kernel/gc_hal_kernel_device.c     |    9 +++++++++
+ .../hal/os/linux/kernel/gc_hal_kernel_device.h     |    3 +++
+ .../hal/os/linux/kernel/gc_hal_kernel_linux.h      |    1 +
+ .../gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c |   12 ++++++++++--
+ 4 files changed, 23 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+index 890d13e..eba81b64 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.c
+@@ -358,6 +358,15 @@ gckGALDEVICE_Construct(
+ 	 	gckDebugFileSystemSetCurrentNode(device->dbgnode);
+ 	}
+     }
++    /*get gpu regulator*/
++    device->gpu_regulator = regulator_get(NULL, "cpu_vddgpu");
++    if (IS_ERR(device->gpu_regulator)) {
++	gcmkTRACE_ZONE(gcvLEVEL_ERROR, gcvZONE_DRIVER,
++		"%s(%d): Failed to get gpu regulator  %s/%s \n",
++		__FUNCTION__, __LINE__,
++		PARENT_FILE, DEBUG_FILE);
++	gcmkONERROR(gcvSTATUS_NOT_FOUND);
++    }
+ 
+     /*Initialize the clock structure*/
+     if (IrqLine != -1) {
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
+index 03f7f9b..c159898 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_device.h
+@@ -89,6 +89,9 @@ typedef struct _gckGALDEVICE
+     struct clk         *clk_2d_axi;
+     struct clk         *clk_vg_axi;
+ 
++    /*Power management.*/
++    struct regulator      *gpu_regulator;
++
+ }
+ * gckGALDEVICE;
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.h b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.h
+index 30fb135..a6ed03f 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.h
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_linux.h
+@@ -47,6 +47,7 @@
+ 
+ #if ENABLE_GPU_CLOCK_BY_DRIVER && LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,28)
+ #include <linux/clk.h>
++#include <linux/regulator/consumer.h>
+ #endif
+ 
+ #define NTSTRSAFE_NO_CCH_FUNCTIONS
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+index 4d1a71d..4091ccd 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_os.c
+@@ -6947,6 +6947,7 @@ gckOS_SetGPUPower(
+     struct clk *clk_vg_axi = Os->device->clk_vg_axi;
+ 
+     gctBOOL oldClockState = gcvFALSE;
++    gctBOOL oldPowerState = gcvFALSE;
+ 
+     gcmkHEADER_ARG("Os=0x%X Core=%d Clock=%d Power=%d", Os, Core, Clock, Power);
+ 
+@@ -6956,15 +6957,20 @@ gckOS_SetGPUPower(
+         if (Core == gcvCORE_VG)
+         {
+             oldClockState = Os->device->kernels[Core]->vg->hardware->clockState;
++            oldPowerState = Os->device->kernels[Core]->vg->hardware->powerState;
+         }
+         else
+         {
+ #endif
+             oldClockState = Os->device->kernels[Core]->hardware->clockState;
++            oldPowerState = Os->device->kernels[Core]->hardware->powerState;
+ #if gcdENABLE_VG
+         }
+ #endif
+     }
++	if((Power == gcvTRUE) && (oldPowerState == gcvFALSE) &&
++		!IS_ERR(Os->device->gpu_regulator))
++            regulator_enable(Os->device->gpu_regulator);
+ 
+     if (Clock == gcvTRUE) {
+         if (oldClockState == gcvFALSE) {
+@@ -7007,8 +7013,10 @@ gckOS_SetGPUPower(
+             }
+         }
+     }
+-
+-
++	if((Power == gcvFALSE) && (oldPowerState == gcvTRUE) &&
++		!IS_ERR(Os->device->gpu_regulator))
++            regulator_disable(Os->device->gpu_regulator);
++    /* TODO: Put your code here. */
+     gcmkFOOTER_NO();
+     return gcvSTATUS_OK;
+ }
+-- 
+1.7.7.4
+

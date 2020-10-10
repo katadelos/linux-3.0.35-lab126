@@ -1,0 +1,75 @@
+From 44755b386b44c8b8bb440ee6c0db7026d3981762 Mon Sep 17 00:00:00 2001
+From: Terry Lv <r65388@freescale.com>
+Date: Thu, 22 Mar 2012 19:13:44 +0800
+Subject: [PATCH 1227/2463] ENGR00177643: Add mlb initial code to mx6 ard
+ board
+
+Add mlb initial code to mx6 ard board.
+
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c    |    7 +++++++
+ arch/arm/mach-mx6/board-mx6q_sabreauto.h    |    5 +++++
+ arch/arm/mach-mx6/board-mx6solo_sabreauto.h |    5 +++++
+ 3 files changed, 17 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index 65cef374..a409a3d 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -1149,6 +1149,12 @@ static int __init imx6q_init_audio(void)
+ 	return 0;
+ }
+ 
++static struct mxc_mlb_platform_data mx6_sabreauto_mlb150_data = {
++	.reg_nvcc		= NULL,
++	.mlb_clk		= "mlb150_clk",
++	.mlb_pll_clk		= "pll6",
++};
++
+ static struct mxc_dvfs_platform_data sabreauto_dvfscore_data = {
+ 	.reg_id			= "cpu_vddgp",
+ 	.clk1_id		= "cpu_clk",
+@@ -1430,6 +1436,7 @@ static void __init mx6_board_init(void)
+ 	imx6q_add_flexcan1(&mx6q_sabreauto_flexcan_pdata[1]);
+ 	imx6q_add_hdmi_soc();
+ 	imx6q_add_hdmi_soc_dai();
++	imx6q_add_mlb150(&mx6_sabreauto_mlb150_data);
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.h b/arch/arm/mach-mx6/board-mx6q_sabreauto.h
+index 045cef0..21e7be5 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.h
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.h
+@@ -207,6 +207,11 @@ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 	MX6Q_PAD_GPIO_19__GPIO_4_5,
+ 	MX6Q_PAD_EIM_D24__GPIO_3_24,
+ 
++	/* MLB150 */
++	MX6Q_PAD_ENET_TXD1__MLB_MLBCLK,
++	MX6Q_PAD_GPIO_6__MLB_MLBSIG,
++	MX6Q_PAD_GPIO_2__MLB_MLBDAT,
++
+ #if defined(CONFIG_MTD_M25P80) || defined(CONFIG_MTD_M25P80_MODULE)
+ 	/* eCSPI1 */
+ 	MX6Q_PAD_EIM_D16__ECSPI1_SCLK,
+diff --git a/arch/arm/mach-mx6/board-mx6solo_sabreauto.h b/arch/arm/mach-mx6/board-mx6solo_sabreauto.h
+index b50b314..25a1bdc 100644
+--- a/arch/arm/mach-mx6/board-mx6solo_sabreauto.h
++++ b/arch/arm/mach-mx6/board-mx6solo_sabreauto.h
+@@ -208,6 +208,11 @@ static iomux_v3_cfg_t mx6dl_sabreauto_pads[] = {
+ 	MX6DL_PAD_GPIO_19__GPIO_4_5,
+ 	MX6DL_PAD_EIM_D24__GPIO_3_24,
+ 
++	/* MLB150 */
++	MX6DL_PAD_ENET_TXD1__MLB_MLBCLK,
++	MX6DL_PAD_GPIO_6__MLB_MLBSIG,
++	MX6DL_PAD_GPIO_2__MLB_MLBDAT,
++
+ #if defined(CONFIG_MTD_M25P80) || defined(CONFIG_MTD_M25P80_MODULE)
+ 	/* eCSPI1 */
+ 	MX6DL_PAD_EIM_D16__ECSPI1_SCLK,
+-- 
+1.7.7.4
+

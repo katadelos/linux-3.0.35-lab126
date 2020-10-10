@@ -1,0 +1,79 @@
+From 0c4ca07c7845c1977553e605a7c859946207d8c8 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Thu, 1 Nov 2012 14:23:25 +0800
+Subject: [PATCH 2207/2463] ENGR00232005 mtd: fix the overflow of big mtd
+ partitions
+
+When the kernel parses the following cmdline
+
+	#mtdparts=gpmi-nand:16m(boot),16m(kernel),1g(home),4g(test),-(usr)
+
+for a big nand chip Micron MT29F64G08AFAAAWP(8GB), we got the following wrong
+result:
+
+	.............................................
+		"mtd: partition size too small (0)"
+	.............................................
+
+We can not get any partition.
+
+The "4g(test)" partition triggers a overflow of the "size". The memparse()
+returns 4g to the "size", but the size is "unsigned long" type, so a overflow
+occurs, the "size" becomes zero in the end.
+
+This patch changes the "size"/"offset" to "unsigned long long" type,
+and replaces the UINT_MAX with ULLONG_MAX for macros SIZE_REMAINING and
+OFFSET_CONTINUOUS.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ drivers/mtd/cmdlinepart.c |   12 ++++++------
+ 1 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/drivers/mtd/cmdlinepart.c b/drivers/mtd/cmdlinepart.c
+index fe33da4..27d9dcc 100644
+--- a/drivers/mtd/cmdlinepart.c
++++ b/drivers/mtd/cmdlinepart.c
+@@ -56,8 +56,8 @@
+ 
+ 
+ /* special size referring to all the remaining space in a partition */
+-#define SIZE_REMAINING UINT_MAX
+-#define OFFSET_CONTINUOUS UINT_MAX
++#define SIZE_REMAINING ULLONG_MAX
++#define OFFSET_CONTINUOUS ULLONG_MAX
+ 
+ struct cmdline_mtd_partition {
+ 	struct cmdline_mtd_partition *next;
+@@ -89,8 +89,8 @@ static struct mtd_partition * newpart(char *s,
+                                       int extra_mem_size)
+ {
+ 	struct mtd_partition *parts;
+-	unsigned long size;
+-	unsigned long offset = OFFSET_CONTINUOUS;
++	unsigned long long size;
++	unsigned long long offset = OFFSET_CONTINUOUS;
+ 	char *name;
+ 	int name_len;
+ 	unsigned char *extra_mem;
+@@ -108,7 +108,7 @@ static struct mtd_partition * newpart(char *s,
+ 		size = memparse(s, &s);
+ 		if (size < PAGE_SIZE)
+ 		{
+-			printk(KERN_ERR ERRP "partition size too small (%lx)\n", size);
++			printk(KERN_ERR ERRP "partition size too small (%llx)\n", size);
+ 			return NULL;
+ 		}
+ 	}
+@@ -319,7 +319,7 @@ static int parse_cmdline_partitions(struct mtd_info *master,
+ 				    struct mtd_partition **pparts,
+ 				    struct mtd_part_parser_data *data)
+ {
+-	unsigned long offset;
++	unsigned long long offset;
+ 	int i;
+ 	struct cmdline_mtd_partition *part;
+ 	const char *mtd_id = master->name;
+-- 
+1.7.7.4
+

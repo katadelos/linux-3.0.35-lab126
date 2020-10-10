@@ -1,0 +1,261 @@
+From ada490e53907f710a7829ace839479a987768905 Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Tue, 5 Jul 2011 15:03:16 +0800
+Subject: [PATCH 0216/2463] ENGR00139241-2 mx6 sata: enable ahci sata module
+ on mx6q
+
+Eanble ahci sata on mx6q
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx6/Kconfig                |    1 +
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   84 ++++++++++++++++++++++++++++++
+ arch/arm/mach-mx6/clock.c                |   20 +++++++
+ arch/arm/mach-mx6/crm_regs.h             |   21 +++++++
+ arch/arm/mach-mx6/devices-imx6q.h        |    4 ++
+ arch/arm/plat-mxc/include/mach/mx6.h     |    4 +-
+ 6 files changed, 132 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index a1cd8df..f07f22b 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -31,6 +31,7 @@ config MACH_MX6Q_SABREAUTO
+ 	select IMX_HAVE_PLATFORM_MXC_EHCI
+ 	select IMX_HAVE_PLATFORM_FSL_OTG
+ 	select IMX_HAVE_PLATFORM_FSL_USB_WAKEUP
++	select IMX_HAVE_PLATFORM_AHCI
+ 	help
+ 	  Include support for i.MX 6Quad SABRE Automotive Infotainment platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index abdc28d..2aeaf52 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -57,12 +57,14 @@
+ #include <mach/iomux-mx6q.h>
+ #include <mach/imx-uart.h>
+ #include <mach/viv_gpu.h>
++#include <mach/ahci_sata.h>
+ #include <linux/gpio.h>
+ #include <linux/etherdevice.h>
+ 
+ #include "usb.h"
+ #include "devices-imx6q.h"
+ #include "regs-anadig.h"
++#include "crm_regs.h"
+ 
+ #define MX6Q_SABREAUTO_ECSPI1_CS0	IMX_GPIO_NR(2, 30)
+ #define MX6Q_SABREAUTO_ECSPI1_CS1	IMX_GPIO_NR(3, 19)
+@@ -74,6 +76,7 @@
+ #define MX6Q_SABREAUTO_CAP_TCH_INT	IMX_GPIO_NR(3, 31)
+ 
+ void __init early_console_setup(unsigned long base, struct clk *clk);
++static struct clk *sata_clk;
+ 
+ static iomux_v3_cfg_t mx6q_sabreauto_pads[] = {
+ 
+@@ -312,6 +315,86 @@ static struct viv_gpu_platform_data imx6q_gc2000_pdata __initdata = {
+ 	.reserved_mem_size = SZ_128M,
+ };
+ 
++/* HW Initialization, if return 0, initialization is successful. */
++static int mx6q_sabreauto_sata_init(struct device *dev, void __iomem *addr)
++{
++	u32 tmpdata;
++	int ret = 0;
++	struct clk *clk;
++
++	/* Enable SATA PWR CTRL_0 of MAX7310 */
++	gpio_request(MX6Q_SABREAUTO_MAX7310_1_BASE_ADDR, "SATA_PWR_EN");
++	gpio_direction_output(MX6Q_SABREAUTO_MAX7310_1_BASE_ADDR, 1);
++
++	sata_clk = clk_get(dev, "imx_sata_clk");
++	if (IS_ERR(sata_clk)) {
++		dev_err(dev, "no sata clock.\n");
++		return PTR_ERR(sata_clk);
++	}
++	ret = clk_enable(sata_clk);
++	if (ret) {
++		dev_err(dev, "can't enable sata clock.\n");
++		goto put_sata_clk;
++	}
++
++	/* Set PHY Paremeters, two steps to configure the GPR13,
++	 * one write for rest of parameters, mask of first write is 0x07FF7FFD,
++	 * and the other one write for setting the mpll_clk_off_b
++	 *.rx_eq_val_0(iomuxc_gpr13[26:24]),
++	 *.los_lvl(iomuxc_gpr13[23:19]),
++	 *.rx_dpll_mode_0(iomuxc_gpr13[18:16]),
++	 *.mpll_ss_en(iomuxc_gpr13[14]),
++	 *.tx_atten_0(iomuxc_gpr13[13:11]),
++	 *.tx_boost_0(iomuxc_gpr13[10:7]),
++	 *.tx_lvl(iomuxc_gpr13[6:2]),
++	 *.mpll_ck_off(iomuxc_gpr13[1]),
++	 *.tx_edgerate_0(iomuxc_gpr13[0]),
++	 */
++	tmpdata = readl(IOMUXC_GPR13);
++	writel(((tmpdata & ~0x07FF7FFD) | 0x05932044), IOMUXC_GPR13);
++
++	/* enable SATA_PHY PLL */
++	tmpdata = readl(IOMUXC_GPR13);
++	writel(((tmpdata & ~0x2) | 0x2), IOMUXC_GPR13);
++
++	/* Get the AHB clock rate, and configure the TIMER1MS reg later */
++	clk = clk_get(NULL, "ahb");
++	if (IS_ERR(clk)) {
++		dev_err(dev, "no ahb clock.\n");
++		ret = PTR_ERR(clk);
++		goto release_sata_clk;
++	}
++	tmpdata = clk_get_rate(clk) / 1000;
++	clk_put(clk);
++
++	sata_init(addr, tmpdata);
++
++	return ret;
++
++release_sata_clk:
++	clk_disable(sata_clk);
++put_sata_clk:
++	clk_put(sata_clk);
++
++	return ret;
++}
++
++static void mx6q_sabreauto_sata_exit(struct device *dev)
++{
++	clk_disable(sata_clk);
++	clk_put(sata_clk);
++
++	/* Disable SATA PWR CTRL_0 of MAX7310 */
++	gpio_request(MX6Q_SABREAUTO_MAX7310_1_BASE_ADDR, "SATA_PWR_EN");
++	gpio_direction_output(MX6Q_SABREAUTO_MAX7310_1_BASE_ADDR, 0);
++
++}
++
++static struct ahci_platform_data mx6q_sabreauto_sata_data = {
++	.init = mx6q_sabreauto_sata_init,
++	.exit = mx6q_sabreauto_sata_exit,
++};
++
+ /*!
+  * Board specific initialization.
+  */
+@@ -332,6 +415,7 @@ static void __init mx6_board_init(void)
+ 	imx6q_add_sdhci_usdhc_imx(3, &mx6q_sabreauto_sd4_data);
+ 	imx_add_viv_gpu("gc2000", &imx6_gc2000_data, &imx6q_gc2000_pdata);
+ 	imx6q_sabreauto_init_usb();
++	imx6q_add_ahci(0, &mx6q_sabreauto_sata_data);
+ }
+ 
+ extern void __iomem *twd_base;
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index db20143..394bf2b 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -3824,6 +3824,26 @@ static struct clk pcie_clk = {
+ static int _clk_sata_enable(struct clk *clk)
+ {
+ 	unsigned int reg;
++	unsigned int cyclecount;
++
++	/* Clear Power Down and Enable PLLs */
++	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
++	reg &= ~ANADIG_PLL_ENET_POWER_DOWN;
++	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
++
++	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
++	reg |= ANADIG_PLL_ENET_EN;
++	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
++
++	/* Waiting for the PLL is locked */
++	if (!WAIT(ANADIG_PLL_ENET_LOCK & __raw_readl(PLL8_ENET_BASE_ADDR),
++				SPIN_DELAY))
++		panic("pll8 lock failed\n");
++
++	/* Disable the bypass */
++	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
++	reg &= ~ANADIG_PLL_ENET_BYPASS;
++	__raw_writel(reg, PLL8_ENET_BASE_ADDR);
+ 
+ 	/* Enable SATA ref clock */
+ 	reg = __raw_readl(PLL8_ENET_BASE_ADDR);
+diff --git a/arch/arm/mach-mx6/crm_regs.h b/arch/arm/mach-mx6/crm_regs.h
+index a0a6fc8..e436ccf 100644
+--- a/arch/arm/mach-mx6/crm_regs.h
++++ b/arch/arm/mach-mx6/crm_regs.h
+@@ -11,6 +11,23 @@
+ #ifndef __ARCH_ARM_MACH_MX6_CRM_REGS_H__
+ #define __ARCH_ARM_MACH_MX6_CRM_REGS_H__
+ 
++/* IOMUXC */
++#define MXC_IOMUXC_BASE			MX6_IO_ADDRESS(IOMUXC_BASE_ADDR)
++#define IOMUXC_GPR0			(MXC_IOMUXC_BASE + 0x00)
++#define IOMUXC_GPR1			(MXC_IOMUXC_BASE + 0x04)
++#define IOMUXC_GPR2			(MXC_IOMUXC_BASE + 0x08)
++#define IOMUXC_GPR3			(MXC_IOMUXC_BASE + 0x0C)
++#define IOMUXC_GPR4			(MXC_IOMUXC_BASE + 0x10)
++#define IOMUXC_GPR5			(MXC_IOMUXC_BASE + 0x14)
++#define IOMUXC_GPR6			(MXC_IOMUXC_BASE + 0x18)
++#define IOMUXC_GPR7			(MXC_IOMUXC_BASE + 0x1C)
++#define IOMUXC_GPR8			(MXC_IOMUXC_BASE + 0x20)
++#define IOMUXC_GPR9			(MXC_IOMUXC_BASE + 0x24)
++#define IOMUXC_GPR10			(MXC_IOMUXC_BASE + 0x28)
++#define IOMUXC_GPR11			(MXC_IOMUXC_BASE + 0x2C)
++#define IOMUXC_GPR12			(MXC_IOMUXC_BASE + 0x30)
++#define IOMUXC_GPR13			(MXC_IOMUXC_BASE + 0x34)
++
+ /* PLLs */
+ #define MXC_PLL_BASE			MX6_IO_ADDRESS(ANATOP_BASE_ADDR)
+ #define PLL1_SYS_BASE_ADDR		(MXC_PLL_BASE + 0x0)
+@@ -69,8 +86,12 @@
+ #define ANADIG_PLL_MLB_VDDA_DELAY_CFG_OFFSET	(17)
+ 
+ /* PLL8_ENET defines. */
++#define ANADIG_PLL_ENET_LOCK			(1 << 31)
+ #define ANADIG_PLL_ENET_EN_SATA			(1 << 20)
+ #define ANADIG_PLL_ENET_EN_PCIE			(1 << 19)
++#define ANADIG_PLL_ENET_BYPASS			(1 << 16)
++#define ANADIG_PLL_ENET_EN			(1 << 13)
++#define ANADIG_PLL_ENET_POWER_DOWN		(1 << 12)
+ #define ANADIG_PLL_ENET_DIV_SELECT_MASK		(0x3)
+ #define ANADIG_PLL_ENET_DIV_SELECT_OFFSET	(0)
+ 
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index ed8298b..ca2fbb5 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -72,3 +72,7 @@ extern const struct imx_fsl_usb2_wakeup_data imx6q_fsl_hs_wakeup_data[] __initco
+ extern const struct imx_viv_gpu_data imx6_gc2000_data __initconst;
+ extern const struct imx_viv_gpu_data imx6_gc320_data __initconst;
+ extern const struct imx_viv_gpu_data imx6_gc355_data __initconst;
++
++extern const struct imx_ahci_data imx6q_ahci_data __initconst;
++#define imx6q_add_ahci(id, pdata)   \
++	imx_add_ahci(&imx6q_ahci_data, pdata)
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 451fc7f..fe95cc0 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -99,7 +99,7 @@
+ #define AIPS1_ARB_END_ADDR              0x020FFFFF
+ #define AIPS2_ARB_BASE_ADDR             0x02100000
+ #define AIPS2_ARB_END_ADDR              0x021FFFFF
+-#define SATA_ARB_BASE_ADDR              0x02200000
++#define MX6Q_SATA_BASE_ADDR              0x02200000
+ #define SATA_ARB_END_ADDR               0x02203FFF
+ #define OPENVG_ARB_BASE_ADDR            0x02204000
+ #define OPENVG_ARB_END_ADDR             0x02207FFF
+@@ -303,7 +303,7 @@
+ #define MX6Q_INT_I2C1                               68
+ #define MX6Q_INT_I2C2                               69
+ #define MX6Q_INT_I2C3                               70
+-#define MXC_INT_SATA                               71
++#define MX6Q_INT_SATA                               71
+ #define MX6Q_INT_USB_HS1					72
+ #define MX6Q_INT_USB_HS2					73
+ #define MX6Q_INT_USB_HS3					74
+-- 
+1.7.7.4
+

@@ -1,0 +1,90 @@
+From f9f266bc8db60629cf656f98b506a3673a5798d5 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Wed, 16 May 2012 12:24:28 -0500
+Subject: [PATCH 1478/2463] ENGR00209620 MX6-Disable PU Brown out detection in
+ low power mode.
+
+Ensure that the brown out detection of the PU regulator is
+disabled before the regulator itself is disabled.
+Keeping the detection enabled will generate an interrupt that
+is not currently being handled in the BSP when the regulator is
+disabled since its voltage is dropped to 0V. This will prevent
+the system from entering complete WAIT state thus increasing the
+power in the low power idle/audio usecase.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/bus_freq.c |   27 +++++++++++++++++++++++++++
+ arch/arm/mach-mx6/crm_regs.h |    1 +
+ 2 files changed, 28 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index ca5154a..7428993 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -154,6 +154,13 @@ static void reduce_bus_freq_handler(struct work_struct *work)
+ 	med_bus_freq_mode = 0;
+ 
+ 	if (cpu_is_mx6q()) {
++		/* Disable the brown out detection since we are going to be
++		  * disabling the LDO.
++		  */
++		reg = __raw_readl(ANA_MISC2_BASE_ADDR);
++		reg &= ~ANADIG_ANA_MISC2_REG1_BO_EN;
++		__raw_writel(reg, ANA_MISC2_BASE_ADDR);
++
+ 		/* Power gate the PU LDO. */
+ 		/* Power gate the PU domain first. */
+ 		/* enable power down request */
+@@ -166,9 +173,19 @@ static void reduce_bus_freq_handler(struct work_struct *work)
+ 		while (__raw_readl(gpc_base + GPC_CNTR_OFFSET) & 0x1)
+ 			;
+ 
++		/* Mask the ANATOP brown out interrupt in the GPC. */
++		reg = __raw_readl(gpc_base + 0x14);
++		reg |= 0x80000000;
++		__raw_writel(reg, gpc_base + 0x14);
++
+ 		org_ldo = reg = __raw_readl(ANADIG_REG_CORE);
+ 		reg &= ~(ANADIG_REG_TARGET_MASK << ANADIG_REG1_PU_TARGET_OFFSET);
+ 		__raw_writel(reg, ANADIG_REG_CORE);
++
++		/* Clear the BO interrupt in the ANATOP. */
++		reg = __raw_readl(ANADIG_MISC1_REG);
++		reg |= 0x80000000;
++		__raw_writel(reg, ANADIG_MISC1_REG);
+ 	}
+ 	clk_disable(pll3);
+ 	mutex_unlock(&bus_freq_mutex);
+@@ -245,6 +262,16 @@ int set_high_bus_freq(int high_bus_freq)
+ 		/* Wait for the power up bit to clear */
+ 		while (__raw_readl(gpc_base + GPC_CNTR_OFFSET) & 0x2)
+ 			;
++
++		/* Enable the Brown Out detection. */
++		reg = __raw_readl(ANA_MISC2_BASE_ADDR);
++		reg |= ANADIG_ANA_MISC2_REG1_BO_EN;
++		__raw_writel(reg, ANA_MISC2_BASE_ADDR);
++
++		/* Unmask the ANATOP brown out interrupt in the GPC. */
++		reg = __raw_readl(gpc_base + 0x14);
++		reg &= ~0x80000000;
++		__raw_writel(reg, gpc_base + 0x14);
+ 	}
+ 
+ 	if (high_bus_freq) {
+diff --git a/arch/arm/mach-mx6/crm_regs.h b/arch/arm/mach-mx6/crm_regs.h
+index 1ae8ac9..74e9db6 100644
+--- a/arch/arm/mach-mx6/crm_regs.h
++++ b/arch/arm/mach-mx6/crm_regs.h
+@@ -141,6 +141,7 @@
+ #define ANADIG_REG0_CORE_TARGET_OFFSET		0
+ 
+ /* ANA MISC2 register defines */
++#define ANADIG_ANA_MISC2_REG1_BO_EN			(1 << 13)
+ #define ANADIG_ANA_MISC2_CONTROL3_MASK		0xC0000000
+ #define ANADIG_ANA_MISC2_CONTROL3_OFFSET	30
+ 
+-- 
+1.7.7.4
+

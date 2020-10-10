@@ -1,0 +1,39 @@
+From 6fcd195d5026d8f1e13336d1bc45bbebbf033b58 Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Fri, 22 Jun 2012 14:12:00 -0500
+Subject: [PATCH 1640/2463] ENGR00214736 [MX6SL]: Enable BUSFREQ at boot
+
+Busfreq should be enabled at boot by default on i.MX6SL.
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ arch/arm/mach-mx6/bus_freq.c |   13 +++++++++++++
+ 1 files changed, 13 insertions(+), 0 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index 37aec11..85f23c7 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -568,6 +568,19 @@ static int __init busfreq_init(void)
+ 	}
+ 
+ 	printk(KERN_INFO "Bus freq driver module loaded\n");
++
++	if (cpu_is_mx6sl()) {
++		/* Enable busfreq by default. */
++		bus_freq_scaling_is_active = 1;
++		set_high_bus_freq(0);
++		/* Make sure system can enter low bus mode if it should be in
++		low bus mode */
++		if (low_freq_bus_used() && !low_bus_freq_mode)
++			set_low_bus_freq();
++
++		printk(KERN_INFO "Bus freq driver Enabled\n");
++	}
++
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,60 @@
+From 9ed493823db84af8f33275e1fc033c5275a31bd4 Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Mon, 26 Mar 2012 17:30:24 +0800
+Subject: [PATCH 1248/2463] ENGR00177932 - i.MX6 sabresd : Recorrect fec phy
+ AR8031 rework.
+
+- i.MX6 sabresd board revA and revB adopt Atheros AR8031 phy.
+  Recorrect the fec phy AR8031 rework.
+
+ Signed-off-by: Fugang Duan <B38611@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_sabresd.c |   30 +++++++++++++++++++++---------
+ 1 files changed, 21 insertions(+), 9 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 27a5a89..a20a435 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -235,17 +235,29 @@ static inline void mx6q_sabresd_init_uart(void)
+ 
+ static int mx6q_sabresd_fec_phy_init(struct phy_device *phydev)
+ {
+-	/* prefer master mode, disable 1000 Base-T capable */
+-	phy_write(phydev, 0x9, 0x1c00);
++	unsigned short val;
+ 
+-	/* min rx data delay */
+-	phy_write(phydev, 0x0b, 0x8105);
+-	phy_write(phydev, 0x0c, 0x0000);
++	/* To enable AR8031 ouput a 125MHz clk from CLK_25M */
++	phy_write(phydev, 0xd, 0x7);
++	phy_write(phydev, 0xe, 0x8016);
++	phy_write(phydev, 0xd, 0x4007);
++	val = phy_read(phydev, 0xe);
+ 
+-	/* max rx/tx clock delay, min rx/tx control delay */
+-	phy_write(phydev, 0x0b, 0x8104);
+-	phy_write(phydev, 0x0c, 0xf0f0);
+-	phy_write(phydev, 0x0b, 0x104);
++	val &= 0xffe3;
++	val |= 0x18;
++	phy_write(phydev, 0xe, val);
++
++	/* Introduce tx clock delay */
++	phy_write(phydev, 0x1d, 0x5);
++	val = phy_read(phydev, 0x1e);
++	val |= 0x0100;
++	phy_write(phydev, 0x1e, val);
++
++	/*check phy power*/
++	val = phy_read(phydev, 0x0);
++
++	if (val & BMCR_PDOWN)
++		phy_write(phydev, 0x0, (val & ~BMCR_PDOWN));
+ 
+ 	return 0;
+ }
+-- 
+1.7.7.4
+

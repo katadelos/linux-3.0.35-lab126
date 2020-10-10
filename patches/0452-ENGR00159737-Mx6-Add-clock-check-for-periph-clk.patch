@@ -1,0 +1,81 @@
+From 1c42c6b03f2ddad06f89ce4e02a656825403c7a0 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 11 Oct 2011 20:03:16 +0800
+Subject: [PATCH 0452/2463] ENGR00159737 [Mx6]Add clock check for periph clk
+
+For lpddr2 board, current freq only support up to
+400MHz, in this case, periph clk will set to 400M
+in uboot, so in clock init, we need to check
+whether the ddr clock is set to 400M, if yes, then
+we should set periph clk parent to pll2_pfd_400M.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c    |   13 +++++++++----
+ arch/arm/mach-mx6/crm_regs.h |    6 ++++++
+ 2 files changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 7dce695..9e76568 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4198,7 +4198,14 @@ static struct clk_lookup lookups[] = {
+ static void clk_tree_init(void)
+ 
+ {
++	unsigned int reg;
+ 
++	reg = __raw_readl(MMDC_MDMISC_OFFSET);
++	if ((reg & MMDC_MDMISC_DDR_TYPE_MASK) ==
++		(0x1 << MMDC_MDMISC_DDR_TYPE_OFFSET)) {
++		clk_set_parent(&periph_clk, &pll2_pfd_400M);
++		printk(KERN_INFO "Set periph_clk's parent to pll2_pfd_400M!\n");
++	}
+ }
+ 
+ 
+@@ -4206,8 +4213,6 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	unsigned long ckih1, unsigned long ckih2)
+ {
+ 	__iomem void *base;
+-	unsigned int reg;
+-
+ 	int i;
+ 
+ 	external_low_reference = ckil;
+@@ -4217,13 +4222,13 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 
+ 	apll_base = ioremap(ANATOP_BASE_ADDR, SZ_4K);
+ 
+-	clk_tree_init();
+-
+ 	for (i = 0; i < ARRAY_SIZE(lookups); i++) {
+ 		clkdev_add(&lookups[i]);
+ 		clk_debug_register(lookups[i].clk);
+ 	}
+ 
++	clk_tree_init();
++
+ 	/* enable mmdc_ch0_axi_clk to make sure the usecount is > 0
+ 	 * or ipu's parent is mmdc_ch0_axi_clk, if ipu disable clk,
+ 	 * mmdc_ch0_axi_clk will also be disabled, system will hang */
+diff --git a/arch/arm/mach-mx6/crm_regs.h b/arch/arm/mach-mx6/crm_regs.h
+index c5eb8c7..9287357 100644
+--- a/arch/arm/mach-mx6/crm_regs.h
++++ b/arch/arm/mach-mx6/crm_regs.h
+@@ -28,6 +28,12 @@
+ #define IOMUXC_GPR12			(MXC_IOMUXC_BASE + 0x30)
+ #define IOMUXC_GPR13			(MXC_IOMUXC_BASE + 0x34)
+ 
++/* MMDC */
++#define MXC_MMDC_P0_BASE		MX6_IO_ADDRESS(MMDC_P0_BASE_ADDR)
++#define MMDC_MDMISC_OFFSET		(MXC_MMDC_P0_BASE + 0x18)
++#define MMDC_MDMISC_DDR_TYPE_MASK	(0x3 << 3)
++#define MMDC_MDMISC_DDR_TYPE_OFFSET	(3)
++
+ /* PLLs */
+ #define MXC_PLL_BASE			MX6_IO_ADDRESS(ANATOP_BASE_ADDR)
+ #define PLL1_SYS_BASE_ADDR		(MXC_PLL_BASE + 0x0)
+-- 
+1.7.7.4
+

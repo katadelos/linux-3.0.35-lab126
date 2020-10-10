@@ -1,0 +1,46 @@
+From df8c1c22bd02a4e9df823cd127b0139e6f4c02b2 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Mon, 13 Aug 2012 15:25:12 +0800
+Subject: [PATCH 1892/2463] ENGR00216786-2 IPU/FB: Allocate DMA buffer from
+ DMA zone
+
+Allocate DMA buffer from DMA zone, and the system can configure reserve dma
+size through proc fs file under /proc/sys/vm/lowmem_reserve_ratio.
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |    6 +++---
+ 1 files changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 4c3ae1e..c9cdad4 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -401,13 +401,13 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 					dma_alloc_coherent(fbi->device,
+ 						  alpha_mem_len,
+ 						  &mxc_fbi->alpha_phy_addr0,
+-						  GFP_KERNEL);
++						  GFP_DMA | GFP_KERNEL);
+ 
+ 			mxc_fbi->alpha_virt_addr1 =
+ 					dma_alloc_coherent(fbi->device,
+ 						  alpha_mem_len,
+ 						  &mxc_fbi->alpha_phy_addr1,
+-						  GFP_KERNEL);
++						  GFP_DMA | GFP_KERNEL);
+ 			if (mxc_fbi->alpha_virt_addr0 == NULL ||
+ 			    mxc_fbi->alpha_virt_addr1 == NULL) {
+ 				dev_err(fbi->device, "mxcfb: dma alloc for"
+@@ -1652,7 +1652,7 @@ static int mxcfb_map_video_memory(struct fb_info *fbi)
+ 	fbi->screen_base = dma_alloc_writecombine(fbi->device,
+ 				fbi->fix.smem_len,
+ 				(dma_addr_t *)&fbi->fix.smem_start,
+-				GFP_KERNEL);
++				GFP_DMA | GFP_KERNEL);
+ 	if (fbi->screen_base == 0) {
+ 		dev_err(fbi->device, "Unable to allocate framebuffer memory\n");
+ 		fbi->fix.smem_len = 0;
+-- 
+1.7.7.4
+

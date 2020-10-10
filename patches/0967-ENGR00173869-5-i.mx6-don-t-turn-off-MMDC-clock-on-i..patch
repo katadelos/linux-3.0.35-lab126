@@ -1,0 +1,29 @@
+From 554466d0968e59b3cd3c0ee17c6fa59d8cc4b4c0 Mon Sep 17 00:00:00 2001
+From: Jason Liu <r64343@freescale.com>
+Date: Tue, 7 Feb 2012 14:09:59 +0800
+Subject: [PATCH 0967/2463] ENGR00173869-5: i.mx6: don't turn off MMDC clock
+ on i.mx6dl
+
+MMDC clock is from pll2_pfd_400M, thus we can't turn it off
+
+Signed-off-by: Jason Liu <r64343@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |    2 +-
+ 1 files changed, 1 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index e3ee229..5adb335 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5116,7 +5116,7 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 
+ 	clk_tree_init();
+ 
+-	if (pll2_pfd_400M.usecount == 0)
++	if (pll2_pfd_400M.usecount == 0 && cpu_is_mx6q())
+ 		pll2_pfd_400M.disable(&pll2_pfd_400M);
+ 	pll2_pfd_352M.disable(&pll2_pfd_352M);
+ 	pll2_pfd_594M.disable(&pll2_pfd_594M);
+-- 
+1.7.7.4
+

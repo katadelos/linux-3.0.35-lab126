@@ -1,0 +1,98 @@
+From 12af2814e89076095dd729cf324fc88088bd79e8 Mon Sep 17 00:00:00 2001
+From: Nancy Chen <Nancy.Chen@freescale.com>
+Date: Thu, 23 Aug 2012 16:38:48 -0500
+Subject: [PATCH 1955/2463] ENGR00221281 [MX6X] Fix BogoMIPS value is not
+ correct
+
+[MX6X] Fix BogoMIPS value is not correct
+
+Signed-off-by: Nancy Chen <Nancy.Chen@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c       |   16 ++++++++++++++++
+ arch/arm/mach-mx6/clock_mx6sl.c |   16 ++++++++++++++++
+ arch/arm/mach-mx6/system.c      |    1 -
+ 3 files changed, 32 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 39e39bf..e2d203c 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -5304,6 +5304,8 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ {
+ 	__iomem void *base;
+ 	int i, reg;
++	u32 parent_rate, rate;
++	unsigned long ipg_clk_rate, max_arm_wait_clk;
+ 
+ 	external_low_reference = ckil;
+ 	external_high_reference = ckih1;
+@@ -5510,6 +5512,20 @@ int __init mx6_clocks_init(unsigned long ckil, unsigned long osc,
+ 	lp_med_freq = 0;
+ 	lp_audio_freq = 0;
+ 
++	/* Get current ARM_PODF value */
++	rate = clk_get_rate(&cpu_clk);
++	parent_rate = clk_get_rate(&pll1_sw_clk);
++	cur_arm_podf = parent_rate / rate;
++
++	/* Calculate the ARM_PODF to be applied when the system
++	  * enters WAIT state.
++	  * The max ARM clk is decided by the ipg_clk and has to
++	  * follow the ratio of ARM_CLK:IPG_CLK of 12:5.
++	  */
++	ipg_clk_rate = clk_get_rate(&ipg_clk);
++	max_arm_wait_clk = (12 * ipg_clk_rate) / 5;
++	wait_mode_arm_podf = parent_rate / max_arm_wait_clk;
++
+ 	/* Turn OFF all unnecessary PHYs. */
+ 	if (cpu_is_mx6q()) {
+ 		/* Turn off SATA PHY. */
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 33721a4..9c79f74 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -3982,6 +3982,8 @@ int __init mx6sl_clocks_init(unsigned long ckil, unsigned long osc,
+ 	unsigned long ckih1, unsigned long ckih2)
+ {
+ 	int i;
++	u32 parent_rate, rate;
++	unsigned long ipg_clk_rate, max_arm_wait_clk;
+ 
+ 	external_low_reference = ckil;
+ 	external_high_reference = ckih1;
+@@ -4094,6 +4096,20 @@ int __init mx6sl_clocks_init(unsigned long ckil, unsigned long osc,
+ 	lp_high_freq = 0;
+ 	lp_med_freq = 0;
+ 
++	/* Get current ARM_PODF value */
++	rate = clk_get_rate(&cpu_clk);
++	parent_rate = clk_get_rate(&pll1_sw_clk);
++	cur_arm_podf = parent_rate / rate;
++
++	/* Calculate the ARM_PODF to be applied when the system
++	  * enters WAIT state.
++	  * The max ARM clk is decided by the ipg_clk and has to
++	  * follow the ratio of ARM_CLK:IPG_CLK of 12:5.
++	  */
++	ipg_clk_rate = clk_get_rate(&ipg_clk);
++	max_arm_wait_clk = (12 * ipg_clk_rate) / 5;
++	wait_mode_arm_podf = parent_rate / max_arm_wait_clk;
++
+ 	return 0;
+ 
+ }
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 09940ff..75701dc 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -52,7 +52,6 @@ extern unsigned int gpc_wake_irq[4];
+ 
+ static void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ 
+-int wait_mode_arm_podf;
+ volatile unsigned int num_cpu_idle;
+ volatile unsigned int num_cpu_idle_lock = 0x0;
+ int wait_mode_arm_podf;
+-- 
+1.7.7.4
+

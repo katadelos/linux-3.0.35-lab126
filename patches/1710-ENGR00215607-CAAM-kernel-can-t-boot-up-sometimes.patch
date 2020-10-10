@@ -1,0 +1,53 @@
+From a23fda1bd3fa217651eca032e3ca3ca9dad0178f Mon Sep 17 00:00:00 2001
+From: Terry Lv <r65388@freescale.com>
+Date: Wed, 4 Jul 2012 13:34:55 +0800
+Subject: [PATCH 1710/2463] ENGR00215607: CAAM: kernel can't boot up sometimes
+
+ahash still has a scatterlist problem which cause this problem.
+Thus we disable ahash feature in defconfig and wait for later patch to
+fix it.
+Also, we remove caam high freq flag to make bus freq run.
+
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig |    4 ++--
+ arch/arm/mach-mx6/clock.c       |    1 -
+ 2 files changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 81a0549..ffcc997 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -2317,7 +2317,7 @@ CONFIG_MXC_MIPI_CSI2=y
+ #
+ # MXC HDMI CEC (Consumer Electronics Control) support
+ #
+-CONFIG_MXC_HDMI_CEC=y
++# CONFIG_MXC_HDMI_CEC is not set
+ 
+ #
+ # File systems
+@@ -2668,7 +2668,7 @@ CONFIG_CRYPTO_DEV_FSL_CAAM_INTC=y
+ CONFIG_CRYPTO_DEV_FSL_CAAM_INTC_COUNT_THLD=255
+ CONFIG_CRYPTO_DEV_FSL_CAAM_INTC_TIME_THLD=2048
+ CONFIG_CRYPTO_DEV_FSL_CAAM_CRYPTO_API=y
+-CONFIG_CRYPTO_DEV_FSL_CAAM_AHASH_API=y
++# CONFIG_CRYPTO_DEV_FSL_CAAM_AHASH_API is not set
+ CONFIG_CRYPTO_DEV_FSL_CAAM_RNG_API=y
+ # CONFIG_CRYPTO_DEV_FSL_CAAM_RNG_TEST is not set
+ # CONFIG_BINARY_PRINTF is not set
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 3efb6b3..79bfd9e0 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -4187,7 +4187,6 @@ static struct clk caam_clk[] = {
+ 	.enable = _clk_enable,
+ 	.disable = _clk_disable,
+ 	.secondary = &caam_clk[1],
+-	.flags = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ 	},
+ 	{
+ 	 __INIT_CLK_DEBUG(caam_aclk_clk)
+-- 
+1.7.7.4
+

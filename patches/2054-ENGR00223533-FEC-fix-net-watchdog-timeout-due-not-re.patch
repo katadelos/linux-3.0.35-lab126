@@ -1,0 +1,79 @@
+From c8febf85a2f32c89e765596e36f075ed0f7d7dae Mon Sep 17 00:00:00 2001
+From: Fugang Duan <B38611@freescale.com>
+Date: Tue, 18 Sep 2012 16:27:43 +0800
+Subject: [PATCH 2054/2463] ENGR00223533 - FEC : fix net watchdog timeout due
+ not refreshing TX timers
+
+When do overnight gpu stress test throught nfs, kernel dump as below:
+
+------------[ cut here ]------------
+WARNING: at net/sched/sch_generic.c:255 dev_watchdog+0x284/0x2a8()
+NETDEV WATCHDOG: eth0 (fec): transmit queue 0 timed out
+Modules linked in: galcore imx2_wd_test [last unloaded: galcore]
+[<80045854>] (unwind_backtrace+0x0/0xf8) from [<80070c2c>]
+(warn_slowpath_common+0x4c/0x64)
+<snip>
+
+In sometime, ethernet cannot recover after watchdog timeout which
+results in nfs no responding and system hang on.
+
+The patch fixes the way that ->trans_start is refreshed to avoid watchdog
+timeout during ethernet status change (such as speed, duplex), and re-init
+fec to recover ethernet after watchdog timeout.
+
+Signed-off-by: Fugang Duan  <B38611@freescale.com>
+---
+ drivers/net/fec.c |   14 +++++++++-----
+ 1 files changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/drivers/net/fec.c b/drivers/net/fec.c
+index 5af378f..86e4ea3 100755
+--- a/drivers/net/fec.c
++++ b/drivers/net/fec.c
+@@ -397,7 +397,12 @@ fec_timeout(struct net_device *ndev)
+ 
+ 	ndev->stats.tx_errors++;
+ 
++	netif_device_detach(ndev);
++	fec_stop(ndev);
++
+ 	fec_restart(ndev, fep->full_duplex);
++	netif_device_attach(ndev);
++	ndev->trans_start = jiffies; /* prevent tx timeout */
+ 	if (fep->link && !fep->tx_full)
+ 		netif_wake_queue(ndev);
+ }
+@@ -1320,10 +1325,7 @@ fec_enet_close(struct net_device *ndev)
+ {
+ 	struct fec_enet_private *fep = netdev_priv(ndev);
+ 
+-	/* Don't know what to do yet. */
+ 	fep->opened = 0;
+-	netif_stop_queue(ndev);
+-	netif_carrier_off(ndev);
+ 	if (fep->use_napi)
+ 		napi_disable(&fep->napi);
+ 
+@@ -1760,7 +1762,10 @@ fec_stop(struct net_device *dev)
+ 	if (fep->ptimer_present)
+ 		fec_ptp_stop(fep->ptp_priv);
+ 	writel(FEC_DEFAULT_IMASK, fep->hwp + FEC_IMASK);
+-	netif_stop_queue(dev);
++
++	if (netif_running(dev))
++		netif_stop_queue(dev);
++	netif_carrier_off(dev);     /* prevent tx timeout */
+ 	fep->link = 0;
+ }
+ 
+@@ -1921,7 +1926,6 @@ fec_suspend(struct device *dev)
+ 	if (netif_running(ndev)) {
+ 		netif_device_detach(ndev);
+ 		fec_stop(ndev);
+-		netif_carrier_off(ndev);
+ 		clk_disable(fep->clk);
+ 	}
+ 
+-- 
+1.7.7.4
+

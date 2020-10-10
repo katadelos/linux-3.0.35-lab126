@@ -1,0 +1,50 @@
+From 4a4c2ad46144c87772f618283656cf394f879b52 Mon Sep 17 00:00:00 2001
+From: Zhang Jiejing <jiejing.zhang@freescale.com>
+Date: Mon, 11 Apr 2011 15:36:38 +0800
+Subject: [PATCH 0068/2463] ENGR00140122 MX53_SMD: p1003: report single
+ pointer.
+
+Since Ubuntu needs report single pointer, I add BTN_TOUCH
+event in single pointer event report.
+
+It will not affact Android, also made ubuntu touchscreen works.
+
+Signed-off-by: Zhang Jiejing <jiejing.zhang@freescale.com>
+---
+ drivers/input/touchscreen/p1003_ts.c |    6 ++++++
+ 1 files changed, 6 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/input/touchscreen/p1003_ts.c b/drivers/input/touchscreen/p1003_ts.c
+index 2a2f524..653f7f5 100644
+--- a/drivers/input/touchscreen/p1003_ts.c
++++ b/drivers/input/touchscreen/p1003_ts.c
+@@ -148,6 +148,9 @@ static void p1003_work(struct work_struct *work)
+ 			input_event(input, EV_ABS, ABS_MT_POSITION_Y, y1);
+ 			input_event(input, EV_ABS, ABS_MT_TOUCH_MAJOR, 1);
+ 			input_mt_sync(input);
++			input_event(input, EV_ABS, ABS_X, x1);
++			input_event(input, EV_ABS, ABS_Y, y1);
++			input_event(input, EV_KEY, BTN_TOUCH, 1);
+ 			input_sync(input);
+ 			old_state->x1 = x1;
+ 			old_state->y1 = y1;
+@@ -187,6 +190,7 @@ static void p1003_work(struct work_struct *work)
+ 	 * release to user space. */
+ 	input_event(input, EV_ABS, ABS_MT_TOUCH_MAJOR, 0);
+ 	input_mt_sync(input);
++	input_event(input, EV_KEY, BTN_TOUCH, 0);
+ 	input_sync(input);
+ 	old_state->state = data[0];
+ }
+@@ -272,6 +276,8 @@ static int __devinit p1003_probe(struct i2c_client *client,
+ 	__set_bit(EV_ABS, input_dev->evbit);
+ 	__set_bit(EV_KEY, input_dev->evbit);
+ 	__set_bit(BTN_TOUCH, input_dev->keybit);
++	__set_bit(ABS_X, input_dev->absbit);
++	__set_bit(ABS_Y, input_dev->absbit);
+ 
+ 	input_set_abs_params(input_dev, ABS_MT_POSITION_X, 0, xmax, 0, 0);
+ 	input_set_abs_params(input_dev, ABS_MT_POSITION_Y, 0, ymax, 0, 0);
+-- 
+1.7.7.4
+

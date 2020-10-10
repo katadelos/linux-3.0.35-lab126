@@ -1,0 +1,69 @@
+From 4470afee1f98402dabfe190765c87ddf152aab73 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Thu, 9 Feb 2012 10:41:08 +0800
+Subject: [PATCH 0995/2463] ENGR00174103 [usb hsic] add usb hsic support for
+ mx6dl
+
+- change the pad setting
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ arch/arm/mach-mx6/usb_h2.c |    8 +++++++-
+ arch/arm/mach-mx6/usb_h3.c |    8 +++++++-
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/usb_h2.c b/arch/arm/mach-mx6/usb_h2.c
+index a1e32ef..4e78ad3 100644
+--- a/arch/arm/mach-mx6/usb_h2.c
++++ b/arch/arm/mach-mx6/usb_h2.c
+@@ -30,6 +30,7 @@
+ #include <mach/arc_otg.h>
+ #include <mach/hardware.h>
+ #include <mach/iomux-mx6q.h>
++#include <mach/iomux-mx6dl.h>
+ #include "devices-imx6q.h"
+ #include "regs-anadig.h"
+ #include "usb.h"
+@@ -179,7 +180,12 @@ static void hsic_start(void)
+ {
+ 	pr_debug("%s\n", __func__);
+ 	/* strobe 47K pull up */
+-	mxc_iomux_v3_setup_pad(MX6Q_PAD_RGMII_TX_CTL__USBOH3_H2_STROBE_START);
++	if (cpu_is_mx6q())
++		mxc_iomux_v3_setup_pad(
++				MX6Q_PAD_RGMII_TX_CTL__USBOH3_H2_STROBE_START);
++	else if (cpu_is_mx6dl())
++		mxc_iomux_v3_setup_pad(
++				MX6DL_PAD_RGMII_TX_CTL__USBOH3_H2_STROBE_START);
+ }
+ 
+ static void hsic_device_connected(void)
+diff --git a/arch/arm/mach-mx6/usb_h3.c b/arch/arm/mach-mx6/usb_h3.c
+index 93210b4..46ffc74 100644
+--- a/arch/arm/mach-mx6/usb_h3.c
++++ b/arch/arm/mach-mx6/usb_h3.c
+@@ -30,6 +30,7 @@
+ #include <mach/arc_otg.h>
+ #include <mach/hardware.h>
+ #include <mach/iomux-mx6q.h>
++#include <mach/iomux-mx6dl.h>
+ #include "devices-imx6q.h"
+ #include "regs-anadig.h"
+ #include "usb.h"
+@@ -180,7 +181,12 @@ static void hsic_start(void)
+ {
+ 	pr_debug("%s", __func__);
+ 	/* strobe 47K pull up */
+-	mxc_iomux_v3_setup_pad(MX6Q_PAD_RGMII_RXC__USBOH3_H3_STROBE_START);
++	if (cpu_is_mx6q())
++		mxc_iomux_v3_setup_pad(
++				MX6Q_PAD_RGMII_RXC__USBOH3_H3_STROBE_START);
++	else if (cpu_is_mx6dl())
++		mxc_iomux_v3_setup_pad(
++				MX6DL_PAD_RGMII_RXC__USBOH3_H3_STROBE_START);
+ }
+ 
+ static void hsic_device_connected(void)
+-- 
+1.7.7.4
+

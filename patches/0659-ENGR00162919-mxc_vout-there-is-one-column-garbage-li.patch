@@ -1,0 +1,116 @@
+From 2bd7aefa0d00b4e5c5a6675591119ff294e1cc38 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Wed, 23 Nov 2011 10:46:01 +0800
+Subject: [PATCH 0659/2463] ENGR00162919 mxc_vout: there is one column garbage
+ line at right for split mode
+
+as ipu processing device driver has protect check, the CR ENGR00155141 can be
+reverted, this CR is the cause of garbage line.
+this patch also change v4l2 output try_task function to make sure there is no
+cropping for output when display support window.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_vout.c |   17 +++++++++++++----
+ drivers/mxc/ipu3/ipu_calc_stripes_sizes.c |   11 +++++------
+ 2 files changed, 18 insertions(+), 10 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_vout.c b/drivers/media/video/mxc/output/mxc_vout.c
+index c08f2fd..57e684f 100644
+--- a/drivers/media/video/mxc/output/mxc_vout.c
++++ b/drivers/media/video/mxc/output/mxc_vout.c
+@@ -772,9 +772,10 @@ static int mxc_vidioc_g_fmt_vid_out(struct file *file, void *fh,
+ 	return 0;
+ }
+ 
+-static inline int ipu_try_task(struct ipu_task *task)
++static inline int ipu_try_task(struct mxc_vout_output *vout)
+ {
+ 	int ret;
++	struct ipu_task *task = &vout->task;
+ 
+ again:
+ 	ret = ipu_check_task(task);
+@@ -789,11 +790,19 @@ again:
+ 				goto again;
+ 			}
+ 			if (ret == IPU_CHECK_ERR_SPLIT_OUTPUTW_OVER) {
+-				task->output.crop.w -= 8;
++				if (vout->disp_support_windows) {
++					task->output.width -= 8;
++					task->output.crop.w = task->output.width;
++				} else
++					task->output.crop.w -= 8;
+ 				goto again;
+ 			}
+ 			if (ret == IPU_CHECK_ERR_SPLIT_OUTPUTH_OVER) {
+-				task->output.crop.h -= 8;
++				if (vout->disp_support_windows) {
++					task->output.height -= 8;
++					task->output.crop.h = task->output.height;
++				} else
++					task->output.crop.h -= 8;
+ 				goto again;
+ 			}
+ 			ret = -EINVAL;
+@@ -830,7 +839,7 @@ static int mxc_vout_try_task(struct mxc_vout_output *vout)
+ 			else
+ 				vout->task.output.format = IPU_PIX_FMT_RGB565;
+ 		}
+-		ret = ipu_try_task(&vout->task);
++		ret = ipu_try_task(vout);
+ 	}
+ 
+ 	return ret;
+diff --git a/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c b/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c
+index 1e05cc5..aa9fdaf 100644
+--- a/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c
++++ b/drivers/mxc/ipu3/ipu_calc_stripes_sizes.c
+@@ -52,8 +52,8 @@ static u32 truncate(u32 up, /* 0: down; else: up */
+ 		return d;
+ }
+ 
+-/*static unsigned int f_calc(unsigned int pfs, unsigned int bpp, unsigned int *write)
+-{[> return input_f <]
++static unsigned int f_calc(unsigned int pfs, unsigned int bpp, unsigned int *write)
++{/* return input_f */
+ 	unsigned int f_calculated = 0;
+ 	switch (pfs) {
+ 	case IPU_PIX_FMT_YVU422P:
+@@ -129,7 +129,7 @@ static unsigned int m_calc(unsigned int pfs)
+ 
+ 	}
+ 	return m_calculated;
+-}*/
++}
+ 
+ 
+ /* Stripe parameters calculator */
+@@ -214,14 +214,14 @@ int ipu_calc_stripes_sizes(const unsigned int input_frame_width,
+ 	/* M, F calculations */
+ 	/* read back pfs from params */
+ 
+-	input_f = 16;
++	input_f = f_calc(input_pixelformat, 0, NULL);
+ 	input_m = 16;
+ 	/* BPP should be used in the out_F calc */
+ 	/* Temporarily not used */
+ 	/* out_F = F_calc(idmac->pfs, idmac->bpp, NULL); */
+ 
+ 	output_f = 16;
+-	output_m = 16;
++	output_m = m_calc(output_pixelformat);
+ 
+ 
+ 	if ((input_frame_width < 4) || (output_frame_width < 4))
+@@ -370,7 +370,6 @@ int ipu_calc_stripes_sizes(const unsigned int input_frame_width,
+ 		left->output_column = 0;
+ 		right->output_column = onw;
+ 	}
+-
+ 	return status;
+ }
+ EXPORT_SYMBOL(ipu_calc_stripes_sizes);
+-- 
+1.7.7.4
+

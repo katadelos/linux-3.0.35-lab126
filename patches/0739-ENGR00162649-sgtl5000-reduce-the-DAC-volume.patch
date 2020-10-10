@@ -1,0 +1,68 @@
+From c7b2146b0b90f8cdeef2b6a012bff898517c4a96 Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Tue, 13 Dec 2011 16:11:18 +0800
+Subject: [PATCH 0739/2463] ENGR00162649 sgtl5000: reduce the DAC volume
+
+1. if the DAC volume is largest, output is harsh.
+so reduce the DAC volume.
+2. increase ADC volume
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ sound/soc/codecs/sgtl5000.c |   19 ++++++++++++-------
+ 1 files changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/sound/soc/codecs/sgtl5000.c b/sound/soc/codecs/sgtl5000.c
+index 98e9c13..c6d067e 100644
+--- a/sound/soc/codecs/sgtl5000.c
++++ b/sound/soc/codecs/sgtl5000.c
+@@ -347,7 +347,7 @@ static int dac_info_volsw(struct snd_kcontrol *kcontrol,
+ 	uinfo->type = SNDRV_CTL_ELEM_TYPE_INTEGER;
+ 	uinfo->count = 2;
+ 	uinfo->value.integer.min = 0;
+-	uinfo->value.integer.max = 0xfc - 0x3c;
++	uinfo->value.integer.max = 0xfc - 0x60;
+ 	return 0;
+ }
+ 
+@@ -390,9 +390,9 @@ static int dac_get_volsw(struct snd_kcontrol *kcontrol,
+ 	/* get right channel volume */
+ 	r = (reg & SGTL5000_DAC_VOL_RIGHT_MASK) >> SGTL5000_DAC_VOL_RIGHT_SHIFT;
+ 
+-	/* make sure value fall in (0x3c,0xfc) */
+-	l = clamp(l, 0x3c, 0xfc);
+-	r = clamp(r, 0x3c, 0xfc);
++	/* make sure value fall in (0x60,0xfc) */
++	l = clamp(l, 0x60, 0xfc);
++	r = clamp(r, 0x60, 0xfc);
+ 
+ 	/* invert it and map to userspace value */
+ 	l = 0xfc - l;
+@@ -438,9 +438,9 @@ static int dac_put_volsw(struct snd_kcontrol *kcontrol,
+ 	l = ucontrol->value.integer.value[0];
+ 	r = ucontrol->value.integer.value[1];
+ 
+-	/* make sure userspace volume fall in (0, 0xfc-0x3c) */
+-	l = clamp(l, 0, 0xfc - 0x3c);
+-	r = clamp(r, 0, 0xfc - 0x3c);
++	/* make sure userspace volume fall in (0, 0xfc-0x60) */
++	l = clamp(l, 0, 0xfc - 0x60);
++	r = clamp(r, 0, 0xfc - 0x60);
+ 
+ 	/* invert it, get the value can be set to register */
+ 	l = 0xfc - l;
+@@ -1603,6 +1603,11 @@ static int sgtl5000_probe(struct snd_soc_codec *codec)
+ 
+ 	snd_soc_write(codec, SGTL5000_CHIP_MIC_CTRL, 0);
+ 
++	snd_soc_write(codec, SGTL5000_CHIP_DAC_VOL, 0x6060);
++	snd_soc_write(codec, SGTL5000_CHIP_ANA_ADC_CTRL,
++		(0xf << SGTL5000_ADC_VOL_LEFT_SHIFT) |\
++		(0xf << SGTL5000_ADC_VOL_RIGHT_SHIFT));
++
+ 	/*
+ 	 * disable DAP
+ 	 * TODO:
+-- 
+1.7.7.4
+

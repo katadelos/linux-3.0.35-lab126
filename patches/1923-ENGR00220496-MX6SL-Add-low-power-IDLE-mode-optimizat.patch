@@ -1,0 +1,809 @@
+From e44fdde7d6906ae163c93380670bcf91229d51f5 Mon Sep 17 00:00:00 2001
+From: Ranjani Vaidyanathan <ra5478@freescale.com>
+Date: Thu, 26 Jul 2012 13:53:28 -0500
+Subject: [PATCH 1923/2463] ENGR00220496 MX6SL:Add low power IDLE mode
+ optimizations.
+
+Add support for DDR freq change code in IRAM.
+Change PLL2 to bypass mode so that DDR is running off 24MHz OSC
+directly.
+ARM is now sourced from PLL1 (running at 800MHz) in this mode.
+This is required for the next step in IDLE mode optmization
+where all PLLs will be disabled when ARM enters WFI.
+
+Signed-off-by: Ranjani Vaidyanathan <ra5478@freescale.com>
+---
+ arch/arm/mach-mx6/Makefile               |    4 +-
+ arch/arm/mach-mx6/bus_freq.c             |  119 +++++++++--
+ arch/arm/mach-mx6/clock_mx6sl.c          |   39 +++--
+ arch/arm/mach-mx6/irq.c                  |    8 +
+ arch/arm/mach-mx6/mx6_anatop_regulator.c |    4 +
+ arch/arm/mach-mx6/mx6sl_ddr.S            |  330 ++++++++++++++++++++++++++++++
+ 6 files changed, 464 insertions(+), 40 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/Makefile b/arch/arm/mach-mx6/Makefile
+index 77d8091..03a104b 100644
+--- a/arch/arm/mach-mx6/Makefile
++++ b/arch/arm/mach-mx6/Makefile
+@@ -9,8 +9,8 @@ mx6_mmdc.o mx6_ddr_freq.o
+ 
+ obj-$(CONFIG_ARCH_MX6) += clock.o mx6_suspend.o clock_mx6sl.o
+ obj-$(CONFIG_MACH_MX6Q_ARM2) += board-mx6q_arm2.o
+-obj-$(CONFIG_MACH_MX6SL_ARM2) += board-mx6sl_arm2.o mx6sl_arm2_pmic_pfuze100.o
+-obj-$(CONFIG_MACH_MX6SL_EVK) += board-mx6sl_evk.o mx6sl_evk_pmic_pfuze100.o
++obj-$(CONFIG_MACH_MX6SL_ARM2) += board-mx6sl_arm2.o mx6sl_arm2_pmic_pfuze100.o mx6sl_ddr.o
++obj-$(CONFIG_MACH_MX6SL_EVK) += board-mx6sl_evk.o mx6sl_evk_pmic_pfuze100.o mx6sl_ddr.o
+ obj-$(CONFIG_MACH_MX6Q_SABRELITE) += board-mx6q_sabrelite.o
+ obj-$(CONFIG_MACH_MX6Q_SABRESD) += board-mx6q_sabresd.o mx6q_sabresd_pmic_pfuze100.o
+ obj-$(CONFIG_MACH_MX6Q_SABREAUTO) += board-mx6q_sabreauto.o mx6q_sabreauto_pmic_pfuze100.o
+diff --git a/arch/arm/mach-mx6/bus_freq.c b/arch/arm/mach-mx6/bus_freq.c
+index 95edf00..b1f9d80 100644
+--- a/arch/arm/mach-mx6/bus_freq.c
++++ b/arch/arm/mach-mx6/bus_freq.c
+@@ -51,7 +51,7 @@
+ #define GPC_PGC_GPU_PGCR_OFFSET	0x260
+ #define GPC_CNTR_OFFSET		0x0
+ 
+-DEFINE_SPINLOCK(ddr_freq_lock);
++static DEFINE_SPINLOCK(freq_lock);
+ 
+ int low_bus_freq_mode;
+ int audio_bus_freq_mode;
+@@ -75,6 +75,10 @@ unsigned int ddr_normal_rate;
+ int low_freq_bus_used(void);
+ void set_ddr_freq(int ddr_freq);
+ 
++void *mx6sl_ddr_freq_base;
++void (*mx6sl_ddr_freq_change_iram)(int ddr_freq) = NULL;
++extern void mx6sl_ddr_iram(int ddr_freq);
++
+ extern int init_mmdc_settings(void);
+ extern struct cpu_op *(*get_cpu_op)(int *op);
+ extern int update_ddr_freq(int ddr_rate);
+@@ -87,6 +91,7 @@ struct timeval start_time;
+ struct timeval end_time;
+ 
+ static int cpu_op_nr;
++static u32 org_arm_podf;
+ static struct cpu_op *cpu_op_tbl;
+ static struct clk *pll2_400;
+ static struct clk *axi_clk;
+@@ -96,6 +101,8 @@ static struct clk *osc_clk;
+ static struct clk *cpu_clk;
+ static struct clk *pll3;
+ static struct clk *pll2;
++static struct clk *pll1;
++static struct clk *pll1_sw_clk;
+ static struct clk *pll3_sw_clk;
+ static struct clk *pll2_200;
+ static struct clk *mmdc_ch0_axi;
+@@ -136,30 +143,46 @@ static void reduce_bus_freq_handler(struct work_struct *work)
+ 		clk_disable(pll3);
+ 		med_bus_freq_mode = 0;
+ 	} else {
++		u32 reg;
++		u32  div;
++		unsigned long flags;
++
+ 		arm_mem_clked_in_wait = true;
+ 
+-		/* Set periph_clk to be sourced from OSC_CLK */
+-		/* Set MMDC clk to 25MHz. */
+-		/* First need to set the divider before changing the parent */
+-		/* if parent clock is larger than previous one */
+-		clk_set_rate(mmdc_ch0_axi, clk_get_rate(mmdc_ch0_axi) / 2);
+-		clk_set_parent(mmdc_ch0_axi, pll3_sw_clk);
+-		clk_set_parent(mmdc_ch0_axi, pll2_200);
+-		clk_set_rate(mmdc_ch0_axi,
+-			     clk_round_rate(mmdc_ch0_axi, LPAPM_CLK));
++		spin_lock_irqsave(&freq_lock, flags);
+ 
++		/* Set periph_clk to be sourced from OSC_CLK */
+ 		/* Set AXI to 24MHz. */
+ 		clk_set_parent(periph_clk, osc_clk);
+ 		clk_set_rate(axi_clk, clk_round_rate(axi_clk, LPAPM_CLK));
+ 		/* Set AHB to 24MHz. */
+ 		clk_set_rate(ahb_clk, clk_round_rate(ahb_clk, LPAPM_CLK));
+ 
++		/* Set MMDC clk to 24MHz. */
++		/* Since we are going to set PLL2 in bypass mode,
++		  * move the CPU clock off PLL2.
++		  */
++		/* Ensure that the clock will be at lowest possible freq. */
++		org_arm_podf = __raw_readl(MXC_CCM_CACRR);
++		div = clk_get_rate(pll1) / cpu_op_tbl[cpu_op_nr - 1].cpu_rate;
++
++		reg = __raw_writel(div - 1, MXC_CCM_CACRR);
++		while (__raw_readl(MXC_CCM_CDHIPR))
++			;
++		clk_set_parent(pll1_sw_clk, pll1);
++
++		/* Now change DDR freq in IRAM. */
++		mx6sl_ddr_freq_change_iram(LPAPM_CLK);
++
+ 		low_bus_freq_mode = 1;
+ 		audio_bus_freq_mode = 0;
++
++		spin_unlock_irqrestore(&freq_lock, flags);
+ 	}
+ 
+ 	high_bus_freq_mode = 0;
+ }
++
+ /* Set the DDR, AHB to 24MHz.
+   * This mode will be activated only when none of the modules that
+   * need a higher DDR or AHB frequency are active.
+@@ -208,6 +231,14 @@ int set_high_bus_freq(int high_bus_freq)
+ 		return 0;
+ 
+ 	if (cpu_is_mx6sl()) {
++		u32 reg;
++		unsigned long flags;
++
++		spin_lock_irqsave(&freq_lock, flags);
++
++		/* Change DDR freq in IRAM. */
++		mx6sl_ddr_freq_change_iram(ddr_normal_rate);
++
+ 		/* Set periph_clk to be sourced from pll2_pfd2_400M */
+ 		/* First need to set the divider before changing the */
+ 		/* parent if parent clock is larger than previous one */
+@@ -217,16 +248,19 @@ int set_high_bus_freq(int high_bus_freq)
+ 			     clk_round_rate(axi_clk, LPAPM_CLK / 2));
+ 		clk_set_parent(periph_clk, pll2_400);
+ 
+-		/* Set mmdc_clk_root to be sourced */
+-		/* from pll2_pfd2_400M */
+-		clk_set_rate(mmdc_ch0_axi,
+-		     clk_round_rate(mmdc_ch0_axi, LPAPM_CLK / 2));
+-		clk_set_parent(mmdc_ch0_axi, pll3_sw_clk);
+-		clk_set_parent(mmdc_ch0_axi, pll2_400);
+-		clk_set_rate(mmdc_ch0_axi,
+-		     clk_round_rate(mmdc_ch0_axi, DDR_MED_CLK));
++		/* Now move ARM to be sourced from PLL2_400 too. */
++		clk_set_parent(pll1_sw_clk, pll2_400);
++
++		/* Ensure that the clock will be at original speed. */
++		reg = __raw_writel(org_arm_podf, MXC_CCM_CACRR);
++		while (__raw_readl(MXC_CCM_CDHIPR))
++			;
+ 
+ 		high_bus_freq_mode = 1;
++		low_bus_freq_mode = 0;
++		audio_bus_freq_mode = 0;
++
++		spin_unlock_irqrestore(&freq_lock, flags);
+ 	} else {
+ 		clk_enable(pll3);
+ 		if (high_bus_freq) {
+@@ -248,14 +282,12 @@ int set_high_bus_freq(int high_bus_freq)
+ 		if (audio_bus_freq_mode)
+ 			clk_disable(pll2_400);
+ 
++		low_bus_freq_mode = 0;
++		audio_bus_freq_mode = 0;
++
+ 		clk_disable(pll3);
+ 	}
+ 
+-	low_bus_freq_mode = 0;
+-	audio_bus_freq_mode = 0;
+-
+-	/* Ensure that WAIT mode can be entered in high bus freq mode. */
+-
+ 	if (cpu_is_mx6sl())
+ 		arm_mem_clked_in_wait = false;
+ 
+@@ -394,6 +426,7 @@ static DEVICE_ATTR(enable, 0644, bus_freq_scaling_enable_show,
+  * @return         The function returns 0 on success
+  *
+  */
++
+ static int __devinit busfreq_probe(struct platform_device *pdev)
+ {
+ 	u32 err;
+@@ -421,6 +454,28 @@ static int __devinit busfreq_probe(struct platform_device *pdev)
+ 		return PTR_ERR(pll2);
+ 	}
+ 
++	pll1 = clk_get(NULL, "pll1_main_clk");
++	if (IS_ERR(pll1)) {
++		printk(KERN_DEBUG "%s: failed to get pll1\n",
++		       __func__);
++		return PTR_ERR(pll1);
++	}
++
++	pll1_sw_clk = clk_get(NULL, "pll1_sw_clk");
++	if (IS_ERR(pll1_sw_clk)) {
++		printk(KERN_DEBUG "%s: failed to get pll1_sw_clk\n",
++		       __func__);
++		return PTR_ERR(pll1_sw_clk);
++	}
++
++
++	if (IS_ERR(pll2)) {
++		printk(KERN_DEBUG "%s: failed to get pll2\n",
++		       __func__);
++		return PTR_ERR(pll2);
++	}
++
++
+ 	cpu_clk = clk_get(NULL, "cpu_clk");
+ 	if (IS_ERR(cpu_clk)) {
+ 		printk(KERN_DEBUG "%s: failed to get cpu_clk\n",
+@@ -518,6 +573,24 @@ static int __devinit busfreq_probe(struct platform_device *pdev)
+ 
+ 	if (!cpu_is_mx6sl())
+ 		init_mmdc_settings();
++	else {
++#if 1
++		unsigned long iram_paddr;
++
++		/* Allocate IRAM for WFI code when system is
++		  * in low freq mode.
++		  */
++		iram_alloc(SZ_4K, &iram_paddr);
++		/* Need to remap the area here since we want
++		   * the memory region to be executable.
++		   */
++		mx6sl_ddr_freq_base = __arm_ioremap(iram_paddr,
++					SZ_4K, MT_MEMORY_NONCACHED);
++		memcpy(mx6sl_ddr_freq_base, mx6sl_ddr_iram, SZ_4K);
++		mx6sl_ddr_freq_change_iram = (void *)mx6sl_ddr_freq_base;
++
++#endif
++	}
+ 
+ 	return 0;
+ }
+diff --git a/arch/arm/mach-mx6/clock_mx6sl.c b/arch/arm/mach-mx6/clock_mx6sl.c
+index 7496882..2abdaa5 100755
+--- a/arch/arm/mach-mx6/clock_mx6sl.c
++++ b/arch/arm/mach-mx6/clock_mx6sl.c
+@@ -100,7 +100,9 @@ DEFINE_SPINLOCK(mx6sl_clk_lock);
+ 	u32 gpt_ticks; \
+ 	u32 gpt_cnt; \
+ 	u32 reg; \
++	unsigned long flags; \
+ 	int result = 1; \
++	spin_lock_irqsave(&mx6sl_clk_lock, flags); \
+ 	gpt_rate = clk_get_rate(&gpt_clk[0]); \
+ 	gpt_ticks = timeout / (1000000000 / gpt_rate); \
+ 	reg = __raw_readl(timer_base + V2_TSTAT);\
+@@ -130,6 +132,7 @@ DEFINE_SPINLOCK(mx6sl_clk_lock);
+ 			} \
+ 		} \
+ 	} \
++	spin_unlock_irqrestore(&mx6sl_clk_lock, flags); \
+ 	result; \
+ })
+ 
+@@ -445,11 +448,6 @@ static int _clk_pll_enable(struct clk *clk)
+ 				SPIN_DELAY))
+ 		panic("pll enable failed\n");
+ 
+-	/* Enable the PLL output now*/
+-	reg = __raw_readl(pllbase);
+-	reg |= ANADIG_PLL_ENABLE;
+-	__raw_writel(reg, pllbase);
+-
+ 	return 0;
+ }
+ 
+@@ -466,7 +464,11 @@ static void _clk_pll_disable(struct clk *clk)
+ 
+ 	reg = __raw_readl(pllbase);
+ 	reg |= ANADIG_PLL_BYPASS;
+-	reg &= ~ANADIG_PLL_ENABLE;
++	reg |= ANADIG_PLL_POWER_DOWN;
++
++	/* The 480MHz PLLs have the opposite definition for power bit. */
++	if (clk == &pll3_usb_otg_main_clk || clk == &pll7_usb_host_main_clk)
++		reg &= ~ANADIG_PLL_POWER_DOWN;
+ 
+ 	__raw_writel(reg, pllbase);
+ 
+@@ -505,7 +507,7 @@ static int _clk_pll1_main_set_rate(struct clk *clk, unsigned long rate)
+ 	/* Wait for PLL1 to lock */
+ 	if (!WAIT((__raw_readl(PLL1_SYS_BASE_ADDR) & ANADIG_PLL_LOCK),
+ 				SPIN_DELAY))
+-		panic("pll1 enable failed\n");
++		panic("pll1 set rate failed\n");
+ 
+ 	return 0;
+ }
+@@ -531,8 +533,7 @@ static void _clk_pll1_main_disable(struct clk *clk)
+ 	  * requires PLL1 to be enabled.
+ 	  */
+ 	reg = __raw_readl(pllbase);
+-	reg |= ANADIG_PLL_BYPASS;
+-
++	reg |= (ANADIG_PLL_BYPASS | ANADIG_PLL_POWER_DOWN);
+ 	__raw_writel(reg, pllbase);
+ }
+ 
+@@ -1266,7 +1267,7 @@ static int _clk_periph_set_parent(struct clk *clk, struct clk *parent)
+ 		reg &= ~MXC_CCM_CBCMR_PRE_PERIPH_CLK_SEL_MASK;
+ 		reg |= mux << MXC_CCM_CBCMR_PRE_PERIPH_CLK_SEL_OFFSET;
+ 		__raw_writel(reg, MXC_CCM_CBCMR);
+-
++		udelay(5);
+ 		/* Set the periph_clk_sel multiplexer. */
+ 		reg = __raw_readl(MXC_CCM_CBCDR);
+ 		reg &= ~MXC_CCM_CBCDR_PERIPH_CLK_SEL;
+@@ -1433,6 +1434,7 @@ static int _clk_ahb_set_rate(struct clk *clk, unsigned long rate)
+ 	div = parent_rate / rate;
+ 	if (div == 0)
+ 		div++;
++
+ 	if (((parent_rate / div) != rate) || (div > 8))
+ 		return -EINVAL;
+ 
+@@ -2080,6 +2082,7 @@ static struct clk usdhc1_clk = {
+ 	.round_rate = _clk_usdhc_round_rate,
+ 	.set_rate = _clk_usdhc1_set_rate,
+ 	.get_rate = _clk_usdhc1_get_rate,
++	.flags  = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static int _clk_usdhc2_set_parent(struct clk *clk, struct clk *parent)
+@@ -2137,6 +2140,7 @@ static struct clk usdhc2_clk = {
+ 	.round_rate = _clk_usdhc_round_rate,
+ 	.set_rate = _clk_usdhc2_set_rate,
+ 	.get_rate = _clk_usdhc2_get_rate,
++	.flags  = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static int _clk_usdhc3_set_parent(struct clk *clk, struct clk *parent)
+@@ -2195,6 +2199,7 @@ static struct clk usdhc3_clk = {
+ 	.round_rate = _clk_usdhc_round_rate,
+ 	.set_rate = _clk_usdhc3_set_rate,
+ 	.get_rate = _clk_usdhc3_get_rate,
++	.flags  = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static int _clk_usdhc4_set_parent(struct clk *clk, struct clk *parent)
+@@ -2253,6 +2258,7 @@ static struct clk usdhc4_clk = {
+ 	.round_rate = _clk_usdhc_round_rate,
+ 	.set_rate = _clk_usdhc4_set_rate,
+ 	.get_rate = _clk_usdhc4_get_rate,
++	.flags  = AHB_HIGH_SET_POINT | CPU_FREQ_TRIG_UPDATE,
+ };
+ 
+ static unsigned long _clk_ssi_round_rate(struct clk *clk,
+@@ -3321,6 +3327,10 @@ static unsigned long _clk_uart_get_rate(struct clk *clk)
+ 	div = (reg >> MXC_CCM_CSCDR1_UART_CLK_PODF_OFFSET) + 1;
+ 	val = clk_get_rate(clk->parent) / div;
+ 
++	/* If the parent is OSC, there is an in-built divide by 6. */
++	if (clk->parent == &osc_clk)
++		val = val / 6;
++
+ 	return val;
+ }
+ 
+@@ -3335,7 +3345,7 @@ static int _clk_uart_set_parent(struct clk *clk, struct clk *parent)
+ 	else
+ 		mux = 0; /* osc */
+ 
+-	reg |= mux << MXC_CCM_CSCDR2_ECSPI_CLK_SEL_OFFSET;
++	reg |= mux << MXC_CCM_CSCDR1_UART_CLK_SEL_OFFSET;
+ 
+ 	__raw_writel(reg, MXC_CCM_CSCDR1);
+ 
+@@ -4024,7 +4034,6 @@ int __init mx6sl_clocks_init(unsigned long ckil, unsigned long osc,
+ 			     3 << MXC_CCM_CCGRx_CG0_OFFSET, MXC_CCM_CCGR0);
+ 	} else {
+ 		__raw_writel(1 << MXC_CCM_CCGRx_CG11_OFFSET |
+-			     3 << MXC_CCM_CCGRx_CG2_OFFSET |
+ 			     3 << MXC_CCM_CCGRx_CG1_OFFSET |
+ 			     3 << MXC_CCM_CCGRx_CG0_OFFSET, MXC_CCM_CCGR0);
+ 	}
+@@ -4032,9 +4041,9 @@ int __init mx6sl_clocks_init(unsigned long ckil, unsigned long osc,
+ 		     3 << MXC_CCM_CCGRx_CG11_OFFSET, MXC_CCM_CCGR1);
+ 	__raw_writel(1 << MXC_CCM_CCGRx_CG12_OFFSET |
+ 		     1 << MXC_CCM_CCGRx_CG11_OFFSET |
+-		     3 << MXC_CCM_CCGRx_CG10_OFFSET |
+-		     3 << MXC_CCM_CCGRx_CG9_OFFSET |
+-		     3 << MXC_CCM_CCGRx_CG8_OFFSET, MXC_CCM_CCGR2);
++		     1 << MXC_CCM_CCGRx_CG10_OFFSET |
++		     1 << MXC_CCM_CCGRx_CG9_OFFSET |
++		     1 << MXC_CCM_CCGRx_CG8_OFFSET, MXC_CCM_CCGR2);
+ 	__raw_writel(1 << MXC_CCM_CCGRx_CG14_OFFSET |
+ 		     3 << MXC_CCM_CCGRx_CG13_OFFSET |
+ 		     3 << MXC_CCM_CCGRx_CG12_OFFSET |
+diff --git a/arch/arm/mach-mx6/irq.c b/arch/arm/mach-mx6/irq.c
+index 197c451..a079c37 100644
+--- a/arch/arm/mach-mx6/irq.c
++++ b/arch/arm/mach-mx6/irq.c
+@@ -103,6 +103,7 @@ void mx6_init_irq(void)
+ 	void __iomem *gpc_base = IO_ADDRESS(GPC_BASE_ADDR);
+ 	struct irq_desc *desc;
+ 	unsigned int i;
++	u32 reg;
+ 
+ 	/* start offset if private timer irq id, which is 29.
+ 	 * ID table:
+@@ -121,6 +122,13 @@ void mx6_init_irq(void)
+ 		__raw_writel(0x20000000, gpc_base + 0x10);
+ 	}
+ 
++#ifdef CONFIG_MX6_INTER_LDO_BYPASS
++	/* Mask the ANATOP brown out interrupt in the GPC. */
++	reg = __raw_readl(gpc_base + 0x14);
++	reg |= 0x80000000;
++	__raw_writel(reg, gpc_base + 0x14);
++#endif
++
+ 	for (i = MXC_INT_START; i <= MXC_INT_END; i++) {
+ 		desc = irq_to_desc(i);
+ 		desc->irq_data.chip->irq_set_wake = mx6_gic_irq_set_wake;
+diff --git a/arch/arm/mach-mx6/mx6_anatop_regulator.c b/arch/arm/mach-mx6/mx6_anatop_regulator.c
+index 06755dc..945adbd 100644
+--- a/arch/arm/mach-mx6/mx6_anatop_regulator.c
++++ b/arch/arm/mach-mx6/mx6_anatop_regulator.c
+@@ -125,10 +125,12 @@ static int pu_enable(struct anatop_regulator *sreg)
+ 	reg |= ANADIG_ANA_MISC2_REG1_BO_EN;
+ 	__raw_writel(reg, ANA_MISC2_BASE_ADDR);
+ 
++#ifndef CONFIG_MX6_INTER_LDO_BYPASS
+ 	/* Unmask the ANATOP brown out interrupt in the GPC. */
+ 	reg = __raw_readl(gpc_base + 0x14);
+ 	reg &= ~0x80000000;
+ 	__raw_writel(reg, gpc_base + 0x14);
++#endif
+ 
+ 	return 0;
+ }
+@@ -162,10 +164,12 @@ static int pu_disable(struct anatop_regulator *sreg)
+ 	while (__raw_readl(gpc_base + GPC_CNTR_OFFSET) & 0x1)
+ 			;
+ 
++#ifndef CONFIG_MX6_INTER_LDO_BYPASS
+ 	/* Mask the ANATOP brown out interrupt in the GPC. */
+ 	reg = __raw_readl(gpc_base + 0x14);
+ 	reg |= 0x80000000;
+ 	__raw_writel(reg, gpc_base + 0x14);
++#endif
+ 
+ 	/* PU power gating. */
+ 	reg = __raw_readl(ANADIG_REG_CORE);
+diff --git a/arch/arm/mach-mx6/mx6sl_ddr.S b/arch/arm/mach-mx6/mx6sl_ddr.S
+new file mode 100644
+index 0000000..4faa294
+--- /dev/null
++++ b/arch/arm/mach-mx6/mx6sl_ddr.S
+@@ -0,0 +1,330 @@
++/*
++ * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <linux/linkage.h>
++#include <mach/hardware.h>
++
++
++	 .macro    mx6sl_switch_to_24MHz
++
++      /* Set MMDC clock to be sourced from PLL3. */
++      /* Ensure first periph2_clk2 is sourced from PLL3. */
++      /* Set the PERIPH2_CLK2_PODF to divide by 2. */
++     ldr    r6, [r2, #0x14]
++     bic    r6, r6, #0x7
++     orr    r6, r6, #0x1
++     str     r6, [r2, #0x14]
++
++     /* Select PLL3 to source MMDC. */
++     ldr    r6, [r2, #0x18]
++     bic    r6, r6, #0x100000
++     str    r6, [r2, #0x18]
++
++     /* Swtich periph2_clk_sel to run from PLL3. */
++      ldr     r6, [r2, #0x14]
++      orr     r6, r6, #0x4000000
++      str     r6, [r2, #0x14]
++
++periph2_clk_switch1:
++     ldr     r6, [r2, #0x48]
++     cmp     r6, #0
++     bne     periph2_clk_switch1
++
++    /* Need to clock gate the 528 PFDs before
++      * powering down PLL2.
++      * Only the PLL2_PFD2_400M should be ON
++      * as it feeds the MMDC
++      */
++     ldr     r6, [r3, #0x100]
++     orr    r6, r6, #0x800000
++     str     r6, [r3, #0x100]
++
++    /* Set PLL2 to bypass state. We should be here
++      *only if MMDC is not sourced from PLL2.*/
++     ldr    r6, [r3, #0x30]
++     orr    r6, r6, #0x10000
++     str     r6, [r3, #0x30]
++
++     ldr    r6, [r3, #0x30]
++     orr    r6, r6, #0x1000
++     str     r6, [r3, #0x30]
++
++    /* Ensure pre_periph2_clk_mux is set to pll2 */
++     ldr     r6, [r2, #0x18]
++     bic     r6, r6, #0x600000
++     str     r6, [r2, #0x18]
++
++     /* Set MMDC clock to be sourced from the bypassed PLL2. */
++     ldr    r6, [r2, #0x14]
++     bic    r6, r6, #0x4000000
++     str    r6, [r2, #0x14]
++
++periph2_clk_switch2:
++     ldr     r6, [r2, #0x48]
++     cmp     r6, #0
++     bne     periph2_clk_switch2
++
++    /* Now move MMDC back to periph2_clk2 source.
++      * after selecting PLL2 as the option.
++      */
++     /* Select PLL2 as the source. */
++     ldr    r6, [r2, #0x18]
++     orr    r6, r6, #0x100000
++     str    r6, [r2, #0x18]
++
++    /* set periph2_clk2_podf to divide by 1. */
++     ldr    r6, [r2, #0x14]
++     bic    r6, r6, #0x7
++     str     r6, [r2, #0x14]
++
++     /* Now move periph2_clk to periph2_clk2 source */
++     ldr    r6, [r2, #0x14]
++     orr    r6, r6, #0x4000000
++     str    r6, [r2, #0x14]
++
++periph2_clk_switch3:
++     ldr     r6, [r2, #0x48]
++     cmp     r6, #0
++     bne     periph2_clk_switch3
++
++	.endm
++
++	  .macro	ddr_switch_400MHz
++
++    /* Set MMDC divider first, in case PLL3 is at 480MHz. */
++      ldr     r6, [r3, #0x10]
++      and    r6, r6, #0x10000
++      cmp   r6, #0x10000
++      beq    pll3_in_bypass
++      /* Set MMDC divder to divide by 2. */
++      ldr    r6, [r2, #0x14]
++      bic    r6, r6, #0x38
++      orr    r6, r6, #0x8
++      str    r6, [r2, #0x14]
++
++mmdc_podf:
++     ldr     r6, [r2, #0x48]
++     cmp     r6, #0
++     bne     mmdc_podf
++
++pll3_in_bypass:
++
++     /* Ensure that MMDC is sourced from PLL2 mux first. */
++     ldr     r6, [r2, #0x14]
++     bic     r6, r6, #0x4000000
++     str     r6, [r2, #0x14]
++
++periph2_clk_switch4:
++     ldr     r6, [r2, #0x48]
++     cmp     r6, #0
++     bne     periph2_clk_switch4
++
++     /* Now ensure periph2_clk2_sel mux is set to PLL3 */
++     ldr     r6, [r2, #0x18]
++     bic     r6, r6, #0x100000
++     str     r6, [r2, #0x18]
++
++      /* Now switch MMDC to PLL3. */
++     ldr     r6, [r2, #0x14]
++     orr     r6, r6, #0x4000000
++     str     r6, [r2, #0x14]
++
++periph2_clk_switch5:
++     ldr     r6, [r2, #0x48]
++     cmp     r6, #0
++     bne     periph2_clk_switch5
++
++     /* Now power up PLL2 and unbypass it. */
++     ldr    r6, [r3, #0x30]
++     bic    r6, r6, #0x1000
++     str     r6, [r3, #0x30]
++
++     /* Make sure PLL2 has locked.*/
++wait_for_pll_lock:
++     ldr    r6, [r3, #0x30]
++     and   r6, r6, #0x80000000
++     cmp  r6, #0x80000000
++     bne   wait_for_pll_lock
++
++      ldr    r6, [r3, #0x30]
++     bic    r6, r6, #0x10000
++     str     r6, [r3, #0x30]
++
++    /* Need to enable the 528 PFDs after
++      * powering up PLL2.
++      * Only the PLL2_PFD2_400M should be ON
++      * as it feeds the MMDC. Rest should have
++      * been managed by clock code.
++      */
++     ldr     r6, [r3, #0x100]
++     bic    r6, r6, #0x800000
++     str     r6, [r3, #0x100]
++
++    /* Now switch MMDC clk back to pll2_mux option. */
++    /* Ensure pre_periph2_clk2 is set to pll2_pfd_400M */
++     ldr     r6, [r2, #0x18]
++     bic     r6, r6, #0x600000
++     orr     r6, r6, #0x200000
++     str     r6, [r2, #0x18]
++
++     ldr     r6, [r2, #0x14]
++     bic     r6, r6, #0x4000000
++     str     r6, [r2, #0x14]
++
++periph2_clk_switch6:
++     ldr     r6, [r2, #0x48]
++     cmp     r6, #0
++     bne     periph2_clk_switch6
++
++     /* Now set the MMDC PODF back to 1.*/
++
++      ldr    r6, [r2, #0x14]
++      bic    r6, r6, #0x38
++      str    r6, [r2, #0x14]
++
++mmdc_podf1:
++     ldr     r6, [r2, #0x48]
++     cmp     r6, #0
++     bne     mmdc_podf1
++
++    .endm
++
++/*
++ *  mx6sl_ddr_iram
++ *
++ *  Idle the processor (eg, wait for interrupt).
++ *  Make sure DDR is in self-refresh.
++ *  IRQs are already disabled.
++ * r0 : DDR freq.
++ */
++ENTRY(mx6sl_ddr_iram)
++
++    push {r4, r5, r6, r7, r8, r9, r10 }
++
++mx6sl_ddr_freq_change:
++    ldr     r3, =ANATOP_BASE_ADDR
++    add   r3, r3, #PERIPBASE_VIRT
++
++    ldr     r2, =CCM_BASE_ADDR
++    add   r2, r2, #PERIPBASE_VIRT
++
++    ldr     r8, =MMDC_P0_BASE_ADDR
++    add   r8, r8, #PERIPBASE_VIRT
++
++    /* Prime all TLB entries. */
++    adr   r7, mx6sl_ddr_freq_change               @Address in this function.
++
++    ldr     r6, [r7]
++    ldr     r6, [r8]
++    ldr     r6, [r3]
++    ldr     r6, [r2]
++
++     dsb
++     isb
++
++     /* Disable Automatic power savings. */
++     ldr    r6, [r8, #0x404]
++     orr    r6, r6, #0x01
++     str    r6, [r8, #0x404]
++
++     /* Disable MMDC power down timer. */
++     /*MMDC0_MDPDC disable power down timer */
++     ldr    r6, [r8, #0x4]
++     bic    r6, r6, #0xff00
++     str    r6, [r8, #0x4]
++
++     /* Delay for a while */
++     ldr      r1, =10
++delay1:
++     ldr      r7, =0
++cont1:
++     ldr      r6, [r8, r7]
++     add     r7, r7, #4
++     cmp    r7, #16
++     bne     cont1
++     sub     r1, r1, #1
++     cmp    r1, #0
++     bgt     delay1
++
++     /* Make the DDR explicitly enter self-refresh. */
++     ldr     r6, [r8, #0x404]
++     orr    r6, r6, #0x200000
++     str     r6, [r8, #0x404]
++
++poll_dvfs_set_1:
++     ldr     r6, [r8, #0x404]
++     and     r6, r6, #0x2000000
++     cmp    r6, #0x2000000
++     bne     poll_dvfs_set_1
++
++     /* set SBS step-by-step mode */
++     ldr     r6, [r8, #0x410]
++     orr     r6, r6, #0x100
++     str     r6, [r8, #0x410]
++
++     ldr     r1, =24000000
++     cmp    r0, r1
++     beq     set_to_24MHz
++
++     ddr_switch_400MHz
++     b    done
++
++set_to_24MHz:
++     mx6sl_switch_to_24MHz
++
++done:
++     /* clear DVFS - exit from self refresh mode */
++     ldr     r6, [r8, #0x404]
++     bic     r6, r6, #0x200000
++     str     r6, [r8, #0x404]
++
++poll_dvfs_clear_1:
++     ldr     r6, [r8, #0x404]
++     and     r6, r6, #0x2000000
++     cmp     r6, #0x2000000
++     beq     poll_dvfs_clear_1
++
++     /* Enable Automatic power savings. */
++     ldr    r6, [r8, #0x404]
++     bic    r6, r6, #0x01
++     str    r6, [r8, #0x404]
++
++     ldr     r1, =24000000
++     cmp    r0, r1
++     beq     skip_power_down
++
++     /* Enable MMDC power down timer. */
++     ldr    r6, [r8, #0x4]
++     orr    r6, r6, #0x5500
++     str    r6, [r8, #0x4]
++
++skip_power_down:
++     /* clear SBS - unblock DDR accesses */
++     ldr     r6, [r8, #0x410]
++     bic     r6, r6, #0x100
++     str     r6, [r8, #0x410]
++
++    pop {r4,r5, r6, r7, r8, r9, r10}
++
++    /* Restore registers */
++    mov     pc, lr
++
++    .type   mx6sl_ddr_do_iram, #object
++ENTRY(mx6sl_ddr_do_iram)
++    .word   mx6sl_ddr_iram
++    .size    mx6sl_ddr_iram, . - mx6sl_ddr_iram
+-- 
+1.7.7.4
+

@@ -1,0 +1,39 @@
+From 2aed1e8c284a108345fb5d5159edecf3c45da090 Mon Sep 17 00:00:00 2001
+From: Liu Ying <Ying.Liu@freescale.com>
+Date: Fri, 30 Mar 2012 09:22:00 +0800
+Subject: [PATCH 1249/2463] ENGR00178456 IPUv3 fb:Unblank primary fb only by
+ default
+
+This patch changes IPUv3 fb probe function logic to
+unblank the primary fb only by default so that the
+secondary fb using IPU DP BG channel won't be unblanked
+when system boot-ups. This avoids the HDMI fb(as the
+secondary fb using IPU DP BG channel) is unblanked
+accidentally without plugging in HDMI cable.
+
+Signed-off-by: Liu Ying <Ying.Liu@freescale.com>
+(cherry picked from commit 2c8188de61f84e40e26e662138af5ef4f81a0969)
+---
+ drivers/video/mxc/mxc_ipuv3_fb.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 62685a5..8eade2c 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -2077,7 +2077,11 @@ static int mxcfb_probe(struct platform_device *pdev)
+ 		mxcfbi->ipu_ch_nf_irq = IPU_IRQ_BG_SYNC_NFACK;
+ 		mxcfbi->ipu_alp_ch_irq = IPU_IRQ_BG_ALPHA_SYNC_EOF;
+ 		mxcfbi->ipu_ch = MEM_BG_SYNC;
+-		mxcfbi->cur_blank = mxcfbi->next_blank = FB_BLANK_UNBLANK;
++		/* Unblank the primary fb only by default */
++		if (pdev->id == 0)
++			mxcfbi->cur_blank = mxcfbi->next_blank = FB_BLANK_UNBLANK;
++		else
++			mxcfbi->cur_blank = mxcfbi->next_blank = FB_BLANK_POWERDOWN;
+ 
+ 		ipu_disp_set_global_alpha(mxcfbi->ipu, mxcfbi->ipu_ch, true, 0x80);
+ 		ipu_disp_set_color_key(mxcfbi->ipu, mxcfbi->ipu_ch, false, 0);
+-- 
+1.7.7.4
+

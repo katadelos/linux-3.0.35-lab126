@@ -1,0 +1,71 @@
+From 824d9184349206db97f880aba7d0e61ae7fb99db Mon Sep 17 00:00:00 2001
+From: Wu Guoxing <b39297@freescale.com>
+Date: Thu, 15 Mar 2012 10:54:26 +0800
+Subject: [PATCH 1170/2463] ENGR00176921:gpu-viv: set outstanding request
+ number for all chips that using gc320
+
+this needs by all the chips(6dl, 6dq) that using gc320
+
+this is vivante's IP bug, that when set outstanding number bigger than
+16, it will have a chance for gc320 to dead lock the axi bus, which will
+lead to system hang.
+also, as our chip can only support axi outstanding of 8(for 6dl) and 4(6dq),
+this change have no performance impact.
+
+Signed-off-by: Wu Guoxing <b39297@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c  |   16 +++++-----------
+ 1 files changed, 5 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+index 90308be..1431b83 100644
+--- a/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
++++ b/drivers/mxc/gpu-viv/arch/XAQ2/hal/kernel/gc_hal_kernel_hardware.c
+@@ -23,7 +23,6 @@
+ 
+ #include "gc_hal.h"
+ #include "gc_hal_kernel.h"
+-#include <mach/hardware.h>
+ 
+ #define _GC_OBJ_ZONE    gcvZONE_HARDWARE
+ 
+@@ -422,6 +421,7 @@ gckHARDWARE_Construct(
+     gceSTATUS status;
+     gckHARDWARE hardware = gcvNULL;
+     gctUINT16 data = 0xff00;
++    gctUINT32 axi_ot;
+     gctPOINTER pointer = gcvNULL;
+ 
+     gcmkHEADER_ARG("Os=0x%x", Os);
+@@ -468,6 +468,10 @@ gckHARDWARE_Construct(
+     case gcv300:
+     case gcv320:
+         hardware->type = gcvHARDWARE_2D;
++        /*set outstanding limit*/
++        gcmkONERROR(gckOS_ReadRegisterEx(Os, Core, 0x00414, &axi_ot));
++        axi_ot = (axi_ot & (~0xFF)) | 0x10;
++        gcmkONERROR(gckOS_WriteRegisterEx(Os, Core, 0x00414, axi_ot));
+         break;
+ 
+     default:
+@@ -509,16 +513,6 @@ gckHARDWARE_Construct(
+ 
+ #endif
+ 
+-    if(cpu_is_mx6dl())
+-    {
+-        /*set outstanding limit on mx6dl*/
+-        gctUINT32 data;
+-
+-        gcmkONERROR(gckOS_ReadRegisterEx(Os, Core, 0x00414, &data));
+-        data = (data & (~0xFF)) | 0x10;
+-        gcmkONERROR(gckOS_WriteRegisterEx(Os, Core, 0x00414, data));
+-    }
+-
+     /* Set power state to ON. */
+     hardware->chipPowerState  = gcvPOWER_ON;
+     hardware->clockState      = gcvTRUE;
+-- 
+1.7.7.4
+

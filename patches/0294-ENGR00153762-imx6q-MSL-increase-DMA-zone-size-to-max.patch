@@ -1,0 +1,102 @@
+From 4953bf7842f52c3fe5d4f20551ee0371639ccb5f Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Wed, 27 Jul 2011 14:17:40 +0800
+Subject: [PATCH 0294/2463] ENGR00153762 imx6q MSL: increase DMA zone size to
+ max 184
+
+when we need enable 1080p 32bpp display and play a 1080p h264 clip,
+it may meet memory allocation fail issue. This patch fix this issue.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ arch/arm/mach-mx5/Kconfig               |    8 ++++++++
+ arch/arm/mach-mx6/Kconfig               |    7 +++++++
+ arch/arm/plat-mxc/Kconfig               |    8 --------
+ arch/arm/plat-mxc/include/mach/memory.h |    4 +++-
+ arch/arm/plat-mxc/include/mach/mx6.h    |    2 +-
+ 5 files changed, 19 insertions(+), 10 deletions(-)
+
+diff --git a/arch/arm/mach-mx5/Kconfig b/arch/arm/mach-mx5/Kconfig
+index d41b560..ccb8e7d 100755
+--- a/arch/arm/mach-mx5/Kconfig
++++ b/arch/arm/mach-mx5/Kconfig
+@@ -258,4 +258,12 @@ config MACH_IMX_BLUETOOTH_RFKILL
+        depends on RFKILL
+        ---help---
+ 	Say Y to get the standard rfkill interface of Bluetooth
++
++config DMA_ZONE_SIZE
++        int "DMA memory zone size"
++        range 0 96
++        default 24
++        help
++          This is the size in MB for the DMA zone. The DMA zone is used for
++          dedicated memory for large contiguous video buffers
+ endif
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 604a029..8b716eb 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -48,4 +48,11 @@ config MACH_MX6Q_SABREAUTO
+ 
+ comment "MX6 Options:"
+ 
++config DMA_ZONE_SIZE
++        int "DMA memory zone size"
++        range 0 184
++        default 24
++        help
++          This is the size in MB for the DMA zone. The DMA zone is used for
++          dedicated memory for large contiguous video buffers
+ endif
+diff --git a/arch/arm/plat-mxc/Kconfig b/arch/arm/plat-mxc/Kconfig
+index 356358c..3558748 100755
+--- a/arch/arm/plat-mxc/Kconfig
++++ b/arch/arm/plat-mxc/Kconfig
+@@ -144,14 +144,6 @@ config IRAM_ALLOC
+         default y
+ 	select GENERIC_ALLOCATOR
+ 
+-config DMA_ZONE_SIZE
+-        int "DMA memory zone size"
+-        range 0 96
+-        default 24
+-        help
+-          This is the size in MB for the DMA zone. The DMA zone is used for
+-          dedicated memory for large contiguous video buffers
+-
+ config CLK_DEBUG
+ 	bool "clock debug information export to user space"
+ 	depends on PM_DEBUG && DEBUG_FS
+diff --git a/arch/arm/plat-mxc/include/mach/memory.h b/arch/arm/plat-mxc/include/mach/memory.h
+index 89015a1..e33df19 100755
+--- a/arch/arm/plat-mxc/include/mach/memory.h
++++ b/arch/arm/plat-mxc/include/mach/memory.h
+@@ -63,8 +63,10 @@
+ #define CONSISTENT_DMA_SIZE SZ_4M
+ #else
+ 
+-#if defined(CONFIG_ARCH_MX5) || defined(CONFIG_ARCH_MX6)
++#if defined(CONFIG_ARCH_MX5)
+ #define CONSISTENT_DMA_SIZE     (96 * SZ_1M)
++#elif defined(CONFIG_ARCH_MX6)
++#define CONSISTENT_DMA_SIZE     (184 * SZ_1M)
+ #else
+ #define CONSISTENT_DMA_SIZE     (32 * SZ_1M)
+ #endif
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index f59d9a1..7ff17ad 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -242,7 +242,7 @@
+ #define MX6Q_FEC_BASE_ADDR	 ENET_BASE_ADDR
+ 
+ /* define virtual address */
+-#define PERIPBASE_VIRT 0xF4000000
++#define PERIPBASE_VIRT 0xF2000000
+ #define AIPS1_BASE_ADDR_VIRT (PERIPBASE_VIRT + AIPS1_ARB_BASE_ADDR)
+ #define AIPS2_BASE_ADDR_VIRT (PERIPBASE_VIRT + AIPS2_ARB_BASE_ADDR)
+ #define ARM_PERIPHBASE_VIRT	 (PERIPBASE_VIRT + ARM_PERIPHBASE)
+-- 
+1.7.7.4
+

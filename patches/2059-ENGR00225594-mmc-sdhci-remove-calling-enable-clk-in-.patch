@@ -1,0 +1,72 @@
+From 0383bc64826a17049cfc81d58c0cf0445e69a4d7 Mon Sep 17 00:00:00 2001
+From: Ryan QIAN <b32804@freescale.com>
+Date: Mon, 24 Sep 2012 15:25:36 +0800
+Subject: [PATCH 2059/2463] ENGR00225594 mmc: sdhci: remove calling enable clk
+ in interrupt context
+
+There's kernel warning without when insmod WiFi module as follows:
+
+------------[ cut here ]------------
+WARNING: at kernel/irq/handle.c:130 handle_irq_event_percpu+0x164/0x180()
+irq 55 handler sdhci_irq+0x0/0x988 enabled interrupts
+Modules linked in: ar6000
+[<800471dc>] (unwind_backtrace+0x0/0xfc) from
+	[<80072fd0>] (warn_slowpath_common+0x4c/0x64)
+[<80072fd0>] (warn_slowpath_common+0x4c/0x64) from
+	[<8007307c>] (warn_slowpath_fmt+0x30/0x40)
+[<8007307c>] (warn_slowpath_fmt+0x30/0x40) from
+	[<800a9f54>] (handle_irq_event_percpu+0x164/0x180)
+[<800a9f54>] (handle_irq_event_percpu+0x164/0x180) from
+	[<800a9fac>] (handle_irq_event+0x3c/0x5c)
+[<800a9fac>] (handle_irq_event+0x3c/0x5c) from
+	[<800ac2a8>] (handle_fasteoi_irq+0x98/0x148)
+[<800ac2a8>] (handle_fasteoi_irq+0x98/0x148) from
+	[<800a9a2c>] (generic_handle_irq+0x2c/0x38)
+[<800a9a2c>] (generic_handle_irq+0x2c/0x38) from
+	[<80041f60>] (handle_IRQ+0x4c/0xb8)
+[<80041f60>] (handle_IRQ+0x4c/0xb8) from
+	[<80040f8c>] (__irq_svc+0x4c/0xe8)
+[<80040f8c>] (__irq_svc+0x4c/0xe8) from
+	[<800420e4>] (default_idle+0x24/0x28)
+[<800420e4>] (default_idle+0x24/0x28) from
+	[<80042730>] (cpu_idle+0xbc/0xfc)
+[<80042730>] (cpu_idle+0xbc/0xfc) from
+	[<80008904>] (start_kernel+0x248/0x288)
+[<80008904>] (start_kernel+0x248/0x288) from
+	[<10008040>] (0x10008040)
+---[ end trace 95ab51b95e0e8e5f ]---
+
+it is caused by calling cancel_delayed_work_sync in sdhci_enable_clk, since
+it will call spin_unlock_irq which will possibly enable irq in interrupt
+context. if sdhci_enable_clk is called in interrupt context this warning
+will be shown.
+
+sdhci_enable_clk will be called in interrupt context in the following path:
+sdhci_irq->mmc_signal_sdio_irq->mmc_signal_sdio_irq->sdhci_enable_sdio_irq->...
+     |____________________interrupt context____________________________________
+
+fix:
+Remove calling sdhci_enable_clk in sdhci_enable_sdio_irq. For sdio cards, sdhci
+clk will not be disabled, so it is save to remove it.
+
+Signed-off-by: Ryan QIAN <b32804@freescale.com>
+Acked-by: Dong Aisheng <b29396@freescale.com>
+---
+ drivers/mmc/host/sdhci.c |    1 -
+ 1 files changed, 0 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mmc/host/sdhci.c b/drivers/mmc/host/sdhci.c
+index 3b8340e..49bbaa5 100755
+--- a/drivers/mmc/host/sdhci.c
++++ b/drivers/mmc/host/sdhci.c
+@@ -1528,7 +1528,6 @@ static void sdhci_enable_sdio_irq(struct mmc_host *mmc, int enable)
+ 
+ 	host = mmc_priv(mmc);
+ 
+-	sdhci_enable_clk(host);
+ 	spin_lock_irqsave(&host->lock, flags);
+ 
+ 	if (host->flags & SDHCI_DEVICE_DEAD)
+-- 
+1.7.7.4
+

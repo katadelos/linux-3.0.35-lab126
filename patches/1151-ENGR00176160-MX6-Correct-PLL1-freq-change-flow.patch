@@ -1,0 +1,53 @@
+From 06c2a73392a73c13f9bc68d2a25199dfbde4ca6d Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 6 Mar 2012 12:00:16 +0800
+Subject: [PATCH 1151/2463] ENGR00176160 [MX6]Correct PLL1 freq change flow
+
+Previous PLL1 freq change is done by switching CPU clock
+to 400M pfd or 24M OSC, then modifying
+PLL1 div directly, and switch back CPU clock immediately,
+it will result in CPU clock stop during PLL1 hardware lock
+period, thus, DRAM FIFO may blocked by the data CPU
+requested before PLL1 clock changed, and it will block other devices
+accessing DRAM, such as IPU, VPU etc. It will cause
+underrun or hang issue. We should wait PLL1 lock, then switch
+back.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/clock.c |   10 ++++++++--
+ 1 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index 89d4810..2ab6cb9 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -492,17 +492,23 @@ static unsigned long  _clk_pll1_main_get_rate(struct clk *clk)
+ 
+ static int _clk_pll1_main_set_rate(struct clk *clk, unsigned long rate)
+ {
+-	unsigned int reg,  div;
++	unsigned int reg, div;
+ 
+ 	if (rate < AUDIO_VIDEO_MIN_CLK_FREQ || rate > AUDIO_VIDEO_MAX_CLK_FREQ)
+ 		return -EINVAL;
+ 
+-	div = (rate * 2) / clk_get_rate(clk->parent) ;
++	div = (rate * 2) / clk_get_rate(clk->parent);
+ 
++	/* Update div */
+ 	reg = __raw_readl(PLL1_SYS_BASE_ADDR) & ~ANADIG_PLL_SYS_DIV_SELECT_MASK;
+ 	reg |= div;
+ 	__raw_writel(reg, PLL1_SYS_BASE_ADDR);
+ 
++	/* Wait for PLL1 to lock */
++	if (!WAIT(__raw_readl(PLL1_SYS_BASE_ADDR) & ANADIG_PLL_LOCK,
++				SPIN_DELAY))
++		panic("pll1 enable failed\n");
++
+ 	return 0;
+ }
+ 
+-- 
+1.7.7.4
+

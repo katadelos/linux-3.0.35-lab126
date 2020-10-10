@@ -1,0 +1,82 @@
+From 955c3e3649760c7c73e2986b76916a38949387f1 Mon Sep 17 00:00:00 2001
+From: Lionel Xu <Lionel.Xu@freescale.com>
+Date: Fri, 2 Mar 2012 13:12:26 +0800
+Subject: [PATCH 1134/2463] ENGR00170526-3 ESAI: Remove the workaround to
+ reset codec before playbacking
+
+Previously in order to avoid audio playback no sound issue, a hardware reset
+was made to the codec chip each time when doing playback. now remove this
+workaround.
+
+Signed-off-by: Lionel Xu <Lionel.Xu@freescale.com>
+---
+ sound/soc/codecs/cs42888.h  |    3 +--
+ sound/soc/imx/imx-cs42888.c |   12 ------------
+ 2 files changed, 1 insertions(+), 14 deletions(-)
+
+diff --git a/sound/soc/codecs/cs42888.h b/sound/soc/codecs/cs42888.h
+index bea8beb..b4f3950 100644
+--- a/sound/soc/codecs/cs42888.h
++++ b/sound/soc/codecs/cs42888.h
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2010-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -19,7 +19,6 @@
+  * the .codec_dai field of your machine driver's snd_soc_dai_link structure.
+  */
+ extern struct snd_soc_dai_driver cs42888_dai;
+-#define CS42888_RST 235
+ 
+ /*
+  * The ASoC codec device structure for the CS42888.  Assign this structure
+diff --git a/sound/soc/imx/imx-cs42888.c b/sound/soc/imx/imx-cs42888.c
+index 0a78b39..dc46fa6 100644
+--- a/sound/soc/imx/imx-cs42888.c
++++ b/sound/soc/imx/imx-cs42888.c
+@@ -41,7 +41,6 @@ struct imx_priv_state {
+ 
+ static struct imx_priv_state hw_state;
+ unsigned int mclk_freq;
+-int rst_gpio;
+ 
+ static int imx_3stack_startup(struct snd_pcm_substream *substream)
+ {
+@@ -50,15 +49,6 @@ static int imx_3stack_startup(struct snd_pcm_substream *substream)
+ 
+ 	if (!cpu_dai->active) {
+ 		hw_state.hw = 0;
+-		if (rst_gpio) {
+-			gpio_set_value_cansleep(rst_gpio, 0);
+-			msleep(100);
+-			gpio_set_value_cansleep(rst_gpio, 1);
+-		} else {
+-			gpio_direction_output(CS42888_RST, 0);
+-			msleep(100);
+-			gpio_direction_output(CS42888_RST, 1);
+-		}
+ 	}
+ 
+ 	return 0;
+@@ -155,7 +145,6 @@ static int imx_3stack_surround_hw_params(struct snd_pcm_substream *substream,
+ 	dai_format = SND_SOC_DAIFMT_LEFT_J | SND_SOC_DAIFMT_NB_NF |
+ 	    SND_SOC_DAIFMT_CBS_CFS;
+ 
+-
+ 	/* set cpu DAI configuration */
+ 	snd_soc_dai_set_fmt(cpu_dai, dai_format);
+ 	/* set i.MX active slot mask */
+@@ -268,7 +257,6 @@ static int __devinit imx_3stack_cs42888_probe(struct platform_device *pdev)
+ 		return -EINVAL;
+ 	}
+ 	mclk_freq = plat_data->sysclk;
+-	rst_gpio = plat_data->rst_gpio;
+ 	if (plat_data->codec_name)
+ 		imx_3stack_dai[0].codec_name = plat_data->codec_name;
+ 	return 0;
+-- 
+1.7.7.4
+

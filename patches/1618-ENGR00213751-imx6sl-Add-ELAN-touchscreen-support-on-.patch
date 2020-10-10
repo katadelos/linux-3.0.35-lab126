@@ -1,0 +1,135 @@
+From e6ed01871c19bc3db1bced9c0951cdf0ded40cd6 Mon Sep 17 00:00:00 2001
+From: Robby Cai <R63905@freescale.com>
+Date: Mon, 18 Jun 2012 13:14:08 +0800
+Subject: [PATCH 1618/2463] ENGR00213751: imx6sl: Add ELAN touchscreen support
+ on EINK-DC3 board
+
+Add ELAN capacitive TS support on EINK-DC3 stacked on MX6SL_ARM2 board
+- configure the iomux setting (need 4.7K Ohm pull up on 'touch_int_b')
+- configure the i2c slave addr
+- configure the GPIO setting for ELAN ce/int/rst
+- update the defconfig
+
+Signed-off-by: Robby Cai <R63905@freescale.com>
+---
+ arch/arm/configs/imx6s_defconfig             |    2 +-
+ arch/arm/mach-mx6/board-mx6sl_arm2.c         |   29 ++++++++++++++++++++++++++
+ arch/arm/mach-mx6/board-mx6sl_arm2.h         |    6 +++++
+ arch/arm/plat-mxc/include/mach/iomux-mx6sl.h |    5 +++-
+ 4 files changed, 40 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/configs/imx6s_defconfig b/arch/arm/configs/imx6s_defconfig
+index 6e8281a..3e366c2 100644
+--- a/arch/arm/configs/imx6s_defconfig
++++ b/arch/arm/configs/imx6s_defconfig
+@@ -1056,7 +1056,7 @@ CONFIG_INPUT_TOUCHSCREEN=y
+ # CONFIG_TOUCHSCREEN_HAMPSHIRE is not set
+ # CONFIG_TOUCHSCREEN_EETI is not set
+ CONFIG_TOUCHSCREEN_EGALAX=y
+-# CONFIG_TOUCHSCREEN_ELAN is not set
++CONFIG_TOUCHSCREEN_ELAN=y
+ # CONFIG_TOUCHSCREEN_FUJITSU is not set
+ # CONFIG_TOUCHSCREEN_GUNZE is not set
+ # CONFIG_TOUCHSCREEN_ELO is not set
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.c b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+index b17a0ff..8b9799d 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.c
+@@ -125,6 +125,9 @@
+ #define MX6SL_ARM2_EPDC_PMIC_WAKE	IMX_GPIO_NR(2, 14) /* EPDC_PWRWAKEUP */
+ #define MX6SL_ARM2_EPDC_PMIC_INT	IMX_GPIO_NR(2, 12) /* EPDC_PWRINT */
+ #define MX6SL_ARM2_EPDC_VCOM		IMX_GPIO_NR(2, 3)
++#define MX6SL_ARM2_ELAN_CE		IMX_GPIO_NR(2, 9)
++#define MX6SL_ARM2_ELAN_INT		IMX_GPIO_NR(2, 10)
++#define MX6SL_ARM2_ELAN_RST		IMX_GPIO_NR(4, 4)
+ 
+ static int max17135_regulator_init(struct max17135 *max17135);
+ struct clk *extern_audio_root;
+@@ -525,6 +528,9 @@ static struct i2c_board_info mxc_i2c0_board_info[] __initdata = {
+ 	{
+ 		I2C_BOARD_INFO("max17135", 0x48),
+ 		.platform_data = &max17135_pdata,
++	}, {
++		I2C_BOARD_INFO("elan-touch", 0x10),
++		.irq = gpio_to_irq(MX6SL_ARM2_ELAN_INT),
+ 	},
+ };
+ 
+@@ -1069,6 +1075,27 @@ static const struct matrix_keymap_data mx6sl_arm2_map_data __initconst = {
+ 	.keymap		= mx6sl_arm2_keymap,
+ 	.keymap_size	= ARRAY_SIZE(mx6sl_arm2_keymap),
+ };
++static void __init elan_ts_init(void)
++{
++	mxc_iomux_v3_setup_multiple_pads(mx6sl_arm2_elan_pads,
++					ARRAY_SIZE(mx6sl_arm2_elan_pads));
++
++	/* ELAN Touchscreen */
++	gpio_request(MX6SL_ARM2_ELAN_INT, "elan-interrupt");
++	gpio_direction_input(MX6SL_ARM2_ELAN_INT);
++
++	gpio_request(MX6SL_ARM2_ELAN_CE, "elan-cs");
++	gpio_direction_output(MX6SL_ARM2_ELAN_CE, 1);
++	gpio_direction_output(MX6SL_ARM2_ELAN_CE, 0);
++
++	gpio_request(MX6SL_ARM2_ELAN_RST, "elan-rst");
++	gpio_direction_output(MX6SL_ARM2_ELAN_RST, 1);
++	gpio_direction_output(MX6SL_ARM2_ELAN_RST, 0);
++	mdelay(1);
++	gpio_direction_output(MX6SL_ARM2_ELAN_RST, 1);
++	gpio_direction_output(MX6SL_ARM2_ELAN_CE, 1);
++}
++
+ /*!
+  * Board specific initialization.
+  */
+@@ -1076,6 +1103,8 @@ static void __init mx6_arm2_init(void)
+ {
+ 	mxc_iomux_v3_setup_multiple_pads(mx6sl_arm2_pads, ARRAY_SIZE(mx6sl_arm2_pads));
+ 
++	elan_ts_init();
++
+ 	gp_reg_id = "cpu_vddgp";
+ 	mx6_cpu_regulator_init();
+ 
+diff --git a/arch/arm/mach-mx6/board-mx6sl_arm2.h b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+index 724f29f..b0c262c 100755
+--- a/arch/arm/mach-mx6/board-mx6sl_arm2.h
++++ b/arch/arm/mach-mx6/board-mx6sl_arm2.h
+@@ -312,4 +312,10 @@ static iomux_v3_cfg_t mx6sl_arm2_spdc_disable_pads[] = {
+ 	MX6SL_PAD_EPDC_PWRWAKEUP__GPIO_2_14,
+ };
+ 
++static iomux_v3_cfg_t mx6sl_arm2_elan_pads[] = {
++	MX6SL_PAD_EPDC_PWRCTRL3__GPIO_2_10,	/* INT */
++	MX6SL_PAD_EPDC_PWRCTRL2__GPIO_2_9,	/* CE */
++	MX6SL_PAD_KEY_COL6__GPIO_4_4,		/* RST */
++};
++
+ #endif
+diff --git a/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h b/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
+index 00734c9..3815e96 100755
+--- a/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
++++ b/arch/arm/plat-mxc/include/mach/iomux-mx6sl.h
+@@ -72,6 +72,9 @@
+ #define MX6SL_KEYPAD_CTRL	(PAD_CTL_HYS | PAD_CTL_PKE | PAD_CTL_PUE | \
+ 				PAD_CTL_PUS_100K_UP | PAD_CTL_DSE_120ohm)
+ 
++#define MX6SL_TSPAD_CTRL	(PAD_CTL_HYS | PAD_CTL_PKE | PAD_CTL_PUE | \
++				PAD_CTL_PUS_47K_UP)
++
+ #define MX6SL_PAD_AUD_MCLK__AUDMUX_AUDIO_CLK_OUT                              \
+ 		IOMUX_PAD(0x02A4, 0x004C, 0, 0x0000, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_AUD_MCLK__PWM4_PWMO                                         \
+@@ -1036,7 +1039,7 @@
+ #define MX6SL_PAD_EPDC_PWRCTRL3__TCON_YDIODL                                  \
+ 		IOMUX_PAD(0x03E0, 0x00F0, 4, 0x0000, 0, NO_PAD_CTRL)
+ #define MX6SL_PAD_EPDC_PWRCTRL3__GPIO_2_10                                    \
+-		IOMUX_PAD(0x03E0, 0x00F0, 5, 0x0000, 0, NO_PAD_CTRL)
++		IOMUX_PAD(0x03E0, 0x00F0, 5, 0x0000, 0, MX6SL_TSPAD_CTRL)
+ #define MX6SL_PAD_EPDC_PWRCTRL3__USDHC4_CD                                    \
+ 		IOMUX_PAD(0x03E0, 0x00F0, 6, 0x0854, 1, MX6SL_USDHC_PAD_CTRL)
+ #define MX6SL_PAD_EPDC_PWRCTRL3__MMDC_MMDC_DEBUG_4                            \
+-- 
+1.7.7.4
+

@@ -1,0 +1,68 @@
+From a9caa87ec8899e1f92fd6aa8de79f1d2c7fff1d8 Mon Sep 17 00:00:00 2001
+From: Gary Zhang <b13634@freescale.com>
+Date: Wed, 7 Dec 2011 14:46:54 +0800
+Subject: [PATCH 0702/2463] ENGR00162797 SSI: add I2S mode for stereo playback
+
+Former stereo playback uses network mode which does not
+suppot 24bit format well.
+Add I2S mode to do the same manner with codec.
+
+Signed-off-by: Gary Zhang <b13634@freescale.com>
+---
+ sound/soc/imx/imx-ssi.c |   22 +++++++++++++++-------
+ 1 files changed, 15 insertions(+), 7 deletions(-)
+
+diff --git a/sound/soc/imx/imx-ssi.c b/sound/soc/imx/imx-ssi.c
+index c67c20f..5f0f6c7 100644
+--- a/sound/soc/imx/imx-ssi.c
++++ b/sound/soc/imx/imx-ssi.c
+@@ -99,10 +99,6 @@ static int imx_ssi_set_dai_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
+ 	case SND_SOC_DAIFMT_I2S:
+ 		/* data on rising edge of bclk, frame low 1clk before data */
+ 		strcr |= SSI_STCR_TFSI | SSI_STCR_TEFS | SSI_STCR_TXBIT0;
+-		if (ssi->flags & IMX_SSI_USE_I2S_SLAVE) {
+-			scr &= ~SSI_I2S_MODE_MASK;
+-			scr |= SSI_SCR_I2S_MODE_SLAVE;
+-		}
+ 		break;
+ 	case SND_SOC_DAIFMT_LEFT_J:
+ 		/* data on rising edge of bclk, frame high with data */
+@@ -138,10 +134,21 @@ static int imx_ssi_set_dai_fmt(struct snd_soc_dai *cpu_dai, unsigned int fmt)
+ 
+ 	/* DAI clock master masks */
+ 	switch (fmt & SND_SOC_DAIFMT_MASTER_MASK) {
++	case SND_SOC_DAIFMT_CBS_CFS:
++		strcr |= SSI_STCR_TFDIR | SSI_STCR_TXDIR;
++		if ((fmt & SND_SOC_DAIFMT_FORMAT_MASK) == SND_SOC_DAIFMT_I2S) {
++			scr &= ~SSI_I2S_MODE_MASK;
++			scr |= SSI_SCR_I2S_MODE_MSTR;
++		}
++		break;
+ 	case SND_SOC_DAIFMT_CBM_CFM:
++		strcr &= ~(SSI_STCR_TFDIR | SSI_STCR_TXDIR);
++		if ((fmt & SND_SOC_DAIFMT_FORMAT_MASK) == SND_SOC_DAIFMT_I2S) {
++			scr &= ~SSI_I2S_MODE_MASK;
++			scr |= SSI_SCR_I2S_MODE_SLAVE;
++		}
+ 		break;
+ 	default:
+-		/* Master mode not implemented, needs handling of clocks. */
+ 		return -EINVAL;
+ 	}
+ 
+@@ -279,9 +286,10 @@ static int imx_ssi_hw_params(struct snd_pcm_substream *substream,
+ 
+ 	scr = readl(ssi->base + SSI_SCR);
+ 
+-	if (channels == 1)
++	if (channels == 1) {
+ 		scr &= ~SSI_SCR_NET;
+-	else
++		scr &= ~SSI_I2S_MODE_MASK;
++	} else
+ 		scr |= SSI_SCR_NET;
+ 
+ 	writel(scr, ssi->base + SSI_SCR);
+-- 
+1.7.7.4
+

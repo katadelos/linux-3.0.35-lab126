@@ -1,0 +1,319 @@
+From 3470c22143fa8a8ed4b9a6d0d5b02cdad36f782d Mon Sep 17 00:00:00 2001
+From: Richard Zhu <r65037@freescale.com>
+Date: Tue, 5 Feb 2013 14:11:08 +0800
+Subject: [PATCH 2384/2463] ENGR00243339 imx: sata: disable sata phy when sata
+ is not enabled
+
+In order to save power consumption, disable sata phy
+(enable PDDQ mode) in kernel level, if the sata module
+is not enabled in kernel configuration.
+
+Signed-off-by: Richard Zhu <r65037@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c      |   23 +++++++++++++++++++++--
+ arch/arm/mach-mx6/board-mx6q_sabreauto.c |   21 ++++++++++++++++++++-
+ arch/arm/mach-mx6/board-mx6q_sabrelite.c |   25 +++++++++++++++++++++++--
+ arch/arm/mach-mx6/board-mx6q_sabresd.c   |   23 +++++++++++++++++++++--
+ arch/arm/plat-mxc/ahci_sata.c            |    8 +++-----
+ 5 files changed, 88 insertions(+), 12 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 85f9389..b1c8eaa 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -1307,11 +1307,22 @@ static int mx6_arm2_sata_init(struct device *dev, void __iomem *addr)
+ 	tmpdata = clk_get_rate(clk) / 1000;
+ 	clk_put(clk);
+ 
++#ifdef CONFIG_SATA_AHCI_PLATFORM
+ 	ret = sata_init(addr, tmpdata);
+ 	if (ret == 0)
+ 		return ret;
++#else
++	usleep_range(1000, 2000);
++	/* AHCI PHY enter into PDDQ mode if the AHCI module is not enabled */
++	tmpdata = readl(addr + PORT_PHY_CTL);
++	writel(tmpdata | PORT_PHY_CTL_PDDQ_LOC, addr + PORT_PHY_CTL);
++	pr_info("No AHCI save PWR: PDDQ %s\n", ((readl(addr + PORT_PHY_CTL)
++					>> 20) & 1) ? "enabled" : "disabled");
++#endif
+ 
+ release_sata_clk:
++	/* disable SATA_PHY PLL */
++	writel((readl(IOMUXC_GPR13) & ~0x2), IOMUXC_GPR13);
+ 	clk_disable(sata_clk);
+ put_sata_clk:
+ 	clk_put(sata_clk);
+@@ -1322,6 +1333,7 @@ put_sata_clk:
+ 	return ret;
+ }
+ 
++#ifdef CONFIG_SATA_AHCI_PLATFORM
+ static void mx6_arm2_sata_exit(struct device *dev)
+ {
+ 	clk_disable(sata_clk);
+@@ -1337,6 +1349,7 @@ static struct ahci_platform_data mx6_arm2_sata_data = {
+ 	.init	= mx6_arm2_sata_init,
+ 	.exit	= mx6_arm2_sata_exit,
+ };
++#endif
+ 
+ static struct imx_asrc_platform_data imx_asrc_data = {
+ 	.channel_bits	= 4,
+@@ -2157,8 +2170,14 @@ static void __init mx6_arm2_init(void)
+ 	imx6q_add_sdhci_usdhc_imx(3, &mx6_arm2_sd4_data);
+ 	imx6q_add_sdhci_usdhc_imx(2, &mx6_arm2_sd3_data);
+ 	imx_add_viv_gpu(&imx6_gpu_data, &imx6_gpu_pdata);
+-	if (cpu_is_mx6q())
++	if (cpu_is_mx6q()) {
++#ifdef CONFIG_SATA_AHCI_PLATFORM
+ 		imx6q_add_ahci(0, &mx6_arm2_sata_data);
++#else
++		mx6_arm2_sata_init(NULL,
++			(void __iomem *)ioremap(MX6Q_SATA_BASE_ADDR, SZ_4K));
++#endif
++	}
+ 	imx6q_add_vpu();
+ 	mx6_arm2_init_usb();
+ 	mx6_arm2_init_audio();
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabreauto.c b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+index a90ade9..4222730 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabreauto.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabreauto.c
+@@ -839,11 +839,22 @@ static int mx6q_sabreauto_sata_init(struct device *dev, void __iomem *addr)
+ 	tmpdata = clk_get_rate(clk) / 1000;
+ 	clk_put(clk);
+ 
++#ifdef CONFIG_SATA_AHCI_PLATFORM
+ 	ret = sata_init(addr, tmpdata);
+ 	if (ret == 0)
+ 		return ret;
++#else
++	usleep_range(1000, 2000);
++	/* AHCI PHY enter into PDDQ mode if the AHCI module is not enabled */
++	tmpdata = readl(addr + PORT_PHY_CTL);
++	writel(tmpdata | PORT_PHY_CTL_PDDQ_LOC, addr + PORT_PHY_CTL);
++	pr_info("No AHCI save PWR: PDDQ %s\n", ((readl(addr + PORT_PHY_CTL)
++					>> 20) & 1) ? "enabled" : "disabled");
++#endif
+ 
+ release_sata_clk:
++	/* disable SATA_PHY PLL */
++	writel((readl(IOMUXC_GPR13) & ~0x2), IOMUXC_GPR13);
+ 	clk_disable(sata_clk);
+ put_sata_clk:
+ 	clk_put(sata_clk);
+@@ -851,6 +862,7 @@ put_sata_clk:
+ 	return ret;
+ }
+ 
++#ifdef CONFIG_SATA_AHCI_PLATFORM
+ static void mx6q_sabreauto_sata_exit(struct device *dev)
+ {
+ 	clk_disable(sata_clk);
+@@ -862,6 +874,7 @@ static struct ahci_platform_data mx6q_sabreauto_sata_data = {
+ 	.init = mx6q_sabreauto_sata_init,
+ 	.exit = mx6q_sabreauto_sata_exit,
+ };
++#endif
+ 
+ static struct imx_asrc_platform_data imx_asrc_data = {
+ 	.channel_bits	= 4,
+@@ -1588,8 +1601,14 @@ static void __init mx6_board_init(void)
+ 
+ 	imx_add_viv_gpu(&imx6_gpu_data, &imx6q_gpu_pdata);
+ 	imx6q_sabreauto_init_usb();
+-	if (cpu_is_mx6q())
++	if (cpu_is_mx6q()) {
++#ifdef CONFIG_SATA_AHCI_PLATFORM
+ 		imx6q_add_ahci(0, &mx6q_sabreauto_sata_data);
++#else
++		mx6q_sabreauto_sata_init(NULL,
++			(void __iomem *)ioremap(MX6Q_SATA_BASE_ADDR, SZ_4K));
++#endif
++	}
+ 	imx6q_add_vpu();
+ 	imx6q_init_audio();
+ 	platform_device_register(&sabreauto_vmmc_reg_devices);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabrelite.c b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+index 736b423..ac4b339 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabrelite.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabrelite.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -721,11 +721,22 @@ static int mx6q_sabrelite_sata_init(struct device *dev, void __iomem *addr)
+ 	tmpdata = clk_get_rate(clk) / 1000;
+ 	clk_put(clk);
+ 
++#ifdef CONFIG_SATA_AHCI_PLATFORM
+ 	ret = sata_init(addr, tmpdata);
+ 	if (ret == 0)
+ 		return ret;
++#else
++	usleep_range(1000, 2000);
++	/* AHCI PHY enter into PDDQ mode if the AHCI module is not enabled */
++	tmpdata = readl(addr + PORT_PHY_CTL);
++	writel(tmpdata | PORT_PHY_CTL_PDDQ_LOC, addr + PORT_PHY_CTL);
++	pr_info("No AHCI save PWR: PDDQ %s\n", ((readl(addr + PORT_PHY_CTL)
++					>> 20) & 1) ? "enabled" : "disabled");
++#endif
+ 
+ release_sata_clk:
++	/* disable SATA_PHY PLL */
++	writel((readl(IOMUXC_GPR13) & ~0x2), IOMUXC_GPR13);
+ 	clk_disable(sata_clk);
+ put_sata_clk:
+ 	clk_put(sata_clk);
+@@ -733,6 +744,7 @@ put_sata_clk:
+ 	return ret;
+ }
+ 
++#ifdef CONFIG_SATA_AHCI_PLATFORM
+ static void mx6q_sabrelite_sata_exit(struct device *dev)
+ {
+ 	clk_disable(sata_clk);
+@@ -743,6 +755,7 @@ static struct ahci_platform_data mx6q_sabrelite_sata_data = {
+ 	.init = mx6q_sabrelite_sata_init,
+ 	.exit = mx6q_sabrelite_sata_exit,
+ };
++#endif
+ 
+ static struct gpio mx6q_sabrelite_flexcan_gpios[] = {
+ 	{ MX6Q_SABRELITE_CAN1_EN, GPIOF_OUT_INIT_LOW, "flexcan1-en" },
+@@ -1191,7 +1204,15 @@ static void __init mx6_sabrelite_board_init(void)
+ 	imx6q_add_sdhci_usdhc_imx(2, &mx6q_sabrelite_sd3_data);
+ 	imx_add_viv_gpu(&imx6_gpu_data, &imx6q_gpu_pdata);
+ 	imx6q_sabrelite_init_usb();
+-	imx6q_add_ahci(0, &mx6q_sabrelite_sata_data);
++
++	if (cpu_is_mx6q()) {
++#ifdef CONFIG_SATA_AHCI_PLATFORM
++		imx6q_add_ahci(0, &mx6q_sabrelite_sata_data);
++#else
++		mx6q_sabrelite_sata_init(NULL,
++			(void __iomem *)ioremap(MX6Q_SATA_BASE_ADDR, SZ_4K));
++#endif
++	}
+ 	imx6q_add_vpu();
+ 	imx6q_init_audio();
+ 	platform_device_register(&sabrelite_vmmc_reg_devices);
+diff --git a/arch/arm/mach-mx6/board-mx6q_sabresd.c b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+index 69afc35..986d291 100644
+--- a/arch/arm/mach-mx6/board-mx6q_sabresd.c
++++ b/arch/arm/mach-mx6/board-mx6q_sabresd.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2012-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -1165,11 +1165,22 @@ static int mx6q_sabresd_sata_init(struct device *dev, void __iomem *addr)
+ 	tmpdata = clk_get_rate(clk) / 1000;
+ 	clk_put(clk);
+ 
++#ifdef CONFIG_SATA_AHCI_PLATFORM
+ 	ret = sata_init(addr, tmpdata);
+ 	if (ret == 0)
+ 		return ret;
++#else
++	usleep_range(1000, 2000);
++	/* AHCI PHY enter into PDDQ mode if the AHCI module is not enabled */
++	tmpdata = readl(addr + PORT_PHY_CTL);
++	writel(tmpdata | PORT_PHY_CTL_PDDQ_LOC, addr + PORT_PHY_CTL);
++	pr_info("No AHCI save PWR: PDDQ %s\n", ((readl(addr + PORT_PHY_CTL)
++					>> 20) & 1) ? "enabled" : "disabled");
++#endif
+ 
+ release_sata_clk:
++	/* disable SATA_PHY PLL */
++	writel((readl(IOMUXC_GPR13) & ~0x2), IOMUXC_GPR13);
+ 	clk_disable(sata_clk);
+ put_sata_clk:
+ 	clk_put(sata_clk);
+@@ -1177,6 +1188,7 @@ put_sata_clk:
+ 	return ret;
+ }
+ 
++#ifdef CONFIG_SATA_AHCI_PLATFORM
+ static void mx6q_sabresd_sata_exit(struct device *dev)
+ {
+ 	clk_disable(sata_clk);
+@@ -1187,6 +1199,7 @@ static struct ahci_platform_data mx6q_sabresd_sata_data = {
+ 	.init = mx6q_sabresd_sata_init,
+ 	.exit = mx6q_sabresd_sata_exit,
+ };
++#endif
+ 
+ static void mx6q_sabresd_flexcan0_switch(int enable)
+ {
+@@ -1776,8 +1789,14 @@ static void __init mx6_sabresd_board_init(void)
+ 	imx_add_viv_gpu(&imx6_gpu_data, &imx6q_gpu_pdata);
+ 	imx6q_sabresd_init_usb();
+ 	/* SATA is not supported by MX6DL/Solo */
+-	if (cpu_is_mx6q())
++	if (cpu_is_mx6q()) {
++#ifdef CONFIG_SATA_AHCI_PLATFORM
+ 		imx6q_add_ahci(0, &mx6q_sabresd_sata_data);
++#else
++		mx6q_sabresd_sata_init(NULL,
++			(void __iomem *)ioremap(MX6Q_SATA_BASE_ADDR, SZ_4K));
++#endif
++	}
+ 	imx6q_add_vpu();
+ 	imx6q_init_audio();
+ 	platform_device_register(&sabresd_vmmc_reg_devices);
+diff --git a/arch/arm/plat-mxc/ahci_sata.c b/arch/arm/plat-mxc/ahci_sata.c
+index cee34b6..de172a9 100644
+--- a/arch/arm/plat-mxc/ahci_sata.c
++++ b/arch/arm/plat-mxc/ahci_sata.c
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (C) 2011-2012 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2011-2013 Freescale Semiconductor, Inc. All Rights Reserved.
+  */
+ 
+ /*
+@@ -152,9 +152,8 @@ int sata_init(void __iomem *addr, unsigned long timer1ms)
+ 	/* Reset HBA */
+ 	writel(HOST_RESET, addr + HOST_CTL);
+ 
+-	tmpdata = readl(addr + HOST_VERSIONR);
+ 	tmpdata = 0;
+-	while (readl(addr + HOST_VERSIONR) == 0) {
++	while (readl(addr + HOST_CAP) == 0) {
+ 		tmpdata++;
+ 		if (tmpdata > 100000) {
+ 			pr_err("Can't recover from RESET HBA!\n");
+@@ -167,7 +166,6 @@ int sata_init(void __iomem *addr, unsigned long timer1ms)
+ 		tmpdata |= HOST_CAP_SSS;
+ 		writel(tmpdata, addr + HOST_CAP);
+ 	}
+-	tmpdata = readl(addr + HOST_CAP);
+ 
+ 	if (!(readl(addr + HOST_PORTS_IMPL) & 0x1))
+ 		writel((readl(addr + HOST_PORTS_IMPL) | 0x1),
+@@ -178,7 +176,7 @@ int sata_init(void __iomem *addr, unsigned long timer1ms)
+ 	/* Release resources when there is no device on the port */
+ 	do {
+ 		if ((readl(addr + PORT_SATA_SR) & 0xF) == 0)
+-			msleep(25);
++			usleep_range(1000, 2000);
+ 		else
+ 			break;
+ 
+-- 
+1.7.7.4
+

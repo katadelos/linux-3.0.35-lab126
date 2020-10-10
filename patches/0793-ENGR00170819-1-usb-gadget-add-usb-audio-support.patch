@@ -1,0 +1,142 @@
+From 1f3c5ce40246e33daf5ca9c7b392d12d87b368a4 Mon Sep 17 00:00:00 2001
+From: Peter Chen <peter.chen@freescale.com>
+Date: Mon, 19 Dec 2011 11:08:31 +0800
+Subject: [PATCH 0793/2463] ENGR00170819-1 usb-gadget: add usb audio support
+
+- Only 44.1Khz audio are supported at i.MX6q, since only 44.1Khz
+local playback are supported at i.MX6q.
+
+- Since there is no feedback at current usb audio framework,
+it may have pop noise/no sound after play some minutes.
+
+- About how to test: please refer Documentation/arm/imx/udc.txt
+
+Signed-off-by: Peter Chen <peter.chen@freescale.com>
+---
+ drivers/usb/gadget/f_audio.c |   36 +++++++++++++++++++++++++++++-------
+ drivers/usb/gadget/u_audio.c |   17 ++++++++++++++++-
+ 2 files changed, 45 insertions(+), 8 deletions(-)
+
+diff --git a/drivers/usb/gadget/f_audio.c b/drivers/usb/gadget/f_audio.c
+index 979f92c..325bfb4 100644
+--- a/drivers/usb/gadget/f_audio.c
++++ b/drivers/usb/gadget/f_audio.c
+@@ -29,9 +29,16 @@ static int audio_buf_size = 48000;
+ module_param(audio_buf_size, int, S_IRUGO);
+ MODULE_PARM_DESC(audio_buf_size, "Audio buffer size");
+ 
++/* The first usb audio buf to alsa playback */
++static int first_audio_buf_size = 65500;
++module_param(first_audio_buf_size, int, S_IRUGO);
++MODULE_PARM_DESC(first_audio_buf_size, "First Audio buffer size");
++
+ static int generic_set_cmd(struct usb_audio_control *con, u8 cmd, int value);
+ static int generic_get_cmd(struct usb_audio_control *con, u8 cmd);
+ 
++/* Flag to use buffer with first_audio_buf_size to asla */
++static int first_copy_audio_buffer = 1;
+ /*
+  * DESCRIPTORS ... most are static, but strings and full
+  * configuration descriptors are built on demand.
+@@ -329,13 +336,27 @@ static int f_audio_out_ep_complete(struct usb_ep *ep, struct usb_request *req)
+ 	if (!copy_buf)
+ 		return -EINVAL;
+ 
++	if (!first_copy_audio_buffer) {
+ 	/* Copy buffer is full, add it to the play_queue */
+-	if (audio_buf_size - copy_buf->actual < req->actual) {
+-		list_add_tail(&copy_buf->list, &audio->play_queue);
+-		schedule_work(&audio->playback_work);
+-		copy_buf = f_audio_buffer_alloc(audio_buf_size);
+-		if (IS_ERR(copy_buf))
+-			return -ENOMEM;
++		if (audio_buf_size - copy_buf->actual < req->actual) {
++			list_add_tail(&copy_buf->list, &audio->play_queue);
++			schedule_work(&audio->playback_work);
++			copy_buf = f_audio_buffer_alloc(audio_buf_size);
++
++			if (IS_ERR(copy_buf))
++				return -ENOMEM;
++		}
++	} else {
++		if (first_audio_buf_size - copy_buf->actual < req->actual) {
++			list_add_tail(&copy_buf->list, &audio->play_queue);
++			schedule_work(&audio->playback_work);
++			copy_buf = f_audio_buffer_alloc(audio_buf_size);
++
++			if (IS_ERR(copy_buf))
++				return -ENOMEM;
++
++			first_copy_audio_buffer = 0;
++		}
+ 	}
+ 
+ 	memcpy(copy_buf->buf + copy_buf->actual, req->buf, req->actual);
+@@ -577,7 +598,7 @@ static int f_audio_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
+ 		if (alt == 1) {
+ 			usb_ep_enable(out_ep, audio->out_desc);
+ 			out_ep->driver_data = audio;
+-			audio->copy_buf = f_audio_buffer_alloc(audio_buf_size);
++			audio->copy_buf = f_audio_buffer_alloc(first_audio_buf_size);
+ 			if (IS_ERR(audio->copy_buf))
+ 				return -ENOMEM;
+ 
+@@ -614,6 +635,7 @@ static int f_audio_set_alt(struct usb_function *f, unsigned intf, unsigned alt)
+ 						&audio->play_queue);
+ 				schedule_work(&audio->playback_work);
+ 			}
++			first_copy_audio_buffer = 1;
+ 		}
+ 	}
+ 
+diff --git a/drivers/usb/gadget/u_audio.c b/drivers/usb/gadget/u_audio.c
+index 59ffe1e..c72aeca 100644
+--- a/drivers/usb/gadget/u_audio.c
++++ b/drivers/usb/gadget/u_audio.c
+@@ -39,6 +39,10 @@ static char *fn_cntl = FILE_CONTROL;
+ module_param(fn_cntl, charp, S_IRUGO);
+ MODULE_PARM_DESC(fn_cntl, "Control device file name");
+ 
++static int audio_sample_rate = 48000;
++module_param(audio_sample_rate, int, S_IRUGO);
++MODULE_PARM_DESC(audio_sample_rate, "Audio Sample Rate");
++
+ /*-------------------------------------------------------------------------*/
+ 
+ /**
+@@ -122,13 +126,23 @@ static int playback_default_hw_params(struct gaudio_snd_dev *snd)
+ 	snd->access = SNDRV_PCM_ACCESS_RW_INTERLEAVED;
+ 	snd->format = SNDRV_PCM_FORMAT_S16_LE;
+ 	snd->channels = 2;
+-	snd->rate = 48000;
++	if (audio_sample_rate == 44100)
++		snd->rate = 44100;
++	else if (audio_sample_rate == 48000)
++		snd->rate = 48000;
+ 
+ 	params = kzalloc(sizeof(*params), GFP_KERNEL);
+ 	if (!params)
+ 		return -ENOMEM;
+ 
+ 	_snd_pcm_hw_params_any(params);
++
++	if (audio_sample_rate == 44100) {
++		_snd_pcm_hw_param_set(params, SNDRV_PCM_HW_PARAM_PERIOD_SIZE, \
++					       2*1024, 0);
++		_snd_pcm_hw_param_set(params, SNDRV_PCM_HW_PARAM_BUFFER_SIZE, \
++						       16*1024, 0);
++	}
+ 	_snd_pcm_hw_param_set(params, SNDRV_PCM_HW_PARAM_ACCESS,
+ 			snd->access, 0);
+ 	_snd_pcm_hw_param_set(params, SNDRV_PCM_HW_PARAM_FORMAT,
+@@ -193,6 +207,7 @@ try_again:
+ 	set_fs(KERNEL_DS);
+ 	result = snd_pcm_lib_write(snd->substream, buf, frames);
+ 	if (result != frames) {
++		msleep_interruptible(2);
+ 		ERROR(card, "Playback error: %d\n", (int)result);
+ 		set_fs(old_fs);
+ 		goto try_again;
+-- 
+1.7.7.4
+

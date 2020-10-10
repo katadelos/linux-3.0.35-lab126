@@ -1,0 +1,55 @@
+From f1861bcaa44cba68c2d614a1ee687fbbc9a232d0 Mon Sep 17 00:00:00 2001
+From: Huang Shijie <b32955@freescale.com>
+Date: Fri, 26 Oct 2012 16:04:03 +0800
+Subject: [PATCH 2186/2463] ENGR00231331 mtd: gpmi: add kernel command line to
+ enable gpmi in arm2 board
+
+In mx6q arm2 board, the gpmi conflicts with SD module.
+But the defconfig has enabled the gpmi by default.
+So we have to add a kernel cmdline to enable the gpmi by hand in arm2 board.
+
+Signed-off-by: Huang Shijie <b32955@freescale.com>
+---
+ arch/arm/mach-mx6/board-mx6q_arm2.c |   12 +++++++++++-
+ 1 files changed, 11 insertions(+), 1 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index 81612e5..50f26dd 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -163,6 +163,7 @@ static struct clk *sata_clk;
+ static int esai_record;
+ static int sgtl5000_en;
+ static int spdif_en;
++static int gpmi_en;
+ static int flexcan_en;
+ static int disable_mipi_dsi;
+ 
+@@ -1927,6 +1928,14 @@ static int __init early_enable_spdif(char *p)
+ 
+ early_param("spdif", early_enable_spdif);
+ 
++static int __init early_enable_gpmi(char *p)
++{
++	gpmi_en = 1;
++	return 0;
++}
++
++early_param("gpmi", early_enable_gpmi);
++
+ static int __init early_enable_can(char *p)
+ {
+ 	flexcan_en = 1;
+@@ -2179,7 +2188,8 @@ static void __init mx6_arm2_init(void)
+ 	imx6q_add_viim();
+ 	imx6q_add_imx2_wdt(0, NULL);
+ 	imx6q_add_dma();
+-	imx6q_add_gpmi(&mx6_gpmi_nand_platform_data);
++	if (gpmi_en)
++		imx6q_add_gpmi(&mx6_gpmi_nand_platform_data);
+ 
+ 	imx6q_add_dvfs_core(&arm2_dvfscore_data);
+ 
+-- 
+1.7.7.4
+

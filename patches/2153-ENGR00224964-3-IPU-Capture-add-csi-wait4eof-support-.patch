@@ -1,0 +1,37 @@
+From 4ddc27dff9b806d8c21dbcf7a57a3608c422d1a4 Mon Sep 17 00:00:00 2001
+From: Sheng Nan <b38800@freescale.com>
+Date: Mon, 15 Oct 2012 20:00:25 +0800
+Subject: [PATCH 2153/2463] ENGR00224964-3 IPU: Capture: add csi wait4eof
+ support of CSI-IC channel
+
+current _ipu_csi_wait4eof only support CSI-->MEM channel
+
+- add support of CSI_PRP_ENC_MEM
+- add support of CSI_PRP_VF_MEM
+
+Signed-off-by: Sheng Nan <b38800@freescale.com>
+---
+ drivers/mxc/ipu3/ipu_capture.c |    6 +++++-
+ 1 files changed, 5 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/mxc/ipu3/ipu_capture.c b/drivers/mxc/ipu3/ipu_capture.c
+index dae3a75..f463836 100644
+--- a/drivers/mxc/ipu3/ipu_capture.c
++++ b/drivers/mxc/ipu3/ipu_capture.c
+@@ -792,8 +792,12 @@ void _ipu_csi_wait4eof(struct ipu_soc *ipu, ipu_channel_t channel)
+ 		irq = IPU_IRQ_CSI2_OUT_EOF;
+ 	else if (channel == CSI_MEM3)
+ 		irq = IPU_IRQ_CSI3_OUT_EOF;
++	else if (channel == CSI_PRP_ENC_MEM)
++		irq = IPU_IRQ_PRP_ENC_OUT_EOF;
++	else if (channel == CSI_PRP_VF_MEM)
++		irq = IPU_IRQ_PRP_VF_OUT_EOF;
+ 	else{
+-		dev_err(ipu->dev, "Not a CSI SMFC channel\n");
++		dev_err(ipu->dev, "Not a CSI channel\n");
+ 		return;
+ 	}
+ 
+-- 
+1.7.7.4
+

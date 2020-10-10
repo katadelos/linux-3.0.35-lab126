@@ -1,0 +1,5325 @@
+From 2240635ac73d12774b0131e2ebdbf6a29ef749f7 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Wed, 13 Jul 2011 12:18:38 +0800
+Subject: [PATCH 0230/2463] ENGR00152845-8 mxc_dispdrv: add support for
+ mxc_dispdrv.
+
+add dispdrv support.
+add dispdrv sub-driver ldb/lcdif/tve support.
+change ipuv3 fb driver for new ipu and dispdrv framework.
+
+Signed-off-by: Jason Chen <jason.chen@freescale.com>
+---
+ drivers/video/mxc/Kconfig        |    2 +-
+ drivers/video/mxc/Makefile       |    4 +-
+ drivers/video/mxc/ldb.c          | 1705 +++++++++-----------------------------
+ drivers/video/mxc/mxc_dispdrv.c  |  152 ++++
+ drivers/video/mxc/mxc_dispdrv.h  |   43 +
+ drivers/video/mxc/mxc_ipuv3_fb.c | 1052 +++++++++++------------
+ drivers/video/mxc/mxc_lcdif.c    |  144 ++++
+ drivers/video/mxc/tve.c          | 1025 +++++++++++------------
+ 8 files changed, 1755 insertions(+), 2372 deletions(-)
+
+diff --git a/drivers/video/mxc/Kconfig b/drivers/video/mxc/Kconfig
+index e2b79fa..cec114a 100644
+--- a/drivers/video/mxc/Kconfig
++++ b/drivers/video/mxc/Kconfig
+@@ -27,7 +27,7 @@ config FB_MXC_EPSON_VGA_SYNC_PANEL
+ config FB_MXC_TVOUT_TVE
+ 	tristate "MXC TVE TV Out Encoder"
+ 	depends on FB_MXC_SYNC_PANEL
+-	depends on MXC_IPU_V3
++	depends on MXC_IPU_V3 && !ARCH_MX6Q
+ 
+ config FB_MXC_LDB
+ 	tristate "MXC LDB"
+diff --git a/drivers/video/mxc/Makefile b/drivers/video/mxc/Makefile
+index 723001a..5011079 100644
+--- a/drivers/video/mxc/Makefile
++++ b/drivers/video/mxc/Makefile
+@@ -1,7 +1,7 @@
+ obj-$(CONFIG_FB_MXC_TVOUT_TVE)             	+= tve.o
+ obj-$(CONFIG_FB_MXC_SII902X)                    += mxcfb_sii902x.o
+ obj-$(CONFIG_FB_MXC_LDB)			+= ldb.o
+-obj-$(CONFIG_FB_MODE_HELPERS)			+= mxc_edid.o
++#obj-$(CONFIG_FB_MODE_HELPERS)			+= mxc_edid.o
+ ifeq ($(CONFIG_ARCH_MX21)$(CONFIG_ARCH_MX27)$(CONFIG_ARCH_MX25),y)
+ 	obj-$(CONFIG_FB_MXC_TVOUT)              += fs453.o
+ 	obj-$(CONFIG_FB_MXC_SYNC_PANEL)         += mx2fb.o mxcfb_modedb.o
+@@ -10,7 +10,7 @@ else
+ ifeq ($(CONFIG_MXC_IPU_V1),y)
+ 	obj-$(CONFIG_FB_MXC_SYNC_PANEL)         += mxcfb.o mxcfb_modedb.o
+ else
+-	obj-$(CONFIG_FB_MXC_SYNC_PANEL)         += mxc_ipuv3_fb.o
++	obj-$(CONFIG_FB_MXC_SYNC_PANEL)         += mxc_dispdrv.o mxc_lcdif.o mxc_ipuv3_fb.o
+ endif
+ 	obj-$(CONFIG_FB_MXC_EPSON_PANEL)        += mxcfb_epson.o
+ 	obj-$(CONFIG_FB_MXC_EPSON_QVGA_PANEL)   += mxcfb_epson_qvga.o
+diff --git a/drivers/video/mxc/ldb.c b/drivers/video/mxc/ldb.c
+index 24ad8e6..07f2519 100644
+--- a/drivers/video/mxc/ldb.c
++++ b/drivers/video/mxc/ldb.c
+@@ -24,7 +24,6 @@
+  * @brief This file contains the LDB driver device interface and fops
+  * functions.
+  */
+-
+ #include <linux/types.h>
+ #include <linux/init.h>
+ #include <linux/platform_device.h>
+@@ -33,14 +32,15 @@
+ #include <linux/console.h>
+ #include <linux/io.h>
+ #include <linux/ipu.h>
+-#include <linux/ldb.h>
+ #include <linux/mxcfb.h>
+ #include <linux/regulator/consumer.h>
+ #include <linux/spinlock.h>
+-#include <linux/uaccess.h>
+ #include <linux/fsl_devices.h>
+ #include <mach/hardware.h>
+ #include <mach/clock.h>
++#include "mxc_dispdrv.h"
++
++#define DISPDRV_LDB	"ldb"
+ 
+ #define LDB_BGREF_RMODE_MASK		0x00008000
+ #define LDB_BGREF_RMODE_INT		0x00008000
+@@ -78,61 +78,47 @@
+ 
+ #define LDB_SPLIT_MODE_EN		0x00000010
+ 
+-enum ldb_chan_mode_opt {
+-	LDB_SIN_DI0 = 0,
+-	LDB_SIN_DI1 = 1,
+-	LDB_SEP = 2,
+-	LDB_DUL_DI0 = 3,
+-	LDB_DUL_DI1 = 4,
+-	LDB_SPL_DI0 = 5,
+-	LDB_SPL_DI1 = 6,
+-	LDB_NO_MODE = 7,
+-};
+-
+-static struct ldb_data {
+-	struct fb_info *fbi[2];
+-	bool ch_working[2];
+-	int blank[2];
+-	uint32_t chan_mode_opt;
+-	uint32_t chan_bit_map[2];
+-	uint32_t bgref_rmode;
+-	uint32_t base_addr;
++struct ldb_data {
++	struct platform_device *pdev;
++	struct mxc_dispdrv_entry *disp_ldb;
++	uint32_t *reg;
+ 	uint32_t *control_reg;
+-	struct clk *ldb_di_clk[2];
++	uint32_t *gpr3_reg;
+ 	struct regulator *lvds_bg_reg;
+-} ldb;
+-
+-static struct device *g_ldb_dev;
+-static u32 *ldb_reg;
+-static int g_chan_mode_opt = LDB_NO_MODE;
+-static int g_chan_bit_map[2];
+-#define MXC_ENABLE	1
+-#define MXC_DISABLE	2
+-static int g_enable_ldb;
+-static bool g_di0_used;
+-static bool g_di1_used;
++	int mode;
++	bool inited;
++	struct clk *di_clk[2];
++	struct clk *ldb_di_clk[2];
++	struct ldb_setting {
++		bool active;
++		bool clk_en;
++		int ipu;
++		int di;
++	} setting[2];
++	struct notifier_block nb;
++};
+ 
+-DEFINE_SPINLOCK(ldb_lock);
++static int g_ldb_mode;
+ 
+-struct fb_videomode mxcfb_ldb_modedb[] = {
++static struct fb_videomode ldb_modedb[] = {
+ 	{
+-	 "1080P60", 60, 1920, 1080, 7692,
+-	 100, 40,
+-	 30, 3,
+-	 10, 2,
++	 "LDB-XGA", 60, 1024, 768, 15385,
++	 220, 40,
++	 21, 7,
++	 60, 10,
+ 	 0,
+ 	 FB_VMODE_NONINTERLACED,
+ 	 FB_MODE_IS_DETAILED,},
+ 	{
+-	 "XGA", 60, 1024, 768, 15385,
+-	 220, 40,
+-	 21, 7,
+-	 60, 10,
++	 "LDB-1080P60", 60, 1920, 1080, 7692,
++	 100, 40,
++	 30, 3,
++	 10, 2,
+ 	 0,
+ 	 FB_VMODE_NONINTERLACED,
+ 	 FB_MODE_IS_DETAILED,},
+ };
+-int mxcfb_ldb_modedb_sz = ARRAY_SIZE(mxcfb_ldb_modedb);
++static int ldb_modedb_sz = ARRAY_SIZE(ldb_modedb);
+ 
+ static int bits_per_pixel(int pixel_fmt)
+ {
+@@ -161,1070 +147,448 @@ static int valid_mode(int pixel_fmt)
+ 		(pixel_fmt == IPU_PIX_FMT_BGR666));
+ }
+ 
+-static void ldb_disable(int ipu_di)
+-{
+-	uint32_t reg;
+-	int i = 0;
+-
+-	spin_lock(&ldb_lock);
+-
+-	switch (ldb.chan_mode_opt) {
+-	case LDB_SIN_DI0:
+-		if (ipu_di != 0 || !ldb.ch_working[0]) {
+-			spin_unlock(&ldb_lock);
+-			return;
+-		}
+-
+-		reg = __raw_readl(ldb.control_reg);
+-		__raw_writel((reg & ~LDB_CH0_MODE_MASK) |
+-			     LDB_CH0_MODE_DISABLE,
+-			     ldb.control_reg);
+-
+-		ldb.ldb_di_clk[0] = clk_get(g_ldb_dev, "ldb_di0_clk");
+-		if (clk_get_usecount(ldb.ldb_di_clk[0]) != 0)
+-			clk_disable(ldb.ldb_di_clk[0]);
+-		clk_put(ldb.ldb_di_clk[0]);
+-
+-		ldb.ch_working[0] = false;
+-		break;
+-	case LDB_SIN_DI1:
+-		if (ipu_di != 1 || !ldb.ch_working[1]) {
+-			spin_unlock(&ldb_lock);
+-			return;
+-		}
+-
+-		reg = __raw_readl(ldb.control_reg);
+-		__raw_writel((reg & ~LDB_CH1_MODE_MASK) |
+-			     LDB_CH1_MODE_DISABLE,
+-			     ldb.control_reg);
+-
+-		ldb.ldb_di_clk[1] = clk_get(g_ldb_dev, "ldb_di1_clk");
+-		if (clk_get_usecount(ldb.ldb_di_clk[1]) != 0)
+-			clk_disable(ldb.ldb_di_clk[1]);
+-		clk_put(ldb.ldb_di_clk[1]);
+-
+-		ldb.ch_working[1] = false;
+-		break;
+-	case LDB_SPL_DI0:
+-	case LDB_DUL_DI0:
+-		if (ipu_di != 0) {
+-			spin_unlock(&ldb_lock);
+-			return;
+-		}
+-
+-		for (i = 0; i < 2; i++) {
+-			if (ldb.ch_working[i]) {
+-				reg = __raw_readl(ldb.control_reg);
+-				if (i == 0)
+-					__raw_writel((reg & ~LDB_CH0_MODE_MASK) |
+-						     LDB_CH0_MODE_DISABLE,
+-						     ldb.control_reg);
+-				else
+-					__raw_writel((reg & ~LDB_CH0_MODE_MASK) |
+-						     LDB_CH1_MODE_DISABLE,
+-						     ldb.control_reg);
+-
+-				if (ldb.chan_mode_opt == LDB_SPL_DI0) {
+-					reg = __raw_readl(ldb.control_reg);
+-					__raw_writel(reg & ~LDB_SPLIT_MODE_EN,
+-						     ldb.control_reg);
+-				}
+-
+-				ldb.ldb_di_clk[i] = clk_get(g_ldb_dev, i ?
+-							"ldb_di1_clk" :
+-							"ldb_di0_clk");
+-				if (clk_get_usecount(ldb.ldb_di_clk[i]) != 0)
+-					clk_disable(ldb.ldb_di_clk[i]);
+-				clk_put(ldb.ldb_di_clk[i]);
+-
+-				ldb.ch_working[i] = false;
+-			}
+-		}
+-		break;
+-	case LDB_SPL_DI1:
+-	case LDB_DUL_DI1:
+-		if (ipu_di != 1) {
+-			spin_unlock(&ldb_lock);
+-			return;
+-		}
+-
+-		for (i = 0; i < 2; i++) {
+-			if (ldb.ch_working[i]) {
+-				reg = __raw_readl(ldb.control_reg);
+-				if (i == 0)
+-					__raw_writel((reg & ~LDB_CH0_MODE_MASK) |
+-						     LDB_CH0_MODE_DISABLE,
+-						     ldb.control_reg);
+-				else
+-					__raw_writel((reg & ~LDB_CH0_MODE_MASK) |
+-						     LDB_CH1_MODE_DISABLE,
+-						     ldb.control_reg);
+-
+-				if (ldb.chan_mode_opt == LDB_SPL_DI1) {
+-					reg = __raw_readl(ldb.control_reg);
+-					__raw_writel(reg & ~LDB_SPLIT_MODE_EN,
+-						     ldb.control_reg);
+-				}
+-
+-				ldb.ldb_di_clk[i] = clk_get(g_ldb_dev, i ?
+-							"ldb_di1_clk" :
+-							"ldb_di0_clk");
+-				if (clk_get_usecount(ldb.ldb_di_clk[i]) != 0)
+-					clk_disable(ldb.ldb_di_clk[i]);
+-				clk_put(ldb.ldb_di_clk[i]);
+-
+-				ldb.ch_working[i] = false;
+-			}
+-		}
+-		break;
+-	case LDB_SEP:
+-		if (ldb.ch_working[ipu_di]) {
+-			reg = __raw_readl(ldb.control_reg);
+-			if (ipu_di == 0)
+-				__raw_writel((reg & ~LDB_CH0_MODE_MASK) |
+-					     LDB_CH0_MODE_DISABLE,
+-					     ldb.control_reg);
+-			else
+-				__raw_writel((reg & ~LDB_CH1_MODE_MASK) |
+-					     LDB_CH1_MODE_DISABLE,
+-					     ldb.control_reg);
+-
+-			ldb.ldb_di_clk[ipu_di] = clk_get(g_ldb_dev, ipu_di ?
+-							       "ldb_di1_clk" :
+-							       "ldb_di0_clk");
+-			if (clk_get_usecount(ldb.ldb_di_clk[ipu_di]) != 0)
+-				clk_disable(ldb.ldb_di_clk[ipu_di]);
+-			clk_put(ldb.ldb_di_clk[ipu_di]);
+-
+-			ldb.ch_working[ipu_di] = false;
+-		}
+-		break;
+-	default:
+-		break;
+-	}
+-
+-	spin_unlock(&ldb_lock);
+-	return;
+-}
+-
+-static void ldb_enable(int ipu_di)
++static int __init ldb_setup(char *options)
+ {
+-	uint32_t reg;
+-
+-	spin_lock(&ldb_lock);
+-
+-	reg = __raw_readl(ldb.control_reg);
+-	switch (ldb.chan_mode_opt) {
+-	case LDB_SIN_DI0:
+-		if (ldb.ch_working[0] || ipu_di != 0) {
+-			spin_unlock(&ldb_lock);
+-			return;
+-		}
+-
+-		ldb.ldb_di_clk[0] = clk_get(g_ldb_dev, "ldb_di0_clk");
+-		if (clk_get_usecount(ldb.ldb_di_clk[0]) == 0)
+-			clk_enable(ldb.ldb_di_clk[0]);
+-		clk_put(ldb.ldb_di_clk[0]);
+-		__raw_writel((reg & ~LDB_CH0_MODE_MASK) |
+-			      LDB_CH0_MODE_EN_TO_DI0, ldb.control_reg);
+-		ldb.ch_working[0] = true;
+-		break;
+-	case LDB_SIN_DI1:
+-		if (ldb.ch_working[1] || ipu_di != 1) {
+-			spin_unlock(&ldb_lock);
+-			return;
+-		}
+-
+-		ldb.ldb_di_clk[1] = clk_get(g_ldb_dev, "ldb_di1_clk");
+-		if (clk_get_usecount(ldb.ldb_di_clk[1]) == 0)
+-			clk_enable(ldb.ldb_di_clk[1]);
+-		clk_put(ldb.ldb_di_clk[1]);
+-		__raw_writel((reg & ~LDB_CH1_MODE_MASK) |
+-			      LDB_CH1_MODE_EN_TO_DI1, ldb.control_reg);
+-		ldb.ch_working[1] = true;
+-		break;
+-	case LDB_SEP:
+-		if (ldb.ch_working[ipu_di]) {
+-			spin_unlock(&ldb_lock);
+-			return;
+-		}
++	if (!strcmp(options, "spl0"))
++		g_ldb_mode = LDB_SPL_DI0;
++	else if (!strcmp(options, "spl1"))
++		g_ldb_mode = LDB_SPL_DI1;
++	else if (!strcmp(options, "dul0"))
++		g_ldb_mode = LDB_DUL_DI0;
++	else if (!strcmp(options, "dul1"))
++		g_ldb_mode = LDB_DUL_DI1;
++	else if (!strcmp(options, "sin0"))
++		g_ldb_mode = LDB_SIN_DI0;
++	else if (!strcmp(options, "sin1"))
++		g_ldb_mode = LDB_SIN_DI1;
++	else if (!strcmp(options, "sep"))
++		g_ldb_mode = LDB_SEP;
+ 
+-		if (ipu_di == 0) {
+-			ldb.ldb_di_clk[0] = clk_get(g_ldb_dev, "ldb_di0_clk");
+-			if (clk_get_usecount(ldb.ldb_di_clk[0]) == 0)
+-				clk_enable(ldb.ldb_di_clk[0]);
+-			clk_put(ldb.ldb_di_clk[0]);
+-			__raw_writel((reg & ~LDB_CH0_MODE_MASK) |
+-				      LDB_CH0_MODE_EN_TO_DI0,
+-				      ldb.control_reg);
+-			ldb.ch_working[0] = true;
+-		} else {
+-			ldb.ldb_di_clk[1] = clk_get(g_ldb_dev, "ldb_di1_clk");
+-			if (clk_get_usecount(ldb.ldb_di_clk[1]) == 0)
+-				clk_enable(ldb.ldb_di_clk[1]);
+-			clk_put(ldb.ldb_di_clk[1]);
+-			__raw_writel((reg & ~LDB_CH1_MODE_MASK) |
+-				      LDB_CH1_MODE_EN_TO_DI1,
+-				      ldb.control_reg);
+-			ldb.ch_working[1] = true;
+-		}
+-		break;
+-	case LDB_DUL_DI0:
+-	case LDB_SPL_DI0:
+-		if (ipu_di != 0)
+-			return;
+-		else
+-			goto proc;
+-	case LDB_DUL_DI1:
+-	case LDB_SPL_DI1:
+-		if (ipu_di != 1)
+-			return;
+-proc:
+-		if (ldb.ch_working[0] || ldb.ch_working[1]) {
+-			spin_unlock(&ldb_lock);
+-			return;
+-		}
+-
+-		ldb.ldb_di_clk[0] = clk_get(g_ldb_dev, "ldb_di0_clk");
+-		ldb.ldb_di_clk[1] = clk_get(g_ldb_dev, "ldb_di1_clk");
+-		if (clk_get_usecount(ldb.ldb_di_clk[0]) == 0)
+-			clk_enable(ldb.ldb_di_clk[0]);
+-		if (clk_get_usecount(ldb.ldb_di_clk[1]) == 0)
+-			clk_enable(ldb.ldb_di_clk[1]);
+-		clk_put(ldb.ldb_di_clk[0]);
+-		clk_put(ldb.ldb_di_clk[1]);
+-
+-		if (ldb.chan_mode_opt == LDB_DUL_DI0 ||
+-		    ldb.chan_mode_opt == LDB_SPL_DI0) {
+-			__raw_writel((reg & ~LDB_CH0_MODE_MASK) |
+-				      LDB_CH0_MODE_EN_TO_DI0,
+-				      ldb.control_reg);
+-			reg = __raw_readl(ldb.control_reg);
+-			__raw_writel((reg & ~LDB_CH1_MODE_MASK) |
+-				      LDB_CH1_MODE_EN_TO_DI0,
+-				      ldb.control_reg);
+-		} else if (ldb.chan_mode_opt == LDB_DUL_DI1 ||
+-			   ldb.chan_mode_opt == LDB_SPL_DI1) {
+-			__raw_writel((reg & ~LDB_CH0_MODE_MASK) |
+-				      LDB_CH0_MODE_EN_TO_DI1,
+-				      ldb.control_reg);
+-			reg = __raw_readl(ldb.control_reg);
+-			__raw_writel((reg & ~LDB_CH1_MODE_MASK) |
+-				      LDB_CH1_MODE_EN_TO_DI1,
+-				      ldb.control_reg);
+-		}
+-		if (ldb.chan_mode_opt == LDB_SPL_DI0 ||
+-		    ldb.chan_mode_opt == LDB_SPL_DI1) {
+-			reg = __raw_readl(ldb.control_reg);
+-			__raw_writel(reg | LDB_SPLIT_MODE_EN,
+-				      ldb.control_reg);
+-		}
+-		ldb.ch_working[0] = true;
+-		ldb.ch_working[1] = true;
+-		break;
+-	default:
+-		break;
+-	}
+-	spin_unlock(&ldb_lock);
+-	return;
++	return 1;
+ }
++__setup("ldb=", ldb_setup);
+ 
+-static int ldb_fb_pre_setup(struct fb_info *fbi)
++static int find_ldb_setting(struct ldb_data *ldb, struct fb_info *fbi)
+ {
+-	int ipu_di = 0;
+-	struct clk *di_clk, *ldb_clk_parent;
+-	unsigned long ldb_clk_prate = 455000000;
+-
+-	fbi->mode = (struct fb_videomode *)fb_match_mode(&fbi->var,
+-			&fbi->modelist);
+-	if (!fbi->mode) {
+-		dev_warn(g_ldb_dev, "can not find mode for xres=%d, yres=%d\n",
+-				fbi->var.xres, fbi->var.yres);
+-		return 0;
+-	}
+-
+-	if (fbi->fbops->fb_ioctl) {
+-		mm_segment_t old_fs;
+-
+-		old_fs = get_fs();
+-		set_fs(KERNEL_DS);
+-		fbi->fbops->fb_ioctl(fbi,
+-				MXCFB_GET_FB_IPU_DI,
+-				(unsigned long)&ipu_di);
+-		fbi->fbops->fb_ioctl(fbi,
+-				MXCFB_GET_FB_BLANK,
+-				(unsigned int)(&ldb.blank[ipu_di]));
+-		set_fs(old_fs);
+-
+-		/*
+-		 * Default ldb mode:
+-		 * 1080p: DI0 split, SPWG or DI1 split, SPWG
+-		 * others: single, SPWG
+-		 */
+-		if (ldb.chan_mode_opt == LDB_NO_MODE) {
+-			if (fb_mode_is_equal(fbi->mode, &mxcfb_ldb_modedb[0])) {
+-				if (ipu_di == 0) {
+-					ldb.chan_mode_opt = LDB_SPL_DI0;
+-					dev_warn(g_ldb_dev,
+-						"default di0 split mode\n");
+-				} else {
+-					ldb.chan_mode_opt = LDB_SPL_DI1;
+-					dev_warn(g_ldb_dev,
+-						"default di1 split mode\n");
+-				}
+-				ldb.chan_bit_map[0] = LDB_BIT_MAP_SPWG;
+-				ldb.chan_bit_map[1] = LDB_BIT_MAP_SPWG;
+-			} else if (fb_mode_is_equal(fbi->mode, &mxcfb_ldb_modedb[1])) {
+-				if (ipu_di == 0) {
+-					ldb.chan_mode_opt = LDB_SIN_DI0;
+-					ldb.chan_bit_map[0] = LDB_BIT_MAP_SPWG;
+-					dev_warn(g_ldb_dev,
+-						 "default di0 single mode\n");
+-				} else {
+-					ldb.chan_mode_opt = LDB_SIN_DI1;
+-					ldb.chan_bit_map[1] = LDB_BIT_MAP_SPWG;
+-					dev_warn(g_ldb_dev,
+-						 "default di1 single mode\n");
+-				}
+-			}
+-		}
+-
+-		/* TODO:Set the correct pll4 rate for all situations */
+-		if (ipu_di == 1) {
+-			ldb.ldb_di_clk[1] =
+-				clk_get(g_ldb_dev, "ldb_di1_clk");
+-			di_clk = clk_get(g_ldb_dev, "ipu_di1_clk");
+-			ldb_clk_parent =
+-				clk_get_parent(ldb.ldb_di_clk[1]);
+-			clk_set_rate(ldb_clk_parent, ldb_clk_prate);
+-			clk_set_parent(di_clk, ldb.ldb_di_clk[1]);
+-			clk_put(di_clk);
+-			clk_put(ldb.ldb_di_clk[1]);
+-		} else {
+-			ldb.ldb_di_clk[0] =
+-				clk_get(g_ldb_dev, "ldb_di0_clk");
+-			di_clk = clk_get(g_ldb_dev, "ipu_di0_clk");
+-			ldb_clk_parent =
+-				clk_get_parent(ldb.ldb_di_clk[0]);
+-			clk_set_rate(ldb_clk_parent, ldb_clk_prate);
+-			clk_set_parent(di_clk, ldb.ldb_di_clk[0]);
+-			clk_put(di_clk);
+-			clk_put(ldb.ldb_di_clk[0]);
+-		}
++	char *id_di[] = {
++		 "DISP3 BG",
++		 "DISP3 BG - DI1",
++		};
++	char id[16];
++	int i;
+ 
+-		switch (ldb.chan_mode_opt) {
+-		case LDB_SIN_DI0:
+-			ldb.ldb_di_clk[0] = clk_get(g_ldb_dev, "ldb_di0_clk");
+-			clk_set_rate(ldb.ldb_di_clk[0], ldb_clk_prate/7);
+-			if (ldb.blank[0] == FB_BLANK_UNBLANK &&
+-			    clk_get_usecount(ldb.ldb_di_clk[0]) == 0)
+-				clk_enable(ldb.ldb_di_clk[0]);
+-			clk_put(ldb.ldb_di_clk[0]);
+-			break;
+-		case LDB_SIN_DI1:
+-			ldb.ldb_di_clk[1] = clk_get(g_ldb_dev, "ldb_di1_clk");
+-			clk_set_rate(ldb.ldb_di_clk[1], ldb_clk_prate/7);
+-			if (ldb.blank[1] == FB_BLANK_UNBLANK &&
+-			    clk_get_usecount(ldb.ldb_di_clk[1]) == 0)
+-				clk_enable(ldb.ldb_di_clk[1]);
+-			clk_put(ldb.ldb_di_clk[1]);
+-			break;
+-		case LDB_SEP:
+-			if (ipu_di == 0) {
+-				ldb.ldb_di_clk[0] = clk_get(g_ldb_dev, "ldb_di0_clk");
+-				clk_set_rate(ldb.ldb_di_clk[0], ldb_clk_prate/7);
+-				if (ldb.blank[0] == FB_BLANK_UNBLANK &&
+-				    clk_get_usecount(ldb.ldb_di_clk[0]) == 0)
+-					clk_enable(ldb.ldb_di_clk[0]);
+-				clk_put(ldb.ldb_di_clk[0]);
+-			} else {
+-				ldb.ldb_di_clk[1] = clk_get(g_ldb_dev, "ldb_di1_clk");
+-				clk_set_rate(ldb.ldb_di_clk[1], ldb_clk_prate/7);
+-				if (ldb.blank[1] == FB_BLANK_UNBLANK &&
+-				    clk_get_usecount(ldb.ldb_di_clk[1]) == 0)
+-					clk_enable(ldb.ldb_di_clk[1]);
+-				clk_put(ldb.ldb_di_clk[1]);
+-			}
+-			break;
+-		case LDB_DUL_DI0:
+-		case LDB_SPL_DI0:
+-			ldb.ldb_di_clk[0] = clk_get(g_ldb_dev, "ldb_di0_clk");
+-			ldb.ldb_di_clk[1] = clk_get(g_ldb_dev, "ldb_di1_clk");
+-			if (ldb.chan_mode_opt == LDB_DUL_DI0) {
+-				clk_set_rate(ldb.ldb_di_clk[0], ldb_clk_prate/7);
+-			} else {
+-				clk_set_rate(ldb.ldb_di_clk[0], 2*ldb_clk_prate/7);
+-				clk_set_rate(ldb.ldb_di_clk[1], 2*ldb_clk_prate/7);
+-			}
+-			if (ldb.blank[0] == FB_BLANK_UNBLANK) {
+-				if (clk_get_usecount(ldb.ldb_di_clk[0]) == 0)
+-					clk_enable(ldb.ldb_di_clk[0]);
+-				if (clk_get_usecount(ldb.ldb_di_clk[1]) == 0)
+-					clk_enable(ldb.ldb_di_clk[1]);
+-			}
+-			clk_put(ldb.ldb_di_clk[0]);
+-			clk_put(ldb.ldb_di_clk[1]);
+-			break;
+-		case LDB_DUL_DI1:
+-		case LDB_SPL_DI1:
+-			ldb.ldb_di_clk[0] = clk_get(g_ldb_dev, "ldb_di0_clk");
+-			ldb.ldb_di_clk[1] = clk_get(g_ldb_dev, "ldb_di1_clk");
+-			if (ldb.chan_mode_opt == LDB_DUL_DI1) {
+-				clk_set_rate(ldb.ldb_di_clk[1], ldb_clk_prate/7);
+-			} else {
+-				clk_set_rate(ldb.ldb_di_clk[0], 2*ldb_clk_prate/7);
+-				clk_set_rate(ldb.ldb_di_clk[1], 2*ldb_clk_prate/7);
+-			}
+-			if (ldb.blank[1] == FB_BLANK_UNBLANK) {
+-				if (clk_get_usecount(ldb.ldb_di_clk[0]) == 0)
+-					clk_enable(ldb.ldb_di_clk[0]);
+-				if (clk_get_usecount(ldb.ldb_di_clk[1]) == 0)
+-					clk_enable(ldb.ldb_di_clk[1]);
+-			}
+-			clk_put(ldb.ldb_di_clk[0]);
+-			clk_put(ldb.ldb_di_clk[1]);
+-			break;
+-		default:
+-			break;
++	for (i = 0; i < 2; i++) {
++		if (ldb->setting[i].active) {
++			memset(id, 0, 16);
++			memcpy(id, id_di[ldb->setting[i].di],
++				strlen(id_di[ldb->setting[i].di]));
++			id[4] += ldb->setting[i].ipu;
++			if (!strcmp(id, fbi->fix.id))
++				return i;
+ 		}
+-
+-		if (ldb.blank[ipu_di] == FB_BLANK_UNBLANK)
+-			ldb_enable(ipu_di);
+ 	}
+-
+-	return 0;
++	return -EINVAL;
+ }
+ 
+ int ldb_fb_event(struct notifier_block *nb, unsigned long val, void *v)
+ {
++	struct ldb_data *ldb = container_of(nb, struct ldb_data, nb);
+ 	struct fb_event *event = v;
+ 	struct fb_info *fbi = event->info;
+-	mm_segment_t old_fs;
+-	int ipu_di = 0;
+-
+-	/* Get rid of impact from FG fb */
+-	if (strcmp(fbi->fix.id, "DISP3 FG") == 0)
+-		return 0;
++	int setting_idx, di;
+ 
+-	if (fbi->fbops->fb_ioctl) {
+-		old_fs = get_fs();
+-		set_fs(KERNEL_DS);
+-		fbi->fbops->fb_ioctl(fbi,
+-				MXCFB_GET_FB_IPU_DI,
+-				(unsigned long)&ipu_di);
+-		set_fs(old_fs);
+-	} else
+-		return 0;
+-
+-	if ((ipu_di == 0 && !g_di0_used) ||
+-	    (ipu_di == 1 && !g_di1_used) ||
+-	    ipu_di > 1)
++	setting_idx = find_ldb_setting(ldb, fbi);
++	if (setting_idx < 0)
+ 		return 0;
+ 
+ 	fbi->mode = (struct fb_videomode *)fb_match_mode(&fbi->var,
+ 			&fbi->modelist);
+ 
+ 	if (!fbi->mode) {
+-		dev_warn(g_ldb_dev, "can not find mode for xres=%d, yres=%d\n",
++		dev_warn(&ldb->pdev->dev,
++				"LDB: can not find mode for xres=%d, yres=%d\n",
+ 				fbi->var.xres, fbi->var.yres);
++		if (ldb->setting[setting_idx].clk_en) {
++			clk_disable(ldb->ldb_di_clk[di]);
++			ldb->setting[setting_idx].clk_en = false;
++		}
+ 		return 0;
+ 	}
+ 
++	di = ldb->setting[setting_idx].di;
++
+ 	switch (val) {
+-	case FB_EVENT_MODE_CHANGE: {
+-		int ipu_di_pix_fmt;
++	case FB_EVENT_PREMODE_CHANGE:
++	{
+ 		uint32_t reg;
++		uint32_t pixel_clk, rounded_pixel_clk;
+ 
+-		if ((ldb.fbi[0] != NULL && ldb.chan_mode_opt != LDB_SEP) ||
+-		    ldb.fbi[1] != NULL)
+-			return 0;
+-
+-		/*
+-		 * We cannot support two LVDS panels with different
+-		 * pixel clock rates except that one's pixel clock rate
+-		 * is two times of the others'.
+-		 */
+-		if (ldb.fbi[0]) {
+-			if (ldb.fbi[0]->var.pixclock == fbi->var.pixclock ||
+-			    ldb.fbi[0]->var.pixclock ==
+-						2 * fbi->var.pixclock ||
+-			    fbi->var.pixclock == 2 * ldb.fbi[0]->var.pixclock)
+-				ldb.fbi[1] = fbi;
+-			else
+-				return 0;
+-		} else
+-			ldb.fbi[0] = fbi;
+-
+-		old_fs = get_fs();
+-		set_fs(KERNEL_DS);
+-		fbi->fbops->fb_ioctl(fbi, MXCFB_GET_DIFMT,
+-				(unsigned long)&ipu_di_pix_fmt);
+-		set_fs(old_fs);
+-
+-		if (!valid_mode(ipu_di_pix_fmt)) {
+-			dev_err(g_ldb_dev, "Unsupport pixel format "
+-					   "for ldb input\n");
+-			return 0;
+-		}
+-
+-		reg = __raw_readl(ldb.control_reg);
++		/* vsync setup */
++		reg = readl(ldb->control_reg);
+ 		if (fbi->var.sync & FB_SYNC_VERT_HIGH_ACT) {
+-			if (ipu_di == 0)
+-				__raw_writel((reg &
+-					~LDB_DI0_VS_POL_MASK) |
+-					LDB_DI0_VS_POL_ACT_HIGH,
+-					ldb.control_reg);
++			if (di == 0)
++				reg = (reg & ~LDB_DI0_VS_POL_MASK)
++					| LDB_DI0_VS_POL_ACT_HIGH;
+ 			else
+-				__raw_writel((reg &
+-					~LDB_DI1_VS_POL_MASK) |
+-					LDB_DI1_VS_POL_ACT_HIGH,
+-					ldb.control_reg);
++				reg = (reg & ~LDB_DI1_VS_POL_MASK)
++					| LDB_DI1_VS_POL_ACT_HIGH;
+ 		} else {
+-			if (ipu_di == 0)
+-				__raw_writel((reg &
+-					~LDB_DI0_VS_POL_MASK) |
+-					LDB_DI0_VS_POL_ACT_LOW,
+-					ldb.control_reg);
++			if (di == 0)
++				reg = (reg & ~LDB_DI0_VS_POL_MASK)
++					| LDB_DI0_VS_POL_ACT_LOW;
+ 			else
+-				__raw_writel((reg &
+-					~LDB_DI1_VS_POL_MASK) |
+-					LDB_DI1_VS_POL_ACT_LOW,
+-					ldb.control_reg);
++				reg = (reg & ~LDB_DI1_VS_POL_MASK)
++					| LDB_DI1_VS_POL_ACT_LOW;
+ 		}
++		writel(reg, ldb->control_reg);
+ 
+-		switch (ldb.chan_mode_opt) {
+-		case LDB_SIN_DI0:
+-			reg = __raw_readl(ldb.control_reg);
+-			if (bits_per_pixel(ipu_di_pix_fmt) == 24)
+-				__raw_writel((reg & ~LDB_DATA_WIDTH_CH0_MASK) |
+-					      LDB_DATA_WIDTH_CH0_24,
+-					      ldb.control_reg);
+-			else if (bits_per_pixel(ipu_di_pix_fmt) == 18)
+-				__raw_writel((reg & ~LDB_DATA_WIDTH_CH0_MASK) |
+-					      LDB_DATA_WIDTH_CH0_18,
+-					      ldb.control_reg);
+-
+-			reg = __raw_readl(ldb.control_reg);
+-			if (ldb.chan_bit_map[0] == LDB_BIT_MAP_SPWG)
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH0_MASK) |
+-					      LDB_BIT_MAP_CH0_SPWG,
+-					      ldb.control_reg);
+-			else
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH0_MASK) |
+-					      LDB_BIT_MAP_CH0_JEIDA,
+-					      ldb.control_reg);
+-
+-			reg = __raw_readl(ldb.control_reg);
+-			__raw_writel((reg & ~LDB_CH0_MODE_MASK) |
+-				      LDB_CH0_MODE_EN_TO_DI0, ldb.control_reg);
+-			if (ldb.blank[0] == FB_BLANK_UNBLANK)
+-				ldb.ch_working[0] = true;
+-			break;
+-		case LDB_SIN_DI1:
+-			reg = __raw_readl(ldb.control_reg);
+-			if (bits_per_pixel(ipu_di_pix_fmt) == 24)
+-				__raw_writel((reg & ~LDB_DATA_WIDTH_CH1_MASK) |
+-					      LDB_DATA_WIDTH_CH1_24,
+-					      ldb.control_reg);
+-			else if (bits_per_pixel(ipu_di_pix_fmt) == 18)
+-				__raw_writel((reg & ~LDB_DATA_WIDTH_CH1_MASK) |
+-					      LDB_DATA_WIDTH_CH1_18,
+-					      ldb.control_reg);
+-
+-			reg = __raw_readl(ldb.control_reg);
+-			if (ldb.chan_bit_map[1] == LDB_BIT_MAP_SPWG)
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH1_MASK) |
+-					      LDB_BIT_MAP_CH1_SPWG,
+-					      ldb.control_reg);
+-			else
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH1_MASK) |
+-					      LDB_BIT_MAP_CH1_JEIDA,
+-					      ldb.control_reg);
+-
+-			reg = __raw_readl(ldb.control_reg);
+-			__raw_writel((reg & ~LDB_CH1_MODE_MASK) |
+-				      LDB_CH1_MODE_EN_TO_DI1, ldb.control_reg);
+-			if (ldb.blank[1] == FB_BLANK_UNBLANK)
+-				ldb.ch_working[1] = true;
+-			break;
+-		case LDB_SEP:
+-			reg = __raw_readl(ldb.control_reg);
+-			if (ipu_di == 0) {
+-				if (bits_per_pixel(ipu_di_pix_fmt) == 24)
+-					__raw_writel((reg & ~LDB_DATA_WIDTH_CH0_MASK) |
+-						      LDB_DATA_WIDTH_CH0_24,
+-						      ldb.control_reg);
+-				else if (bits_per_pixel(ipu_di_pix_fmt) == 18)
+-					__raw_writel((reg & ~LDB_DATA_WIDTH_CH0_MASK) |
+-						      LDB_DATA_WIDTH_CH0_18,
+-						      ldb.control_reg);
+-			} else {
+-				if (bits_per_pixel(ipu_di_pix_fmt) == 24)
+-					__raw_writel((reg & ~LDB_DATA_WIDTH_CH1_MASK) |
+-						      LDB_DATA_WIDTH_CH1_24,
+-						      ldb.control_reg);
+-				else if (bits_per_pixel(ipu_di_pix_fmt) == 18)
+-					__raw_writel((reg & ~LDB_DATA_WIDTH_CH1_MASK) |
+-						      LDB_DATA_WIDTH_CH1_18,
+-						      ldb.control_reg);
+-			}
+-
+-			reg = __raw_readl(ldb.control_reg);
+-			if (ldb.chan_bit_map[0] == LDB_BIT_MAP_SPWG)
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH0_MASK) |
+-					      LDB_BIT_MAP_CH0_SPWG,
+-					      ldb.control_reg);
+-			else
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH0_MASK) |
+-					      LDB_BIT_MAP_CH0_JEIDA,
+-					      ldb.control_reg);
+-			reg = __raw_readl(ldb.control_reg);
+-			if (ldb.chan_bit_map[1] == LDB_BIT_MAP_SPWG)
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH1_MASK) |
+-					      LDB_BIT_MAP_CH1_SPWG,
+-					      ldb.control_reg);
+-			else
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH1_MASK) |
+-					      LDB_BIT_MAP_CH1_JEIDA,
+-					      ldb.control_reg);
+-
+-			reg = __raw_readl(ldb.control_reg);
+-			__raw_writel((reg & ~(LDB_CH0_MODE_MASK |
+-					      LDB_CH1_MODE_MASK)) |
+-				      LDB_CH0_MODE_EN_TO_DI0 |
+-				      LDB_CH1_MODE_EN_TO_DI1, ldb.control_reg);
+-			if (ldb.blank[0] == FB_BLANK_UNBLANK)
+-				ldb.ch_working[0] = true;
+-			if (ldb.blank[1] == FB_BLANK_UNBLANK)
+-				ldb.ch_working[1] = true;
+-			break;
+-		case LDB_DUL_DI0:
+-		case LDB_SPL_DI0:
+-			reg = __raw_readl(ldb.control_reg);
+-			if (bits_per_pixel(ipu_di_pix_fmt) == 24)
+-				__raw_writel((reg & ~(LDB_DATA_WIDTH_CH0_MASK |
+-						      LDB_DATA_WIDTH_CH1_MASK)) |
+-					      LDB_DATA_WIDTH_CH0_24 |
+-					      LDB_DATA_WIDTH_CH1_24,
+-					      ldb.control_reg);
+-			else if (bits_per_pixel(ipu_di_pix_fmt) == 18)
+-				__raw_writel((reg & ~(LDB_DATA_WIDTH_CH0_MASK |
+-						      LDB_DATA_WIDTH_CH1_MASK)) |
+-					      LDB_DATA_WIDTH_CH0_18 |
+-					      LDB_DATA_WIDTH_CH1_18,
+-					      ldb.control_reg);
+-
+-			reg = __raw_readl(ldb.control_reg);
+-			if (ldb.chan_bit_map[0] == LDB_BIT_MAP_SPWG)
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH0_MASK) |
+-					      LDB_BIT_MAP_CH0_SPWG,
+-					      ldb.control_reg);
+-			else
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH0_MASK) |
+-					      LDB_BIT_MAP_CH0_JEIDA,
+-					      ldb.control_reg);
+-			reg = __raw_readl(ldb.control_reg);
+-			if (ldb.chan_bit_map[1] == LDB_BIT_MAP_SPWG)
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH1_MASK) |
+-					      LDB_BIT_MAP_CH1_SPWG,
+-					      ldb.control_reg);
+-			else
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH1_MASK) |
+-					      LDB_BIT_MAP_CH1_JEIDA,
+-					      ldb.control_reg);
+-
+-			reg = __raw_readl(ldb.control_reg);
+-			if (ldb.chan_mode_opt == LDB_SPL_DI0)
+-				__raw_writel(reg | LDB_SPLIT_MODE_EN,
+-					      ldb.control_reg);
+-
+-			reg = __raw_readl(ldb.control_reg);
+-			__raw_writel((reg & ~(LDB_CH0_MODE_MASK |
+-					      LDB_CH1_MODE_MASK)) |
+-				      LDB_CH0_MODE_EN_TO_DI0 |
+-				      LDB_CH1_MODE_EN_TO_DI0, ldb.control_reg);
+-			if (ldb.blank[0] == FB_BLANK_UNBLANK) {
+-				ldb.ch_working[0] = true;
+-				ldb.ch_working[1] = true;
++		/* clk setup */
++		pixel_clk = (PICOS2KHZ(fbi->var.pixclock)) * 1000UL;
++		rounded_pixel_clk = clk_round_rate(ldb->ldb_di_clk[di],
++				pixel_clk);
++		clk_set_rate(ldb->ldb_di_clk[di], rounded_pixel_clk);
++		clk_enable(ldb->ldb_di_clk[di]);
++		ldb->setting[setting_idx].clk_en = true;
++		break;
++	}
++	case FB_EVENT_BLANK:
++	{
++		if (*((int *)event->data) == FB_BLANK_UNBLANK) {
++			if (!ldb->setting[setting_idx].clk_en) {
++				clk_enable(ldb->ldb_di_clk[di]);
++				ldb->setting[setting_idx].clk_en = true;
+ 			}
+-			break;
+-		case LDB_DUL_DI1:
+-		case LDB_SPL_DI1:
+-			reg = __raw_readl(ldb.control_reg);
+-			if (bits_per_pixel(ipu_di_pix_fmt) == 24)
+-				__raw_writel((reg & ~(LDB_DATA_WIDTH_CH0_MASK |
+-						      LDB_DATA_WIDTH_CH1_MASK)) |
+-					      LDB_DATA_WIDTH_CH0_24 |
+-					      LDB_DATA_WIDTH_CH1_24,
+-					      ldb.control_reg);
+-			else if (bits_per_pixel(ipu_di_pix_fmt) == 18)
+-				__raw_writel((reg & ~(LDB_DATA_WIDTH_CH0_MASK |
+-						      LDB_DATA_WIDTH_CH1_MASK)) |
+-					      LDB_DATA_WIDTH_CH0_18 |
+-					      LDB_DATA_WIDTH_CH1_18,
+-					      ldb.control_reg);
+-
+-			reg = __raw_readl(ldb.control_reg);
+-			if (ldb.chan_bit_map[0] == LDB_BIT_MAP_SPWG)
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH0_MASK) |
+-					      LDB_BIT_MAP_CH0_SPWG,
+-					      ldb.control_reg);
+-			else
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH0_MASK) |
+-					      LDB_BIT_MAP_CH0_JEIDA,
+-					      ldb.control_reg);
+-			reg = __raw_readl(ldb.control_reg);
+-			if (ldb.chan_bit_map[1] == LDB_BIT_MAP_SPWG)
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH1_MASK) |
+-					      LDB_BIT_MAP_CH1_SPWG,
+-					      ldb.control_reg);
+-			else
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH1_MASK) |
+-					      LDB_BIT_MAP_CH1_JEIDA,
+-					      ldb.control_reg);
+-
+-			reg = __raw_readl(ldb.control_reg);
+-			if (ldb.chan_mode_opt == LDB_SPL_DI1)
+-				__raw_writel(reg | LDB_SPLIT_MODE_EN,
+-					      ldb.control_reg);
+-
+-			reg = __raw_readl(ldb.control_reg);
+-			__raw_writel((reg & ~(LDB_CH0_MODE_MASK |
+-					      LDB_CH1_MODE_MASK)) |
+-				      LDB_CH0_MODE_EN_TO_DI1 |
+-				      LDB_CH1_MODE_EN_TO_DI1, ldb.control_reg);
+-			if (ldb.blank[1] == FB_BLANK_UNBLANK) {
+-				ldb.ch_working[0] = true;
+-				ldb.ch_working[1] = true;
++		} else {
++			if (ldb->setting[setting_idx].clk_en) {
++				clk_disable(ldb->ldb_di_clk[di]);
++				ldb->setting[setting_idx].clk_en = false;
+ 			}
+-			break;
+-		default:
+-			break;
+ 		}
++	}
++	default:
+ 		break;
+ 	}
+-	case FB_EVENT_BLANK: {
+-		if (ldb.fbi[0] != fbi && ldb.fbi[1] != fbi)
+-			return 0;
+-
+-		if (*((int *)event->data) == ldb.blank[ipu_di])
+-			return 0;
++	return 0;
++}
+ 
+-		if (*((int *)event->data) == FB_BLANK_UNBLANK)
+-			ldb_enable(ipu_di);
++#define LVDS0_MUX_CTL_MASK	(3 << 6)
++#define LVDS1_MUX_CTL_MASK	(3 << 8)
++#define LVDS0_MUX_CTL_OFFS	6
++#define LVDS1_MUX_CTL_OFFS	8
++#define ROUTE_IPU0_DI0		0
++#define ROUTE_IPU0_DI1		1
++#define ROUTE_IPU1_DI0		2
++#define ROUTE_IPU1_DI1		3
++static int ldb_ipu_ldb_route(int ipu, int di, struct ldb_data *ldb)
++{
++	uint32_t reg;
++	int mode = ldb->mode;
++
++	reg = readl(ldb->gpr3_reg);
++	if ((mode == LDB_SPL_DI0) || (mode == LDB_DUL_DI0)) {
++		reg &= ~(LVDS0_MUX_CTL_MASK | LVDS1_MUX_CTL_MASK);
++		if (ipu == 0)
++			reg |= (ROUTE_IPU0_DI0 << LVDS0_MUX_CTL_OFFS) |
++				(ROUTE_IPU0_DI0 << LVDS1_MUX_CTL_OFFS);
++		else
++			reg |= (ROUTE_IPU1_DI0 << LVDS0_MUX_CTL_OFFS) |
++				(ROUTE_IPU1_DI0 << LVDS1_MUX_CTL_OFFS);
++		dev_dbg(&ldb->pdev->dev,
++			"Dual/Split mode both channels route to IPU%d-DI0\n", ipu);
++	} else if ((mode == LDB_SPL_DI1) || (mode == LDB_DUL_DI1)) {
++		reg &= ~(LVDS0_MUX_CTL_MASK | LVDS1_MUX_CTL_MASK);
++		if (ipu == 0)
++			reg |= (ROUTE_IPU0_DI1 << LVDS0_MUX_CTL_OFFS) |
++				(ROUTE_IPU0_DI1 << LVDS1_MUX_CTL_OFFS);
++		else
++			reg |= (ROUTE_IPU1_DI1 << LVDS0_MUX_CTL_OFFS) |
++				(ROUTE_IPU1_DI1 << LVDS1_MUX_CTL_OFFS);
++		dev_dbg(&ldb->pdev->dev,
++			"Dual/Split mode both channels route to IPU%d-DI1\n", ipu);
++	} else if (mode == LDB_SIN_DI0) {
++		reg &= ~LVDS0_MUX_CTL_MASK;
++		if (ipu == 0)
++			reg |= ROUTE_IPU0_DI0 << LVDS0_MUX_CTL_OFFS;
+ 		else
+-			ldb_disable(ipu_di);
++			reg |= ROUTE_IPU1_DI0 << LVDS0_MUX_CTL_OFFS;
++		dev_dbg(&ldb->pdev->dev,
++			"Single mode channel 0 route to IPU%d-DI0\n", ipu);
++	} else if (mode == LDB_SIN_DI1) {
++		reg &= ~LVDS1_MUX_CTL_MASK;
++		if (ipu == 0)
++			reg |= ROUTE_IPU0_DI1 << LVDS1_MUX_CTL_OFFS;
++		else
++			reg |= ROUTE_IPU1_DI1 << LVDS1_MUX_CTL_OFFS;
++		dev_dbg(&ldb->pdev->dev,
++			"Single mode channel 1 route to IPU%d-DI1\n", ipu);
++	} else if (mode == LDB_SEP) {
++		if (di == 0)
++			reg &= ~LVDS0_MUX_CTL_MASK;
++		else
++			reg &= ~LVDS1_MUX_CTL_MASK;
++		if ((ipu == 0) && (di == 0))
++			reg |= ROUTE_IPU0_DI0 << LVDS0_MUX_CTL_OFFS;
++		else if ((ipu == 0) && (di == 1))
++			reg |= ROUTE_IPU0_DI1 << LVDS1_MUX_CTL_OFFS;
++		else if ((ipu == 1) && (di == 0))
++			reg |= ROUTE_IPU1_DI0 << LVDS0_MUX_CTL_OFFS;
++		else
++			reg |= ROUTE_IPU1_DI1 << LVDS1_MUX_CTL_OFFS;
+ 
+-		ldb.blank[ipu_di] = *((int *)event->data);
+-		break;
+-	}
+-	default:
+-		break;
++		dev_dbg(&ldb->pdev->dev,
++			"Separate mode channel %d route to IPU%d-DI%d\n", di, ipu, di);
+ 	}
++	writel(reg, ldb->gpr3_reg);
++
+ 	return 0;
+ }
+ 
+-static struct notifier_block nb = {
+-	.notifier_call = ldb_fb_event,
+-};
+-
+-static long mxc_ldb_ioctl(struct file *file,
+-		unsigned int cmd, unsigned long arg)
++static int ldb_disp_init(struct mxc_dispdrv_entry *disp)
+ {
+-	int ret = 0;
+-	uint32_t reg;
++	int ret = 0, i;
++	struct ldb_data *ldb = mxc_dispdrv_getdata(disp);
++	struct mxc_dispdrv_setting *setting = mxc_dispdrv_getsetting(disp);
++	struct fsl_mxc_ldb_platform_data *plat_data = ldb->pdev->dev.platform_data;
++	struct resource *res;
++	uint32_t base_addr;
++	uint32_t reg, setting_idx;
+ 
+-	switch (cmd) {
+-	case LDB_BGREF_RMODE:
+-		{
+-		ldb_bgref_parm parm;
+-
+-		if (copy_from_user(&parm, (ldb_bgref_parm *) arg,
+-				   sizeof(ldb_bgref_parm)))
+-			return -EFAULT;
+-
+-		spin_lock(&ldb_lock);
+-		reg = __raw_readl(ldb.control_reg);
+-		if (parm.bgref_mode == LDB_EXT_REF)
+-			__raw_writel((reg & ~LDB_BGREF_RMODE_MASK) |
+-				      LDB_BGREF_RMODE_EXT, ldb.control_reg);
+-		else if (parm.bgref_mode == LDB_INT_REF)
+-			__raw_writel((reg & ~LDB_BGREF_RMODE_MASK) |
+-				      LDB_BGREF_RMODE_INT, ldb.control_reg);
+-		spin_unlock(&ldb_lock);
+-		break;
+-		}
+-	case LDB_VSYNC_POL:
+-		{
+-		ldb_vsync_parm parm;
+-
+-		if (copy_from_user(&parm, (ldb_vsync_parm *) arg,
+-				   sizeof(ldb_vsync_parm)))
+-			return -EFAULT;
+-
+-		spin_lock(&ldb_lock);
+-		reg = __raw_readl(ldb.control_reg);
+-		if (parm.vsync_mode == LDB_VS_ACT_H) {
+-			if (parm.di == 0)
+-				__raw_writel((reg &
+-					~LDB_DI0_VS_POL_MASK) |
+-					LDB_DI0_VS_POL_ACT_HIGH,
+-					ldb.control_reg);
+-			else
+-				__raw_writel((reg &
+-					~LDB_DI1_VS_POL_MASK) |
+-					LDB_DI1_VS_POL_ACT_HIGH,
+-					ldb.control_reg);
+-		} else if (parm.vsync_mode == LDB_VS_ACT_L) {
+-			if (parm.di == 0)
+-				__raw_writel((reg &
+-					~LDB_DI0_VS_POL_MASK) |
+-					LDB_DI0_VS_POL_ACT_LOW,
+-					ldb.control_reg);
+-			else
+-				__raw_writel((reg &
+-					~LDB_DI1_VS_POL_MASK) |
+-					LDB_DI1_VS_POL_ACT_LOW,
+-					ldb.control_reg);
++	/* ipu selected by platform data setting */
++	setting->dev_id = plat_data->ipu_id;
++
++	/* if input format not valid, make RGB666 as default*/
++	if (!valid_mode(setting->if_fmt)) {
++		dev_warn(&ldb->pdev->dev, "Input pixel format not valid"
++					"use default RGB666\n");
++		setting->if_fmt = IPU_PIX_FMT_RGB666;
++	}
++
++	if (!ldb->inited) {
++		struct clk *ldb_clk_parent;
++		char di0_clk[] = "ipu1_di0_clk";
++		char di1_clk[] = "ipu1_di1_clk";
++		unsigned long ldb_clk_prate = 455000000;
+ 
++		ldb->ldb_di_clk[0] = clk_get(&ldb->pdev->dev, "ldb_di0_clk");
++		if (IS_ERR(ldb->ldb_di_clk[0])) {
++			dev_err(&ldb->pdev->dev, "get ldb clk0 failed\n");
++			return PTR_ERR(ldb->ldb_di_clk[0]);
+ 		}
+-		spin_unlock(&ldb_lock);
+-		break;
++		ldb->ldb_di_clk[1] = clk_get(&ldb->pdev->dev, "ldb_di1_clk");
++		if (IS_ERR(ldb->ldb_di_clk[1])) {
++			dev_err(&ldb->pdev->dev, "get ldb clk1 failed\n");
++			return PTR_ERR(ldb->ldb_di_clk[1]);
+ 		}
+-	case LDB_BIT_MAP:
+-		{
+-		ldb_bitmap_parm parm;
+-
+-		if (copy_from_user(&parm, (ldb_bitmap_parm *) arg,
+-				   sizeof(ldb_bitmap_parm)))
+-			return -EFAULT;
+-
+-		spin_lock(&ldb_lock);
+-		reg = __raw_readl(ldb.control_reg);
+-		if (parm.bitmap_mode == LDB_BIT_MAP_SPWG) {
+-			if (parm.channel == 0)
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH0_MASK) |
+-					      LDB_BIT_MAP_CH0_SPWG,
+-					      ldb.control_reg);
+-			else
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH0_MASK) |
+-					      LDB_BIT_MAP_CH1_SPWG,
+-					      ldb.control_reg);
+-		} else if (parm.bitmap_mode == LDB_BIT_MAP_JEIDA) {
+-			if (parm.channel == 0)
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH0_MASK) |
+-					      LDB_BIT_MAP_CH0_JEIDA,
+-					      ldb.control_reg);
+-			else
+-				__raw_writel((reg & ~LDB_BIT_MAP_CH0_MASK) |
+-					      LDB_BIT_MAP_CH1_JEIDA,
+-					      ldb.control_reg);
++		di0_clk[3] += plat_data->ipu_id;
++		di1_clk[3] += plat_data->ipu_id;
++
++		ldb->di_clk[0] = clk_get(&ldb->pdev->dev, di0_clk);
++		if (IS_ERR(ldb->di_clk[0])) {
++			dev_err(&ldb->pdev->dev, "get di clk0 failed\n");
++			return PTR_ERR(ldb->di_clk[0]);
+ 		}
+-		spin_unlock(&ldb_lock);
+-		break;
++		ldb->di_clk[1] = clk_get(&ldb->pdev->dev, di1_clk);
++		if (IS_ERR(ldb->di_clk[1])) {
++			dev_err(&ldb->pdev->dev, "get di clk1 failed\n");
++			return PTR_ERR(ldb->di_clk[1]);
+ 		}
+-	case LDB_DATA_WIDTH:
+-		{
+-		ldb_data_width_parm parm;
+-
+-		if (copy_from_user(&parm, (ldb_data_width_parm *) arg,
+-				   sizeof(ldb_data_width_parm)))
+-			return -EFAULT;
+-
+-		spin_lock(&ldb_lock);
+-		reg = __raw_readl(ldb.control_reg);
+-		if (parm.data_width == 24) {
+-			if (parm.channel == 0)
+-				__raw_writel((reg & ~LDB_DATA_WIDTH_CH0_MASK) |
+-					      LDB_DATA_WIDTH_CH0_24,
+-					      ldb.control_reg);
+-			else
+-				__raw_writel((reg & ~LDB_DATA_WIDTH_CH0_MASK) |
+-					      LDB_DATA_WIDTH_CH1_24,
+-					      ldb.control_reg);
+-		} else if (parm.data_width == 18) {
+-			if (parm.channel == 0)
+-				__raw_writel((reg & ~LDB_DATA_WIDTH_CH0_MASK) |
+-					      LDB_DATA_WIDTH_CH0_18,
+-					      ldb.control_reg);
+-			else
+-				__raw_writel((reg & ~LDB_DATA_WIDTH_CH0_MASK) |
+-					      LDB_DATA_WIDTH_CH1_18,
+-					      ldb.control_reg);
++
++		/* FIXME: set ldb_di_clk parent to 455M to fit both XGA/1080P mode*/
++		ldb_clk_parent =
++			clk_get_parent(ldb->ldb_di_clk[0]);
++		clk_set_rate(ldb_clk_parent, ldb_clk_prate);
++		ldb_clk_parent =
++			clk_get_parent(ldb->ldb_di_clk[1]);
++		clk_set_rate(ldb_clk_parent, ldb_clk_prate);
++
++		res = platform_get_resource(ldb->pdev, IORESOURCE_MEM, 0);
++		if (IS_ERR(res)) {
++			ret = -ENOMEM;
++			goto get_res_failed;
+ 		}
+-		spin_unlock(&ldb_lock);
+-		break;
++
++		base_addr = res->start;
++		ldb->reg = ioremap(base_addr, res->end - res->start + 1);
++		ldb->control_reg = ldb->reg + 2;
++		ldb->gpr3_reg = ldb->reg + 3;
++
++		ldb->lvds_bg_reg = regulator_get(&ldb->pdev->dev, plat_data->lvds_bg_reg);
++		if (!IS_ERR(ldb->lvds_bg_reg)) {
++			regulator_set_voltage(ldb->lvds_bg_reg, 2500000, 2500000);
++			regulator_enable(ldb->lvds_bg_reg);
+ 		}
+-	case LDB_CHAN_MODE:
+-		{
+-		ldb_chan_mode_parm parm;
+-		struct clk *pll4_clk;
+-		unsigned long pll4_rate = 0;
+-
+-		if (copy_from_user(&parm, (ldb_chan_mode_parm *) arg,
+-				   sizeof(ldb_chan_mode_parm)))
+-			return -EFAULT;
+-
+-		spin_lock(&ldb_lock);
+-
+-		/* TODO:Set the correct pll4 rate for all situations */
+-		pll4_clk = clk_get(g_ldb_dev, "pll4");
+-		pll4_rate = clk_get_rate(pll4_clk);
+-		pll4_rate = 455000000;
+-		clk_set_rate(pll4_clk, pll4_rate);
+-		clk_put(pll4_clk);
+-
+-		reg = __raw_readl(ldb.control_reg);
+-		switch (parm.channel_mode) {
+-		case LDB_CHAN_MODE_SIN:
+-			if (parm.di == 0) {
+-				ldb.chan_mode_opt = LDB_SIN_DI0;
+-
+-				ldb.ldb_di_clk[0] = clk_get(g_ldb_dev,
+-							    "ldb_di0_clk");
+-				clk_set_rate(ldb.ldb_di_clk[0], pll4_rate/7);
+-				clk_put(ldb.ldb_di_clk[0]);
+-
+-				__raw_writel((reg & ~LDB_CH0_MODE_MASK) |
+-					      LDB_CH0_MODE_EN_TO_DI0,
+-					      ldb.control_reg);
+-			} else {
+-				ldb.chan_mode_opt = LDB_SIN_DI1;
+ 
+-				ldb.ldb_di_clk[1] = clk_get(g_ldb_dev,
+-							    "ldb_di1_clk");
+-				clk_set_rate(ldb.ldb_di_clk[1], pll4_rate/7);
+-				clk_put(ldb.ldb_di_clk[1]);
++		reg = readl(ldb->control_reg);
+ 
+-				__raw_writel((reg & ~LDB_CH1_MODE_MASK) |
+-					      LDB_CH1_MODE_EN_TO_DI1,
+-					      ldb.control_reg);
+-			}
+-			break;
+-		case LDB_CHAN_MODE_SEP:
+-			ldb.chan_mode_opt = LDB_SEP;
+-
+-			ldb.ldb_di_clk[0] = clk_get(g_ldb_dev, "ldb_di0_clk");
+-			clk_set_rate(ldb.ldb_di_clk[0], pll4_rate/7);
+-			clk_put(ldb.ldb_di_clk[0]);
+-			ldb.ldb_di_clk[1] = clk_get(g_ldb_dev, "ldb_di1_clk");
+-			clk_set_rate(ldb.ldb_di_clk[1], pll4_rate/7);
+-			clk_put(ldb.ldb_di_clk[1]);
+-
+-			__raw_writel((reg & ~(LDB_CH0_MODE_MASK |
+-					      LDB_CH1_MODE_MASK)) |
+-				      LDB_CH0_MODE_EN_TO_DI0 |
+-				      LDB_CH1_MODE_EN_TO_DI1,
+-				      ldb.control_reg);
+-			break;
+-		case LDB_CHAN_MODE_DUL:
+-		case LDB_CHAN_MODE_SPL:
+-			ldb.ldb_di_clk[0] = clk_get(g_ldb_dev, "ldb_di0_clk");
+-			ldb.ldb_di_clk[1] = clk_get(g_ldb_dev, "ldb_di1_clk");
+-			if (parm.di == 0) {
+-				if (parm.channel_mode == LDB_CHAN_MODE_DUL) {
+-					ldb.chan_mode_opt = LDB_DUL_DI0;
+-					clk_set_rate(ldb.ldb_di_clk[0],
+-						     pll4_rate/7);
+-				} else {
+-					ldb.chan_mode_opt = LDB_SPL_DI0;
+-					clk_set_rate(ldb.ldb_di_clk[0],
+-						     2*pll4_rate/7);
+-					clk_set_rate(ldb.ldb_di_clk[1],
+-						     2*pll4_rate/7);
+-					reg = __raw_readl(ldb.control_reg);
+-					__raw_writel(reg | LDB_SPLIT_MODE_EN,
+-						      ldb.control_reg);
+-				}
+-
+-				reg = __raw_readl(ldb.control_reg);
+-				__raw_writel((reg & ~(LDB_CH0_MODE_MASK |
+-						      LDB_CH1_MODE_MASK)) |
+-					      LDB_CH0_MODE_EN_TO_DI0 |
+-					      LDB_CH1_MODE_EN_TO_DI0,
+-					      ldb.control_reg);
++		/* refrence resistor select */
++		reg &= ~LDB_BGREF_RMODE_MASK;
++		if (plat_data->ext_ref)
++			reg |= LDB_BGREF_RMODE_EXT;
++		else
++			reg |= LDB_BGREF_RMODE_INT;
++
++		/* TODO: now only use SPWG data mapping for both channel */
++		reg &= ~(LDB_BIT_MAP_CH0_MASK | LDB_BIT_MAP_CH1_MASK);
++		reg |= LDB_BIT_MAP_CH0_SPWG | LDB_BIT_MAP_CH1_SPWG;
++
++		/* channel mode setting */
++		reg &= ~(LDB_CH0_MODE_MASK | LDB_CH1_MODE_MASK);
++		reg &= ~(LDB_DATA_WIDTH_CH0_MASK | LDB_DATA_WIDTH_CH1_MASK);
++
++		if (bits_per_pixel(setting->if_fmt) == 24)
++			reg |= LDB_DATA_WIDTH_CH0_24 | LDB_DATA_WIDTH_CH1_24;
++		else
++			reg |= LDB_DATA_WIDTH_CH0_18 | LDB_DATA_WIDTH_CH1_18;
++
++		if (g_ldb_mode)
++			ldb->mode = g_ldb_mode;
++		else
++			ldb->mode = plat_data->mode;
++
++		if (ldb->mode == LDB_SPL_DI0) {
++			reg |= LDB_SPLIT_MODE_EN | LDB_CH0_MODE_EN_TO_DI0
++				| LDB_CH1_MODE_EN_TO_DI0;
++			setting->disp_id = 0;
++		} else if (ldb->mode == LDB_SPL_DI1) {
++			reg |= LDB_SPLIT_MODE_EN | LDB_CH0_MODE_EN_TO_DI1
++				| LDB_CH1_MODE_EN_TO_DI1;
++			setting->disp_id = 1;
++		} else if (ldb->mode == LDB_DUL_DI0) {
++			reg &= ~LDB_SPLIT_MODE_EN;
++			reg |= LDB_CH0_MODE_EN_TO_DI0 | LDB_CH1_MODE_EN_TO_DI0;
++			setting->disp_id = 0;
++		} else if (ldb->mode == LDB_DUL_DI1) {
++			reg &= ~LDB_SPLIT_MODE_EN;
++			reg |= LDB_CH0_MODE_EN_TO_DI1 | LDB_CH1_MODE_EN_TO_DI1;
++			setting->disp_id = 1;
++		} else if (ldb->mode == LDB_SIN_DI0) {
++			reg &= ~LDB_SPLIT_MODE_EN;
++			reg |= LDB_CH0_MODE_EN_TO_DI0;
++			setting->disp_id = 0;
++		} else if (ldb->mode == LDB_SIN_DI1) {
++			reg &= ~LDB_SPLIT_MODE_EN;
++			reg |= LDB_CH1_MODE_EN_TO_DI1;
++			setting->disp_id = 1;
++		} else { /* separate mode*/
++			reg &= ~LDB_SPLIT_MODE_EN;
++			reg |= LDB_CH0_MODE_EN_TO_DI0 | LDB_CH1_MODE_EN_TO_DI1;
++			setting->disp_id = plat_data->disp_id;
++			if (bits_per_pixel(setting->if_fmt) == 24) {
++				if (setting->disp_id == 0)
++					reg &= ~LDB_DATA_WIDTH_CH1_24;
++				else
++					reg &= ~LDB_DATA_WIDTH_CH0_24;
+ 			} else {
+-				if (parm.channel_mode == LDB_CHAN_MODE_DUL) {
+-					ldb.chan_mode_opt = LDB_DUL_DI1;
+-					clk_set_rate(ldb.ldb_di_clk[1],
+-						     pll4_rate/7);
+-				} else {
+-					ldb.chan_mode_opt = LDB_SPL_DI1;
+-					clk_set_rate(ldb.ldb_di_clk[0],
+-						     2*pll4_rate/7);
+-					clk_set_rate(ldb.ldb_di_clk[1],
+-						     2*pll4_rate/7);
+-					reg = __raw_readl(ldb.control_reg);
+-					__raw_writel(reg | LDB_SPLIT_MODE_EN,
+-						      ldb.control_reg);
+-				}
+-
+-				reg = __raw_readl(ldb.control_reg);
+-				__raw_writel((reg & ~(LDB_CH0_MODE_MASK |
+-						      LDB_CH1_MODE_MASK)) |
+-					      LDB_CH0_MODE_EN_TO_DI1 |
+-					      LDB_CH1_MODE_EN_TO_DI1,
+-					      ldb.control_reg);
++				if (setting->disp_id == 0)
++					reg &= ~LDB_DATA_WIDTH_CH1_18;
++				else
++					reg &= ~LDB_DATA_WIDTH_CH0_18;
+ 			}
+-			clk_put(ldb.ldb_di_clk[0]);
+-			clk_put(ldb.ldb_di_clk[1]);
+-			break;
+-		default:
+-			ret = -EINVAL;
+-			break;
+ 		}
+-		spin_unlock(&ldb_lock);
+-		break;
+-		}
+-	case LDB_ENABLE:
+-		{
+-		int ipu_di;
+ 
+-		if (copy_from_user(&ipu_di, (int *) arg, sizeof(int)))
+-			return -EFAULT;
++		writel(reg, ldb->control_reg);
+ 
+-		ldb_enable(ipu_di);
+-		break;
++		/* fb notifier for clk setting */
++		ldb->nb.notifier_call = ldb_fb_event,
++		ret = fb_register_client(&ldb->nb);
++		if (ret < 0)
++			goto fb_register_nb_failed;
++
++		setting_idx = 0;
++		ldb->inited = true;
++	} else { /* second time for separate mode */
++		int disp_id;
++
++		if ((ldb->mode == LDB_SPL_DI0) ||
++			(ldb->mode == LDB_SPL_DI1) ||
++			(ldb->mode == LDB_DUL_DI0) ||
++			(ldb->mode == LDB_DUL_DI1) ||
++			(ldb->mode == LDB_SIN_DI0) ||
++			(ldb->mode == LDB_SIN_DI1)) {
++			dev_err(&ldb->pdev->dev, "for second ldb disp"
++					"ldb mode should in separate mode\n");
++			return -EINVAL;
+ 		}
+-	case LDB_DISABLE:
+-		{
+-		int ipu_di;
+ 
+-		if (copy_from_user(&ipu_di, (int *) arg, sizeof(int)))
+-			return -EFAULT;
++		disp_id = setting->disp_id = !plat_data->disp_id;
+ 
+-		ldb_disable(ipu_di);
+-		break;
++		reg = readl(ldb->control_reg);
++		if (bits_per_pixel(setting->if_fmt) == 24) {
++			if (disp_id == 0)
++				reg |= LDB_DATA_WIDTH_CH0_24;
++			else
++				reg |= LDB_DATA_WIDTH_CH1_24;
++		} else {
++			if (disp_id == 0)
++				reg |= LDB_DATA_WIDTH_CH0_18;
++			else
++				reg |= LDB_DATA_WIDTH_CH1_18;
++		}
++		writel(reg, ldb->control_reg);
++		setting_idx = 1;
++	}
++
++	if (cpu_is_mx6q())
++		ldb_ipu_ldb_route(setting->dev_id, setting->disp_id, ldb);
++
++	/*
++	 * ldb_di0_clk -> ipux_di0_clk
++	 * ldb_di1_clk -> ipux_di1_clk
++	 */
++	clk_set_parent(ldb->di_clk[setting->disp_id],
++			ldb->ldb_di_clk[setting->disp_id]);
++
++	/* must use spec video mode defined by driver */
++	ret = fb_find_mode(&setting->fbi->var, setting->fbi, setting->dft_mode_str,
++				ldb_modedb, ldb_modedb_sz, NULL, setting->default_bpp);
++	if (ret != 1)
++		fb_videomode_to_var(&setting->fbi->var, &ldb_modedb[0]);
++
++	INIT_LIST_HEAD(&setting->fbi->modelist);
++	for (i = 0; i < ldb_modedb_sz; i++) {
++		struct fb_videomode m;
++		fb_var_to_videomode(&m, &setting->fbi->var);
++		if (fb_mode_is_equal(&m, &ldb_modedb[i])) {
++			fb_add_videomode(&ldb_modedb[i],
++					&setting->fbi->modelist);
++			break;
+ 		}
+-	default:
+-		ret = -EINVAL;
+-		break;
+ 	}
+ 
++	/* save current ldb setting for fb notifier */
++	ldb->setting[setting_idx].active = true;
++	ldb->setting[setting_idx].ipu = setting->dev_id;
++	ldb->setting[setting_idx].di = setting->disp_id;
++
+ 	return ret;
+-}
+ 
+-static int mxc_ldb_open(struct inode *inode, struct file *file)
+-{
+-	return 0;
++fb_register_nb_failed:
++	iounmap(ldb->reg);
++get_res_failed:
++	return ret;
+ }
+ 
+-static int mxc_ldb_release(struct inode *inode, struct file *file)
++static void ldb_disp_deinit(struct mxc_dispdrv_entry *disp)
+ {
+-	return 0;
+-}
++	struct ldb_data *ldb = mxc_dispdrv_getdata(disp);
++	int i;
+ 
+-static int mxc_ldb_mmap(struct file *file, struct vm_area_struct *vma)
+-{
+-	return 0;
++	writel(0, ldb->control_reg);
++
++	for (i = 0; i < 2; i++) {
++		clk_disable(ldb->ldb_di_clk[i]);
++		clk_put(ldb->ldb_di_clk[i]);
++	}
++
++	fb_unregister_client(&ldb->nb);
++
++	iounmap(ldb->reg);
+ }
+ 
+-static const struct file_operations mxc_ldb_fops = {
+-	.owner = THIS_MODULE,
+-	.open = mxc_ldb_open,
+-	.mmap = mxc_ldb_mmap,
+-	.release = mxc_ldb_release,
+-	.unlocked_ioctl = mxc_ldb_ioctl
++static struct mxc_dispdrv_driver ldb_drv = {
++	.name 	= DISPDRV_LDB,
++	.init 	= ldb_disp_init,
++	.deinit	= ldb_disp_deinit,
+ };
+ 
+ /*!
+@@ -1239,186 +603,30 @@ static const struct file_operations mxc_ldb_fops = {
+ static int ldb_probe(struct platform_device *pdev)
+ {
+ 	int ret = 0;
+-	struct resource *res;
+-	struct fsl_mxc_ldb_platform_data *plat_data = pdev->dev.platform_data;
+-	uint32_t reg;
+-	struct device *temp;
+-	int mxc_ldb_major;
+-	struct class *mxc_ldb_class;
+-
+-	if ((plat_data->boot_enable & (MXC_LDBDI0 | MXC_LDBDI1))
+-		&& !g_enable_ldb) {
+-		g_enable_ldb = MXC_ENABLE;
+-		if (plat_data->boot_enable & MXC_LDBDI0)
+-			g_di0_used = true;
+-		if (plat_data->boot_enable & MXC_LDBDI1)
+-			g_di1_used = true;
+-	}
+-
+-	if (!g_enable_ldb)
+-		g_enable_ldb = MXC_DISABLE;
+-
+-	if (g_enable_ldb == MXC_DISABLE) {
+-		printk(KERN_WARNING "By setting, LDB driver will not be enabled\n");
+-		return 0;
+-	}
+-
+-	spin_lock_init(&ldb_lock);
+-
+-	g_ldb_dev = &pdev->dev;
+-
+-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+-	if (IS_ERR(res))
+-		return -ENODEV;
+-
+-	memset(&ldb, 0, sizeof(struct ldb_data));
+-	ldb.chan_mode_opt = g_chan_mode_opt;
+-	ldb.chan_bit_map[0] = g_chan_bit_map[0];
+-	ldb.chan_bit_map[1] = g_chan_bit_map[1];
+-
+-	ldb.base_addr = res->start;
+-	ldb_reg = ioremap(ldb.base_addr, res->end - res->start + 1);
+-	ldb.control_reg = ldb_reg + 2;
+-
+-	ldb.bgref_rmode = plat_data->ext_ref;
+-	ldb.lvds_bg_reg = regulator_get(&pdev->dev, plat_data->lvds_bg_reg);
+-	if (!IS_ERR(ldb.lvds_bg_reg)) {
+-		regulator_set_voltage(ldb.lvds_bg_reg, 2500000, 2500000);
+-		regulator_enable(ldb.lvds_bg_reg);
+-	}
+-
+-	reg = __raw_readl(ldb.control_reg);
+-	if (ldb.bgref_rmode == LDB_EXT_REF)
+-		__raw_writel((reg & ~LDB_BGREF_RMODE_MASK) |
+-			      LDB_BGREF_RMODE_EXT, ldb.control_reg);
+-	else
+-		__raw_writel((reg & ~LDB_BGREF_RMODE_MASK) |
+-			      LDB_BGREF_RMODE_INT, ldb.control_reg);
+-
+-	mxc_ldb_major = register_chrdev(0, "mxc_ldb", &mxc_ldb_fops);
+-	if (mxc_ldb_major < 0) {
+-		dev_err(g_ldb_dev, "Unable to register MXC LDB as a char "
+-				   "device\n");
+-		ret = mxc_ldb_major;
+-		goto err0;
+-	}
+-
+-	mxc_ldb_class = class_create(THIS_MODULE, "mxc_ldb");
+-	if (IS_ERR(mxc_ldb_class)) {
+-		dev_err(g_ldb_dev, "Unable to create class for MXC LDB\n");
+-		ret = PTR_ERR(mxc_ldb_class);
+-		goto err1;
+-	}
++	struct ldb_data *ldb;
+ 
+-	temp = device_create(mxc_ldb_class, NULL, MKDEV(mxc_ldb_major, 0),
+-			NULL, "mxc_ldb");
+-	if (IS_ERR(temp)) {
+-		dev_err(g_ldb_dev, "Unable to create class device for "
+-				   "MXC LDB\n");
+-		ret = PTR_ERR(temp);
+-		goto err2;
++	ldb = kzalloc(sizeof(struct ldb_data), GFP_KERNEL);
++	if (!ldb) {
++		ret = -ENOMEM;
++		goto alloc_failed;
+ 	}
+ 
+-	if (g_di0_used) {
+-		mxcfb_register_mode(0, mxcfb_ldb_modedb,
+-				mxcfb_ldb_modedb_sz,
+-				MXC_DISP_SPEC_DEV);
+-		mxcfb_register_presetup(0, ldb_fb_pre_setup);
+-	}
+-	if (g_di1_used) {
+-		mxcfb_register_mode(1, mxcfb_ldb_modedb,
+-				mxcfb_ldb_modedb_sz,
+-				MXC_DISP_SPEC_DEV);
+-		mxcfb_register_presetup(1, ldb_fb_pre_setup);
+-	}
++	ldb->pdev = pdev;
++	ldb->disp_ldb = mxc_dispdrv_register(&ldb_drv);
++	mxc_dispdrv_setdata(ldb->disp_ldb, ldb);
+ 
+-	ret = fb_register_client(&nb);
+-	if (ret < 0)
+-		goto err2;
++	dev_set_drvdata(&pdev->dev, ldb);
+ 
+-	ldb.blank[0] = ldb.blank[1] = -1;
+-
+-	return ret;
+-err2:
+-	class_destroy(mxc_ldb_class);
+-err1:
+-	unregister_chrdev(mxc_ldb_major, "mxc_ldb");
+-err0:
+-	iounmap(ldb_reg);
++alloc_failed:
+ 	return ret;
+ }
+ 
+ static int ldb_remove(struct platform_device *pdev)
+ {
+-	int i;
+-
+-	__raw_writel(0, ldb.control_reg);
++	struct ldb_data *ldb = dev_get_drvdata(&pdev->dev);
+ 
+-	for (i = 0; i < 2; i++) {
+-		if (ldb.ch_working[i]) {
+-			ldb.ldb_di_clk[i] = clk_get(g_ldb_dev,
+-					    i ? "ldb_di1_clk" : "ldb_di0_clk");
+-			clk_disable(ldb.ldb_di_clk[i]);
+-			clk_put(ldb.ldb_di_clk[i]);
+-			ldb.ch_working[i] = false;
+-		}
+-	}
+-
+-	fb_unregister_client(&nb);
+-	return 0;
+-}
+-
+-static int ldb_suspend(struct platform_device *pdev, pm_message_t state)
+-{
+-	switch (ldb.chan_mode_opt) {
+-	case LDB_SIN_DI0:
+-	case LDB_DUL_DI0:
+-	case LDB_SPL_DI0:
+-		if (ldb.blank[0] != FB_BLANK_UNBLANK)
+-			ldb_disable(0);
+-		break;
+-	case LDB_SIN_DI1:
+-	case LDB_DUL_DI1:
+-	case LDB_SPL_DI1:
+-		if (ldb.blank[1] != FB_BLANK_UNBLANK)
+-			ldb_disable(1);
+-		break;
+-	case LDB_SEP:
+-		if (ldb.blank[0] != FB_BLANK_UNBLANK)
+-			ldb_disable(0);
+-		if (ldb.blank[1] != FB_BLANK_UNBLANK)
+-			ldb_disable(1);
+-		break;
+-	default:
+-		break;
+-	}
+-	return 0;
+-}
+-
+-static int ldb_resume(struct platform_device *pdev)
+-{
+-	switch (ldb.chan_mode_opt) {
+-	case LDB_SIN_DI0:
+-	case LDB_DUL_DI0:
+-	case LDB_SPL_DI0:
+-		if (ldb.blank[0] == FB_BLANK_UNBLANK)
+-			ldb_enable(0);
+-		break;
+-	case LDB_SIN_DI1:
+-	case LDB_DUL_DI1:
+-	case LDB_SPL_DI1:
+-		if (ldb.blank[1] == FB_BLANK_UNBLANK)
+-			ldb_enable(1);
+-		break;
+-	case LDB_SEP:
+-		if (ldb.blank[0] == FB_BLANK_UNBLANK)
+-			ldb_enable(0);
+-		if (ldb.blank[1] == FB_BLANK_UNBLANK)
+-			ldb_enable(1);
+-		break;
+-	default:
+-		break;
+-	}
++	mxc_dispdrv_unregister(ldb->disp_ldb);
++	kfree(ldb);
+ 	return 0;
+ }
+ 
+@@ -1428,102 +636,11 @@ static struct platform_driver mxcldb_driver = {
+ 		   },
+ 	.probe = ldb_probe,
+ 	.remove = ldb_remove,
+-	.suspend = ldb_suspend,
+-	.resume = ldb_resume,
+ };
+ 
+-/*
+- * Parse user specified options (`ldb=')
+- * example:
+- * ldb=single(separate, dual or split),(di=0 or di=1),
+- *	ch0_map=SPWG or JEIDA,ch1_map=SPWG or JEIDA
+- *
+- */
+-static int __init ldb_setup(char *options)
+-{
+-	if (!strcmp(options, "=off")) {
+-		g_enable_ldb = MXC_DISABLE;
+-		return 1;
+-	} else
+-		g_enable_ldb = MXC_ENABLE;
+-
+-	if (!strlen(options))
+-		return 1;
+-	else if (!strsep(&options, "="))
+-		return 1;
+-
+-	if (!strncmp(options, "di0", 3))
+-		g_di0_used = true;
+-
+-	if (!strncmp(options, "di1", 3))
+-		g_di1_used = true;
+-
+-	if (!strncmp(options, "single", 6)) {
+-		strsep(&options, ",");
+-		if (!strncmp(options, "di=0", 4)) {
+-			g_chan_mode_opt = LDB_SIN_DI0;
+-			g_di0_used = true;
+-		} else {
+-			g_chan_mode_opt = LDB_SIN_DI1;
+-			g_di1_used = true;
+-		}
+-	} else if (!strncmp(options, "separate", 8)) {
+-		g_chan_mode_opt = LDB_SEP;
+-		g_di0_used = true;
+-		g_di1_used = true;
+-	} else if (!strncmp(options, "dual", 4)) {
+-		strsep(&options, ",");
+-		if (!strncmp(options, "di=", 3)) {
+-			if (simple_strtoul(options + 3, NULL, 0) == 0) {
+-				g_chan_mode_opt = LDB_DUL_DI0;
+-				g_di0_used = true;
+-			} else {
+-				g_chan_mode_opt = LDB_DUL_DI1;
+-				g_di1_used = true;
+-			}
+-		}
+-	} else if (!strncmp(options, "split", 5)) {
+-		strsep(&options, ",");
+-		if (!strncmp(options, "di=", 3)) {
+-			if (simple_strtoul(options + 3, NULL, 0) == 0) {
+-				g_chan_mode_opt = LDB_SPL_DI0;
+-				g_di0_used = true;
+-			} else {
+-				g_chan_mode_opt = LDB_SPL_DI1;
+-				g_di1_used = true;
+-			}
+-		}
+-	} else
+-		return 1;
+-
+-	if ((strsep(&options, ",") != NULL) &&
+-	    !strncmp(options, "ch0_map=", 8)) {
+-		if (!strncmp(options + 8, "SPWG", 4))
+-			g_chan_bit_map[0] = LDB_BIT_MAP_SPWG;
+-		else
+-			g_chan_bit_map[0] = LDB_BIT_MAP_JEIDA;
+-	}
+-
+-	if (!(g_chan_mode_opt == LDB_SIN_DI0 ||
+-	      g_chan_mode_opt == LDB_SIN_DI1) &&
+-	    (strsep(&options, ",") != NULL) &&
+-	    !strncmp(options, "ch1_map=", 8)) {
+-		if (!strncmp(options + 8, "SPWG", 4))
+-			g_chan_bit_map[1] = LDB_BIT_MAP_SPWG;
+-		else
+-			g_chan_bit_map[1] = LDB_BIT_MAP_JEIDA;
+-	}
+-
+-	return 1;
+-}
+-__setup("ldb", ldb_setup);
+-
+ static int __init ldb_init(void)
+ {
+-	int ret;
+-
+-	ret = platform_driver_register(&mxcldb_driver);
+-	return 0;
++	return platform_driver_register(&mxcldb_driver);
+ }
+ 
+ static void __exit ldb_uninit(void)
+diff --git a/drivers/video/mxc/mxc_dispdrv.c b/drivers/video/mxc/mxc_dispdrv.c
+new file mode 100644
+index 0000000..06b7af9
+--- /dev/null
++++ b/drivers/video/mxc/mxc_dispdrv.c
+@@ -0,0 +1,152 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++/*!
++ * @file mxc_dispdrv.c
++ * @brief mxc display driver framework.
++ *
++ * A display device driver could call mxc_dispdrv_register(drv) in its dev_probe() function.
++ * Move all dev_probe() things into mxc_dispdrv_driver->init(), init() function should init
++ * and feedback setting;
++ * Move all dev_remove() things into mxc_dispdrv_driver->deinit();
++ * Move all dev_suspend() things into fb_notifier for SUSPEND, if there is;
++ * Move all dev_resume() things into fb_notifier for RESUME, if there is;
++ *
++ * ipuv3 fb driver could call mxc_dispdrv_init(setting) before a fb need be added, with fbi param
++ * passing by setting, after mxc_dispdrv_init() return, FB driver should get the basic setting
++ * about fbi info and ipuv3-hw (ipu_id and disp_id).
++ *
++ * @ingroup Framebuffer
++ */
++
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/list.h>
++#include <linux/mutex.h>
++#include <linux/slab.h>
++#include <linux/err.h>
++#include <linux/string.h>
++#include "mxc_dispdrv.h"
++
++static LIST_HEAD(dispdrv_list);
++static DEFINE_MUTEX(dispdrv_lock);
++
++struct mxc_dispdrv_entry {
++	const char *name;
++	struct list_head list;
++	int (*init) (struct mxc_dispdrv_entry *);
++	void (*deinit) (struct mxc_dispdrv_entry *);
++	bool active;
++	struct mxc_dispdrv_setting setting;
++	void *priv;
++};
++
++struct mxc_dispdrv_entry *mxc_dispdrv_register(struct mxc_dispdrv_driver *drv)
++{
++	struct mxc_dispdrv_entry *new;
++
++	mutex_lock(&dispdrv_lock);
++
++	new = kzalloc(sizeof(struct mxc_dispdrv_entry), GFP_KERNEL);
++	if (!new) {
++		mutex_unlock(&dispdrv_lock);
++		return ERR_PTR(-ENOMEM);
++	}
++
++	new->name = drv->name;
++	new->init = drv->init;
++	new->deinit = drv->deinit;
++
++	list_add_tail(&new->list, &dispdrv_list);
++	mutex_unlock(&dispdrv_lock);
++
++	return new;
++}
++EXPORT_SYMBOL_GPL(mxc_dispdrv_register);
++
++int mxc_dispdrv_unregister(struct mxc_dispdrv_entry *entry)
++{
++	if (entry) {
++		mutex_lock(&dispdrv_lock);
++		if (entry->active && entry->deinit)
++			entry->deinit(entry);
++		list_del(&entry->list);
++		mutex_unlock(&dispdrv_lock);
++		kfree(entry);
++		return 0;
++	} else
++		return -EINVAL;
++}
++EXPORT_SYMBOL_GPL(mxc_dispdrv_unregister);
++
++int mxc_dispdrv_init(char *name, struct mxc_dispdrv_setting *setting)
++{
++	int ret = 0, found = 0;
++	struct mxc_dispdrv_entry *disp;
++
++	mutex_lock(&dispdrv_lock);
++	list_for_each_entry(disp, &dispdrv_list, list) {
++		if (!strcmp(disp->name, name)) {
++			if (disp->init) {
++				memcpy(&disp->setting, setting,
++						sizeof(struct mxc_dispdrv_setting));
++				ret = disp->init(disp);
++				if (ret >= 0) {
++					disp->active = true;
++					/* setting may need fix-up */
++					memcpy(setting, &disp->setting,
++							sizeof(struct mxc_dispdrv_setting));
++					found = 1;
++					break;
++				}
++			}
++		}
++	}
++
++	if (!found)
++		ret = -EINVAL;
++
++	mutex_unlock(&dispdrv_lock);
++
++	return ret;
++}
++EXPORT_SYMBOL_GPL(mxc_dispdrv_init);
++
++int mxc_dispdrv_setdata(struct mxc_dispdrv_entry *entry, void *data)
++{
++	if (entry) {
++		entry->priv = data;
++		return 0;
++	} else
++		return -EINVAL;
++}
++EXPORT_SYMBOL_GPL(mxc_dispdrv_setdata);
++
++void *mxc_dispdrv_getdata(struct mxc_dispdrv_entry *entry)
++{
++	if (entry) {
++		return entry->priv;
++	} else
++		return ERR_PTR(-EINVAL);
++}
++EXPORT_SYMBOL_GPL(mxc_dispdrv_getdata);
++
++struct mxc_dispdrv_setting
++	*mxc_dispdrv_getsetting(struct mxc_dispdrv_entry *entry)
++{
++	if (entry) {
++		return &entry->setting;
++	} else
++		return ERR_PTR(-EINVAL);
++}
++EXPORT_SYMBOL_GPL(mxc_dispdrv_getsetting);
+diff --git a/drivers/video/mxc/mxc_dispdrv.h b/drivers/video/mxc/mxc_dispdrv.h
+new file mode 100644
+index 0000000..f5f62a2
+--- /dev/null
++++ b/drivers/video/mxc/mxc_dispdrv.h
+@@ -0,0 +1,43 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++#ifndef __MXC_DISPDRV_H__
++#define __MXC_DISPDRV_H__
++
++struct mxc_dispdrv_entry;
++
++struct mxc_dispdrv_driver {
++	const char *name;
++	int (*init) (struct mxc_dispdrv_entry *);
++	void (*deinit) (struct mxc_dispdrv_entry *);
++};
++
++struct mxc_dispdrv_setting {
++	/*input-feedback parameter*/
++	struct fb_info *fbi;
++	int if_fmt;
++	int default_bpp;
++	char *dft_mode_str;
++
++	/*feedback parameter*/
++	int dev_id;
++	int disp_id;
++};
++
++struct mxc_dispdrv_entry *mxc_dispdrv_register(struct mxc_dispdrv_driver *drv);
++int mxc_dispdrv_unregister(struct mxc_dispdrv_entry *entry);
++int mxc_dispdrv_init(char *name, struct mxc_dispdrv_setting *setting);
++int mxc_dispdrv_setdata(struct mxc_dispdrv_entry *entry, void *data);
++void *mxc_dispdrv_getdata(struct mxc_dispdrv_entry *entry);
++struct mxc_dispdrv_setting
++	*mxc_dispdrv_getsetting(struct mxc_dispdrv_entry *entry);
++#endif
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index efdb664..a278150 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -48,6 +48,7 @@
+ #include <linux/fsl_devices.h>
+ #include <asm/mach-types.h>
+ #include <mach/ipu-v3.h>
++#include "mxc_dispdrv.h"
+ 
+ /*
+  * Driver name
+@@ -60,11 +61,11 @@
+  * Structure containing the MXC specific framebuffer information.
+  */
+ struct mxcfb_info {
+-	char *fb_mode_str;
+ 	int default_bpp;
+ 	int cur_blank;
+ 	int next_blank;
+ 	ipu_channel_t ipu_ch;
++	int ipu_id;
+ 	int ipu_di;
+ 	u32 ipu_di_pix_fmt;
+ 	bool ipu_int_clk;
+@@ -82,16 +83,14 @@ struct mxcfb_info {
+ 
+ 	u32 pseudo_palette[16];
+ 
++	bool mode_found;
+ 	bool wait4vsync;
+ 	struct semaphore flip_sem;
+ 	struct semaphore alpha_flip_sem;
+ 	struct completion vsync_complete;
+-};
+ 
+-struct mxcfb_mode {
+-	int dev_mode;
+-	int num_modes;
+-	struct fb_videomode *mode;
++	void *ipu;
++	struct fb_info *ovfbi;
+ };
+ 
+ struct mxcfb_alloc_list {
+@@ -108,72 +107,8 @@ enum {
+ 	BOTH_OFF
+ };
+ 
+-static bool g_dp_in_use;
++static bool g_dp_in_use[2];
+ LIST_HEAD(fb_alloc_list);
+-static struct fb_info *mxcfb_info[3];
+-static __initdata struct mxcfb_mode mxc_disp_mode[MXCFB_PORT_NUM];
+-static __initdata int (*mxcfb_pre_setup[MXCFB_PORT_NUM])(struct fb_info *info);
+-
+-/*
+- * register pre-setup callback for some display
+- * driver which need prepare clk etc.
+- */
+-void mxcfb_register_presetup(int disp_port,
+-	int (*pre_setup)(struct fb_info *info))
+-{
+-	if (pre_setup)
+-		mxcfb_pre_setup[disp_port] = pre_setup;
+-}
+-EXPORT_SYMBOL(mxcfb_register_presetup);
+-
+-/*
+- * mode register from each display driver before
+- * primary fb setting.
+- */
+-void mxcfb_register_mode(int disp_port,
+-	const struct fb_videomode *modedb,
+-	int num_modes, int dev_mode)
+-{
+-	struct fb_videomode *mode;
+-	int mode_sum;
+-
+-	if (disp_port > MXCFB_PORT_NUM)
+-		return;
+-
+-	/*
+-	 * if there is new DDC device, overwrite old modes.
+-	 * if there is old DDC device while new device is not DDC,
+-	 * just keep old DDC modes.
+-	 */
+-	if (dev_mode & MXC_DISP_DDC_DEV) {
+-		if (mxc_disp_mode[disp_port].num_modes) {
+-			kfree(mxc_disp_mode[disp_port].mode);
+-			mxc_disp_mode[disp_port].num_modes = 0;
+-		}
+-	} else if (mxc_disp_mode[disp_port].dev_mode & MXC_DISP_DDC_DEV)
+-		return;
+-
+-	mode_sum = mxc_disp_mode[disp_port].num_modes + num_modes;
+-	mode = kzalloc(mode_sum * sizeof(struct fb_videomode), GFP_KERNEL);
+-
+-	if (mxc_disp_mode[disp_port].num_modes)
+-		memcpy(mode, mxc_disp_mode[disp_port].mode,
+-			mxc_disp_mode[disp_port].num_modes
+-			* sizeof(struct fb_videomode));
+-	if (modedb)
+-		memcpy(mode + mxc_disp_mode[disp_port].num_modes,
+-			modedb, num_modes * sizeof(struct fb_videomode));
+-
+-	if (mxc_disp_mode[disp_port].num_modes)
+-		kfree(mxc_disp_mode[disp_port].mode);
+-
+-	mxc_disp_mode[disp_port].mode = mode;
+-	mxc_disp_mode[disp_port].num_modes += num_modes;
+-	mxc_disp_mode[disp_port].dev_mode = dev_mode;
+-
+-	return;
+-}
+-EXPORT_SYMBOL(mxcfb_register_mode);
+ 
+ static uint32_t bpp_to_pixfmt(struct fb_info *fbi)
+ {
+@@ -196,11 +131,29 @@ static uint32_t bpp_to_pixfmt(struct fb_info *fbi)
+ 	return pixfmt;
+ }
+ 
++static struct fb_info *found_registered_fb(ipu_channel_t ipu_ch, int ipu_id)
++{
++	int i;
++	struct mxcfb_info *mxc_fbi;
++	struct fb_info *fbi = NULL;
++
++	for (i = 0; i < num_registered_fb; i++) {
++		mxc_fbi =
++			((struct mxcfb_info *)(registered_fb[i]->par));
++
++		if ((mxc_fbi->ipu_ch == ipu_ch) &&
++			(mxc_fbi->ipu_id == ipu_id)) {
++			fbi = registered_fb[i];
++			break;
++		}
++	}
++	return fbi;
++}
++
+ static irqreturn_t mxcfb_irq_handler(int irq, void *dev_id);
+ static int mxcfb_blank(int blank, struct fb_info *info);
+ static int mxcfb_map_video_memory(struct fb_info *fbi);
+ static int mxcfb_unmap_video_memory(struct fb_info *fbi);
+-static int mxcfb_option_setup(struct fb_info *info, char *options);
+ 
+ /*
+  * Set fixed framebuffer parameters based on variable settings.
+@@ -230,56 +183,23 @@ static int _setup_disp_channel1(struct fb_info *fbi)
+ 	struct mxcfb_info *mxc_fbi = (struct mxcfb_info *)fbi->par;
+ 
+ 	memset(&params, 0, sizeof(params));
+-	params.mem_dp_bg_sync.di = mxc_fbi->ipu_di;
+ 
+-	/*
+-	 * Assuming interlaced means yuv output, below setting also
+-	 * valid for mem_dc_sync. FG should have the same vmode as BG.
+-	 */
+-	if (mxc_fbi->ipu_ch == MEM_FG_SYNC) {
+-		struct mxcfb_info *mxc_fbi_tmp;
+-		int i;
+-
+-		for (i = 0; i < num_registered_fb; i++) {
+-			mxc_fbi_tmp = (struct mxcfb_info *)
+-				(registered_fb[i]->par);
+-			if (mxc_fbi_tmp->ipu_ch == MEM_BG_SYNC) {
+-				fbi->var.vmode =
+-				registered_fb[i]->var.vmode;
+-				mxc_fbi->ipu_di_pix_fmt =
+-				mxc_fbi_tmp->ipu_di_pix_fmt;
+-				break;
+-			}
+-		}
+-	}
+ 	if (mxc_fbi->ipu_ch == MEM_DC_SYNC) {
+-		if (fbi->var.vmode & FB_VMODE_INTERLACED) {
++		params.mem_dc_sync.di = mxc_fbi->ipu_di;
++		if (fbi->var.vmode & FB_VMODE_INTERLACED)
+ 			params.mem_dc_sync.interlaced = true;
+-			params.mem_dc_sync.out_pixel_fmt =
+-				IPU_PIX_FMT_YUV444;
+-		} else {
+-			if (mxc_fbi->ipu_di_pix_fmt)
+-				params.mem_dc_sync.out_pixel_fmt = mxc_fbi->ipu_di_pix_fmt;
+-			else
+-				params.mem_dc_sync.out_pixel_fmt = IPU_PIX_FMT_RGB666;
+-		}
++		params.mem_dc_sync.out_pixel_fmt = mxc_fbi->ipu_di_pix_fmt;
+ 		params.mem_dc_sync.in_pixel_fmt = bpp_to_pixfmt(fbi);
+ 	} else {
+-		if (fbi->var.vmode & FB_VMODE_INTERLACED) {
++		params.mem_dp_bg_sync.di = mxc_fbi->ipu_di;
++		if (fbi->var.vmode & FB_VMODE_INTERLACED)
+ 			params.mem_dp_bg_sync.interlaced = true;
+-			params.mem_dp_bg_sync.out_pixel_fmt =
+-				IPU_PIX_FMT_YUV444;
+-		} else {
+-			if (mxc_fbi->ipu_di_pix_fmt)
+-				params.mem_dp_bg_sync.out_pixel_fmt = mxc_fbi->ipu_di_pix_fmt;
+-			else
+-				params.mem_dp_bg_sync.out_pixel_fmt = IPU_PIX_FMT_RGB666;
+-		}
++		params.mem_dp_bg_sync.out_pixel_fmt = mxc_fbi->ipu_di_pix_fmt;
+ 		params.mem_dp_bg_sync.in_pixel_fmt = bpp_to_pixfmt(fbi);
+ 		if (mxc_fbi->alpha_chan_en)
+ 			params.mem_dp_bg_sync.alpha_chan_en = true;
+ 	}
+-	ipu_init_channel(mxc_fbi->ipu_ch, &params);
++	ipu_init_channel(mxc_fbi->ipu, mxc_fbi->ipu_ch, &params);
+ 
+ 	return 0;
+ }
+@@ -316,7 +236,8 @@ static int _setup_disp_channel2(struct fb_info *fbi)
+ 	base = (fbi->var.bits_per_pixel) * base / 8;
+ 	base += fbi->fix.smem_start;
+ 
+-	retval = ipu_init_channel_buffer(mxc_fbi->ipu_ch, IPU_INPUT_BUFFER,
++	retval = ipu_init_channel_buffer(mxc_fbi->ipu,
++					 mxc_fbi->ipu_ch, IPU_INPUT_BUFFER,
+ 					 bpp_to_pixfmt(fbi),
+ 					 fbi->var.xres, fbi->var.yres,
+ 					 fb_stride,
+@@ -332,7 +253,8 @@ static int _setup_disp_channel2(struct fb_info *fbi)
+ 	}
+ 
+ 	if (mxc_fbi->alpha_chan_en) {
+-		retval = ipu_init_channel_buffer(mxc_fbi->ipu_ch,
++		retval = ipu_init_channel_buffer(mxc_fbi->ipu,
++						 mxc_fbi->ipu_ch,
+ 						 IPU_ALPHA_IN_BUFFER,
+ 						 IPU_PIX_FMT_GENERIC,
+ 						 fbi->var.xres, fbi->var.yres,
+@@ -366,10 +288,10 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 
+ 	dev_dbg(fbi->device, "Reconfiguring framebuffer\n");
+ 
+-	ipu_disable_irq(mxc_fbi->ipu_ch_irq);
+-	ipu_disable_channel(mxc_fbi->ipu_ch, true);
+-	ipu_uninit_channel(mxc_fbi->ipu_ch);
+-	ipu_clear_irq(mxc_fbi->ipu_ch_irq);
++	ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
++	ipu_disable_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
++	ipu_disable_channel(mxc_fbi->ipu, mxc_fbi->ipu_ch, true);
++	ipu_uninit_channel(mxc_fbi->ipu, mxc_fbi->ipu_ch);
+ 	mxcfb_set_fix(fbi);
+ 
+ 	mem_len = fbi->var.yres_virtual * fbi->fix.line_length;
+@@ -380,6 +302,7 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 		if (mxcfb_map_video_memory(fbi) < 0)
+ 			return -ENOMEM;
+ 	}
++
+ 	if (mxc_fbi->alpha_chan_en) {
+ 		alpha_mem_len = fbi->var.xres * fbi->var.yres;
+ 		if ((!mxc_fbi->alpha_phy_addr0 && !mxc_fbi->alpha_phy_addr1) ||
+@@ -435,15 +358,9 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 		uint32_t out_pixel_fmt;
+ 
+ 		memset(&sig_cfg, 0, sizeof(sig_cfg));
+-		if (fbi->var.vmode & FB_VMODE_INTERLACED) {
++		if (fbi->var.vmode & FB_VMODE_INTERLACED)
+ 			sig_cfg.interlaced = true;
+-			out_pixel_fmt = IPU_PIX_FMT_YUV444;
+-		} else {
+-			if (mxc_fbi->ipu_di_pix_fmt)
+-				out_pixel_fmt = mxc_fbi->ipu_di_pix_fmt;
+-			else
+-				out_pixel_fmt = IPU_PIX_FMT_RGB666;
+-		}
++		out_pixel_fmt = mxc_fbi->ipu_di_pix_fmt;
+ 		if (fbi->var.vmode & FB_VMODE_ODD_FLD_FIRST) /* PAL */
+ 			sig_cfg.odd_field_first = true;
+ 		if (mxc_fbi->ipu_int_clk)
+@@ -464,7 +381,7 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 		dev_dbg(fbi->device, "pixclock = %ul Hz\n",
+ 			(u32) (PICOS2KHZ(fbi->var.pixclock) * 1000UL));
+ 
+-		if (ipu_init_sync_panel(mxc_fbi->ipu_di,
++		if (ipu_init_sync_panel(mxc_fbi->ipu, mxc_fbi->ipu_di,
+ 					(PICOS2KHZ(fbi->var.pixclock)) * 1000UL,
+ 					fbi->var.xres, fbi->var.yres,
+ 					out_pixel_fmt,
+@@ -484,29 +401,30 @@ static int mxcfb_set_par(struct fb_info *fbi)
+ 		    (struct fb_videomode *)fb_match_mode(&fbi->var,
+ 							 &fbi->modelist);
+ 
+-		ipu_disp_set_window_pos(mxc_fbi->ipu_ch, 0, 0);
++		ipu_disp_set_window_pos(mxc_fbi->ipu, mxc_fbi->ipu_ch, 0, 0);
+ 	}
+ 
+ 	retval = _setup_disp_channel2(fbi);
+ 	if (retval)
+ 		return retval;
+ 
+-	ipu_enable_channel(mxc_fbi->ipu_ch);
++	ipu_enable_channel(mxc_fbi->ipu, mxc_fbi->ipu_ch);
+ 
+ 	return retval;
+ }
+ 
+-static int _swap_channels(struct fb_info *fbi,
++static int _swap_channels(struct fb_info *fbi_from,
+ 			  struct fb_info *fbi_to, bool both_on)
+ {
+ 	int retval, tmp;
+ 	ipu_channel_t old_ch;
+-	struct mxcfb_info *mxc_fbi_from = (struct mxcfb_info *)fbi->par;
++	struct fb_info *ovfbi;
++	struct mxcfb_info *mxc_fbi_from = (struct mxcfb_info *)fbi_from->par;
+ 	struct mxcfb_info *mxc_fbi_to = (struct mxcfb_info *)fbi_to->par;
+ 
+ 	if (both_on) {
+-		ipu_disable_channel(mxc_fbi_to->ipu_ch, true);
+-		ipu_uninit_channel(mxc_fbi_to->ipu_ch);
++		ipu_disable_channel(mxc_fbi_to->ipu, mxc_fbi_to->ipu_ch, true);
++		ipu_uninit_channel(mxc_fbi_to->ipu, mxc_fbi_to->ipu_ch);
+ 	}
+ 
+ 	/* switch the mxc fbi parameters */
+@@ -516,33 +434,36 @@ static int _swap_channels(struct fb_info *fbi,
+ 	tmp = mxc_fbi_from->ipu_ch_irq;
+ 	mxc_fbi_from->ipu_ch_irq = mxc_fbi_to->ipu_ch_irq;
+ 	mxc_fbi_to->ipu_ch_irq = tmp;
++	ovfbi = mxc_fbi_from->ovfbi;
++	mxc_fbi_from->ovfbi = mxc_fbi_to->ovfbi;
++	mxc_fbi_to->ovfbi = ovfbi;
+ 
+-	_setup_disp_channel1(fbi);
+-	retval = _setup_disp_channel2(fbi);
++	_setup_disp_channel1(fbi_from);
++	retval = _setup_disp_channel2(fbi_from);
+ 	if (retval)
+ 		return retval;
+ 
+ 	/* switch between dp and dc, disable old idmac, enable new idmac */
+-	retval = ipu_swap_channel(old_ch, mxc_fbi_from->ipu_ch);
+-	ipu_uninit_channel(old_ch);
++	retval = ipu_swap_channel(mxc_fbi_from->ipu, old_ch, mxc_fbi_from->ipu_ch);
++	ipu_uninit_channel(mxc_fbi_from->ipu, old_ch);
+ 
+ 	if (both_on) {
+ 		_setup_disp_channel1(fbi_to);
+ 		retval = _setup_disp_channel2(fbi_to);
+ 		if (retval)
+ 			return retval;
+-		ipu_enable_channel(mxc_fbi_to->ipu_ch);
++		ipu_enable_channel(mxc_fbi_to->ipu, mxc_fbi_to->ipu_ch);
+ 	}
+ 
+ 	return retval;
+ }
+ 
+-static int swap_channels(struct fb_info *fbi)
++static int swap_channels(struct fb_info *fbi_from)
+ {
+ 	int i;
+ 	int swap_mode;
+ 	ipu_channel_t ch_to;
+-	struct mxcfb_info *mxc_fbi_from = (struct mxcfb_info *)fbi->par;
++	struct mxcfb_info *mxc_fbi_from = (struct mxcfb_info *)fbi_from->par;
+ 	struct fb_info *fbi_to = NULL;
+ 	struct mxcfb_info *mxc_fbi_to;
+ 
+@@ -552,21 +473,15 @@ static int swap_channels(struct fb_info *fbi)
+ 	else
+ 		ch_to = MEM_BG_SYNC;
+ 
+-	for (i = 0; i < num_registered_fb; i++) {
+-		mxc_fbi_to =
+-			(struct mxcfb_info *)mxcfb_info[i]->par;
+-		if (mxc_fbi_to->ipu_ch == ch_to) {
+-			fbi_to = mxcfb_info[i];
+-			break;
+-		}
+-	}
+-	if (fbi_to == NULL)
++	fbi_to = found_registered_fb(ch_to, mxc_fbi_from->ipu_id);
++	if (!fbi_to)
+ 		return -1;
++	mxc_fbi_to = (struct mxcfb_info *)fbi_to->par;
+ 
+-	ipu_clear_irq(mxc_fbi_from->ipu_ch_irq);
+-	ipu_clear_irq(mxc_fbi_to->ipu_ch_irq);
+-	ipu_free_irq(mxc_fbi_from->ipu_ch_irq, fbi);
+-	ipu_free_irq(mxc_fbi_to->ipu_ch_irq, fbi_to);
++	ipu_clear_irq(mxc_fbi_from->ipu, mxc_fbi_from->ipu_ch_irq);
++	ipu_clear_irq(mxc_fbi_to->ipu, mxc_fbi_to->ipu_ch_irq);
++	ipu_free_irq(mxc_fbi_from->ipu, mxc_fbi_from->ipu_ch_irq, fbi_from);
++	ipu_free_irq(mxc_fbi_to->ipu, mxc_fbi_to->ipu_ch_irq, fbi_to);
+ 
+ 	if (mxc_fbi_from->cur_blank == FB_BLANK_UNBLANK) {
+ 		if (mxc_fbi_to->cur_blank == FB_BLANK_UNBLANK)
+@@ -580,31 +495,18 @@ static int swap_channels(struct fb_info *fbi)
+ 			swap_mode = BOTH_OFF;
+ 	}
+ 
+-	/* tvout di-1: for DC use UYVY, for DP use RGB */
+-	if (mxc_fbi_from->ipu_di == 1 && ch_to == MEM_DC_SYNC) {
+-		fbi->var.bits_per_pixel = 16;
+-		fbi->var.nonstd = IPU_PIX_FMT_UYVY;
+-	} else if (mxc_fbi_from->ipu_di == 1 && ch_to == MEM_BG_SYNC) {
+-		fbi->var.nonstd = 0;
+-	} else if (mxc_fbi_from->ipu_di == 0 && ch_to == MEM_DC_SYNC) {
+-		fbi_to->var.nonstd = 0;
+-	} else if (mxc_fbi_from->ipu_di == 0 && ch_to == MEM_BG_SYNC) {
+-		fbi->var.bits_per_pixel = 16;
+-		fbi->var.nonstd = IPU_PIX_FMT_UYVY;
+-	}
+-
+ 	switch (swap_mode) {
+ 	case BOTH_ON:
+ 		/* disable target->switch src->enable target */
+-		_swap_channels(fbi, fbi_to, true);
++		_swap_channels(fbi_from, fbi_to, true);
+ 		break;
+ 	case SRC_ON:
+ 		/* just switch src */
+-		_swap_channels(fbi, fbi_to, false);
++		_swap_channels(fbi_from, fbi_to, false);
+ 		break;
+ 	case TGT_ON:
+ 		/* just switch target */
+-		_swap_channels(fbi_to, fbi, false);
++		_swap_channels(fbi_to, fbi_from, false);
+ 		break;
+ 	case BOTH_OFF:
+ 		/* switch directly, no more need to do */
+@@ -618,20 +520,20 @@ static int swap_channels(struct fb_info *fbi)
+ 		break;
+ 	}
+ 
+-	if (ipu_request_irq(mxc_fbi_from->ipu_ch_irq, mxcfb_irq_handler, 0,
+-		MXCFB_NAME, fbi) != 0) {
+-		dev_err(fbi->device, "Error registering irq %d\n",
++	if (ipu_request_irq(mxc_fbi_from->ipu, mxc_fbi_from->ipu_ch_irq, mxcfb_irq_handler, 0,
++		MXCFB_NAME, fbi_from) != 0) {
++		dev_err(fbi_from->device, "Error registering irq %d\n",
+ 			mxc_fbi_from->ipu_ch_irq);
+ 		return -EBUSY;
+ 	}
+-	ipu_disable_irq(mxc_fbi_from->ipu_ch_irq);
+-	if (ipu_request_irq(mxc_fbi_to->ipu_ch_irq, mxcfb_irq_handler, 0,
++	ipu_disable_irq(mxc_fbi_from->ipu, mxc_fbi_from->ipu_ch_irq);
++	if (ipu_request_irq(mxc_fbi_to->ipu, mxc_fbi_to->ipu_ch_irq, mxcfb_irq_handler, 0,
+ 		MXCFB_NAME, fbi_to) != 0) {
+ 		dev_err(fbi_to->device, "Error registering irq %d\n",
+ 			mxc_fbi_to->ipu_ch_irq);
+ 		return -EBUSY;
+ 	}
+-	ipu_disable_irq(mxc_fbi_to->ipu_ch_irq);
++	ipu_disable_irq(mxc_fbi_to->ipu, mxc_fbi_to->ipu_ch_irq);
+ 
+ 	return 0;
+ }
+@@ -652,25 +554,19 @@ static int mxcfb_check_var(struct fb_var_screeninfo *var, struct fb_info *info)
+ 	/* fg should not bigger than bg */
+ 	if (mxc_fbi->ipu_ch == MEM_FG_SYNC) {
+ 		struct fb_info *fbi_tmp;
+-		struct mxcfb_info *mxc_fbi_tmp;
+-		int i, bg_xres, bg_yres;
++		int bg_xres = 0, bg_yres = 0;
+ 		int16_t pos_x, pos_y;
+ 
+ 		bg_xres = var->xres;
+ 		bg_yres = var->yres;
+ 
+-		for (i = 0; i < num_registered_fb; i++) {
+-			fbi_tmp = registered_fb[i];
+-			mxc_fbi_tmp = (struct mxcfb_info *)
+-				(fbi_tmp->par);
+-			if (mxc_fbi_tmp->ipu_ch == MEM_BG_SYNC) {
+-				bg_xres = fbi_tmp->var.xres;
+-				bg_yres = fbi_tmp->var.yres;
+-				break;
+-			}
++		fbi_tmp = found_registered_fb(MEM_BG_SYNC, mxc_fbi->ipu_id);
++		if (fbi_tmp) {
++			bg_xres = fbi_tmp->var.xres;
++			bg_yres = fbi_tmp->var.yres;
+ 		}
+ 
+-		ipu_disp_get_window_pos(mxc_fbi->ipu_ch, &pos_x, &pos_y);
++		ipu_disp_get_window_pos(mxc_fbi->ipu, mxc_fbi->ipu_ch, &pos_x, &pos_y);
+ 
+ 		if ((var->xres + pos_x) > bg_xres)
+ 			var->xres = bg_xres - pos_x;
+@@ -855,7 +751,8 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 				break;
+ 			}
+ 
+-			if (ipu_disp_set_global_alpha(mxc_fbi->ipu_ch,
++			if (ipu_disp_set_global_alpha(mxc_fbi->ipu,
++						      mxc_fbi->ipu_ch,
+ 						      (bool)ga.enable,
+ 						      ga.alpha)) {
+ 				retval = -EINVAL;
+@@ -874,35 +771,36 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 	case MXCFB_SET_LOC_ALPHA:
+ 		{
+ 			struct mxcfb_loc_alpha la;
+-			int i;
+-			char *video_plane_idstr = "";
+ 
+ 			if (copy_from_user(&la, (void *)arg, sizeof(la))) {
+ 				retval = -EFAULT;
+ 				break;
+ 			}
+ 
+-			if (ipu_disp_set_global_alpha(mxc_fbi->ipu_ch,
++			if (ipu_disp_set_global_alpha(mxc_fbi->ipu, mxc_fbi->ipu_ch,
+ 						      !(bool)la.enable, 0)) {
+ 				retval = -EINVAL;
+ 				break;
+ 			}
+ 
+ 			if (la.enable && !la.alpha_in_pixel) {
++				struct fb_info *fbi_tmp;
++				ipu_channel_t ipu_ch;
++
+ 				mxc_fbi->alpha_chan_en = true;
+ 
+ 				if (mxc_fbi->ipu_ch == MEM_FG_SYNC)
+-					video_plane_idstr = "DISP3 BG";
++					ipu_ch = MEM_BG_SYNC;
+ 				else if (mxc_fbi->ipu_ch == MEM_BG_SYNC)
+-					video_plane_idstr = "DISP3 FG";
+-
+-				for (i = 0; i < num_registered_fb; i++) {
+-					char *idstr = registered_fb[i]->fix.id;
+-					if (strcmp(idstr, video_plane_idstr) == 0) {
+-						((struct mxcfb_info *)(registered_fb[i]->par))->alpha_chan_en = false;
+-						break;
+-					}
++					ipu_ch = MEM_FG_SYNC;
++				else {
++					retval = -EINVAL;
++					break;
+ 				}
++
++				fbi_tmp = found_registered_fb(ipu_ch, mxc_fbi->ipu_id);
++				if (fbi_tmp)
++					((struct mxcfb_info *)(fbi_tmp->par))->alpha_chan_en = false;
+ 			} else
+ 				mxc_fbi->alpha_chan_en = false;
+ 
+@@ -956,16 +854,16 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 
+ 			mxc_fbi->cur_ipu_alpha_buf =
+ 						!mxc_fbi->cur_ipu_alpha_buf;
+-			if (ipu_update_channel_buffer(mxc_fbi->ipu_ch,
++			if (ipu_update_channel_buffer(mxc_fbi->ipu, mxc_fbi->ipu_ch,
+ 						      IPU_ALPHA_IN_BUFFER,
+ 						      mxc_fbi->
+ 							cur_ipu_alpha_buf,
+ 						      base) == 0) {
+-				ipu_select_buffer(mxc_fbi->ipu_ch,
++				ipu_select_buffer(mxc_fbi->ipu, mxc_fbi->ipu_ch,
+ 						  IPU_ALPHA_IN_BUFFER,
+ 						  mxc_fbi->cur_ipu_alpha_buf);
+-				ipu_clear_irq(ipu_alp_ch_irq);
+-				ipu_enable_irq(ipu_alp_ch_irq);
++				ipu_clear_irq(mxc_fbi->ipu, ipu_alp_ch_irq);
++				ipu_enable_irq(mxc_fbi->ipu, ipu_alp_ch_irq);
+ 			} else {
+ 				dev_err(fbi->device,
+ 					"Error updating %s SDC alpha buf %d "
+@@ -982,7 +880,7 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 				retval = -EFAULT;
+ 				break;
+ 			}
+-			retval = ipu_disp_set_color_key(mxc_fbi->ipu_ch,
++			retval = ipu_disp_set_color_key(mxc_fbi->ipu, mxc_fbi->ipu_ch,
+ 							key.enable,
+ 							key.color_key);
+ 			dev_dbg(fbi->device, "Set color key to 0x%08X\n",
+@@ -996,7 +894,8 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 				retval = -EFAULT;
+ 				break;
+ 			}
+-			retval = ipu_disp_set_gamma_correction(mxc_fbi->ipu_ch,
++			retval = ipu_disp_set_gamma_correction(mxc_fbi->ipu,
++							mxc_fbi->ipu_ch,
+ 							gamma.enable,
+ 							gamma.constk,
+ 							gamma.slopek);
+@@ -1005,14 +904,17 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 	case MXCFB_WAIT_FOR_VSYNC:
+ 		{
+ 			if (mxc_fbi->ipu_ch == MEM_FG_SYNC) {
++				/* BG should poweron */
+ 				struct mxcfb_info *bg_mxcfbi = NULL;
+-				int i;
+-				for (i = 0; i < num_registered_fb; i++) {
+-					bg_mxcfbi =
+-					((struct mxcfb_info *)(registered_fb[i]->par));
++				struct fb_info *fbi_tmp;
++
++				fbi_tmp = found_registered_fb(MEM_BG_SYNC, mxc_fbi->ipu_id);
++				if (fbi_tmp)
++					bg_mxcfbi = ((struct mxcfb_info *)(fbi_tmp->par));
+ 
+-					if (bg_mxcfbi->ipu_ch == MEM_BG_SYNC)
+-						break;
++				if (!bg_mxcfbi) {
++					retval = -EINVAL;
++					break;
+ 				}
+ 				if (bg_mxcfbi->cur_blank != FB_BLANK_UNBLANK) {
+ 					retval = -EINVAL;
+@@ -1026,9 +928,9 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 
+ 			init_completion(&mxc_fbi->vsync_complete);
+ 
+-			ipu_clear_irq(mxc_fbi->ipu_ch_irq);
++			ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+ 			mxc_fbi->wait4vsync = 1;
+-			ipu_enable_irq(mxc_fbi->ipu_ch_irq);
++			ipu_enable_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+ 			retval = wait_for_completion_interruptible_timeout(
+ 				&mxc_fbi->vsync_complete, 1 * HZ);
+ 			if (retval == 0) {
+@@ -1103,7 +1005,6 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 			struct mxcfb_pos pos;
+ 			struct fb_info *bg_fbi = NULL;
+ 			struct mxcfb_info *bg_mxcfbi = NULL;
+-			int i;
+ 
+ 			if (mxc_fbi->ipu_ch != MEM_FG_SYNC) {
+ 				dev_err(fbi->device, "Should use the overlay "
+@@ -1118,15 +1019,9 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 				break;
+ 			}
+ 
+-			for (i = 0; i < num_registered_fb; i++) {
+-				bg_mxcfbi =
+-				((struct mxcfb_info *)(registered_fb[i]->par));
+-
+-				if (bg_mxcfbi->ipu_ch == MEM_BG_SYNC) {
+-					bg_fbi = registered_fb[i];
+-					break;
+-				}
+-			}
++			bg_fbi = found_registered_fb(MEM_BG_SYNC, mxc_fbi->ipu_id);
++			if (bg_fbi)
++				bg_mxcfbi = ((struct mxcfb_info *)(bg_fbi->par));
+ 
+ 			if (bg_fbi == NULL) {
+ 				dev_err(fbi->device, "Cannot find the "
+@@ -1148,7 +1043,7 @@ static int mxcfb_ioctl(struct fb_info *fbi, unsigned int cmd, unsigned long arg)
+ 					pos.y = bg_fbi->var.yres - fbi->var.yres;
+ 			}
+ 
+-			retval = ipu_disp_set_window_pos(mxc_fbi->ipu_ch,
++			retval = ipu_disp_set_window_pos(mxc_fbi->ipu, mxc_fbi->ipu_ch,
+ 							 pos.x, pos.y);
+ 
+ 			if (copy_to_user((void *)arg, &pos, sizeof(pos))) {
+@@ -1229,9 +1124,10 @@ static int mxcfb_blank(int blank, struct fb_info *info)
+ 	case FB_BLANK_VSYNC_SUSPEND:
+ 	case FB_BLANK_HSYNC_SUSPEND:
+ 	case FB_BLANK_NORMAL:
+-		ipu_disable_channel(mxc_fbi->ipu_ch, true);
+-		ipu_uninit_sync_panel(mxc_fbi->ipu_di);
+-		ipu_uninit_channel(mxc_fbi->ipu_ch);
++		ipu_disable_channel(mxc_fbi->ipu, mxc_fbi->ipu_ch, true);
++		if (mxc_fbi->ipu_di >= 0)
++			ipu_uninit_sync_panel(mxc_fbi->ipu, mxc_fbi->ipu_di);
++		ipu_uninit_channel(mxc_fbi->ipu, mxc_fbi->ipu_ch);
+ 		break;
+ 	case FB_BLANK_UNBLANK:
+ 		mxcfb_set_par(info);
+@@ -1257,7 +1153,7 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 	u_int y_bottom;
+ 	unsigned long base, active_alpha_phy_addr = 0;
+ 	bool loc_alpha_en = false;
+-	int i = 0;
++	int i;
+ 
+ 	if (info->var.yoffset == var->yoffset)
+ 		return 0;	/* No change, do nothing */
+@@ -1265,14 +1161,13 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 	/* no pan display during fb blank */
+ 	if (mxc_fbi->ipu_ch == MEM_FG_SYNC) {
+ 		struct mxcfb_info *bg_mxcfbi = NULL;
+-		int j;
+-		for (j = 0; j < num_registered_fb; j++) {
+-			bg_mxcfbi =
+-				((struct mxcfb_info *)(registered_fb[j]->par));
++		struct fb_info *fbi_tmp;
+ 
+-			if (bg_mxcfbi->ipu_ch == MEM_BG_SYNC)
+-				break;
+-		}
++		fbi_tmp = found_registered_fb(MEM_BG_SYNC, mxc_fbi->ipu_id);
++		if (fbi_tmp)
++			bg_mxcfbi = ((struct mxcfb_info *)(fbi_tmp->par));
++		if (!bg_mxcfbi)
++			return -EINVAL;
+ 		if (bg_mxcfbi->cur_blank != FB_BLANK_UNBLANK)
+ 			return -EINVAL;
+ 	}
+@@ -1294,9 +1189,13 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 	/* Check if DP local alpha is enabled and find the graphic fb */
+ 	if (mxc_fbi->ipu_ch == MEM_BG_SYNC || mxc_fbi->ipu_ch == MEM_FG_SYNC) {
+ 		for (i = 0; i < num_registered_fb; i++) {
++			char *bg_id = "DISP3 BG";
++			char *fg_id = "DISP3 FG";
+ 			char *idstr = registered_fb[i]->fix.id;
+-			if ((strcmp(idstr, "DISP3 BG") == 0 ||
+-			     strcmp(idstr, "DISP3 FG") == 0) &&
++			bg_id[4] += mxc_fbi->ipu_id;
++			fg_id[4] += mxc_fbi->ipu_id;
++			if ((strcmp(idstr, bg_id) == 0 ||
++			     strcmp(idstr, fg_id) == 0) &&
+ 			    ((struct mxcfb_info *)
+ 			      (registered_fb[i]->par))->alpha_chan_en) {
+ 				loc_alpha_en = true;
+@@ -1323,41 +1222,41 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 	dev_dbg(info->device, "Updating SDC %s buf %d address=0x%08lX\n",
+ 		info->fix.id, mxc_fbi->cur_ipu_buf, base);
+ 
+-	if (ipu_update_channel_buffer(mxc_fbi->ipu_ch, IPU_INPUT_BUFFER,
++	if (ipu_update_channel_buffer(mxc_fbi->ipu, mxc_fbi->ipu_ch, IPU_INPUT_BUFFER,
+ 				      mxc_fbi->cur_ipu_buf, base) == 0) {
+ 		/* Update the DP local alpha buffer only for graphic plane */
+ 		if (loc_alpha_en && mxc_graphic_fbi == mxc_fbi &&
+-		    ipu_update_channel_buffer(mxc_graphic_fbi->ipu_ch,
++		    ipu_update_channel_buffer(mxc_graphic_fbi->ipu, mxc_graphic_fbi->ipu_ch,
+ 					      IPU_ALPHA_IN_BUFFER,
+ 					      mxc_fbi->cur_ipu_alpha_buf,
+ 					      active_alpha_phy_addr) == 0) {
+-			ipu_select_buffer(mxc_graphic_fbi->ipu_ch,
++			ipu_select_buffer(mxc_graphic_fbi->ipu, mxc_graphic_fbi->ipu_ch,
+ 					  IPU_ALPHA_IN_BUFFER,
+ 					  mxc_fbi->cur_ipu_alpha_buf);
+ 		}
+ 
+-		ipu_select_buffer(mxc_fbi->ipu_ch, IPU_INPUT_BUFFER,
++		ipu_select_buffer(mxc_fbi->ipu, mxc_fbi->ipu_ch, IPU_INPUT_BUFFER,
+ 				  mxc_fbi->cur_ipu_buf);
+-		ipu_clear_irq(mxc_fbi->ipu_ch_irq);
+-		ipu_enable_irq(mxc_fbi->ipu_ch_irq);
++		ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
++		ipu_enable_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+ 	} else {
+ 		dev_err(info->device,
+ 			"Error updating SDC buf %d to address=0x%08lX, "
+ 			"current buf %d, buf0 ready %d, buf1 ready %d, "
+ 			"buf2 ready %d\n", mxc_fbi->cur_ipu_buf, base,
+-			ipu_get_cur_buffer_idx(mxc_fbi->ipu_ch,
++			ipu_get_cur_buffer_idx(mxc_fbi->ipu, mxc_fbi->ipu_ch,
+ 					       IPU_INPUT_BUFFER),
+-			ipu_check_buffer_ready(mxc_fbi->ipu_ch,
++			ipu_check_buffer_ready(mxc_fbi->ipu, mxc_fbi->ipu_ch,
+ 					       IPU_INPUT_BUFFER, 0),
+-			ipu_check_buffer_ready(mxc_fbi->ipu_ch,
++			ipu_check_buffer_ready(mxc_fbi->ipu, mxc_fbi->ipu_ch,
+ 					       IPU_INPUT_BUFFER, 1),
+-			ipu_check_buffer_ready(mxc_fbi->ipu_ch,
++			ipu_check_buffer_ready(mxc_fbi->ipu, mxc_fbi->ipu_ch,
+ 					       IPU_INPUT_BUFFER, 2));
+ 		mxc_fbi->cur_ipu_buf = (++mxc_fbi->cur_ipu_buf) % 3;
+ 		mxc_fbi->cur_ipu_buf = (++mxc_fbi->cur_ipu_buf) % 3;
+ 		mxc_fbi->cur_ipu_alpha_buf = !mxc_fbi->cur_ipu_alpha_buf;
+-		ipu_clear_irq(mxc_fbi->ipu_ch_irq);
+-		ipu_enable_irq(mxc_fbi->ipu_ch_irq);
++		ipu_clear_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
++		ipu_enable_irq(mxc_fbi->ipu, mxc_fbi->ipu_ch_irq);
+ 		return -EBUSY;
+ 	}
+ 
+@@ -1448,11 +1347,11 @@ static irqreturn_t mxcfb_irq_handler(int irq, void *dev_id)
+ 
+ 	if (mxc_fbi->wait4vsync) {
+ 		complete(&mxc_fbi->vsync_complete);
+-		ipu_disable_irq(irq);
++		ipu_disable_irq(mxc_fbi->ipu, irq);
+ 		mxc_fbi->wait4vsync = 0;
+ 	} else {
+ 		up(&mxc_fbi->flip_sem);
+-		ipu_disable_irq(irq);
++		ipu_disable_irq(mxc_fbi->ipu, irq);
+ 	}
+ 	return IRQ_HANDLED;
+ }
+@@ -1463,7 +1362,7 @@ static irqreturn_t mxcfb_alpha_irq_handler(int irq, void *dev_id)
+ 	struct mxcfb_info *mxc_fbi = fbi->par;
+ 
+ 	up(&mxc_fbi->alpha_flip_sem);
+-	ipu_disable_irq(irq);
++	ipu_disable_irq(mxc_fbi->ipu, irq);
+ 	return IRQ_HANDLED;
+ }
+ 
+@@ -1479,6 +1378,18 @@ static int mxcfb_suspend(struct platform_device *pdev, pm_message_t state)
+ 	void *fbmem;
+ #endif
+ 
++	if (mxc_fbi->ovfbi) {
++		struct mxcfb_info *mxc_fbi_fg =
++			(struct mxcfb_info *)mxc_fbi->ovfbi->par;
++
++		console_lock();
++		fb_set_suspend(mxc_fbi->ovfbi, 1);
++		saved_blank = mxc_fbi_fg->cur_blank;
++		mxcfb_blank(FB_BLANK_POWERDOWN, mxc_fbi->ovfbi);
++		mxc_fbi_fg->next_blank = saved_blank;
++		console_unlock();
++	}
++
+ 	console_lock();
+ 	fb_set_suspend(fbi, 1);
+ 	saved_blank = mxc_fbi->cur_blank;
+@@ -1502,6 +1413,15 @@ static int mxcfb_resume(struct platform_device *pdev)
+ 	fb_set_suspend(fbi, 0);
+ 	console_unlock();
+ 
++	if (mxc_fbi->ovfbi) {
++		struct mxcfb_info *mxc_fbi_fg =
++			(struct mxcfb_info *)mxc_fbi->ovfbi->par;
++		console_lock();
++		mxcfb_blank(mxc_fbi_fg->next_blank, mxc_fbi->ovfbi);
++		fb_set_suspend(mxc_fbi->ovfbi, 0);
++		console_unlock();
++	}
++
+ 	return 0;
+ }
+ 
+@@ -1631,16 +1551,12 @@ static ssize_t swap_disp_chan(struct device *dev,
+ 	     (strstr(buf, "1-layer-fb") != NULL)) ||
+ 	    ((mxcfbi->ipu_ch == MEM_DC_SYNC) &&
+ 	     (strstr(buf, "2-layer-fb-bg") != NULL))) {
+-		int i;
++		struct fb_info *fbi_fg;
++
++		fbi_fg = found_registered_fb(MEM_FG_SYNC, mxcfbi->ipu_id);
++		if (fbi_fg)
++			fg_mxcfbi = (struct mxcfb_info *)fbi_fg->par;
+ 
+-		for (i = 0; i < num_registered_fb; i++) {
+-			fg_mxcfbi =
+-				(struct mxcfb_info *)mxcfb_info[i]->par;
+-			if (fg_mxcfbi->ipu_ch == MEM_FG_SYNC)
+-				break;
+-			else
+-				fg_mxcfbi = NULL;
+-		}
+ 		if (!fg_mxcfbi ||
+ 			fg_mxcfbi->cur_blank == FB_BLANK_UNBLANK) {
+ 			dev_err(dev,
+@@ -1658,151 +1574,183 @@ static ssize_t swap_disp_chan(struct device *dev,
+ }
+ DEVICE_ATTR(fsl_disp_property, 644, show_disp_chan, swap_disp_chan);
+ 
+-static int mxcfb_setup(struct fb_info *fbi, struct platform_device *pdev)
++static int mxcfb_dispdrv_init(struct platform_device *pdev,
++		struct fb_info *fbi)
+ {
+-	struct mxcfb_info *mxcfbi = (struct mxcfb_info *)fbi->par;
+ 	struct ipuv3_fb_platform_data *plat_data = pdev->dev.platform_data;
++	struct mxcfb_info *mxcfbi = (struct mxcfb_info *)fbi->par;
++	struct mxc_dispdrv_setting setting;
++	char disp_dev[32], *default_dev = "lcd";
+ 	int ret = 0;
+ 
+-	/* Need dummy values until real panel is configured */
+-	fbi->var.xres = 240;
+-	fbi->var.yres = 320;
+-
+-	if (!mxcfbi->default_bpp)
+-		mxcfbi->default_bpp = 16;
+-
+-	if (plat_data && !mxcfbi->ipu_di_pix_fmt)
+-		mxcfbi->ipu_di_pix_fmt = plat_data->interface_pix_fmt;
+-
+-	if (!mxcfbi->fb_mode_str && plat_data && plat_data->mode_str)
+-		mxcfbi->fb_mode_str = plat_data->mode_str;
+-
+-	if (mxcfbi->fb_mode_str) {
+-		if (mxcfbi->ipu_di >= 0) {
+-			const struct fb_videomode *mode = NULL;
+-			struct fb_videomode m;
+-			int num = 0, found = 0;
+-
+-			dev_dbg(fbi->device, "Config display port %d\n",
+-					mxcfbi->ipu_di);
+-
+-			INIT_LIST_HEAD(&fbi->modelist);
+-
+-			if (mxc_disp_mode[mxcfbi->ipu_di].num_modes) {
+-				int i;
+-				mode = mxc_disp_mode[mxcfbi->ipu_di].mode;
+-				num = mxc_disp_mode[mxcfbi->ipu_di].num_modes;
+-
+-				for (i = 0; i < num; i++) {
+-					/*
+-					 * FIXME now we do not support interlaced
+-					 * mode for ddc mode
+-					 */
+-					if ((mxc_disp_mode[mxcfbi->ipu_di].dev_mode
+-						& MXC_DISP_DDC_DEV) &&
+-						(mode[i].vmode & FB_VMODE_INTERLACED))
+-						continue;
+-					else
+-						fb_add_videomode(&mode[i], &fbi->modelist);
+-				}
+-			}
++	setting.if_fmt = plat_data->interface_pix_fmt;
++	setting.dft_mode_str = plat_data->mode_str;
++	setting.default_bpp = plat_data->default_bpp;
++	if (!setting.default_bpp)
++		setting.default_bpp = 16;
++	setting.fbi = fbi;
++	if (!strlen(plat_data->disp_dev)) {
++		memcpy(disp_dev, default_dev, strlen(default_dev));
++		disp_dev[strlen(default_dev)] = '\0';
++	} else {
++		memcpy(disp_dev, plat_data->disp_dev,
++				strlen(plat_data->disp_dev));
++		disp_dev[strlen(plat_data->disp_dev)] = '\0';
++	}
+ 
+-			if ((mxc_disp_mode[mxcfbi->ipu_di].dev_mode
+-				& MXC_DISP_DDC_DEV) &&
+-				!list_empty(&fbi->modelist)) {
+-				dev_dbg(fbi->device,
+-					"Look for video mode %s in ddc modelist\n",
+-					mxcfbi->fb_mode_str);
+-				/*
+-				 * For DDC mode, try to get compatible mode first.
+-				 * If get one, try to find nearest mode, otherwise,
+-				 * use first mode provide by DDC.
+-				 */
+-				ret = fb_find_mode(&fbi->var, fbi,
+-						mxcfbi->fb_mode_str, NULL, 0,
+-						NULL, mxcfbi->default_bpp);
+-				if (ret) {
+-					fb_var_to_videomode(&m, &fbi->var);
+-					mode = fb_find_nearest_mode(&m,
+-						&fbi->modelist);
+-					fb_videomode_to_var(&fbi->var, mode);
+-				} else {
+-					struct list_head *pos, *head;
+-					struct fb_modelist *modelist;
+-
+-					head = &fbi->modelist;
+-					list_for_each(pos, head) {
+-						modelist = list_entry(pos,
+-							struct fb_modelist, list);
+-						m = modelist->mode;
+-						if (m.flag & FB_MODE_IS_FIRST)
+-							break;
+-					}
+-					/* if no first mode, use last one */
+-					mode = &m;
+-					fb_videomode_to_var(&fbi->var, mode);
+-				}
+-				found = 1;
+-			} else if (!list_empty(&fbi->modelist)) {
+-				dev_dbg(fbi->device,
+-					"Look for video mode %s in spec modelist\n",
+-					mxcfbi->fb_mode_str);
+-				/*
+-				 * For specific mode, try to get specified mode
+-				 * from fbi modelist.
+-				 */
+-				ret = fb_find_mode(&fbi->var, fbi,
+-						mxcfbi->fb_mode_str, mode, num,
+-						NULL, mxcfbi->default_bpp);
+-				if (ret == 1)
+-					found = 1;
++	dev_info(&pdev->dev, "register mxc display driver %s\n", disp_dev);
++
++	ret = mxc_dispdrv_init(disp_dev, &setting);
++	if (ret < 0) {
++		dev_err(&pdev->dev,
++			"register mxc display driver failed with %d\n", ret);
++	} else {
++		/* fix-up  */
++		mxcfbi->ipu_di_pix_fmt = setting.if_fmt;
++		mxcfbi->default_bpp = setting.default_bpp;
++
++		/* setting */
++		mxcfbi->ipu_id = setting.dev_id;
++		mxcfbi->ipu_di = setting.disp_id;
++	}
++
++	return ret;
++}
++
++/*
++ * Parse user specified options (`video=trident:')
++ * example:
++ * 	video=mxcfb0:dev=lcd,800x480M-16@55,if=RGB565,bpp=16,noaccel
++ */
++static int mxcfb_option_setup(struct platform_device *pdev)
++{
++	struct ipuv3_fb_platform_data *pdata = pdev->dev.platform_data;
++	char *options, *opt, *fb_mode_str = NULL;
++	char name[] = "mxcfb0";
++
++	name[5] += pdev->id;
++	fb_get_options(name, &options);
++
++	if (!options || !*options)
++		return 0;
++
++	while ((opt = strsep(&options, ",")) != NULL) {
++		if (!*opt)
++			continue;
+ 
++		if (!strncmp(opt, "dev=", 4)) {
++			memcpy(pdata->disp_dev, opt + 4, strlen(opt) - 4);
++			continue;
++		}
++		if (!strncmp(opt, "if=", 3)) {
++			if (!strncmp(opt+3, "RGB24", 5)) {
++				pdata->interface_pix_fmt = IPU_PIX_FMT_RGB24;
++				continue;
++			} else if (!strncmp(opt+6, "BGR24", 5)) {
++				pdata->interface_pix_fmt = IPU_PIX_FMT_BGR24;
++				continue;
+ 			}
+-			/*
+-			 * if no DDC mode and spec mode found,
+-			 * try plat_data mode.
+-			 */
+-			if (!found) {
+-				dev_dbg(fbi->device,
+-					"Look for video mode %s in plat modelist\n",
+-					mxcfbi->fb_mode_str);
+-				if (plat_data && plat_data->modes
+-					&& plat_data->num_modes)
+-					ret = fb_find_mode(&fbi->var, fbi,
+-						mxcfbi->fb_mode_str,
+-						plat_data->modes,
+-						plat_data->num_modes,
+-						NULL,
+-						mxcfbi->default_bpp);
+-				else
+-					ret = fb_find_mode(&fbi->var, fbi,
+-						mxcfbi->fb_mode_str, NULL, 0,
+-						NULL, mxcfbi->default_bpp);
+-				if (ret)
+-					found = 1;
++			if (!strncmp(opt+3, "GBR24", 5)) {
++				pdata->interface_pix_fmt = IPU_PIX_FMT_GBR24;
++				continue;
+ 			}
+-
+-			if (!found) {
+-				dev_err(fbi->device,
+-					"Not found any valid video mode");
+-				ret = -EINVAL;
+-				goto done;
++			if (!strncmp(opt+3, "RGB565", 6)) {
++				pdata->interface_pix_fmt = IPU_PIX_FMT_RGB565;
++				continue;
++			}
++			if (!strncmp(opt+3, "RGB666", 6)) {
++				pdata->interface_pix_fmt = IPU_PIX_FMT_RGB666;
++				continue;
++			}
++			if (!strncmp(opt+3, "YUV444", 6)) {
++				pdata->interface_pix_fmt = IPU_PIX_FMT_YUV444;
++				continue;
++			}
++			if (!strncmp(opt+3, "LVDS666", 7)) {
++				pdata->interface_pix_fmt = IPU_PIX_FMT_LVDS666;
++				continue;
++			}
++			if (!strncmp(opt+3, "YUYV16", 6)) {
++				pdata->interface_pix_fmt = IPU_PIX_FMT_YUYV;
++				continue;
++			}
++			if (!strncmp(opt+3, "UYVY16", 6)) {
++				pdata->interface_pix_fmt = IPU_PIX_FMT_UYVY;
++				continue;
++			}
++			if (!strncmp(opt+3, "YVYU16", 6)) {
++				pdata->interface_pix_fmt = IPU_PIX_FMT_YVYU;
++				continue;
++			}
++			if (!strncmp(opt+3, "VYUY16", 6)) {
++				pdata->interface_pix_fmt = IPU_PIX_FMT_VYUY;
++				continue;
+ 			}
+-
+-			/*added found mode to fbi modelist*/
+-			fb_var_to_videomode(&m, &fbi->var);
+-			fb_add_videomode(&m, &fbi->modelist);
+ 		}
++		if (!strncmp(opt, "int_clk", 7)) {
++			pdata->int_clk = true;
++			continue;
++		}
++		if (!strncmp(opt, "bpp=", 4))
++			pdata->default_bpp =
++				simple_strtoul(opt + 4, NULL, 0);
++		else
++			fb_mode_str = opt;
++	}
++
++	if (fb_mode_str)
++		pdata->mode_str = fb_mode_str;
++
++	return 0;
++}
++
++static int mxcfb_register(struct fb_info *fbi)
++{
++	struct mxcfb_info *mxcfbi = (struct mxcfb_info *)fbi->par;
++	struct fb_videomode m;
++	int ret = 0;
++	char bg0_id[] = "DISP3 BG";
++	char bg1_id[] = "DISP3 BG - DI1";
++	char fg_id[] = "DISP3 FG";
++
++	if (mxcfbi->ipu_di == 0) {
++		bg0_id[4] += mxcfbi->ipu_id;
++		strcpy(fbi->fix.id, bg0_id);
++	} else if (mxcfbi->ipu_di == 1) {
++		bg1_id[4] += mxcfbi->ipu_id;
++		strcpy(fbi->fix.id, bg1_id);
++	} else { /* Overlay */
++		fg_id[4] += mxcfbi->ipu_id;
++		strcpy(fbi->fix.id, fg_id);
+ 	}
+ 
++	if (ipu_request_irq(mxcfbi->ipu, mxcfbi->ipu_ch_irq, mxcfb_irq_handler, 0,
++				MXCFB_NAME, fbi) != 0) {
++		dev_err(fbi->device, "Error registering BG irq handler.\n");
++		ret = -EBUSY;
++		goto err0;
++	}
++	ipu_disable_irq(mxcfbi->ipu, mxcfbi->ipu_ch_irq);
++
++	if (mxcfbi->ipu_alp_ch_irq != -1)
++		if (ipu_request_irq(mxcfbi->ipu, mxcfbi->ipu_alp_ch_irq,
++					mxcfb_alpha_irq_handler, 0,
++					MXCFB_NAME, fbi) != 0) {
++			dev_err(fbi->device, "Error registering alpha irq "
++					"handler.\n");
++			ret = -EBUSY;
++			goto err1;
++		}
++
+ 	mxcfb_check_var(&fbi->var, fbi);
+ 
+ 	mxcfb_set_fix(fbi);
+ 
+-	/* setup display */
+-	if (mxcfbi->ipu_di >= 0)
+-		if (mxcfb_pre_setup[mxcfbi->ipu_di])
+-			(mxcfb_pre_setup[mxcfbi->ipu_di])(fbi);
++	/*added first mode to fbi modelist*/
++	if (!fbi->modelist.next || !fbi->modelist.prev)
++		INIT_LIST_HEAD(&fbi->modelist);
++	fb_var_to_videomode(&m, &fbi->var);
++	fb_add_videomode(&m, &fbi->modelist);
+ 
+ 	fbi->var.activate |= FB_ACTIVATE_FORCE;
+ 	console_lock();
+@@ -1810,10 +1758,109 @@ static int mxcfb_setup(struct fb_info *fbi, struct platform_device *pdev)
+ 	ret = fb_set_var(fbi, &fbi->var);
+ 	fbi->flags &= ~FBINFO_MISC_USEREVENT;
+ 	console_unlock();
+-done:
++
++	ret = register_framebuffer(fbi);
++	if (ret < 0)
++		goto err2;
++
++	return ret;
++err2:
++	if (mxcfbi->ipu_alp_ch_irq != -1)
++		ipu_free_irq(mxcfbi->ipu, mxcfbi->ipu_alp_ch_irq, fbi);
++err1:
++	ipu_free_irq(mxcfbi->ipu, mxcfbi->ipu_ch_irq, fbi);
++err0:
+ 	return ret;
+ }
+ 
++static void mxcfb_unregister(struct fb_info *fbi)
++{
++	struct mxcfb_info *mxcfbi = (struct mxcfb_info *)fbi->par;
++
++	if (mxcfbi->ipu_alp_ch_irq != -1)
++		ipu_free_irq(mxcfbi->ipu, mxcfbi->ipu_alp_ch_irq, fbi);
++	if (mxcfbi->ipu_ch_irq)
++		ipu_free_irq(mxcfbi->ipu, mxcfbi->ipu_ch_irq, fbi);
++
++	unregister_framebuffer(fbi);
++}
++
++static int mxcfb_setup_overlay(struct platform_device *pdev,
++		struct fb_info *fbi_bg)
++{
++	struct fb_info *ovfbi;
++	struct mxcfb_info *mxcfbi_bg = (struct mxcfb_info *)fbi_bg->par;
++	struct mxcfb_info *mxcfbi_fg;
++	int ret = 0;
++
++	ovfbi = mxcfb_init_fbinfo(&pdev->dev, &mxcfb_ops);
++	if (!ovfbi) {
++		ret = -ENOMEM;
++		goto init_ovfbinfo_failed;
++	}
++	mxcfbi_fg = (struct mxcfb_info *)ovfbi->par;
++
++	mxcfbi_fg->ipu = ipu_get_soc(mxcfbi_bg->ipu_id);
++	if (IS_ERR(mxcfbi_fg->ipu)) {
++		ret = -ENODEV;
++		goto get_ipu_failed;
++	}
++	mxcfbi_fg->ipu_id = mxcfbi_bg->ipu_id;
++	mxcfbi_fg->ipu_ch_irq = IPU_IRQ_FG_SYNC_EOF;
++	mxcfbi_fg->ipu_alp_ch_irq = IPU_IRQ_FG_ALPHA_SYNC_EOF;
++	mxcfbi_fg->ipu_ch = MEM_FG_SYNC;
++	mxcfbi_fg->ipu_di = -1;
++	mxcfbi_fg->ipu_di_pix_fmt = mxcfbi_bg->ipu_di_pix_fmt;
++	mxcfbi_fg->overlay = true;
++	mxcfbi_fg->cur_blank = mxcfbi_fg->next_blank = FB_BLANK_POWERDOWN;
++
++	/* Need dummy values until real panel is configured */
++	ovfbi->var.xres = 240;
++	ovfbi->var.yres = 320;
++
++	ret = mxcfb_register(ovfbi);
++	if (ret < 0)
++		goto register_ov_failed;
++
++	mxcfbi_bg->ovfbi = ovfbi;
++
++	return ret;
++
++register_ov_failed:
++get_ipu_failed:
++	fb_dealloc_cmap(&ovfbi->cmap);
++	framebuffer_release(ovfbi);
++init_ovfbinfo_failed:
++	return ret;
++}
++
++static void mxcfb_unsetup_overlay(struct fb_info *fbi_bg)
++{
++	struct mxcfb_info *mxcfbi_bg = (struct mxcfb_info *)fbi_bg->par;
++	struct fb_info *ovfbi = mxcfbi_bg->ovfbi;
++
++	mxcfb_unregister(ovfbi);
++
++	if (&ovfbi->cmap)
++		fb_dealloc_cmap(&ovfbi->cmap);
++	framebuffer_release(ovfbi);
++}
++
++static bool ipu_usage[2][2];
++static int ipu_test_set_usage(int ipu, int di)
++{
++	if (ipu_usage[ipu][di])
++		return -EBUSY;
++	else
++		ipu_usage[ipu][di] = true;
++	return 0;
++}
++
++static void ipu_clear_usage(int ipu, int di)
++{
++	ipu_usage[ipu][di] = false;
++}
++
+ /*!
+  * Probe routine for the framebuffer driver. It is called during the
+  * driver binding process.      The following functions are performed in
+@@ -1824,11 +1871,10 @@ done:
+  */
+ static int mxcfb_probe(struct platform_device *pdev)
+ {
++	struct ipuv3_fb_platform_data *plat_data = pdev->dev.platform_data;
+ 	struct fb_info *fbi;
+ 	struct mxcfb_info *mxcfbi;
+ 	struct resource *res;
+-	char *options;
+-	char name[] = "mxcdi0fb";
+ 	int ret = 0;
+ 
+ 	/*
+@@ -1837,91 +1883,68 @@ static int mxcfb_probe(struct platform_device *pdev)
+ 	fbi = mxcfb_init_fbinfo(&pdev->dev, &mxcfb_ops);
+ 	if (!fbi) {
+ 		ret = -ENOMEM;
+-		goto err0;
++		goto init_fbinfo_failed;
+ 	}
++
++	mxcfb_option_setup(pdev);
++
+ 	mxcfbi = (struct mxcfb_info *)fbi->par;
++	mxcfbi->ipu_int_clk = plat_data->int_clk;
++	ret = mxcfb_dispdrv_init(pdev, fbi);
++	if (ret < 0)
++		goto init_dispdrv_failed;
+ 
+-	name[5] += pdev->id;
+-	if (fb_get_options(name, &options)) {
+-		ret = -ENODEV;
+-		goto err1;
++	ret = ipu_test_set_usage(mxcfbi->ipu_id, mxcfbi->ipu_di);
++	if (ret < 0) {
++		dev_err(&pdev->dev, "ipu%d-di%d already in use\n",
++				mxcfbi->ipu_id, mxcfbi->ipu_di);
++		goto ipu_in_busy;
++	}
++
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (res && res->end) {
++		fbi->fix.smem_len = res->end - res->start + 1;
++		fbi->fix.smem_start = res->start;
++		fbi->screen_base = ioremap(fbi->fix.smem_start, fbi->fix.smem_len);
+ 	}
+ 
+-	if (options)
+-		mxcfb_option_setup(fbi, options);
++	mxcfbi->ipu = ipu_get_soc(mxcfbi->ipu_id);
++	if (IS_ERR(mxcfbi->ipu)) {
++		ret = -ENODEV;
++		goto get_ipu_failed;
++	}
+ 
+-	if (!g_dp_in_use) {
++	/* first user uses DP with alpha feature */
++	if (!g_dp_in_use[mxcfbi->ipu_id]) {
+ 		mxcfbi->ipu_ch_irq = IPU_IRQ_BG_SYNC_EOF;
++		mxcfbi->ipu_alp_ch_irq = IPU_IRQ_BG_ALPHA_SYNC_EOF;
+ 		mxcfbi->ipu_ch = MEM_BG_SYNC;
+ 		mxcfbi->cur_blank = mxcfbi->next_blank = FB_BLANK_UNBLANK;
+-	} else {
+-		mxcfbi->ipu_ch_irq = IPU_IRQ_DC_SYNC_EOF;
+-		mxcfbi->ipu_ch = MEM_DC_SYNC;
+-		mxcfbi->cur_blank = mxcfbi->next_blank = FB_BLANK_POWERDOWN;
+-	}
+-
+-	mxcfbi->ipu_di = pdev->id;
+-	mxcfbi->ipu_alp_ch_irq = -1;
+-
+-	if (pdev->id == 0) {
+-		ipu_disp_set_global_alpha(mxcfbi->ipu_ch, true, 0x80);
+-		ipu_disp_set_color_key(mxcfbi->ipu_ch, false, 0);
+-		strcpy(fbi->fix.id, "DISP3 BG");
+-
+-		if (!g_dp_in_use)
+-			mxcfbi->ipu_alp_ch_irq = IPU_IRQ_BG_ALPHA_SYNC_EOF;
+-		g_dp_in_use = true;
+-	} else if (pdev->id == 1) {
+-		strcpy(fbi->fix.id, "DISP3 BG - DI1");
+-
+-		if (!g_dp_in_use)
+-			mxcfbi->ipu_alp_ch_irq = IPU_IRQ_BG_ALPHA_SYNC_EOF;
+-		g_dp_in_use = true;
+-	} else if (pdev->id == 2) {	/* Overlay */
+-		mxcfbi->ipu_ch_irq = IPU_IRQ_FG_SYNC_EOF;
+-		mxcfbi->ipu_alp_ch_irq = IPU_IRQ_FG_ALPHA_SYNC_EOF;
+-		mxcfbi->ipu_ch = MEM_FG_SYNC;
+-		mxcfbi->ipu_di = -1;
+-		mxcfbi->overlay = true;
+-		mxcfbi->cur_blank = mxcfbi->next_blank = FB_BLANK_POWERDOWN;
+-
+-		strcpy(fbi->fix.id, "DISP3 FG");
+-	}
+ 
+-	mxcfb_info[pdev->id] = fbi;
++		ipu_disp_set_global_alpha(mxcfbi->ipu, mxcfbi->ipu_ch, true, 0x80);
++		ipu_disp_set_color_key(mxcfbi->ipu, mxcfbi->ipu_ch, false, 0);
+ 
+-	if (ipu_request_irq(mxcfbi->ipu_ch_irq, mxcfb_irq_handler, 0,
+-			    MXCFB_NAME, fbi) != 0) {
+-		dev_err(&pdev->dev, "Error registering BG irq handler.\n");
+-		ret = -EBUSY;
+-		goto err1;
+-	}
+-	ipu_disable_irq(mxcfbi->ipu_ch_irq);
++		ret = mxcfb_register(fbi);
++		if (ret < 0)
++			goto mxcfb_register_failed;
+ 
+-	if (mxcfbi->ipu_alp_ch_irq != -1)
+-		if (ipu_request_irq(mxcfbi->ipu_alp_ch_irq,
+-					mxcfb_alpha_irq_handler, 0,
+-					MXCFB_NAME, fbi) != 0) {
+-			dev_err(&pdev->dev, "Error registering alpha irq "
+-					"handler.\n");
+-			ret = -EBUSY;
+-			goto err2;
++		ret = mxcfb_setup_overlay(pdev, fbi);
++		if (ret < 0) {
++			mxcfb_unregister(fbi);
++			goto mxcfb_setupoverlay_failed;
+ 		}
+ 
+-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+-	if (res && res->end) {
+-		fbi->fix.smem_len = res->end - res->start + 1;
+-		fbi->fix.smem_start = res->start;
+-		fbi->screen_base = ioremap(fbi->fix.smem_start, fbi->fix.smem_len);
+-	}
+-
+-	ret =  mxcfb_setup(fbi, pdev);
+-	if (ret < 0)
+-		goto err3;
++		g_dp_in_use[mxcfbi->ipu_id] = true;
++	} else {
++		mxcfbi->ipu_ch_irq = IPU_IRQ_DC_SYNC_EOF;
++		mxcfbi->ipu_alp_ch_irq = -1;
++		mxcfbi->ipu_ch = MEM_DC_SYNC;
++		mxcfbi->cur_blank = mxcfbi->next_blank = FB_BLANK_POWERDOWN;
+ 
+-	ret = register_framebuffer(fbi);
+-	if (ret < 0)
+-		goto err3;
++		ret = mxcfb_register(fbi);
++		if (ret < 0)
++			goto mxcfb_register_failed;
++	}
+ 
+ 	platform_set_drvdata(pdev, fbi);
+ 
+@@ -1935,15 +1958,16 @@ static int mxcfb_probe(struct platform_device *pdev)
+ #endif
+ 
+ 	return 0;
+-err3:
+-	if (mxcfbi->ipu_alp_ch_irq != -1)
+-		ipu_free_irq(mxcfbi->ipu_alp_ch_irq, fbi);
+-err2:
+-	ipu_free_irq(mxcfbi->ipu_ch_irq, fbi);
+-err1:
++
++mxcfb_setupoverlay_failed:
++mxcfb_register_failed:
++get_ipu_failed:
++	ipu_clear_usage(mxcfbi->ipu_id, mxcfbi->ipu_di);
++ipu_in_busy:
++init_dispdrv_failed:
+ 	fb_dealloc_cmap(&fbi->cmap);
+ 	framebuffer_release(fbi);
+-err0:
++init_fbinfo_failed:
+ 	return ret;
+ }
+ 
+@@ -1956,13 +1980,18 @@ static int mxcfb_remove(struct platform_device *pdev)
+ 		return 0;
+ 
+ 	mxcfb_blank(FB_BLANK_POWERDOWN, fbi);
+-	ipu_free_irq(mxc_fbi->ipu_ch_irq, fbi);
++	mxcfb_unregister(fbi);
+ 	mxcfb_unmap_video_memory(fbi);
+ 
++	if (mxc_fbi->ovfbi) {
++		mxcfb_blank(FB_BLANK_POWERDOWN, mxc_fbi->ovfbi);
++		mxcfb_unsetup_overlay(fbi);
++		mxcfb_unmap_video_memory(mxc_fbi->ovfbi);
++	}
++
++	ipu_clear_usage(mxc_fbi->ipu_id, mxc_fbi->ipu_di);
+ 	if (&fbi->cmap)
+ 		fb_dealloc_cmap(&fbi->cmap);
+-
+-	unregister_framebuffer(fbi);
+ 	framebuffer_release(fbi);
+ 	return 0;
+ }
+@@ -1980,81 +2009,6 @@ static struct platform_driver mxcfb_driver = {
+ 	.resume = mxcfb_resume,
+ };
+ 
+-/*
+- * Parse user specified options (`video=trident:')
+- * example:
+- * 	video=mxcdi0fb:RGB24, 1024x768M-16@60,bpp=16,noaccel
+- */
+-static int mxcfb_option_setup(struct fb_info *info, char *options)
+-{
+-	struct mxcfb_info *mxcfbi = info->par;
+-	char *opt;
+-
+-	if (!options || !*options)
+-		return 0;
+-
+-	while ((opt = strsep(&options, ",")) != NULL) {
+-		if (!*opt)
+-			continue;
+-
+-		if (!strncmp(opt, "RGB24", 5)) {
+-			mxcfbi->ipu_di_pix_fmt = IPU_PIX_FMT_RGB24;
+-			continue;
+-		}
+-		if (!strncmp(opt, "BGR24", 5)) {
+-			mxcfbi->ipu_di_pix_fmt = IPU_PIX_FMT_BGR24;
+-			continue;
+-		}
+-		if (!strncmp(opt, "GBR24", 5)) {
+-			mxcfbi->ipu_di_pix_fmt = IPU_PIX_FMT_GBR24;
+-			continue;
+-		}
+-		if (!strncmp(opt, "RGB565", 6)) {
+-			mxcfbi->ipu_di_pix_fmt = IPU_PIX_FMT_RGB565;
+-			continue;
+-		}
+-		if (!strncmp(opt, "RGB666", 6)) {
+-			mxcfbi->ipu_di_pix_fmt = IPU_PIX_FMT_RGB666;
+-			continue;
+-		}
+-		if (!strncmp(opt, "YUV444", 6)) {
+-			mxcfbi->ipu_di_pix_fmt = IPU_PIX_FMT_YUV444;
+-			continue;
+-		}
+-		if (!strncmp(opt, "LVDS666", 7)) {
+-			mxcfbi->ipu_di_pix_fmt = IPU_PIX_FMT_LVDS666;
+-			continue;
+-		}
+-		if (!strncmp(opt, "YUYV16", 6)) {
+-			mxcfbi->ipu_di_pix_fmt = IPU_PIX_FMT_YUYV;
+-			continue;
+-		}
+-		if (!strncmp(opt, "UYVY16", 6)) {
+-			mxcfbi->ipu_di_pix_fmt = IPU_PIX_FMT_UYVY;
+-			continue;
+-		}
+-		if (!strncmp(opt, "YVYU16", 6)) {
+-			mxcfbi->ipu_di_pix_fmt = IPU_PIX_FMT_YVYU;
+-			continue;
+-		}
+-		if (!strncmp(opt, "VYUY16", 6)) {
+-			mxcfbi->ipu_di_pix_fmt = IPU_PIX_FMT_VYUY;
+-			continue;
+-		}
+-		if (!strncmp(opt, "int_clk", 7)) {
+-			mxcfbi->ipu_int_clk = true;
+-			continue;
+-		}
+-		if (!strncmp(opt, "bpp=", 4))
+-			mxcfbi->default_bpp =
+-				simple_strtoul(opt + 4, NULL, 0);
+-		else
+-			mxcfbi->fb_mode_str = opt;
+-	}
+-
+-	return 0;
+-}
+-
+ /*!
+  * Main entry function for the framebuffer. The function registers the power
+  * management callback functions with the kernel and also registers the MXCFB
+diff --git a/drivers/video/mxc/mxc_lcdif.c b/drivers/video/mxc/mxc_lcdif.c
+new file mode 100644
+index 0000000..d9d7fa3
+--- /dev/null
++++ b/drivers/video/mxc/mxc_lcdif.c
+@@ -0,0 +1,144 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * The code contained herein is licensed under the GNU General Public
++ * License. You may obtain a copy of the GNU General Public License
++ * Version 2 or later at the following locations:
++ *
++ * http://www.opensource.org/licenses/gpl-license.html
++ * http://www.gnu.org/copyleft/gpl.html
++ */
++
++#include <linux/kernel.h>
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/platform_device.h>
++#include <linux/mxcfb.h>
++#include <linux/fsl_devices.h>
++#include "mxc_dispdrv.h"
++
++struct mxc_lcdif_data {
++	struct platform_device *pdev;
++	struct mxc_dispdrv_entry *disp_lcdif;
++};
++
++#define DISPDRV_LCD	"lcd"
++
++static struct fb_videomode lcdif_modedb[] = {
++	{
++	/* 800x480 @ 57 Hz , pixel clk @ 27MHz */
++	"CLAA-WVGA", 57, 800, 480, 37037, 40, 60, 10, 10, 20, 10,
++	FB_SYNC_CLK_LAT_FALL,
++	FB_VMODE_NONINTERLACED,
++	0,},
++	{
++	/* 800x480 @ 60 Hz , pixel clk @ 32MHz */
++	"SEIKO-WVGA", 60, 800, 480, 29850, 89, 164, 23, 10, 10, 10,
++	FB_SYNC_CLK_LAT_FALL,
++	FB_VMODE_NONINTERLACED,
++	0,},
++};
++static int lcdif_modedb_sz = ARRAY_SIZE(lcdif_modedb);
++
++static int lcdif_init(struct mxc_dispdrv_entry *disp)
++{
++	int ret, i;
++	struct mxc_lcdif_data *lcdif = mxc_dispdrv_getdata(disp);
++	struct mxc_dispdrv_setting *setting = mxc_dispdrv_getsetting(disp);
++	struct fsl_mxc_lcd_platform_data *plat_data
++			= lcdif->pdev->dev.platform_data;
++	struct fb_videomode *modedb = lcdif_modedb;
++	int modedb_sz = lcdif_modedb_sz;
++
++	/* use platform defined ipu/di */
++	setting->dev_id = plat_data->ipu_id;
++	setting->disp_id = plat_data->disp_id;
++
++	ret = fb_find_mode(&setting->fbi->var, setting->fbi, setting->dft_mode_str,
++				modedb, modedb_sz, NULL, setting->default_bpp);
++	if (!ret) {
++		fb_videomode_to_var(&setting->fbi->var, &modedb[0]);
++		setting->if_fmt = plat_data->default_ifmt;
++	}
++
++	INIT_LIST_HEAD(&setting->fbi->modelist);
++	for (i = 0; i < modedb_sz; i++) {
++		struct fb_videomode m;
++		fb_var_to_videomode(&m, &setting->fbi->var);
++		if (fb_mode_is_equal(&m, &modedb[i])) {
++			fb_add_videomode(&modedb[i],
++					&setting->fbi->modelist);
++			break;
++		}
++	}
++
++	return ret;
++}
++
++void lcdif_deinit(struct mxc_dispdrv_entry *disp)
++{
++	/*TODO*/
++}
++
++static struct mxc_dispdrv_driver lcdif_drv = {
++	.name 	= DISPDRV_LCD,
++	.init 	= lcdif_init,
++	.deinit	= lcdif_deinit,
++};
++
++static int mxc_lcdif_probe(struct platform_device *pdev)
++{
++	int ret = 0;
++	struct mxc_lcdif_data *lcdif;
++
++	lcdif = kzalloc(sizeof(struct mxc_lcdif_data), GFP_KERNEL);
++	if (!lcdif) {
++		ret = -ENOMEM;
++		goto alloc_failed;
++	}
++
++	lcdif->pdev = pdev;
++	lcdif->disp_lcdif = mxc_dispdrv_register(&lcdif_drv);
++	mxc_dispdrv_setdata(lcdif->disp_lcdif, lcdif);
++
++	dev_set_drvdata(&pdev->dev, lcdif);
++
++alloc_failed:
++	return ret;
++}
++
++static int mxc_lcdif_remove(struct platform_device *pdev)
++{
++	struct mxc_lcdif_data *lcdif = dev_get_drvdata(&pdev->dev);
++
++	mxc_dispdrv_unregister(lcdif->disp_lcdif);
++	kfree(lcdif);
++	return 0;
++}
++
++static struct platform_driver mxc_lcdif_driver = {
++	.driver = {
++		   .name = "mxc_lcdif",
++		   },
++	.probe = mxc_lcdif_probe,
++	.remove = mxc_lcdif_remove,
++};
++
++static int __init mxc_lcdif_init(void)
++{
++	return platform_driver_register(&mxc_lcdif_driver);
++}
++
++static void __exit mxc_lcdif_exit(void)
++{
++	platform_driver_unregister(&mxc_lcdif_driver);
++}
++
++module_init(mxc_lcdif_init);
++module_exit(mxc_lcdif_exit);
++
++MODULE_AUTHOR("Freescale Semiconductor, Inc.");
++MODULE_DESCRIPTION("i.MX ipuv3 LCD extern port driver");
++MODULE_LICENSE("GPL");
+diff --git a/drivers/video/mxc/tve.c b/drivers/video/mxc/tve.c
+index 8e01f05..04d380b 100644
+--- a/drivers/video/mxc/tve.c
++++ b/drivers/video/mxc/tve.c
+@@ -38,6 +38,7 @@
+ #include <linux/uaccess.h>
+ #include <asm/atomic.h>
+ #include <mach/hardware.h>
++#include "mxc_dispdrv.h"
+ 
+ #define TVE_ENABLE			(1UL)
+ #define TVE_DAC_FULL_RATE		(0UL<<1)
+@@ -98,16 +99,8 @@
+ #define TVOUT_FMT_VGA_SXGA		12
+ #define TVOUT_FMT_VGA_WSXGA		13
+ 
+-#define IPU_DISP_PORT 1
+-
+-static int enabled;		/* enable power on or not */
+-DEFINE_SPINLOCK(tve_lock);
+-
+-static struct fb_info *tve_fbi;
+-#define MXC_ENABLE	1
+-#define MXC_DISABLE	2
+-static int g_enable_tve;
+-static int g_enable_vga;
++#define DISPDRV_VGA 	"vga"
++#define DISPDRV_TVE 	"tve"
+ 
+ struct tve_data {
+ 	struct platform_device *pdev;
+@@ -116,14 +109,21 @@ struct tve_data {
+ 	int output_mode;
+ 	int detect;
+ 	void *base;
++	spinlock_t tve_lock;
++	bool inited;
++	int enabled;
+ 	int irq;
+-	int blank;
+ 	struct clk *clk;
+ 	struct clk *di_clk;
+ 	struct regulator *dac_reg;
+ 	struct regulator *dig_reg;
+ 	struct delayed_work cd_work;
+-} tve;
++	struct tve_reg_mapping *regs;
++	struct tve_reg_fields_mapping *reg_fields;
++	struct mxc_dispdrv_entry *disp_tve;
++	struct mxc_dispdrv_entry *disp_vga;
++	struct notifier_block nb;
++};
+ 
+ struct tve_reg_mapping {
+ 	u32 tve_com_conf_reg;
+@@ -165,11 +165,7 @@ static struct tve_reg_fields_mapping tve_reg_fields_v2 = {
+ 	1, 2, 1, 2, 4, 0x01000000, 0x700000, 0x7000, 20, 12, 16
+ };
+ 
+-
+-struct tve_reg_mapping *tve_regs;
+-struct tve_reg_fields_mapping *tve_reg_fields;
+-
+-static struct fb_videomode video_modes[] = {
++static struct fb_videomode video_modes_tve[] = {
+ 	{
+ 	 /* NTSC TV output */
+ 	 "TV-NTSC", 60, 720, 480, 74074,
+@@ -252,6 +248,7 @@ static struct fb_videomode video_modes[] = {
+ 	 FB_VMODE_NONINTERLACED,
+ 	 FB_MODE_IS_DETAILED,},
+ };
++static int tve_modedb_sz = ARRAY_SIZE(video_modes_tve);
+ 
+ static struct fb_videomode video_modes_vga[] = {
+ 	{
+@@ -291,6 +288,7 @@ static struct fb_videomode video_modes_vga[] = {
+ 	FB_VMODE_NONINTERLACED,
+ 	FB_MODE_IS_DETAILED,},
+ };
++static int vga_modedb_sz = ARRAY_SIZE(video_modes_vga);
+ 
+ enum tvout_mode {
+ 	TV_OFF,
+@@ -314,30 +312,30 @@ static unsigned short tvout_mode_to_channel_map[8] = {
+ 	7	/* TVRGB */
+ };
+ 
+-static void tve_dump_regs(void)
++static void tve_dump_regs(struct tve_data *tve)
+ {
+-	dev_dbg(&tve.pdev->dev, "tve_com_conf_reg 0x%x\n",
+-			__raw_readl(tve.base + tve_regs->tve_com_conf_reg));
+-	dev_dbg(&tve.pdev->dev, "tve_cd_cont_reg 0x%x\n",
+-			__raw_readl(tve.base + tve_regs->tve_cd_cont_reg));
+-	dev_dbg(&tve.pdev->dev, "tve_int_cont_reg 0x%x\n",
+-			__raw_readl(tve.base + tve_regs->tve_int_cont_reg));
+-	dev_dbg(&tve.pdev->dev, "tve_tst_mode_reg 0x%x\n",
+-			__raw_readl(tve.base + tve_regs->tve_tst_mode_reg));
+-	dev_dbg(&tve.pdev->dev, "tve_tvdac_cont_reg0 0x%x\n",
+-			__raw_readl(tve.base + tve_regs->tve_tvdac_cont_reg));
+-	dev_dbg(&tve.pdev->dev, "tve_tvdac_cont_reg1 0x%x\n",
+-			__raw_readl(tve.base + tve_regs->tve_tvdac_cont_reg + 4));
+-	dev_dbg(&tve.pdev->dev, "tve_tvdac_cont_reg2 0x%x\n",
+-			__raw_readl(tve.base + tve_regs->tve_tvdac_cont_reg + 8));
++	dev_dbg(&tve->pdev->dev, "tve_com_conf_reg 0x%x\n",
++			readl(tve->base + tve->regs->tve_com_conf_reg));
++	dev_dbg(&tve->pdev->dev, "tve_cd_cont_reg 0x%x\n",
++			readl(tve->base + tve->regs->tve_cd_cont_reg));
++	dev_dbg(&tve->pdev->dev, "tve_int_cont_reg 0x%x\n",
++			readl(tve->base + tve->regs->tve_int_cont_reg));
++	dev_dbg(&tve->pdev->dev, "tve_tst_mode_reg 0x%x\n",
++			readl(tve->base + tve->regs->tve_tst_mode_reg));
++	dev_dbg(&tve->pdev->dev, "tve_tvdac_cont_reg0 0x%x\n",
++			readl(tve->base + tve->regs->tve_tvdac_cont_reg));
++	dev_dbg(&tve->pdev->dev, "tve_tvdac_cont_reg1 0x%x\n",
++			readl(tve->base + tve->regs->tve_tvdac_cont_reg + 4));
++	dev_dbg(&tve->pdev->dev, "tve_tvdac_cont_reg2 0x%x\n",
++			readl(tve->base + tve->regs->tve_tvdac_cont_reg + 8));
+ }
+ 
+-static int is_vga_enabled(void)
++static int is_vga_enabled(struct tve_data *tve)
+ {
+ 	u32 reg;
+ 
+-	if (tve.revision == 2) {
+-		reg = __raw_readl(tve.base + tve_regs->tve_tst_mode_reg);
++	if (tve->revision == 2) {
++		reg = readl(tve->base + tve->regs->tve_tst_mode_reg);
+ 		if (reg & TVEV2_DAC_TEST_MODE_MASK)
+ 			return 1;
+ 		else
+@@ -368,78 +366,64 @@ static inline int valid_mode(int mode)
+ 		|| (mode == TVOUT_FMT_1080P30));
+ }
+ 
+-static int get_video_mode(struct fb_info *fbi, int *fmt)
++static int get_video_mode(struct fb_info *fbi)
+ {
+ 	int mode;
+ 
+-	if (fb_mode_is_equal(fbi->mode, &video_modes[0])) {
+-		*fmt = IPU_PIX_FMT_YUV444;
++	if (fb_mode_is_equal(fbi->mode, &video_modes_tve[0])) {
+ 		mode = TVOUT_FMT_NTSC;
+-	} else if (fb_mode_is_equal(fbi->mode, &video_modes[1])) {
+-		*fmt = IPU_PIX_FMT_YUV444;
++	} else if (fb_mode_is_equal(fbi->mode, &video_modes_tve[1])) {
+ 		mode = TVOUT_FMT_PAL;
+-	} else if (fb_mode_is_equal(fbi->mode, &video_modes[2])) {
+-		*fmt = IPU_PIX_FMT_YUV444;
++	} else if (fb_mode_is_equal(fbi->mode, &video_modes_tve[2])) {
+ 		mode = TVOUT_FMT_720P60;
+-	} else if (fb_mode_is_equal(fbi->mode, &video_modes[3])) {
+-		*fmt = IPU_PIX_FMT_YUV444;
++	} else if (fb_mode_is_equal(fbi->mode, &video_modes_tve[3])) {
+ 		mode = TVOUT_FMT_720P30;
+-	} else if (fb_mode_is_equal(fbi->mode, &video_modes[4])) {
+-		*fmt = IPU_PIX_FMT_YUV444;
++	} else if (fb_mode_is_equal(fbi->mode, &video_modes_tve[4])) {
+ 		mode = TVOUT_FMT_1080I60;
+-	} else if (fb_mode_is_equal(fbi->mode, &video_modes[5])) {
+-		*fmt = IPU_PIX_FMT_YUV444;
++	} else if (fb_mode_is_equal(fbi->mode, &video_modes_tve[5])) {
+ 		mode = TVOUT_FMT_1080I50;
+-	} else if (fb_mode_is_equal(fbi->mode, &video_modes[6])) {
+-		*fmt = IPU_PIX_FMT_YUV444;
++	} else if (fb_mode_is_equal(fbi->mode, &video_modes_tve[6])) {
+ 		mode = TVOUT_FMT_1080P30;
+-	} else if (fb_mode_is_equal(fbi->mode, &video_modes[7])) {
+-		*fmt = IPU_PIX_FMT_YUV444;
++	} else if (fb_mode_is_equal(fbi->mode, &video_modes_tve[7])) {
+ 		mode = TVOUT_FMT_1080P25;
+-	} else if (fb_mode_is_equal(fbi->mode, &video_modes[8])) {
+-		*fmt = IPU_PIX_FMT_YUV444;
++	} else if (fb_mode_is_equal(fbi->mode, &video_modes_tve[8])) {
+ 		mode = TVOUT_FMT_1080P24;
+ 	} else if (fb_mode_is_equal(fbi->mode, &video_modes_vga[0])) {
+-		*fmt = IPU_PIX_FMT_GBR24;
+ 		mode = TVOUT_FMT_VGA_SVGA;
+ 	} else if (fb_mode_is_equal(fbi->mode, &video_modes_vga[1])) {
+-		*fmt = IPU_PIX_FMT_GBR24;
+ 		mode = TVOUT_FMT_VGA_XGA;
+ 	} else if (fb_mode_is_equal(fbi->mode, &video_modes_vga[2])) {
+-		*fmt = IPU_PIX_FMT_GBR24;
+ 		mode = TVOUT_FMT_VGA_SXGA;
+ 	} else if (fb_mode_is_equal(fbi->mode, &video_modes_vga[3])) {
+-		*fmt = IPU_PIX_FMT_GBR24;
+ 		mode = TVOUT_FMT_VGA_WSXGA;
+ 	} else {
+-		*fmt = IPU_PIX_FMT_YUV444;
+ 		mode = TVOUT_FMT_OFF;
+ 	}
+ 	return mode;
+ }
+ 
+-static void tve_disable_vga_mode(void)
++static void tve_disable_vga_mode(struct tve_data *tve)
+ {
+-	if (tve.revision == 2) {
++	if (tve->revision == 2) {
+ 		u32 reg;
+ 		/* disable test mode */
+-		reg = __raw_readl(tve.base + tve_regs->tve_tst_mode_reg);
++		reg = readl(tve->base + tve->regs->tve_tst_mode_reg);
+ 		reg = reg & ~TVEV2_DAC_TEST_MODE_MASK;
+-		__raw_writel(reg, tve.base + tve_regs->tve_tst_mode_reg);
++		writel(reg, tve->base + tve->regs->tve_tst_mode_reg);
+ 	}
+ }
+ 
+-static void tve_set_tvout_mode(int mode)
++static void tve_set_tvout_mode(struct tve_data *tve, int mode)
+ {
+ 	u32 conf_reg;
+ 
+ 	/* clear sync_ch and tvout_mode fields */
+-	conf_reg = __raw_readl(tve.base + tve_regs->tve_com_conf_reg);
+-	conf_reg &= ~(tve_reg_fields->sync_ch_mask |
+-				tve_reg_fields->tvout_mode_mask);
++	conf_reg = readl(tve->base + tve->regs->tve_com_conf_reg);
++	conf_reg &= ~(tve->reg_fields->sync_ch_mask |
++				tve->reg_fields->tvout_mode_mask);
+ 
+ 	conf_reg = conf_reg & ~TVE_DAC_SAMPRATE_MASK;
+-	if (tve.revision == 2) {
++	if (tve->revision == 2) {
+ 		conf_reg = (conf_reg & ~TVEV2_DATA_SRC_MASK) |
+ 			TVEV2_DATA_SRC_BUS_1;
+ 		conf_reg = conf_reg & ~TVEV2_INP_VIDEO_FORM;
+@@ -447,18 +431,18 @@ static void tve_set_tvout_mode(int mode)
+ 	}
+ 
+ 	conf_reg |=
+-		mode << tve_reg_fields->
++		mode << tve->reg_fields->
+ 		tvout_mode_offset | tvout_mode_to_channel_map[mode] <<
+-		tve_reg_fields->sync_ch_offset;
+-	__raw_writel(conf_reg, tve.base + tve_regs->tve_com_conf_reg);
++		tve->reg_fields->sync_ch_offset;
++	writel(conf_reg, tve->base + tve->regs->tve_com_conf_reg);
+ }
+ 
+-static int _is_tvout_mode_hd_compatible(void)
++static int _is_tvout_mode_hd_compatible(struct tve_data *tve)
+ {
+ 	u32 conf_reg, mode;
+ 
+-	conf_reg = __raw_readl(tve.base + tve_regs->tve_com_conf_reg);
+-	mode = (conf_reg >> tve_reg_fields->tvout_mode_offset) & 7;
++	conf_reg = readl(tve->base + tve->regs->tve_com_conf_reg);
++	mode = (conf_reg >> tve->reg_fields->tvout_mode_offset) & 7;
+ 	if (mode == YPBPR || mode == TVRGB) {
+ 		return 1;
+ 	} else {
+@@ -466,37 +450,37 @@ static int _is_tvout_mode_hd_compatible(void)
+ 	}
+ }
+ 
+-static int tve_setup_vga(void)
++static int tve_setup_vga(struct tve_data *tve)
+ {
+ 	u32 reg;
+ 
+-	if (tve.revision == 2) {
++	if (tve->revision == 2) {
+ 		/* set gain */
+-		reg = __raw_readl(tve.base + tve_regs->tve_tvdac_cont_reg);
++		reg = readl(tve->base + tve->regs->tve_tvdac_cont_reg);
+ 		reg = (reg & ~TVEV2_DAC_GAIN_MASK) | 0;
+-		__raw_writel(reg, tve.base + tve_regs->tve_tvdac_cont_reg);
+-		reg = __raw_readl(tve.base + tve_regs->tve_tvdac_cont_reg + 4);
++		writel(reg, tve->base + tve->regs->tve_tvdac_cont_reg);
++		reg = readl(tve->base + tve->regs->tve_tvdac_cont_reg + 4);
+ 		reg = (reg & ~TVEV2_DAC_GAIN_MASK) | 0;
+-		__raw_writel(reg, tve.base + tve_regs->tve_tvdac_cont_reg + 4);
+-		reg = __raw_readl(tve.base + tve_regs->tve_tvdac_cont_reg + 8);
++		writel(reg, tve->base + tve->regs->tve_tvdac_cont_reg + 4);
++		reg = readl(tve->base + tve->regs->tve_tvdac_cont_reg + 8);
+ 		reg = (reg & ~TVEV2_DAC_GAIN_MASK) | 0;
+-		__raw_writel(reg, tve.base + tve_regs->tve_tvdac_cont_reg + 8);
++		writel(reg, tve->base + tve->regs->tve_tvdac_cont_reg + 8);
+ 
+ 		/* set tve_com_conf_reg  */
+-		reg = __raw_readl(tve.base + tve_regs->tve_com_conf_reg);
++		reg = readl(tve->base + tve->regs->tve_com_conf_reg);
+ 		reg = (reg & ~TVE_DAC_SAMPRATE_MASK) | TVE_DAC_DIV2_RATE;
+ 		reg = (reg & ~TVEV2_DATA_SRC_MASK) | TVEV2_DATA_SRC_BUS_2;
+ 		reg = reg | TVEV2_INP_VIDEO_FORM;
+ 		reg = reg & ~TVEV2_P2I_CONV_EN;
+ 		reg = (reg & ~TVE_STAND_MASK) | TVE_HD1080P30_STAND;
+-		reg |= TVRGB << tve_reg_fields->tvout_mode_offset |
+-			1 << tve_reg_fields->sync_ch_offset;
+-		__raw_writel(reg, tve.base + tve_regs->tve_com_conf_reg);
++		reg |= TVRGB << tve->reg_fields->tvout_mode_offset |
++			1 << tve->reg_fields->sync_ch_offset;
++		writel(reg, tve->base + tve->regs->tve_com_conf_reg);
+ 
+ 		/* set test mode */
+-		reg = __raw_readl(tve.base + tve_regs->tve_tst_mode_reg);
++		reg = readl(tve->base + tve->regs->tve_tst_mode_reg);
+ 		reg = (reg & ~TVEV2_DAC_TEST_MODE_MASK) | 1;
+-		__raw_writel(reg, tve.base + tve_regs->tve_tst_mode_reg);
++		writel(reg, tve->base + tve->regs->tve_tst_mode_reg);
+ 	}
+ 
+ 	return 0;
+@@ -511,7 +495,7 @@ static int tve_setup_vga(void)
+  * 	0 successful
+  * 	otherwise failed
+  */
+-static int tve_setup(int mode)
++static int tve_setup(struct tve_data *tve, int mode)
+ {
+ 	u32 reg;
+ 	struct clk *tve_parent_clk;
+@@ -519,10 +503,10 @@ static int tve_setup(int mode)
+ 	unsigned long tve_clock_rate = 216000000;
+ 	unsigned long lock_flags;
+ 
+-	if (tve.cur_mode == mode)
++	if (tve->cur_mode == mode)
+ 		return 0;
+ 
+-	spin_lock_irqsave(&tve_lock, lock_flags);
++	spin_lock_irqsave(&tve->tve_lock, lock_flags);
+ 
+ 	switch (mode) {
+ 	case TVOUT_FMT_PAL:
+@@ -562,122 +546,122 @@ static int tve_setup(int mode)
+ 		di1_clock_rate = 147140000;
+ 		break;
+ 	}
+-	if (enabled)
+-		clk_disable(tve.clk);
++	if (tve->enabled)
++		clk_disable(tve->clk);
+ 
+-	tve_parent_clk = clk_get_parent(tve.clk);
++	tve_parent_clk = clk_get_parent(tve->clk);
+ 
+ 	clk_set_rate(tve_parent_clk, parent_clock_rate);
+ 
+-	tve_clock_rate = clk_round_rate(tve.clk, tve_clock_rate);
+-	clk_set_rate(tve.clk, tve_clock_rate);
++	tve_clock_rate = clk_round_rate(tve->clk, tve_clock_rate);
++	clk_set_rate(tve->clk, tve_clock_rate);
+ 
+-	clk_enable(tve.clk);
+-	di1_clock_rate = clk_round_rate(tve.di_clk, di1_clock_rate);
+-	clk_set_rate(tve.di_clk, di1_clock_rate);
++	clk_enable(tve->clk);
++	di1_clock_rate = clk_round_rate(tve->di_clk, di1_clock_rate);
++	clk_set_rate(tve->di_clk, di1_clock_rate);
+ 
+-	tve.cur_mode = mode;
++	tve->cur_mode = mode;
+ 
+ 	/* select output video format */
+ 	if (mode == TVOUT_FMT_PAL) {
+-		tve_disable_vga_mode();
+-		tve_set_tvout_mode(YPBPR);
+-		reg = __raw_readl(tve.base + tve_regs->tve_com_conf_reg);
++		tve_disable_vga_mode(tve);
++		tve_set_tvout_mode(tve, YPBPR);
++		reg = readl(tve->base + tve->regs->tve_com_conf_reg);
+ 		reg = (reg & ~TVE_STAND_MASK) | TVE_PAL_STAND;
+-		__raw_writel(reg, tve.base + tve_regs->tve_com_conf_reg);
+-		pr_debug("TVE: change to PAL video\n");
++		writel(reg, tve->base + tve->regs->tve_com_conf_reg);
++		dev_dbg(&tve->pdev->dev, "TVE: change to PAL video\n");
+ 	} else if (mode == TVOUT_FMT_NTSC) {
+-		tve_disable_vga_mode();
+-		tve_set_tvout_mode(YPBPR);
+-		reg = __raw_readl(tve.base + tve_regs->tve_com_conf_reg);
++		tve_disable_vga_mode(tve);
++		tve_set_tvout_mode(tve, YPBPR);
++		reg = readl(tve->base + tve->regs->tve_com_conf_reg);
+ 		reg = (reg & ~TVE_STAND_MASK) | TVE_NTSC_STAND;
+-		__raw_writel(reg, tve.base + tve_regs->tve_com_conf_reg);
+-		pr_debug("TVE: change to NTSC video\n");
++		writel(reg, tve->base + tve->regs->tve_com_conf_reg);
++		dev_dbg(&tve->pdev->dev, "TVE: change to NTSC video\n");
+ 	} else if (mode == TVOUT_FMT_720P60) {
+-		tve_disable_vga_mode();
+-		if (!_is_tvout_mode_hd_compatible()) {
+-			tve_set_tvout_mode(YPBPR);
+-			pr_debug("The TV out mode is HD incompatible. Setting to YPBPR.");
++		tve_disable_vga_mode(tve);
++		if (!_is_tvout_mode_hd_compatible(tve)) {
++			tve_set_tvout_mode(tve, YPBPR);
++			dev_dbg(&tve->pdev->dev, "The TV out mode is HD incompatible. Setting to YPBPR.");
+ 		}
+-		reg = __raw_readl(tve.base + tve_regs->tve_com_conf_reg);
++		reg = readl(tve->base + tve->regs->tve_com_conf_reg);
+ 		reg = (reg & ~TVE_STAND_MASK) | TVE_HD720P60_STAND;
+-		__raw_writel(reg, tve.base + tve_regs->tve_com_conf_reg);
+-		pr_debug("TVE: change to 720P60 video\n");
++		writel(reg, tve->base + tve->regs->tve_com_conf_reg);
++		dev_dbg(&tve->pdev->dev, "TVE: change to 720P60 video\n");
+ 	} else if (mode == TVOUT_FMT_720P30) {
+-		tve_disable_vga_mode();
+-		if (!_is_tvout_mode_hd_compatible()) {
+-			tve_set_tvout_mode(YPBPR);
+-			pr_debug("The TV out mode is HD incompatible. Setting to YPBPR.");
++		tve_disable_vga_mode(tve);
++		if (!_is_tvout_mode_hd_compatible(tve)) {
++			tve_set_tvout_mode(tve, YPBPR);
++			dev_dbg(&tve->pdev->dev, "The TV out mode is HD incompatible. Setting to YPBPR.");
+ 		}
+-		reg = __raw_readl(tve.base + tve_regs->tve_com_conf_reg);
++		reg = readl(tve->base + tve->regs->tve_com_conf_reg);
+ 		reg = (reg & ~TVE_STAND_MASK) | TVE_HD720P30_STAND;
+-		__raw_writel(reg, tve.base + tve_regs->tve_com_conf_reg);
+-		pr_debug("TVE: change to 720P30 video\n");
++		writel(reg, tve->base + tve->regs->tve_com_conf_reg);
++		dev_dbg(&tve->pdev->dev, "TVE: change to 720P30 video\n");
+ 	} else if (mode == TVOUT_FMT_1080I60) {
+-		tve_disable_vga_mode();
+-		if (!_is_tvout_mode_hd_compatible()) {
+-			tve_set_tvout_mode(YPBPR);
+-			pr_debug("The TV out mode is HD incompatible. Setting to YPBPR.");
++		tve_disable_vga_mode(tve);
++		if (!_is_tvout_mode_hd_compatible(tve)) {
++			tve_set_tvout_mode(tve, YPBPR);
++			dev_dbg(&tve->pdev->dev, "The TV out mode is HD incompatible. Setting to YPBPR.");
+ 		}
+-		reg = __raw_readl(tve.base + tve_regs->tve_com_conf_reg);
++		reg = readl(tve->base + tve->regs->tve_com_conf_reg);
+ 		reg = (reg & ~TVE_STAND_MASK) | TVE_HD1080I60_STAND;
+-		__raw_writel(reg, tve.base + tve_regs->tve_com_conf_reg);
+-		pr_debug("TVE: change to 1080I60 video\n");
++		writel(reg, tve->base + tve->regs->tve_com_conf_reg);
++		dev_dbg(&tve->pdev->dev, "TVE: change to 1080I60 video\n");
+ 	} else if (mode == TVOUT_FMT_1080I50) {
+-		tve_disable_vga_mode();
+-		if (!_is_tvout_mode_hd_compatible()) {
+-			tve_set_tvout_mode(YPBPR);
+-			pr_debug("The TV out mode is HD incompatible. Setting to YPBPR.");
++		tve_disable_vga_mode(tve);
++		if (!_is_tvout_mode_hd_compatible(tve)) {
++			tve_set_tvout_mode(tve, YPBPR);
++			dev_dbg(&tve->pdev->dev, "The TV out mode is HD incompatible. Setting to YPBPR.");
+ 		}
+-		reg = __raw_readl(tve.base + tve_regs->tve_com_conf_reg);
++		reg = readl(tve->base + tve->regs->tve_com_conf_reg);
+ 		reg = (reg & ~TVE_STAND_MASK) | TVE_HD1080I50_STAND;
+-		__raw_writel(reg, tve.base + tve_regs->tve_com_conf_reg);
+-		pr_debug("TVE: change to 1080I50 video\n");
++		writel(reg, tve->base + tve->regs->tve_com_conf_reg);
++		dev_dbg(&tve->pdev->dev, "TVE: change to 1080I50 video\n");
+ 	} else if (mode == TVOUT_FMT_1080P30) {
+-		tve_disable_vga_mode();
+-		if (!_is_tvout_mode_hd_compatible()) {
+-			tve_set_tvout_mode(YPBPR);
+-			pr_debug("The TV out mode is HD incompatible. Setting to YPBPR.");
++		tve_disable_vga_mode(tve);
++		if (!_is_tvout_mode_hd_compatible(tve)) {
++			tve_set_tvout_mode(tve, YPBPR);
++			dev_dbg(&tve->pdev->dev, "The TV out mode is HD incompatible. Setting to YPBPR.");
+ 		}
+-		reg = __raw_readl(tve.base + tve_regs->tve_com_conf_reg);
++		reg = readl(tve->base + tve->regs->tve_com_conf_reg);
+ 		reg = (reg & ~TVE_STAND_MASK) | TVE_HD1080P30_STAND;
+-		__raw_writel(reg, tve.base + tve_regs->tve_com_conf_reg);
+-		pr_debug("TVE: change to 1080P30 video\n");
++		writel(reg, tve->base + tve->regs->tve_com_conf_reg);
++		dev_dbg(&tve->pdev->dev, "TVE: change to 1080P30 video\n");
+ 	} else if (mode == TVOUT_FMT_1080P25) {
+-		tve_disable_vga_mode();
+-		if (!_is_tvout_mode_hd_compatible()) {
+-			tve_set_tvout_mode(YPBPR);
+-			pr_debug("The TV out mode is HD incompatible. Setting to YPBPR.");
++		tve_disable_vga_mode(tve);
++		if (!_is_tvout_mode_hd_compatible(tve)) {
++			tve_set_tvout_mode(tve, YPBPR);
++			dev_dbg(&tve->pdev->dev, "The TV out mode is HD incompatible. Setting to YPBPR.");
+ 		}
+-		reg = __raw_readl(tve.base + tve_regs->tve_com_conf_reg);
++		reg = readl(tve->base + tve->regs->tve_com_conf_reg);
+ 		reg = (reg & ~TVE_STAND_MASK) | TVE_HD1080P25_STAND;
+-		__raw_writel(reg, tve.base + tve_regs->tve_com_conf_reg);
+-		pr_debug("TVE: change to 1080P25 video\n");
++		writel(reg, tve->base + tve->regs->tve_com_conf_reg);
++		dev_dbg(&tve->pdev->dev, "TVE: change to 1080P25 video\n");
+ 	} else if (mode == TVOUT_FMT_1080P24) {
+-		tve_disable_vga_mode();
+-		if (!_is_tvout_mode_hd_compatible()) {
+-			tve_set_tvout_mode(YPBPR);
+-			pr_debug("The TV out mode is HD incompatible. Setting to YPBPR.");
++		tve_disable_vga_mode(tve);
++		if (!_is_tvout_mode_hd_compatible(tve)) {
++			tve_set_tvout_mode(tve, YPBPR);
++			dev_dbg(&tve->pdev->dev, "The TV out mode is HD incompatible. Setting to YPBPR.");
+ 		}
+-		reg = __raw_readl(tve.base + tve_regs->tve_com_conf_reg);
++		reg = readl(tve->base + tve->regs->tve_com_conf_reg);
+ 		reg = (reg & ~TVE_STAND_MASK) | TVE_HD1080P24_STAND;
+-		__raw_writel(reg, tve.base + tve_regs->tve_com_conf_reg);
+-		pr_debug("TVE: change to 1080P24 video\n");
++		writel(reg, tve->base + tve->regs->tve_com_conf_reg);
++		dev_dbg(&tve->pdev->dev, "TVE: change to 1080P24 video\n");
+ 	} else if (is_vga_mode(mode)) {
+ 		/* do not need cable detect */
+-		tve_setup_vga();
+-		pr_debug("TVE: change to VGA video\n");
++		tve_setup_vga(tve);
++		dev_dbg(&tve->pdev->dev, "TVE: change to VGA video\n");
+ 	} else if (mode == TVOUT_FMT_OFF) {
+-		__raw_writel(0x0, tve.base + tve_regs->tve_com_conf_reg);
+-		pr_debug("TVE: change to OFF video\n");
++		writel(0x0, tve->base + tve->regs->tve_com_conf_reg);
++		dev_dbg(&tve->pdev->dev, "TVE: change to OFF video\n");
+ 	} else {
+-		pr_debug("TVE: no such video format.\n");
++		dev_dbg(&tve->pdev->dev, "TVE: no such video format.\n");
+ 	}
+ 
+-	if (!enabled)
+-		clk_disable(tve.clk);
++	if (!tve->enabled)
++		clk_disable(tve->clk);
+ 
+-	spin_unlock_irqrestore(&tve_lock, lock_flags);
++	spin_unlock_irqrestore(&tve->tve_lock, lock_flags);
+ 	return 0;
+ }
+ 
+@@ -685,63 +669,63 @@ static int tve_setup(int mode)
+  * tve_enable
+  * Enable the tve Power to begin TV encoder
+  */
+-static void tve_enable(void)
++static void tve_enable(struct tve_data *tve)
+ {
+ 	u32 reg;
+ 	unsigned long lock_flags;
+ 
+-	spin_lock_irqsave(&tve_lock, lock_flags);
+-	if (!enabled) {
+-		enabled = 1;
+-		clk_enable(tve.clk);
+-		reg = __raw_readl(tve.base + tve_regs->tve_com_conf_reg);
+-		__raw_writel(reg | TVE_IPU_CLK_ENABLE | TVE_ENABLE,
+-					tve.base + tve_regs->tve_com_conf_reg);
+-		pr_debug("TVE power on.\n");
++	spin_lock_irqsave(&tve->tve_lock, lock_flags);
++	if (!tve->enabled) {
++		tve->enabled = 1;
++		clk_enable(tve->clk);
++		reg = readl(tve->base + tve->regs->tve_com_conf_reg);
++		writel(reg | TVE_IPU_CLK_ENABLE | TVE_ENABLE,
++					tve->base + tve->regs->tve_com_conf_reg);
++		dev_dbg(&tve->pdev->dev, "TVE power on.\n");
+ 	}
+ 
+-	if (is_vga_enabled()) {
++	if (is_vga_enabled(tve)) {
+ 		/* disable interrupt */
+-		pr_debug("TVE VGA disable cable detect.\n");
+-		__raw_writel(0xffffffff, tve.base + tve_regs->tve_stat_reg);
+-		__raw_writel(0, tve.base + tve_regs->tve_int_cont_reg);
++		dev_dbg(&tve->pdev->dev, "TVE VGA disable cable detect.\n");
++		writel(0xffffffff, tve->base + tve->regs->tve_stat_reg);
++		writel(0, tve->base + tve->regs->tve_int_cont_reg);
+ 	} else {
+ 		/* enable interrupt */
+-		pr_debug("TVE TVE enable cable detect.\n");
+-		__raw_writel(0xffffffff, tve.base + tve_regs->tve_stat_reg);
+-		__raw_writel(CD_SM_INT | CD_LM_INT | CD_MON_END_INT,
+-				tve.base + tve_regs->tve_int_cont_reg);
++		dev_dbg(&tve->pdev->dev, "TVE TVE enable cable detect.\n");
++		writel(0xffffffff, tve->base + tve->regs->tve_stat_reg);
++		writel(CD_SM_INT | CD_LM_INT | CD_MON_END_INT,
++				tve->base + tve->regs->tve_int_cont_reg);
+ 	}
+ 
+-	spin_unlock_irqrestore(&tve_lock, lock_flags);
++	spin_unlock_irqrestore(&tve->tve_lock, lock_flags);
+ 
+-	tve_dump_regs();
++	tve_dump_regs(tve);
+ }
+ 
+ /**
+  * tve_disable
+  * Disable the tve Power to stop TV encoder
+  */
+-static void tve_disable(void)
++static void tve_disable(struct tve_data *tve)
+ {
+ 	u32 reg;
+ 	unsigned long lock_flags;
+ 
+-	spin_lock_irqsave(&tve_lock, lock_flags);
+-	if (enabled) {
+-		enabled = 0;
+-		reg = __raw_readl(tve.base + tve_regs->tve_com_conf_reg);
+-		__raw_writel(reg & ~TVE_ENABLE & ~TVE_IPU_CLK_ENABLE,
+-				tve.base + tve_regs->tve_com_conf_reg);
+-		clk_disable(tve.clk);
+-		pr_debug("TVE power off.\n");
++	spin_lock_irqsave(&tve->tve_lock, lock_flags);
++	if (tve->enabled) {
++		tve->enabled = 0;
++		reg = readl(tve->base + tve->regs->tve_com_conf_reg);
++		writel(reg & ~TVE_ENABLE & ~TVE_IPU_CLK_ENABLE,
++				tve->base + tve->regs->tve_com_conf_reg);
++		clk_disable(tve->clk);
++		dev_dbg(&tve->pdev->dev, "TVE power off.\n");
+ 	}
+-	spin_unlock_irqrestore(&tve_lock, lock_flags);
++	spin_unlock_irqrestore(&tve->tve_lock, lock_flags);
+ }
+ 
+-static int tve_update_detect_status(void)
++static int tve_update_detect_status(struct tve_data *tve)
+ {
+-	int old_detect = tve.detect;
++	int old_detect = tve->detect;
+ 	u32 stat_lm, stat_sm, stat;
+ 	u32 int_ctl;
+ 	u32 cd_cont_reg;
+@@ -750,244 +734,201 @@ static int tve_update_detect_status(void)
+ 	char event_string[16];
+ 	char *envp[] = { event_string, NULL };
+ 
+-	spin_lock_irqsave(&tve_lock, lock_flags);
++	spin_lock_irqsave(&tve->tve_lock, lock_flags);
+ 
+-	if (!enabled) {
+-		pr_warning("Warning: update tve status while it disabled!\n");
+-		tve.detect = 0;
++	if (!tve->enabled) {
++		dev_warn(&tve->pdev->dev, "Warning: update tve status while it disabled!\n");
++		tve->detect = 0;
+ 		goto done;
+ 	}
+ 
+-	int_ctl = __raw_readl(tve.base + tve_regs->tve_int_cont_reg);
+-	cd_cont_reg = __raw_readl(tve.base + tve_regs->tve_cd_cont_reg);
++	int_ctl = readl(tve->base + tve->regs->tve_int_cont_reg);
++	cd_cont_reg = readl(tve->base + tve->regs->tve_cd_cont_reg);
+ 
+ 	if ((cd_cont_reg & 0x1) == 0) {
+-		pr_warning("Warning: pls enable TVE CD first!\n");
++		dev_warn(&tve->pdev->dev, "Warning: pls enable TVE CD first!\n");
+ 		goto done;
+ 	}
+ 
+-	stat = __raw_readl(tve.base + tve_regs->tve_stat_reg);
++	stat = readl(tve->base + tve->regs->tve_stat_reg);
+ 	while (((stat & CD_MON_END_INT) == 0) && (timeout > 0)) {
+-		spin_unlock_irqrestore(&tve_lock, lock_flags);
++		spin_unlock_irqrestore(&tve->tve_lock, lock_flags);
+ 		msleep(2);
+-		spin_lock_irqsave(&tve_lock, lock_flags);
++		spin_lock_irqsave(&tve->tve_lock, lock_flags);
+ 		timeout -= 2;
+-		if (!enabled) {
+-			pr_warning("Warning: update tve status while it disabled!\n");
+-			tve.detect = 0;
++		if (!tve->enabled) {
++			dev_warn(&tve->pdev->dev, "Warning: update tve status while it disabled!\n");
++			tve->detect = 0;
+ 			goto done;
+ 		} else
+-			stat = __raw_readl(tve.base + tve_regs->tve_stat_reg);
++			stat = readl(tve->base + tve->regs->tve_stat_reg);
+ 	}
+ 	if (((stat & CD_MON_END_INT) == 0) && (timeout <= 0)) {
+-		pr_warning("Warning: get detect result without CD_MON_END_INT!\n");
++		dev_warn(&tve->pdev->dev, "Warning: get detect result without CD_MON_END_INT!\n");
+ 		goto done;
+ 	}
+ 
+-	stat = stat >> tve_reg_fields->cd_ch_stat_offset;
++	stat = stat >> tve->reg_fields->cd_ch_stat_offset;
+ 	stat_lm = stat & (CD_CH_0_LM_ST | CD_CH_1_LM_ST | CD_CH_2_LM_ST);
+ 	if ((stat_lm == (CD_CH_0_LM_ST | CD_CH_1_LM_ST | CD_CH_2_LM_ST)) &&
+ 		((stat & (CD_CH_0_SM_ST | CD_CH_1_SM_ST | CD_CH_2_SM_ST)) == 0)
+ 		) {
+-			tve.detect = 3;
+-			tve.output_mode = YPBPR;
++			tve->detect = 3;
++			tve->output_mode = YPBPR;
+ 	} else if ((stat_lm == (CD_CH_0_LM_ST | CD_CH_1_LM_ST)) &&
+ 		((stat & (CD_CH_0_SM_ST | CD_CH_1_SM_ST)) == 0)) {
+-			tve.detect = 4;
+-			tve.output_mode = SVIDEO;
++			tve->detect = 4;
++			tve->output_mode = SVIDEO;
+ 	} else if (stat_lm == CD_CH_0_LM_ST) {
+ 		stat_sm = stat & CD_CH_0_SM_ST;
+ 		if (stat_sm != 0) {
+ 			/* headset */
+-			tve.detect = 2;
+-			tve.output_mode = TV_OFF;
++			tve->detect = 2;
++			tve->output_mode = TV_OFF;
+ 		} else {
+-			tve.detect = 1;
+-			tve.output_mode = CVBS0;
++			tve->detect = 1;
++			tve->output_mode = CVBS0;
+ 		}
+ 	} else if (stat_lm == CD_CH_2_LM_ST) {
+ 		stat_sm = stat & CD_CH_2_SM_ST;
+ 		if (stat_sm != 0) {
+ 			/* headset */
+-			tve.detect = 2;
+-			tve.output_mode = TV_OFF;
++			tve->detect = 2;
++			tve->output_mode = TV_OFF;
+ 		} else {
+-			tve.detect = 1;
+-			tve.output_mode = CVBS2;
++			tve->detect = 1;
++			tve->output_mode = CVBS2;
+ 		}
+ 	} else {
+ 		/* none */
+-		tve.detect = 0;
+-		tve.output_mode = TV_OFF;
++		tve->detect = 0;
++		tve->output_mode = TV_OFF;
+ 	}
+ 
+-	tve_set_tvout_mode(tve.output_mode);
++	tve_set_tvout_mode(tve, tve->output_mode);
+ 
+ 	/* clear interrupt */
+-	__raw_writel(CD_MON_END_INT | CD_LM_INT | CD_SM_INT,
+-			tve.base + tve_regs->tve_stat_reg);
++	writel(CD_MON_END_INT | CD_LM_INT | CD_SM_INT,
++			tve->base + tve->regs->tve_stat_reg);
+ 
+-	__raw_writel(int_ctl | CD_SM_INT | CD_LM_INT,
+-			tve.base + tve_regs->tve_int_cont_reg);
++	writel(int_ctl | CD_SM_INT | CD_LM_INT,
++			tve->base + tve->regs->tve_int_cont_reg);
+ 
+ done:
+-	spin_unlock_irqrestore(&tve_lock, lock_flags);
++	spin_unlock_irqrestore(&tve->tve_lock, lock_flags);
+ 
+-	if (old_detect != tve.detect) {
+-		sysfs_notify(&tve.pdev->dev.kobj, NULL, "headphone");
+-		if (tve.detect == 1)
++	if (old_detect != tve->detect) {
++		sysfs_notify(&tve->pdev->dev.kobj, NULL, "headphone");
++		if (tve->detect == 1)
+ 			sprintf(event_string, "EVENT=CVBS0");
+-		else if (tve.detect == 3)
++		else if (tve->detect == 3)
+ 			sprintf(event_string, "EVENT=YPBPR");
+-		else if (tve.detect == 4)
++		else if (tve->detect == 4)
+ 			sprintf(event_string, "EVENT=SVIDEO");
+ 		else
+ 			sprintf(event_string, "EVENT=NONE");
+-		kobject_uevent_env(&tve.pdev->dev.kobj, KOBJ_CHANGE, envp);
++		kobject_uevent_env(&tve->pdev->dev.kobj, KOBJ_CHANGE, envp);
+ 	}
+ 
+-	dev_dbg(&tve.pdev->dev, "detect = %d mode = %d\n",
+-			tve.detect, tve.output_mode);
+-	return tve.detect;
++	dev_dbg(&tve->pdev->dev, "detect = %d mode = %d\n",
++			tve->detect, tve->output_mode);
++	return tve->detect;
+ }
+ 
+ static void cd_work_func(struct work_struct *work)
+ {
+-	tve_update_detect_status();
+-}
+-#if 0
+-static int tve_man_detect(void)
+-{
+-	u32 cd_cont;
+-	u32 int_cont;
+-
+-	if (!enabled)
+-		return -1;
+-
+-	int_cont = __raw_readl(tve.base + tve_regs->tve_int_cont_reg);
+-	__raw_writel(int_cont &
+-				~(tve_reg_fields->cd_sm_int | tve_reg_fields->cd_lm_int),
+-				tve.base + tve_regs->tve_int_cont_reg);
+-
+-	cd_cont = __raw_readl(tve.base + tve_regs->tve_cd_cont_reg);
+-	__raw_writel(cd_cont | tve_reg_fields->cd_trig_mode,
+-				tve.base + tve_regs->tve_cd_cont_reg);
+-
+-	__raw_writel(tve_reg_fields->cd_sm_int | tve_reg_fields->
+-			cd_lm_int | tve_reg_fields->
+-			cd_mon_end_int | tve_reg_fields->cd_man_trig,
+-			tve.base + tve_regs->tve_stat_reg);
+-
+-	while ((__raw_readl(tve.base + tve_regs->tve_stat_reg)
+-		& tve_reg_fields->cd_mon_end_int) == 0)
+-		msleep(5);
+-
+-	tve_update_detect_status();
++	struct delayed_work *delay_work = to_delayed_work(work);
++	struct tve_data *tve =
++		container_of(delay_work, struct tve_data, cd_work);
+ 
+-	__raw_writel(cd_cont, tve.base + tve_regs->tve_cd_cont_reg);
+-	__raw_writel(int_cont, tve.base + tve_regs->tve_int_cont_reg);
+-
+-	return tve.detect;
++	tve_update_detect_status(tve);
+ }
+-#endif
+ 
+ static irqreturn_t tve_detect_handler(int irq, void *data)
+ {
+-	u32 int_ctl = __raw_readl(tve.base + tve_regs->tve_int_cont_reg);
++	struct tve_data *tve = data;
++
++	u32 int_ctl = readl(tve->base + tve->regs->tve_int_cont_reg);
+ 
+ 	/* disable INT first */
+ 	int_ctl &= ~(CD_SM_INT | CD_LM_INT | CD_MON_END_INT);
+-	__raw_writel(int_ctl, tve.base + tve_regs->tve_int_cont_reg);
++	writel(int_ctl, tve->base + tve->regs->tve_int_cont_reg);
+ 
+-	__raw_writel(CD_MON_END_INT | CD_LM_INT | CD_SM_INT,
+-			tve.base + tve_regs->tve_stat_reg);
++	writel(CD_MON_END_INT | CD_LM_INT | CD_SM_INT,
++			tve->base + tve->regs->tve_stat_reg);
+ 
+-	schedule_delayed_work(&tve.cd_work, msecs_to_jiffies(1000));
++	schedule_delayed_work(&tve->cd_work, msecs_to_jiffies(1000));
+ 
+ 	return IRQ_HANDLED;
+ }
+ 
+-static inline void tve_set_di_fmt(struct fb_info *fbi, unsigned int fmt)
+-{
+-	mm_segment_t old_fs;
+-
+-	if (fbi->fbops->fb_ioctl) {
+-		old_fs = get_fs();
+-		set_fs(KERNEL_DS);
+-		fbi->fbops->fb_ioctl(fbi, MXCFB_SET_DIFMT, (unsigned long)&fmt);
+-		set_fs(old_fs);
+-	}
+-}
+-
+ /*!
+  * FB suspend/resume routing
+  */
+-static int tve_suspend(void)
++static int tve_suspend(struct tve_data *tve)
+ {
+-	if (enabled) {
+-		__raw_writel(0, tve.base + tve_regs->tve_int_cont_reg);
+-		__raw_writel(0, tve.base + tve_regs->tve_cd_cont_reg);
+-		__raw_writel(0, tve.base + tve_regs->tve_com_conf_reg);
+-		clk_disable(tve.clk);
++	if (tve->enabled) {
++		writel(0, tve->base + tve->regs->tve_int_cont_reg);
++		writel(0, tve->base + tve->regs->tve_cd_cont_reg);
++		writel(0, tve->base + tve->regs->tve_com_conf_reg);
++		clk_disable(tve->clk);
+ 	}
+ 	return 0;
+ }
+ 
+-static int tve_resume(struct fb_info *fbi)
++static int tve_resume(struct tve_data *tve, struct fb_info *fbi)
+ {
+ 	int mode;
+ 
+-	if (enabled) {
+-		clk_enable(tve.clk);
++	if (tve->enabled) {
++		clk_enable(tve->clk);
+ 
+ 		/* Setup cable detect */
+-		if (tve.revision == 1)
+-			__raw_writel(0x01067701,
+-				tve.base + tve_regs->tve_cd_cont_reg);
++		if (tve->revision == 1)
++			writel(0x01067701,
++				tve->base + tve->regs->tve_cd_cont_reg);
+ 		else
+-			__raw_writel(0x00770601,
+-				tve.base + tve_regs->tve_cd_cont_reg);
+-
+-		if (valid_mode(tve.cur_mode)) {
+-			mode = tve.cur_mode;
+-			tve_disable();
+-			tve.cur_mode = TVOUT_FMT_OFF;
+-			tve_setup(mode);
++			writel(0x00770601,
++				tve->base + tve->regs->tve_cd_cont_reg);
++
++		if (valid_mode(tve->cur_mode)) {
++			mode = tve->cur_mode;
++			tve_disable(tve);
++			tve->cur_mode = TVOUT_FMT_OFF;
++			tve_setup(tve, mode);
+ 		}
+-		tve_enable();
++		tve_enable(tve);
+ 	}
+ 
+ 	return 0;
+ }
+ 
+-int tve_fb_setup(struct fb_info *fbi)
++int tve_fb_setup(struct tve_data *tve, struct fb_info *fbi)
+ {
+-	int mode, fmt;
++	int mode;
+ 
+ 	fbi->mode = (struct fb_videomode *)fb_match_mode(&fbi->var,
+ 			&fbi->modelist);
+ 
+ 	if (!fbi->mode) {
+-		pr_warning("TVE: can not find mode for xres=%d, yres=%d\n",
++		dev_warn(&tve->pdev->dev, "TVE: can not find mode for xres=%d, yres=%d\n",
+ 				fbi->var.xres, fbi->var.yres);
+-		tve_disable();
+-		tve.cur_mode = TVOUT_FMT_OFF;
++		tve_disable(tve);
++		tve->cur_mode = TVOUT_FMT_OFF;
+ 		return 0;
+ 	}
+ 
+-	pr_debug("TVE: fb mode change event: xres=%d, yres=%d\n",
++	dev_dbg(&tve->pdev->dev, "TVE: fb mode change event: xres=%d, yres=%d\n",
+ 			fbi->mode->xres, fbi->mode->yres);
+ 
+-	mode = get_video_mode(fbi, &fmt);
++	mode = get_video_mode(fbi);
+ 	if (mode != TVOUT_FMT_OFF) {
+-		tve_set_di_fmt(fbi, fmt);
+-		tve_disable();
+-		tve_setup(mode);
+-		if (tve.blank == FB_BLANK_UNBLANK)
+-			tve_enable();
++		tve_disable(tve);
++		tve_setup(tve, mode);
++		tve_enable(tve);
+ 	} else {
+-		tve_disable();
+-		tve_setup(mode);
++		tve_disable(tve);
++		tve_setup(tve, mode);
+ 	}
+ 
+ 	return 0;
+@@ -995,78 +936,62 @@ int tve_fb_setup(struct fb_info *fbi)
+ 
+ int tve_fb_event(struct notifier_block *nb, unsigned long val, void *v)
+ {
++	struct tve_data *tve = container_of(nb, struct tve_data, nb);
+ 	struct fb_event *event = v;
+ 	struct fb_info *fbi = event->info;
+ 
++	/* only work for ipu0 di1*/
+ 	if (strcmp(fbi->fix.id, "DISP3 BG - DI1"))
+ 		return 0;
+ 
+ 	switch (val) {
+-	case FB_EVENT_FB_REGISTERED:
+-		pr_debug("TVE: fb registered event\n");
+-		if (tve_fbi != NULL)
+-			break;
+-
+-		tve_fbi = fbi;
+-		break;
+-	case FB_EVENT_MODE_CHANGE:
++	case FB_EVENT_PREMODE_CHANGE:
+ 	{
+-		if (tve_fbi != fbi)
+-			break;
+-
+-		tve_fb_setup(fbi);
++		tve_fb_setup(tve, fbi);
+ 		break;
+ 	}
+ 	case FB_EVENT_BLANK:
+-		if ((tve_fbi != fbi) || (fbi->mode == NULL))
++		if (fbi->mode == NULL)
+ 			return 0;
+ 
+-		pr_debug("TVE: fb blank event\n");
++		dev_dbg(&tve->pdev->dev, "TVE: fb blank event\n");
+ 
+ 		if (*((int *)event->data) == FB_BLANK_UNBLANK) {
+-			if (tve.blank != FB_BLANK_UNBLANK) {
+-				int mode, fmt;
+-				mode = get_video_mode(fbi, &fmt);
+-				if (mode != TVOUT_FMT_OFF) {
+-					if (tve.cur_mode != mode) {
+-						tve_disable();
+-						tve_setup(mode);
+-					}
+-					tve_enable();
+-				} else
+-					tve_setup(mode);
+-				tve.blank = FB_BLANK_UNBLANK;
+-			}
+-		} else {
+-			tve_disable();
+-			tve.blank = FB_BLANK_POWERDOWN;
+-		}
++			int mode;
++			mode = get_video_mode(fbi);
++			if (mode != TVOUT_FMT_OFF) {
++				if (tve->cur_mode != mode) {
++					tve_disable(tve);
++					tve_setup(tve, mode);
++				}
++				tve_enable(tve);
++			} else
++				tve_setup(tve, mode);
++		} else
++			tve_disable(tve);
+ 		break;
+ 	case FB_EVENT_SUSPEND:
+-		tve_suspend();
++		tve_suspend(tve);
+ 		break;
+ 	case FB_EVENT_RESUME:
+-		tve_resume(fbi);
++		tve_resume(tve, fbi);
+ 		break;
+ 	}
+ 	return 0;
+ }
+ 
+-static struct notifier_block nb = {
+-	.notifier_call = tve_fb_event,
+-};
+-
+ static ssize_t show_headphone(struct device *dev,
+ 		struct device_attribute *attr, char *buf)
+ {
++	struct tve_data *tve = dev_get_drvdata(dev);
+ 	int detect;
+ 
+-	if (!enabled) {
++	if (!tve->enabled) {
+ 		strcpy(buf, "tve power off\n");
+ 		return strlen(buf);
+ 	}
+ 
+-	detect = tve_update_detect_status();
++	detect = tve_update_detect_status(tve);
+ 
+ 	if (detect == 0)
+ 		strcpy(buf, "none\n");
+@@ -1084,14 +1009,14 @@ static ssize_t show_headphone(struct device *dev,
+ 
+ static DEVICE_ATTR(headphone, S_IRUGO | S_IWUSR, show_headphone, NULL);
+ 
+-static int _tve_get_revision(void)
++static int _tve_get_revision(struct tve_data *tve)
+ {
+ 	u32 conf_reg;
+ 	u32 rev = 0;
+ 
+ 	/* find out TVE rev based on the base addr default value
+ 	 * can be used at the init/probe ONLY */
+-	conf_reg = __raw_readl(tve.base);
++	conf_reg = readl(tve->base);
+ 	switch (conf_reg) {
+ 	case 0x00842000:
+ 		rev = 1;
+@@ -1103,180 +1028,250 @@ static int _tve_get_revision(void)
+ 	return rev;
+ }
+ 
+-int tve_fb_pre_setup(struct fb_info *fbi)
+-{
+-	if (fbi->fbops->fb_ioctl) {
+-		mm_segment_t old_fs;
+-
+-		old_fs = get_fs();
+-		set_fs(KERNEL_DS);
+-		fbi->fbops->fb_ioctl(fbi,
+-				MXCFB_GET_FB_BLANK,
+-				(unsigned int)(&tve.blank));
+-		set_fs(old_fs);
+-	}
+-	return tve_fb_setup(fbi);
+-}
+-
+-static int tve_probe(struct platform_device *pdev)
++static int tve_drv_init(struct mxc_dispdrv_entry *disp, bool vga)
+ {
+ 	int ret;
++	struct tve_data *tve = mxc_dispdrv_getdata(disp);
++	struct mxc_dispdrv_setting *setting = mxc_dispdrv_getsetting(disp);
++	struct fsl_mxc_tve_platform_data *plat_data
++			= tve->pdev->dev.platform_data;
+ 	struct resource *res;
+-	struct fsl_mxc_tve_platform_data *plat_data = pdev->dev.platform_data;
++	struct fb_videomode *modedb;
++	int modedb_sz;
+ 	u32 conf_reg;
+ 
+-	/*
+-	 * tve/vga can be enabled by platform data when there is
+-	 * no setting from cmdline setup
+-	 */
+-	if ((plat_data->boot_enable & MXC_TVE_TVOUT)
+-		&& !g_enable_tve)
+-		g_enable_tve = MXC_ENABLE;
+-	if (!g_enable_tve)
+-		g_enable_tve = MXC_DISABLE;
+-
+-	if ((plat_data->boot_enable & MXC_TVE_VGA) &&
+-		!g_enable_vga)
+-		g_enable_vga = MXC_ENABLE;
+-	if (!g_enable_vga)
+-		g_enable_vga = MXC_DISABLE;
+-
+-	if (g_enable_tve == MXC_DISABLE &&
+-		g_enable_vga == MXC_DISABLE) {
+-		printk(KERN_WARNING "By setting, TVE driver will not be enabled\n");
+-		return 0;
+-	}
++	if (tve->inited == true)
++		return -ENODEV;
+ 
+-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+-	if (res == NULL)
+-		return -ENOMEM;
++	/*tve&vga only use ipu0 and di1*/
++	setting->dev_id = 0;
++	setting->disp_id = 1;
+ 
+-	tve.pdev = pdev;
+-	tve.base = ioremap(res->start, res->end - res->start);
++	res = platform_get_resource(tve->pdev, IORESOURCE_MEM, 0);
++	if (res == NULL) {
++		ret = -ENOMEM;
++		goto get_res_failed;
++	}
+ 
+-	tve.irq = platform_get_irq(pdev, 0);
+-	if (tve.irq < 0) {
+-		ret = tve.irq;
+-		goto err0;
++	tve->irq = platform_get_irq(tve->pdev, 0);
++	if (tve->irq < 0) {
++		ret = tve->irq;
++		goto get_irq_failed;
+ 	}
+ 
+-	ret = request_irq(tve.irq, tve_detect_handler, 0, pdev->name, pdev);
+-	if (ret < 0)
+-		goto err0;
++	tve->base = ioremap(res->start, res->end - res->start);
++	if (!tve->base) {
++		ret = -ENOMEM;
++		goto ioremap_failed;
++	}
+ 
+-	ret = device_create_file(&pdev->dev, &dev_attr_headphone);
++	ret = device_create_file(&tve->pdev->dev, &dev_attr_headphone);
+ 	if (ret < 0)
+-		goto err1;
++		goto dev_file_create_failed;
+ 
+-	tve.dac_reg = regulator_get(&pdev->dev, plat_data->dac_reg);
+-	if (!IS_ERR(tve.dac_reg)) {
+-		regulator_set_voltage(tve.dac_reg, 2750000, 2750000);
+-		regulator_enable(tve.dac_reg);
++	tve->dac_reg = regulator_get(&tve->pdev->dev, plat_data->dac_reg);
++	if (!IS_ERR(tve->dac_reg)) {
++		regulator_set_voltage(tve->dac_reg, 2750000, 2750000);
++		regulator_enable(tve->dac_reg);
+ 	}
+-
+-	tve.dig_reg = regulator_get(&pdev->dev, plat_data->dig_reg);
+-	if (!IS_ERR(tve.dig_reg)) {
+-		regulator_set_voltage(tve.dig_reg, 1250000, 1250000);
+-		regulator_enable(tve.dig_reg);
++	tve->dig_reg = regulator_get(&tve->pdev->dev, plat_data->dig_reg);
++	if (!IS_ERR(tve->dig_reg)) {
++		regulator_set_voltage(tve->dig_reg, 1250000, 1250000);
++		regulator_enable(tve->dig_reg);
+ 	}
+ 
+-	tve.clk = clk_get(&pdev->dev, "tve_clk");
+-	if (IS_ERR(tve.clk)) {
+-		ret = PTR_ERR(tve.clk);
+-		goto err2;
++	tve->clk = clk_get(&tve->pdev->dev, "tve_clk");
++	if (IS_ERR(tve->clk)) {
++		ret = PTR_ERR(tve->clk);
++		goto get_tveclk_failed;
+ 	}
+-	tve.di_clk = clk_get(NULL, "ipu_di1_clk");
+-	if (IS_ERR(tve.di_clk)) {
+-		ret = PTR_ERR(tve.di_clk);
+-		goto err2;
++	tve->di_clk = clk_get(NULL, "ipu1_di1_clk");
++	if (IS_ERR(tve->di_clk)) {
++		ret = PTR_ERR(tve->di_clk);
++		goto get_diclk_failed;
+ 	}
+-	clk_set_rate(tve.clk, 216000000);
+-	clk_set_parent(tve.di_clk, tve.clk);
+-	clk_enable(tve.clk);
+-
+-	tve.revision = _tve_get_revision();
+-	if (tve.revision == 1) {
+-		tve_regs = &tve_regs_v1;
+-		tve_reg_fields = &tve_reg_fields_v1;
++
++	clk_set_rate(tve->clk, 216000000);
++	clk_set_parent(tve->di_clk, tve->clk);
++	clk_enable(tve->clk);
++
++	tve->revision = _tve_get_revision(tve);
++	if (tve->revision == 1) {
++		tve->regs = &tve_regs_v1;
++		tve->reg_fields = &tve_reg_fields_v1;
+ 	} else {
+-		tve_regs = &tve_regs_v2;
+-		tve_reg_fields = &tve_reg_fields_v2;
++		tve->regs = &tve_regs_v2;
++		tve->reg_fields = &tve_reg_fields_v2;
+ 	}
+ 
+-	/*[> adjust video mode for mx37 <]
++	/* adjust video mode for mx37 */
+ 	if (cpu_is_mx37()) {
+-		video_modes[0].left_margin = 121;
+-		video_modes[0].right_margin = 16;
+-		video_modes[0].upper_margin = 17;
+-		video_modes[0].lower_margin = 5;
+-		video_modes[1].left_margin = 131;
+-		video_modes[1].right_margin = 12;
+-		video_modes[1].upper_margin = 21;
+-		video_modes[1].lower_margin = 3;
+-	}*/
+-
+-	/* TVE is on disp port 1 */
+-	if (tve.revision == 1) {
+-		if (g_enable_tve == MXC_ENABLE)
+-			mxcfb_register_mode(IPU_DISP_PORT, video_modes,
+-					3, MXC_DISP_SPEC_DEV);
++		video_modes_tve[0].left_margin = 121;
++		video_modes_tve[0].right_margin = 16;
++		video_modes_tve[0].upper_margin = 17;
++		video_modes_tve[0].lower_margin = 5;
++		video_modes_tve[1].left_margin = 131;
++		video_modes_tve[1].right_margin = 12;
++		video_modes_tve[1].upper_margin = 21;
++		video_modes_tve[1].lower_margin = 3;
++	}
++
++	if (vga && cpu_is_mx53()) {
++		setting->if_fmt = IPU_PIX_FMT_GBR24;
++		modedb = video_modes_vga;
++		modedb_sz = vga_modedb_sz;
+ 	} else {
+-		if (g_enable_tve == MXC_ENABLE)
+-			mxcfb_register_mode(IPU_DISP_PORT, video_modes,
+-					ARRAY_SIZE(video_modes),
+-					MXC_DISP_SPEC_DEV);
+-
+-		if (cpu_is_mx53() && (g_enable_vga == MXC_ENABLE))
+-			mxcfb_register_mode(IPU_DISP_PORT, video_modes_vga,
+-					ARRAY_SIZE(video_modes_vga),
+-					MXC_DISP_SPEC_DEV);
++		setting->if_fmt = IPU_PIX_FMT_YUV444;
++		if (tve->revision == 1) {
++			modedb = video_modes_tve;
++			modedb_sz = 3;
++		} else {
++			modedb = video_modes_tve;
++			modedb_sz = tve_modedb_sz;
++		}
+ 	}
+-	mxcfb_register_presetup(IPU_DISP_PORT, tve_fb_pre_setup);
++
++	fb_videomode_to_modelist(modedb, modedb_sz, &setting->fbi->modelist);
++
++	/* must use spec video mode defined by driver */
++	ret = fb_find_mode(&setting->fbi->var, setting->fbi, setting->dft_mode_str,
++				modedb, modedb_sz, NULL, setting->default_bpp);
++	if (ret != 1)
++		fb_videomode_to_var(&setting->fbi->var, &modedb[0]);
++
++	ret = request_irq(tve->irq, tve_detect_handler, 0, tve->pdev->name, tve);
++	if (ret < 0)
++		goto req_irq_failed;
+ 
+ 	/* Setup cable detect, for YPrPb mode, default use channel#-1 for Y */
+-	INIT_DELAYED_WORK(&tve.cd_work, cd_work_func);
+-	if (tve.revision == 1)
+-		__raw_writel(0x01067701, tve.base + tve_regs->tve_cd_cont_reg);
++	INIT_DELAYED_WORK(&tve->cd_work, cd_work_func);
++	if (tve->revision == 1)
++		writel(0x01067701, tve->base + tve->regs->tve_cd_cont_reg);
+ 	else
+-		__raw_writel(0x00770601, tve.base + tve_regs->tve_cd_cont_reg);
++		writel(0x00770601, tve->base + tve->regs->tve_cd_cont_reg);
+ 
+ 	conf_reg = 0;
+-	__raw_writel(conf_reg, tve.base + tve_regs->tve_com_conf_reg);
++	writel(conf_reg, tve->base + tve->regs->tve_com_conf_reg);
++
++	writel(0x00000000, tve->base + tve->regs->tve_mv_cont_reg - 4 * 5);
++	writel(0x00000000, tve->base + tve->regs->tve_mv_cont_reg - 4 * 4);
++	writel(0x00000000, tve->base + tve->regs->tve_mv_cont_reg - 4 * 3);
++	writel(0x00000000, tve->base + tve->regs->tve_mv_cont_reg - 4 * 2);
++	writel(0x00000000, tve->base + tve->regs->tve_mv_cont_reg - 4);
++	writel(0x00000000, tve->base + tve->regs->tve_mv_cont_reg);
+ 
+-	__raw_writel(0x00000000, tve.base + tve_regs->tve_mv_cont_reg - 4 * 5);
+-	__raw_writel(0x00000000, tve.base + tve_regs->tve_mv_cont_reg - 4 * 4);
+-	__raw_writel(0x00000000, tve.base + tve_regs->tve_mv_cont_reg - 4 * 3);
+-	__raw_writel(0x00000000, tve.base + tve_regs->tve_mv_cont_reg - 4 * 2);
+-	__raw_writel(0x00000000, tve.base + tve_regs->tve_mv_cont_reg - 4);
+-	__raw_writel(0x00000000, tve.base + tve_regs->tve_mv_cont_reg);
++	clk_disable(tve->clk);
+ 
+-	clk_disable(tve.clk);
++	tve->nb.notifier_call = tve_fb_event;
++	ret = fb_register_client(&tve->nb);
++	if (ret < 0)
++		goto reg_fbclient_failed;
++
++	dev_set_drvdata(&tve->pdev->dev, tve);
++
++	spin_lock_init(&tve->tve_lock);
++
++	tve->inited = true;
++
++	return 0;
++
++reg_fbclient_failed:
++	free_irq(tve->irq, tve->pdev);
++req_irq_failed:
++get_diclk_failed:
++get_tveclk_failed:
++	device_remove_file(&tve->pdev->dev, &dev_attr_headphone);
++dev_file_create_failed:
++	iounmap(tve->base);
++ioremap_failed:
++get_irq_failed:
++get_res_failed:
++	return ret;
++
++}
++
++static int tvout_init(struct mxc_dispdrv_entry *disp)
++{
++	return tve_drv_init(disp, 0);
++}
+ 
+-	ret = fb_register_client(&nb);
++static int vga_init(struct mxc_dispdrv_entry *disp)
++{
++	return tve_drv_init(disp, 1);
++}
++
++void tvout_deinit(struct mxc_dispdrv_entry *disp)
++{
++	struct tve_data *tve = mxc_dispdrv_getdata(disp);
++
++	if (tve->enabled)
++		clk_disable(tve->clk);
++
++	fb_unregister_client(&tve->nb);
++	free_irq(tve->irq, tve->pdev);
++	device_remove_file(&tve->pdev->dev, &dev_attr_headphone);
++	iounmap(tve->base);
++}
++
++static struct mxc_dispdrv_driver tve_drv = {
++	.name 	= DISPDRV_TVE,
++	.init  	= tvout_init,
++	.deinit = tvout_deinit,
++};
++
++static struct mxc_dispdrv_driver vga_drv = {
++	.name 	= DISPDRV_VGA,
++	.init 	= vga_init,
++	.deinit	= tvout_deinit,
++};
++
++static int tve_dispdrv_init(struct tve_data *tve)
++{
++	tve->disp_tve = mxc_dispdrv_register(&tve_drv);
++	mxc_dispdrv_setdata(tve->disp_tve, tve);
++	tve->disp_vga = mxc_dispdrv_register(&vga_drv);
++	mxc_dispdrv_setdata(tve->disp_vga, tve);
++	return 0;
++}
++
++static void tve_dispdrv_deinit(struct tve_data *tve)
++{
++	mxc_dispdrv_unregister(tve->disp_tve);
++	mxc_dispdrv_unregister(tve->disp_vga);
++}
++
++static int tve_probe(struct platform_device *pdev)
++{
++	int ret;
++	struct tve_data *tve;
++
++	tve = kzalloc(sizeof(struct tve_data), GFP_KERNEL);
++	if (!tve) {
++		ret = -ENOMEM;
++		goto alloc_failed;
++	}
++
++	tve->pdev = pdev;
++	ret = tve_dispdrv_init(tve);
+ 	if (ret < 0)
+-		goto err2;
++		goto dispdrv_init_failed;
+ 
+-	tve.blank = -1;
++	dev_set_drvdata(&pdev->dev, tve);
+ 
+ 	return 0;
+-err2:
+-	device_remove_file(&pdev->dev, &dev_attr_headphone);
+-err1:
+-	free_irq(tve.irq, pdev);
+-err0:
+-	iounmap(tve.base);
++
++dispdrv_init_failed:
++	kfree(tve);
++alloc_failed:
+ 	return ret;
+ }
+ 
+ static int tve_remove(struct platform_device *pdev)
+ {
+-	if (enabled) {
+-		clk_disable(tve.clk);
+-		enabled = 0;
+-	}
+-	free_irq(tve.irq, pdev);
+-	device_remove_file(&pdev->dev, &dev_attr_headphone);
+-	fb_unregister_client(&nb);
++	struct tve_data *tve = dev_get_drvdata(&pdev->dev);
++
++	tve_dispdrv_deinit(tve);
++	kfree(tve);
+ 	return 0;
+ }
+ 
+@@ -1288,28 +1283,6 @@ static struct platform_driver tve_driver = {
+ 	.remove = tve_remove,
+ };
+ 
+-static int __init enable_tve_setup(char *options)
+-{
+-	if (!strcmp(options, "=off"))
+-		g_enable_tve = MXC_DISABLE;
+-	else
+-		g_enable_tve = MXC_ENABLE;
+-
+-	return 1;
+-}
+-__setup("tve", enable_tve_setup);
+-
+-static int __init enable_vga_setup(char *options)
+-{
+-	if (!strcmp(options, "=off"))
+-		g_enable_vga = MXC_DISABLE;
+-	else
+-		g_enable_vga = MXC_ENABLE;
+-
+-	return 1;
+-}
+-__setup("vga", enable_vga_setup);
+-
+ static int __init tve_init(void)
+ {
+ 	return platform_driver_register(&tve_driver);
+-- 
+1.7.7.4
+

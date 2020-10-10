@@ -1,0 +1,56 @@
+From 156a28ba3a9f7e3568f15242a49ae269ec3eb77f Mon Sep 17 00:00:00 2001
+From: Alan Tull <r80115@freescale.com>
+Date: Fri, 23 Mar 2012 16:06:35 -0500
+Subject: [PATCH 1215/2463] ENGR00177851   HDMI fix hotpug race condition
+
+hotplug_worker can't assume that the iahb_clk is enabled if the
+irq_enabled flag is set.
+
+Signed-off-by: Alan Tull <r80115@freescale.com>
+---
+ drivers/video/mxc_hdmi.c |   14 +++++++-------
+ 1 files changed, 7 insertions(+), 7 deletions(-)
+
+diff --git a/drivers/video/mxc_hdmi.c b/drivers/video/mxc_hdmi.c
+index 9e83df0..ad6d713 100644
+--- a/drivers/video/mxc_hdmi.c
++++ b/drivers/video/mxc_hdmi.c
+@@ -1739,13 +1739,13 @@ static void hotplug_worker(struct work_struct *work)
+ 	bool hdmi_disable = false;
+ 	int irq = platform_get_irq(hdmi->pdev, 0);
+ 	unsigned long flags;
+-    char event_string[16];
+-    char *envp[] = { event_string, NULL };
++	char event_string[16];
++	char *envp[] = { event_string, NULL };
+ 
+-	if (!hdmi->irq_enabled) {
+-		/* Enable clock long enough to do a few register accesses */
+-		clk_enable(hdmi->hdmi_iahb_clk);
++	/* Enable clock long enough to do a few register accesses */
++	clk_enable(hdmi->hdmi_iahb_clk);
+ 
++	if (!hdmi->irq_enabled) {
+ 		/* Capture status - used in hotplug_worker ISR */
+ 		phy_int_stat = hdmi_readb(HDMI_IH_PHY_STAT0);
+ 		if ((phy_int_stat & HDMI_IH_PHY_STAT0_HPD) == 0) {
+@@ -1764,14 +1764,14 @@ static void hotplug_worker(struct work_struct *work)
+ 		hdmi_writeb(HDMI_IH_PHY_STAT0_HPD, HDMI_IH_PHY_STAT0);
+ 
+ 		phy_int_pol = hdmi_readb(HDMI_PHY_POL0);
+-
+-		clk_disable(hdmi->hdmi_iahb_clk);
+ 	} else {
+ 		/* Use saved interrupt status, since it was cleared in IST */
+ 		phy_int_stat = hdmi->latest_intr_stat;
+ 		phy_int_pol = hdmi_readb(HDMI_PHY_POL0);
+ 	}
+ 
++	clk_disable(hdmi->hdmi_iahb_clk);
++
+ 	/* Re-enable HDMI irq now that our interrupts have been masked off */
+ 	hdmi_irq_enable(irq);
+ 
+-- 
+1.7.7.4
+

@@ -1,0 +1,49 @@
+From 95e927d3e75b658b641d408c13aa6d6ba0ffaa89 Mon Sep 17 00:00:00 2001
+From: Anson Huang <b20788@freescale.com>
+Date: Tue, 18 Sep 2012 12:24:29 +0800
+Subject: [PATCH 2051/2463] ENGR00224696 mx6:Improve DSM power stability
+
+1. If weak 2P5 is not enabled in DSM, need to enable pull down
+function to make sure its voltage is 0V;
+
+2. WB_COUNT need to set to a higher value instead of the reset
+value to make sure it function normally.
+
+Signed-off-by: Anson Huang <b20788@freescale.com>
+---
+ arch/arm/mach-mx6/system.c |   11 +++++++++--
+ 1 files changed, 9 insertions(+), 2 deletions(-)
+
+diff --git a/arch/arm/mach-mx6/system.c b/arch/arm/mach-mx6/system.c
+index 800c7cc..97629d0 100644
+--- a/arch/arm/mach-mx6/system.c
++++ b/arch/arm/mach-mx6/system.c
+@@ -179,6 +179,12 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 				anatop_val |= BM_ANADIG_ANA_MISC0_RTC_RINGOSC_EN;
+ 				__raw_writel(anatop_val, anatop_base +
+ 					HW_ANADIG_ANA_MISC0);
++				/* Need to enable pull down if 2P5 is disabled */
++				anatop_val = __raw_readl(anatop_base +
++					HW_ANADIG_REG_2P5);
++				anatop_val |= BM_ANADIG_REG_2P5_ENABLE_PULLDOWN;
++				__raw_writel(anatop_val, anatop_base +
++					HW_ANADIG_REG_2P5);
+ 				/* We need to allow the memories to be clock gated
+ 				 * in STOP mode, else the power consumption will
+ 				 * be very high. */
+@@ -196,9 +202,10 @@ void mxc_cpu_lp_set(enum mxc_cpu_pwr_mode mode)
+ 				(~MXC_CCM_CCR_WB_COUNT_MASK) &
+ 				(~MXC_CCM_CCR_REG_BYPASS_CNT_MASK), MXC_CCM_CCR);
+ 			udelay(80);
+-			/* Reconfigurate WB and RBC counter */
++			/* Reconfigurate WB and RBC counter, need to set WB counter
++			 * to 0x7 to make sure it work normally */
+ 			__raw_writel(__raw_readl(MXC_CCM_CCR) |
+-				(0x1 << MXC_CCM_CCR_WB_COUNT_OFFSET) |
++				(0x7 << MXC_CCM_CCR_WB_COUNT_OFFSET) |
+ 				(0x20 << MXC_CCM_CCR_REG_BYPASS_CNT_OFFSET), MXC_CCM_CCR);
+ 
+ 			/* Set WB_PER enable */
+-- 
+1.7.7.4
+

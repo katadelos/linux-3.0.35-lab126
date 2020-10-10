@@ -1,0 +1,167 @@
+From a1f6f4ee9de45b4407a4781342ec475f23d52684 Mon Sep 17 00:00:00 2001
+From: Rong Dian <b38775@freescale.com>
+Date: Mon, 28 Jan 2013 13:40:20 +0800
+Subject: [PATCH 2375/2463] ENGR00241739-2 gpu: Enable thermal hot
+ notification in gpu driver
+
+Using notify mechanism instead of global variable to
+trigger gpu3d clock change through thermal driver
+
+Signed-off-by: Rong Dian <b38775@freescale.com>
+Signed-off-by: Loren Huang <b02279@freescale.com>
+Acked-by: Lily Zhang
+---
+ .../mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c |   21 ---------
+ .../mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h    |    8 ---
+ .../hal/os/linux/kernel/gc_hal_kernel_driver.c     |   46 +++++++++++++++++++-
+ 3 files changed, 45 insertions(+), 30 deletions(-)
+
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
+index 06bebee..952ee88 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
++++ b/drivers/mxc/gpu-viv/hal/kernel/gc_hal_kernel_command.c
+@@ -30,9 +30,6 @@
+ 
+ #define _GC_OBJ_ZONE            gcvZONE_COMMAND
+ 
+-#if gcdENABLE_FSCALE_VAL_ADJUST
+-extern int thermal_hot;
+-#endif
+ /******************************************************************************\
+ ********************************* Support Code *********************************
+ \******************************************************************************/
+@@ -1163,24 +1160,6 @@ gckCOMMAND_Commit(
+     /* Extract the gckHARDWARE and gckEVENT objects. */
+     hardware = Command->kernel->hardware;
+ 
+-#if gcdENABLE_FSCALE_VAL_ADJUST
+-    if(hardware->core == gcvCORE_MAJOR){
+-        static gctUINT orgFscale,minFscale,maxFscale;
+-        static gctBOOL bAlreadyTooHot = gcvFALSE;
+-        if((thermal_hot > 0) && (!bAlreadyTooHot)) {
+-            gckHARDWARE_GetFscaleValue(hardware,&orgFscale,&minFscale, &maxFscale);
+-            gckHARDWARE_SetFscaleValue(hardware, minFscale);
+-            bAlreadyTooHot = gcvTRUE;
+-            gckOS_Print("System is too hot. GPU3D will work at %d/64 clock.\n", minFscale);
+-        } else if((!(thermal_hot > 0)) && bAlreadyTooHot) {
+-            gckHARDWARE_SetFscaleValue(hardware, orgFscale);
+-            gckOS_Print("Hot alarm is canceled. GPU3D clock will return to %d/64\n", orgFscale);
+-            bAlreadyTooHot = gcvFALSE;
+-        }
+-
+-    }
+-#endif
+-
+     /* Check wehther we need to copy the structures or not. */
+     gcmkONERROR(gckOS_QueryNeedCopy(Command->os, ProcessID, &needCopy));
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+index e7e148d..537e58c 100644
+--- a/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
++++ b/drivers/mxc/gpu-viv/hal/kernel/inc/gc_hal_options.h
+@@ -161,14 +161,6 @@
+         When non-zero, FSCALE_VAL when gcvPOWER_ON can be adjusted externally.
+  */
+ #ifndef gcdENABLE_FSCALE_VAL_ADJUST
+-#   define gcdENABLE_FSCALE_VAL_ADJUST          0
+-#endif
+-
+-/*
+-    gcdENABLE_FSCALE_VAL_ADJUST
+-        When non-zero, FSCALE_VAL when gcvPOWER_ON can be adjusted externally.
+- */
+-#ifndef gcdENABLE_FSCALE_VAL_ADJUST
+ #   define gcdENABLE_FSCALE_VAL_ADJUST          1
+ #endif
+ 
+diff --git a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+index 7586bca..0fc1891 100644
+--- a/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
++++ b/drivers/mxc/gpu-viv/hal/os/linux/kernel/gc_hal_kernel_driver.c
+@@ -24,6 +24,7 @@
+ 
+ #include <linux/device.h>
+ #include <linux/slab.h>
++#include <linux/notifier.h>
+ #include "gc_hal_kernel_linux.h"
+ #include "gc_hal_driver.h"
+ 
+@@ -50,6 +51,11 @@
+ /* Zone used for header/footer. */
+ #define _GC_OBJ_ZONE    gcvZONE_DRIVER
+ 
++#if gcdENABLE_FSCALE_VAL_ADJUST
++extern int register_thermal_notifier(struct notifier_block *nb);
++extern int unregister_thermal_notifier(struct notifier_block *nb);
++#endif
++
+ MODULE_DESCRIPTION("Vivante Graphics Driver");
+ MODULE_LICENSE("GPL");
+ 
+@@ -953,6 +959,34 @@ static void drv_exit(void)
+ #   define DEVICE_NAME "galcore"
+ #endif
+ 
++#if gcdENABLE_FSCALE_VAL_ADJUST
++static int thermal_hot_pm_notify(struct notifier_block *nb, unsigned long event,
++	void *dummy)
++{
++    static gctUINT orgFscale, minFscale, maxFscale;
++    static gctBOOL bAlreadyTooHot = gcvFALSE;
++    gckHARDWARE hardware = galDevice->kernels[gcvCORE_MAJOR]->hardware;
++
++    if (event && !bAlreadyTooHot) {
++        gckHARDWARE_GetFscaleValue(hardware,&orgFscale,&minFscale, &maxFscale);
++        gckHARDWARE_SetFscaleValue(hardware, minFscale);
++        bAlreadyTooHot = gcvTRUE;
++        gckOS_Print("System is too hot. GPU3D will work at %d/64 clock.\n", minFscale);
++    } else if (!event && bAlreadyTooHot) {
++        gckHARDWARE_SetFscaleValue(hardware, orgFscale);
++        gckOS_Print("Hot alarm is canceled. GPU3D clock will return to %d/64\n", orgFscale);
++        bAlreadyTooHot = gcvFALSE;
++    }
++    return NOTIFY_OK;
++}
++
++static struct notifier_block thermal_hot_pm_notifier = {
++    .notifier_call = thermal_hot_pm_notify,
++    };
++#endif
++
++
++
+ static int __devinit gpu_probe(struct platform_device *pdev)
+ {
+     int ret = -ENODEV;
+@@ -1022,10 +1056,16 @@ static int __devinit gpu_probe(struct platform_device *pdev)
+     {
+         platform_set_drvdata(pdev, galDevice);
+ 
++#if gcdENABLE_FSCALE_VAL_ADJUST
++        if(galDevice->kernels[gcvCORE_MAJOR])
++            register_thermal_notifier(&thermal_hot_pm_notifier);
++#endif
+         gcmkFOOTER_NO();
+         return ret;
+     }
+-
++#if gcdENABLE_FSCALE_VAL_ADJUST
++    unregister_thermal_notifier(&thermal_hot_pm_notifier);
++#endif
+     gcmkFOOTER_ARG(KERN_INFO "Failed to register gpu driver: %d\n", ret);
+     return ret;
+ }
+@@ -1033,6 +1073,10 @@ static int __devinit gpu_probe(struct platform_device *pdev)
+ static int __devinit gpu_remove(struct platform_device *pdev)
+ {
+     gcmkHEADER();
++#if gcdENABLE_FSCALE_VAL_ADJUST
++    if(galDevice->kernels[gcvCORE_MAJOR])
++        unregister_thermal_notifier(&thermal_hot_pm_notifier);
++#endif
+     drv_exit();
+     gcmkFOOTER_NO();
+     return 0;
+-- 
+1.7.7.4
+

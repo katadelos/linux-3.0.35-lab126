@@ -1,0 +1,109 @@
+From 66540f67e794fa58f7d32e8850e43676b471a312 Mon Sep 17 00:00:00 2001
+From: Jason Chen <b02280@freescale.com>
+Date: Mon, 7 Nov 2011 16:46:36 +0800
+Subject: [PATCH 0573/2463] ENGR00161526 mxc v4l2 output: 720p ic bypass
+ output may failed in block
+
+Repeat play with below cmdline:
+/unit_tests/mxc_v4l2_output.out -iw 1280 -ih 720 -ow 1280 -oh
+720 -fr 10 -l 1 /unit_tests/720p.yuv
+
+Found the ipu update offset function cause this issue, it can be
+work-around by setting it only when value changed.
+
+Signed-off-by: Jason Chen <b02280@freescale.com>
+---
+ drivers/media/video/mxc/output/mxc_vout.c |    5 ++++-
+ drivers/mxc/ipu3/ipu_param_mem.h          |   17 +++++++++++++----
+ drivers/video/mxc/mxc_ipuv3_fb.c          |   19 ++++++++++---------
+ 3 files changed, 27 insertions(+), 14 deletions(-)
+
+diff --git a/drivers/media/video/mxc/output/mxc_vout.c b/drivers/media/video/mxc/output/mxc_vout.c
+index ccce9a4..8596b42 100644
+--- a/drivers/media/video/mxc/output/mxc_vout.c
++++ b/drivers/media/video/mxc/output/mxc_vout.c
+@@ -1217,8 +1217,11 @@ static void release_disp_output(struct mxc_vout_output *vout)
+ 	console_unlock();
+ 
+ 	/* fix if ic bypass crack smem_start */
+-	if (is_pp_bypass(vout))
++	if (is_pp_bypass(vout)) {
++		console_lock();
+ 		fbi->fix.smem_start = vout->disp_bufs[0];
++		console_unlock();
++	}
+ 
+ 	if (get_ipu_channel(fbi) == MEM_BG_SYNC) {
+ 		console_lock();
+diff --git a/drivers/mxc/ipu3/ipu_param_mem.h b/drivers/mxc/ipu3/ipu_param_mem.h
+index 7fbd4e1..223a1cd 100644
+--- a/drivers/mxc/ipu3/ipu_param_mem.h
++++ b/drivers/mxc/ipu3/ipu_param_mem.h
+@@ -653,6 +653,7 @@ static inline void _ipu_ch_offset_update(struct ipu_soc *ipu,
+ {
+ 	uint32_t u_offset = 0;
+ 	uint32_t v_offset = 0;
++	uint32_t old_offset = 0;
+ 	uint32_t u_fix = 0;
+ 	uint32_t v_fix = 0;
+ 	int32_t sub_ch = 0;
+@@ -788,14 +789,22 @@ static inline void _ipu_ch_offset_update(struct ipu_soc *ipu,
+ 		dev_warn(ipu->dev,
+ 			"IDMAC%d's V offset is not 8-byte aligned\n", ch);
+ 
+-	ipu_ch_param_mod_field_io(ipu_ch_param_addr(ipu, ch), 0, 46, 22, u_offset / 8);
+-	ipu_ch_param_mod_field_io(ipu_ch_param_addr(ipu, ch), 0, 68, 22, v_offset / 8);
++	old_offset = ipu_ch_param_read_field_io(ipu_ch_param_addr(ipu, ch), 0, 46, 22);
++	if (old_offset != u_offset / 8)
++		ipu_ch_param_mod_field_io(ipu_ch_param_addr(ipu, ch), 0, 46, 22, u_offset / 8);
++	old_offset = ipu_ch_param_read_field_io(ipu_ch_param_addr(ipu, ch), 0, 68, 22);
++	if (old_offset != v_offset / 8)
++		ipu_ch_param_mod_field_io(ipu_ch_param_addr(ipu, ch), 0, 68, 22, v_offset / 8);
+ 
+ 	sub_ch = __ipu_ch_get_third_buf_cpmem_num(ch);
+ 	if (sub_ch <= 0)
+ 		return;
+-	ipu_ch_param_mod_field_io(ipu_ch_param_addr(ipu, sub_ch), 0, 46, 22, u_offset / 8);
+-	ipu_ch_param_mod_field_io(ipu_ch_param_addr(ipu, sub_ch), 0, 68, 22, v_offset / 8);
++	old_offset = ipu_ch_param_read_field_io(ipu_ch_param_addr(ipu, sub_ch), 0, 46, 22);
++	if (old_offset != u_offset / 8)
++		ipu_ch_param_mod_field_io(ipu_ch_param_addr(ipu, sub_ch), 0, 46, 22, u_offset / 8);
++	old_offset = ipu_ch_param_read_field_io(ipu_ch_param_addr(ipu, sub_ch), 0, 68, 22);
++	if (old_offset != v_offset / 8)
++		ipu_ch_param_mod_field_io(ipu_ch_param_addr(ipu, sub_ch), 0, 68, 22, v_offset / 8);
+ };
+ 
+ static inline void _ipu_ch_params_set_alpha_width(struct ipu_soc *ipu, uint32_t ch, int alpha_width)
+diff --git a/drivers/video/mxc/mxc_ipuv3_fb.c b/drivers/video/mxc/mxc_ipuv3_fb.c
+index 11e6744..74e4077 100644
+--- a/drivers/video/mxc/mxc_ipuv3_fb.c
++++ b/drivers/video/mxc/mxc_ipuv3_fb.c
+@@ -1234,15 +1234,16 @@ mxcfb_pan_display(struct fb_var_screeninfo *var, struct fb_info *info)
+ 		}
+ 
+ 		/* update u/v offset */
+-		ipu_update_channel_offset(mxc_fbi->ipu, mxc_fbi->ipu_ch,
+-				IPU_INPUT_BUFFER,
+-				bpp_to_pixfmt(info),
+-				info->var.xres_virtual,
+-				info->var.yres_virtual,
+-				info->var.xres_virtual,
+-				0, 0,
+-				var->yoffset,
+-				var->xoffset);
++		if (info->var.xres_virtual > info->var.xres)
++			ipu_update_channel_offset(mxc_fbi->ipu, mxc_fbi->ipu_ch,
++					IPU_INPUT_BUFFER,
++					bpp_to_pixfmt(info),
++					info->var.xres_virtual,
++					info->var.yres_virtual,
++					info->var.xres_virtual,
++					0, 0,
++					var->yoffset,
++					var->xoffset);
+ 
+ 		ipu_select_buffer(mxc_fbi->ipu, mxc_fbi->ipu_ch, IPU_INPUT_BUFFER,
+ 				  mxc_fbi->cur_ipu_buf);
+-- 
+1.7.7.4
+

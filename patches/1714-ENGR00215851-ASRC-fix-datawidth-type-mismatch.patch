@@ -1,0 +1,40 @@
+From e78e111ac3a51ec3e4dece15b36716ea7f112606 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Thu, 5 Jul 2012 15:10:14 +0800
+Subject: [PATCH 1714/2463] ENGR00215851 ASRC:fix datawidth type mismatch
+
+When ESAI call ASRC for p2p playback. The datawidth may be
+changed. The cpu dai would configure the ESAI data width according
+to the modified datawidth(output_bits). The type mismatch between output_bits
+and cpu dai's switch branch cause cpu dai's hardware parameter set
+fail.
+
+Match the type of output_bits to the switch branch in cpu dai's hardware
+parameter configuration function.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ sound/soc/imx/imx-esai.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/sound/soc/imx/imx-esai.c b/sound/soc/imx/imx-esai.c
+index daa3a8a..f11757b 100644
+--- a/sound/soc/imx/imx-esai.c
++++ b/sound/soc/imx/imx-esai.c
+@@ -320,11 +320,11 @@ static int imx_esai_hw_tx_params(struct snd_pcm_substream *substream,
+ 
+ 	if (iprtd->asrc_enable) {
+ 		switch (iprtd->output_bit) {
+-		case 16:
++		case ASRC_WIDTH_16_BIT:
+ 			tfcr |= ESAI_WORD_LEN_16;
+ 			tcr |= ESAI_TCR_TSHFD_MSB | ESAI_TCR_TSWS_STL32_WDL16;
+ 			break;
+-		case 24:
++		case ASRC_WIDTH_24_BIT:
+ 			tfcr |= ESAI_WORD_LEN_24;
+ 			tcr |= ESAI_TCR_TSHFD_MSB | ESAI_TCR_TSWS_STL32_WDL24;
+ 			break;
+-- 
+1.7.7.4
+

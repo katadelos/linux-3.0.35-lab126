@@ -1,0 +1,47 @@
+From 500e80ec8e06f65a97a490adab330b134f2c0907 Mon Sep 17 00:00:00 2001
+From: Chen Liangjun <b36089@freescale.com>
+Date: Mon, 29 Oct 2012 15:36:24 +0800
+Subject: [PATCH 2223/2463] ENGR00231773-6 SDMA: add event pending trigger
+ interface
+
+When SDMA is use for periphal data transfer, dma request is trigger by
+FIFO level. If the SDMA is started after the start of periphal, SDMA
+would miss the first pulse and be not able to trigger itself.
+
+In this patch, add interface to trigger a dma request manully.
+
+Signed-off-by: Chen Liangjun <b36089@freescale.com>
+---
+ drivers/dma/imx-sdma.c |   16 ++++++++++++++++
+ 1 files changed, 16 insertions(+), 0 deletions(-)
+
+diff --git a/drivers/dma/imx-sdma.c b/drivers/dma/imx-sdma.c
+index 4ac8319..68cacbf 100644
+--- a/drivers/dma/imx-sdma.c
++++ b/drivers/dma/imx-sdma.c
+@@ -1300,6 +1300,22 @@ static void sdma_issue_pending(struct dma_chan *chan)
+ 	 */
+ }
+ 
++void sdma_set_event_pending(struct dma_chan *chan)
++{
++	struct sdma_channel *sdmac = to_sdma_chan(chan);
++	struct sdma_engine *sdma = sdmac->sdma;
++	u32 reg;
++	u32 channel;
++
++	channel = sdmac->channel;
++	reg = readl_relaxed(sdma->regs + SDMA_H_EVTPEND);
++	reg |= 1 << channel;
++	writel_relaxed(reg, sdma->regs + SDMA_H_EVTPEND);
++
++	return;
++}
++EXPORT_SYMBOL(sdma_set_event_pending);
++
+ #define SDMA_SCRIPT_ADDRS_ARRAY_SIZE_V1	38
+ 
+ static void sdma_add_scripts(struct sdma_engine *sdma,
+-- 
+1.7.7.4
+

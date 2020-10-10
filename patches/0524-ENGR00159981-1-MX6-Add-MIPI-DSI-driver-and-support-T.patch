@@ -1,0 +1,570 @@
+From 95b9660d685d3e3476fe158a7bbb0c8bb145a680 Mon Sep 17 00:00:00 2001
+From: Wayne Zou <b36644@freescale.com>
+Date: Fri, 14 Oct 2011 14:55:08 +0800
+Subject: [PATCH 0524/2463] ENGR00159981-1 MX6: Add MIPI DSI driver and
+ support TRULY WVGA LCD panel
+
+MX6 MIPI DSI: Add MIPI DSI driver and support for TRULY WVGA LCD panel
+
+Signed-off-by: Wayne Zou <b36644@freescale.com>
+---
+ arch/arm/configs/imx6_defconfig                   |   15 +-
+ arch/arm/mach-mx6/Kconfig                         |    1 +
+ arch/arm/mach-mx6/board-mx6q_arm2.c               |   24 +++
+ arch/arm/mach-mx6/clock.c                         |   11 +
+ arch/arm/mach-mx6/devices-imx6q.h                 |    4 +
+ arch/arm/plat-mxc/devices/Kconfig                 |    3 +
+ arch/arm/plat-mxc/devices/Makefile                |    1 +
+ arch/arm/plat-mxc/devices/platform-imx-mipi_dsi.c |   58 ++++++
+ arch/arm/plat-mxc/include/mach/devices-common.h   |   11 +
+ arch/arm/plat-mxc/include/mach/mipi_dsi.h         |  225 +++++++++++++++++++++
+ arch/arm/plat-mxc/include/mach/mx6.h              |    2 +
+ 11 files changed, 352 insertions(+), 3 deletions(-)
+
+diff --git a/arch/arm/configs/imx6_defconfig b/arch/arm/configs/imx6_defconfig
+index 234b84c..0228ca4 100644
+--- a/arch/arm/configs/imx6_defconfig
++++ b/arch/arm/configs/imx6_defconfig
+@@ -1,7 +1,7 @@
+ #
+ # Automatically generated make config: don't edit
+ # Linux/arm 2.6.38 Kernel Configuration
+-# Wed Oct 26 15:45:36 2011
++# Mon Oct 31 18:13:45 2011
+ #
+ CONFIG_ARM=y
+ CONFIG_HAVE_PWM=y
+@@ -272,6 +272,7 @@ CONFIG_IMX_HAVE_PLATFORM_SDHCI_ESDHC_IMX=y
+ CONFIG_IMX_HAVE_PLATFORM_SPI_IMX=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_IPUV3=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_VPU=y
++CONFIG_IMX_HAVE_PLATFORM_IMX_DVFS=y
+ CONFIG_IMX_HAVE_PLATFORM_AHCI=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_OCOTP=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_VIIM=y
+@@ -284,6 +285,7 @@ CONFIG_IMX_HAVE_PLATFORM_FSL_OTG=y
+ CONFIG_IMX_HAVE_PLATFORM_FSL_USB_WAKEUP=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_PM=y
+ CONFIG_IMX_HAVE_PLATFORM_IMX_ASRC=y
++CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_DSI=y
+ 
+ #
+ # Freescale MXC Implementations
+@@ -381,7 +383,6 @@ CONFIG_GENERIC_CLOCKEVENTS_BUILD=y
+ CONFIG_SMP=y
+ CONFIG_SMP_ON_UP=y
+ CONFIG_HAVE_ARM_SCU=y
+-CONFIG_HAVE_ARM_TWD=y
+ # CONFIG_VMSPLIT_3G is not set
+ CONFIG_VMSPLIT_2G=y
+ # CONFIG_VMSPLIT_1G is not set
+@@ -1198,6 +1199,8 @@ CONFIG_MFD_CORE=y
+ # CONFIG_MFD_PCF50633 is not set
+ # CONFIG_PMIC_DIALOG is not set
+ # CONFIG_MFD_MC13XXX is not set
++# CONFIG_MFD_MC_PMIC is not set
++# CONFIG_MFD_MC34708 is not set
+ # CONFIG_ABX500_CORE is not set
+ # CONFIG_EZX_PCAP is not set
+ # CONFIG_MFD_TPS6586X is not set
+@@ -1217,6 +1220,7 @@ CONFIG_REGULATOR_FIXED_VOLTAGE=y
+ # CONFIG_REGULATOR_MAX8952 is not set
+ # CONFIG_REGULATOR_LP3971 is not set
+ # CONFIG_REGULATOR_LP3972 is not set
++# CONFIG_REGULATOR_MC34708 is not set
+ # CONFIG_REGULATOR_TPS65023 is not set
+ # CONFIG_REGULATOR_TPS6507X is not set
+ # CONFIG_REGULATOR_ISL6271A is not set
+@@ -1409,6 +1413,8 @@ CONFIG_FB_MXC=y
+ CONFIG_FB_MXC_SYNC_PANEL=y
+ # CONFIG_FB_MXC_EPSON_VGA_SYNC_PANEL is not set
+ CONFIG_FB_MXC_LDB=y
++CONFIG_FB_MXC_MIPI_DSI=y
++CONFIG_FB_MXC_TRULY_WVGA_SYNC_PANEL=y
+ # CONFIG_FB_MXC_CLAA_WVGA_SYNC_PANEL is not set
+ # CONFIG_FB_MXC_SEIKO_WVGA_SYNC_PANEL is not set
+ # CONFIG_FB_MXC_SII902X is not set
+@@ -1470,6 +1476,9 @@ CONFIG_SND_DRIVERS=y
+ CONFIG_SND_ARM=y
+ CONFIG_SND_SPI=y
+ CONFIG_SND_USB=y
++# CONFIG_SND_USB_AUDIO is not set
++# CONFIG_SND_USB_UA101 is not set
++# CONFIG_SND_USB_CAIAQ is not set
+ CONFIG_SND_SOC=y
+ # CONFIG_SND_SOC_CACHE_LZO is not set
+ CONFIG_SND_SOC_AC97_BUS=y
+@@ -1482,10 +1491,10 @@ CONFIG_SND_SOC_IMX_SPDIF=y
+ CONFIG_SND_SOC_IMX_HDMI=y
+ CONFIG_SND_SOC_I2C_AND_SPI=y
+ # CONFIG_SND_SOC_ALL_CODECS is not set
++CONFIG_SND_SOC_MXC_HDMI=y
+ CONFIG_SND_SOC_MXC_SPDIF=y
+ CONFIG_SND_SOC_SGTL5000=y
+ CONFIG_SND_SOC_CS42888=y
+-CONFIG_SND_SOC_MXC_HDMI=y
+ # CONFIG_SOUND_PRIME is not set
+ CONFIG_AC97_BUS=y
+ CONFIG_HID_SUPPORT=y
+diff --git a/arch/arm/mach-mx6/Kconfig b/arch/arm/mach-mx6/Kconfig
+index 90ef11f..9441aa9 100644
+--- a/arch/arm/mach-mx6/Kconfig
++++ b/arch/arm/mach-mx6/Kconfig
+@@ -51,6 +51,7 @@ config MACH_MX6Q_ARM2
+ 	select IMX_HAVE_PLATFORM_MXC_HDMI
+ 	select IMX_HAVE_PLATFORM_IMX_ASRC
+ 	select IMX_HAVE_PLATFORM_IMX_SPDIF
++	select IMX_HAVE_PLATFORM_IMX_MIPI_DSI
+ 	help
+ 	  Include support for i.MX 6Quad Armadillo2 platform. This includes specific
+ 	  configurations for the board and its peripherals.
+diff --git a/arch/arm/mach-mx6/board-mx6q_arm2.c b/arch/arm/mach-mx6/board-mx6q_arm2.c
+index d37d7e5..29fc86e 100644
+--- a/arch/arm/mach-mx6/board-mx6q_arm2.c
++++ b/arch/arm/mach-mx6/board-mx6q_arm2.c
+@@ -64,6 +64,7 @@
+ #include <mach/ipu-v3.h>
+ #include <mach/mxc_hdmi.h>
+ #include <mach/mxc_asrc.h>
++#include <mach/mipi_dsi.h>
+ 
+ #include <asm/irq.h>
+ #include <asm/setup.h>
+@@ -775,6 +776,28 @@ static struct imx_asrc_platform_data imx_asrc_data = {
+ 	.clk_map_ver = 2,
+ };
+ 
++static void mx6q_sabreauto_reset_mipi_dsi(void)
++{
++	gpio_set_value(MX6Q_ARM2_DISP0_PWR, 1);
++	gpio_set_value(MX6Q_ARM2_DISP0_RESET, 1);
++	udelay(10);
++	gpio_set_value(MX6Q_ARM2_DISP0_RESET, 0);
++	udelay(50);
++	gpio_set_value(MX6Q_ARM2_DISP0_RESET, 1);
++
++	/*
++	 * it needs to delay 120ms minimum for reset complete
++	 */
++	msleep(120);
++}
++
++static struct mipi_dsi_platform_data mipi_dsi_pdata = {
++	.ipu_id	 = 0,
++	.disp_id = 0,
++	.lcd_panel = "TRULY-WVGA",
++	.reset   = mx6q_sabreauto_reset_mipi_dsi,
++};
++
+ static struct ipuv3_fb_platform_data sabr_fb_data[] = {
+ 	{ /*fb0*/
+ 	.disp_dev = "ldb",
+@@ -1128,6 +1151,7 @@ static void __init mx6_board_init(void)
+ 	for (i = 0; i < ARRAY_SIZE(sabr_fb_data); i++)
+ 		imx6q_add_ipuv3fb(i, &sabr_fb_data[i]);
+ 
++	imx6q_add_mipi_dsi(&mipi_dsi_pdata);
+ 	imx6q_add_lcdif(&lcdif_data);
+ 	imx6q_add_ldb(&ldb_data);
+ 	imx6q_add_v4l2_output(0);
+diff --git a/arch/arm/mach-mx6/clock.c b/arch/arm/mach-mx6/clock.c
+index a837918..a632e41 100644
+--- a/arch/arm/mach-mx6/clock.c
++++ b/arch/arm/mach-mx6/clock.c
+@@ -3782,6 +3782,16 @@ static struct clk hsi_tx_clk[] = {
+ 	 },
+ };
+ 
++static struct clk mipi_pllref_clk = {
++	 __INIT_CLK_DEBUG(mipi_pllref_clk)
++	.id = 0,
++	.parent = &pll3_pfd_540M,
++	.enable_reg = MXC_CCM_CCGR3,
++	.enable_shift = MXC_CCM_CCGRx_CG8_OFFSET,
++	.enable = _clk_enable,
++	.disable = _clk_disable,
++};
++
+ static struct clk hdmi_clk[] = {
+ 	{
+ 	 __INIT_CLK_DEBUG(hdmi_isfr_clk)
+@@ -4660,6 +4670,7 @@ static struct clk_lookup lookups[] = {
+ 	_REGISTER_CLOCK("imx2-wdt.1", NULL, dummy_clk),
+ 	_REGISTER_CLOCK(NULL, "hdmi_isfr_clk", hdmi_clk[0]),
+ 	_REGISTER_CLOCK(NULL, "hdmi_iahb_clk", hdmi_clk[1]),
++	_REGISTER_CLOCK(NULL, "mipi_pllref_clk", mipi_pllref_clk),
+ 	_REGISTER_CLOCK(NULL, NULL, vdoa_clk),
+ 	_REGISTER_CLOCK(NULL, NULL, aips_tz2_clk),
+ 	_REGISTER_CLOCK(NULL, NULL, aips_tz1_clk),
+diff --git a/arch/arm/mach-mx6/devices-imx6q.h b/arch/arm/mach-mx6/devices-imx6q.h
+index 9673f9e..2f0610d 100644
+--- a/arch/arm/mach-mx6/devices-imx6q.h
++++ b/arch/arm/mach-mx6/devices-imx6q.h
+@@ -175,3 +175,7 @@ extern const struct imx_spdif_dai_data imx6q_spdif_dai_data __initconst;
+ extern const struct imx_hdmi_soc_data imx6q_imx_hdmi_soc_dai_data __initconst;
+ #define imx6q_add_hdmi_soc_dai() \
+ 	imx_add_hdmi_soc_dai(&imx6q_imx_hdmi_soc_dai_data)
++
++extern const struct imx_mipi_dsi_data imx6q_mipi_dsi_data __initconst;
++#define imx6q_add_mipi_dsi(pdata)	\
++	imx_add_mipi_dsi(&imx6q_mipi_dsi_data, pdata)
+diff --git a/arch/arm/plat-mxc/devices/Kconfig b/arch/arm/plat-mxc/devices/Kconfig
+index 3be72bc..5d6b78e 100755
+--- a/arch/arm/plat-mxc/devices/Kconfig
++++ b/arch/arm/plat-mxc/devices/Kconfig
+@@ -160,3 +160,6 @@ config IMX_HAVE_PLATFORM_IMX_PM
+ 
+ config IMX_HAVE_PLATFORM_IMX_ASRC
+ 	bool
++
++config IMX_HAVE_PLATFORM_IMX_MIPI_DSI
++	bool
+diff --git a/arch/arm/plat-mxc/devices/Makefile b/arch/arm/plat-mxc/devices/Makefile
+index 831e259..27e6fcd 100755
+--- a/arch/arm/plat-mxc/devices/Makefile
++++ b/arch/arm/plat-mxc/devices/Makefile
+@@ -58,3 +58,4 @@ obj-$(CONFIG_IMX_HAVE_PLATFORM_MXC_HDMI) +=  platform-mxc-hdmi-core.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_MXC_HDMI) += platform-imx-hdmi-soc.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_MXC_HDMI) += platform-imx-hdmi-soc-dai.o
+ obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_ASRC) += platform-imx-asrc.o
++obj-$(CONFIG_IMX_HAVE_PLATFORM_IMX_MIPI_DSI) += platform-imx-mipi_dsi.o
+diff --git a/arch/arm/plat-mxc/devices/platform-imx-mipi_dsi.c b/arch/arm/plat-mxc/devices/platform-imx-mipi_dsi.c
+new file mode 100644
+index 0000000..1c583ee
+--- /dev/null
++++ b/arch/arm/plat-mxc/devices/platform-imx-mipi_dsi.c
+@@ -0,0 +1,58 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ */
++
++/*
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#include <mach/hardware.h>
++#include <mach/devices-common.h>
++
++#define imx_mipi_dsi_data_entry_single(soc, _id, _hwid, size)		\
++	{								\
++		.id = _id,						\
++		.iobase = soc ## _MIPI_DSI ## _hwid ## _BASE_ADDR,	\
++		.iosize = size,						\
++		.irq	= soc ## _INT_DSI ## _hwid,			\
++	}
++
++#define imx_mipi_dsi_data_entry(soc, _id, _hwid, _size)			\
++	[_id] = imx_mipi_dsi_data_entry_single(soc, _id, _hwid, _size)
++
++#ifdef CONFIG_SOC_IMX6Q
++const struct imx_mipi_dsi_data imx6q_mipi_dsi_data __initconst =
++			imx_mipi_dsi_data_entry_single(MX6Q, 0, , SZ_4K);
++#endif
++
++struct platform_device *__init imx_add_mipi_dsi(
++		const struct imx_mipi_dsi_data *data,
++		const struct mipi_dsi_platform_data *pdata)
++{
++	struct resource res[] = {
++		{
++			.start = data->iobase,
++			.end = data->iobase + data->iosize - 1,
++			.flags = IORESOURCE_MEM,
++		}, {
++			.start = data->irq,
++			.end = data->irq,
++			.flags = IORESOURCE_IRQ,
++		},
++	};
++
++	return imx_add_platform_device("mxc_mipi_dsi", -1,
++			res, ARRAY_SIZE(res), pdata, sizeof(*pdata));
++}
+diff --git a/arch/arm/plat-mxc/include/mach/devices-common.h b/arch/arm/plat-mxc/include/mach/devices-common.h
+index 5061be6..0dab3ef 100755
+--- a/arch/arm/plat-mxc/include/mach/devices-common.h
++++ b/arch/arm/plat-mxc/include/mach/devices-common.h
+@@ -580,6 +580,17 @@ struct platform_device *__init imx_add_hdmi_soc(void);
+ 
+ struct platform_device *__init imx_add_hdmi_soc_dai(
+ 		const struct imx_hdmi_soc_data *data);
++
++#include <mach/mipi_dsi.h>
++struct imx_mipi_dsi_data {
++	int id;
++	resource_size_t iobase;
++	resource_size_t iosize;
++	resource_size_t irq;
++};
++struct platform_device *__init imx_add_mipi_dsi(
++		const struct imx_mipi_dsi_data *data,
++		const struct mipi_dsi_platform_data *pdata);
+ struct platform_device *__init imx_add_dcp(
+ 
+ struct imx_fsl_usb2_otg_data {
+diff --git a/arch/arm/plat-mxc/include/mach/mipi_dsi.h b/arch/arm/plat-mxc/include/mach/mipi_dsi.h
+new file mode 100644
+index 0000000..0dd1f08
+--- /dev/null
++++ b/arch/arm/plat-mxc/include/mach/mipi_dsi.h
+@@ -0,0 +1,225 @@
++/*
++ * Copyright (C) 2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, write to the Free Software Foundation, Inc.,
++ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
++ */
++
++#ifndef __INCLUDE_MIPI_DSI_H
++#define __INCLUDE_MIPI_DSI_H
++
++#define     MIPI_DSI_VERSION		(0x000)
++#define     MIPI_DSI_PWR_UP		(0x004)
++#define     MIPI_DSI_CLKMGR_CFG		(0x008)
++#define     MIPI_DSI_DPI_CFG		(0x00c)
++#define     MIPI_DSI_DBI_CFG		(0x010)
++#define     MIPI_DSI_DBIS_CMDSIZE	(0x014)
++#define     MIPI_DSI_PCKHDL_CFG		(0x018)
++#define     MIPI_DSI_VID_MODE_CFG	(0x01c)
++#define     MIPI_DSI_VID_PKT_CFG	(0x020)
++#define     MIPI_DSI_CMD_MODE_CFG	(0x024)
++#define     MIPI_DSI_TMR_LINE_CFG	(0x028)
++#define     MIPI_DSI_VTIMING_CFG	(0x02c)
++#define     MIPI_DSI_PHY_TMR_CFG	(0x030)
++#define     MIPI_DSI_GEN_HDR		(0x034)
++#define     MIPI_DSI_GEN_PLD_DATA	(0x038)
++#define     MIPI_DSI_CMD_PKT_STATUS	(0x03c)
++#define     MIPI_DSI_TO_CNT_CFG		(0x040)
++#define     MIPI_DSI_ERROR_ST0		(0x044)
++#define     MIPI_DSI_ERROR_ST1		(0x048)
++#define     MIPI_DSI_ERROR_MSK0		(0x04c)
++#define     MIPI_DSI_ERROR_MSK1		(0x050)
++#define     MIPI_DSI_PHY_RSTZ		(0x054)
++#define     MIPI_DSI_PHY_IF_CFG		(0x058)
++#define     MIPI_DSI_PHY_IF_CTRL	(0x05c)
++#define     MIPI_DSI_PHY_STATUS		(0x060)
++#define     MIPI_DSI_PHY_TST_CTRL0	(0x064)
++#define     MIPI_DSI_PHY_TST_CTRL1	(0x068)
++
++#define		DSI_PWRUP_RESET					(0x0 << 0)
++#define		DSI_PWRUP_POWERUP				(0x1 << 0)
++
++#define		DSI_DPI_CFG_VID_SHIFT				(0)
++#define		DSI_DPI_CFG_VID_MASK				(0x3)
++#define		DSI_DPI_CFG_COLORCODE_SHIFT			(2)
++#define		DSI_DPI_CFG_COLORCODE_MASK			(0x7)
++#define		DSI_DPI_CFG_DATAEN_ACT_LOW			(0x1 << 5)
++#define		DSI_DPI_CFG_DATAEN_ACT_HIGH			(0x0 << 5)
++#define		DSI_DPI_CFG_VSYNC_ACT_LOW			(0x1 << 6)
++#define		DSI_DPI_CFG_VSYNC_ACT_HIGH			(0x0 << 6)
++#define		DSI_DPI_CFG_HSYNC_ACT_LOW			(0x1 << 7)
++#define		DSI_DPI_CFG_HSYNC_ACT_HIGH			(0x0 << 7)
++#define		DSI_DPI_CFG_SHUTD_ACT_LOW			(0x1 << 8)
++#define		DSI_DPI_CFG_SHUTD_ACT_HIGH			(0x0 << 8)
++#define		DSI_DPI_CFG_COLORMODE_ACT_LOW			(0x1 << 9)
++#define		DSI_DPI_CFG_COLORMODE_ACT_HIGH			(0x0 << 9)
++#define		DSI_DPI_CFG_EN18LOOSELY				(0x1 << 10)
++
++#define		DSI_PCKHDL_CFG_EN_EOTP_TX			(0x1 << 0)
++#define		DSI_PCKHDL_CFG_EN_EOTP_RX			(0x1 << 1)
++#define		DSI_PCKHDL_CFG_EN_BTA				(0x1 << 2)
++#define		DSI_PCKHDL_CFG_EN_ECC_RX			(0x1 << 3)
++#define		DSI_PCKHDL_CFG_EN_CRC_RX			(0x1 << 4)
++#define		DSI_PCKHDL_CFG_GEN_VID_RX_MASK			(0x3)
++#define		DSI_PCKHDL_CFG_GEN_VID_RX_SHIFT			(5)
++
++#define		DSI_VID_MODE_CFG_EN				(0x1 << 0)
++#define		DSI_VID_MODE_CFG_EN_BURSTMODE			(0x3 << 1)
++#define		DSI_VID_MODE_CFG_TYPE_MASK			(0x3)
++#define		DSI_VID_MODE_CFG_TYPE_SHIFT			(1)
++#define		DSI_VID_MODE_CFG_EN_LP_VSA			(0x1 << 3)
++#define		DSI_VID_MODE_CFG_EN_LP_VBP			(0x1 << 4)
++#define		DSI_VID_MODE_CFG_EN_LP_VFP			(0x1 << 5)
++#define		DSI_VID_MODE_CFG_EN_LP_VACT			(0x1 << 6)
++#define		DSI_VID_MODE_CFG_EN_LP_HBP			(0x1 << 7)
++#define		DSI_VID_MODE_CFG_EN_LP_HFP			(0x1 << 8)
++#define		DSI_VID_MODE_CFG_EN_MULTI_PKT			(0x1 << 9)
++#define		DSI_VID_MODE_CFG_EN_NULL_PKT			(0x1 << 10)
++#define		DSI_VID_MODE_CFG_EN_FRAME_ACK			(0x1 << 11)
++#define		DSI_VID_MODE_CFG_EN_LP_MODE (DSI_VID_MODE_CFG_EN_LP_VSA | \
++						 DSI_VID_MODE_CFG_EN_LP_VBP | \
++						 DSI_VID_MODE_CFG_EN_LP_VFP | \
++						 DSI_VID_MODE_CFG_EN_LP_HFP | \
++						 DSI_VID_MODE_CFG_EN_LP_HBP | \
++						 DSI_VID_MODE_CFG_EN_LP_VACT)
++
++
++
++#define		DSI_VID_PKT_CFG_VID_PKT_SZ_MASK			(0x7ff)
++#define		DSI_VID_PKT_CFG_VID_PKT_SZ_SHIFT		(0)
++#define		DSI_VID_PKT_CFG_NUM_CHUNKS_MASK			(0x3ff)
++#define		DSI_VID_PKT_CFG_NUM_CHUNKS_SHIFT		(11)
++#define		DSI_VID_PKT_CFG_NULL_PKT_SZ_MASK		(0x3ff)
++#define		DSI_VID_PKT_CFG_NULL_PKT_SZ_SHIFT		(21)
++
++#define		MIPI_DSI_CMD_MODE_CFG_EN_LOWPOWER		(0x1FFF)
++#define		MIPI_DSI_CMD_MODE_CFG_EN_CMD_MODE		(0x1 << 0)
++
++#define		DSI_TME_LINE_CFG_HSA_TIME_MASK			(0x1ff)
++#define		DSI_TME_LINE_CFG_HSA_TIME_SHIFT			(0)
++#define		DSI_TME_LINE_CFG_HBP_TIME_MASK			(0x1ff)
++#define		DSI_TME_LINE_CFG_HBP_TIME_SHIFT			(9)
++#define		DSI_TME_LINE_CFG_HLINE_TIME_MASK		(0x3fff)
++#define		DSI_TME_LINE_CFG_HLINE_TIME_SHIFT		(18)
++
++#define		DSI_VTIMING_CFG_VSA_LINES_MASK			(0xf)
++#define		DSI_VTIMING_CFG_VSA_LINES_SHIFT			(0)
++#define		DSI_VTIMING_CFG_VBP_LINES_MASK			(0x3f)
++#define		DSI_VTIMING_CFG_VBP_LINES_SHIFT			(4)
++#define		DSI_VTIMING_CFG_VFP_LINES_MASK			(0x3f)
++#define		DSI_VTIMING_CFG_VFP_LINES_SHIFT			(10)
++#define		DSI_VTIMING_CFG_V_ACT_LINES_MASK		(0x7ff)
++#define		DSI_VTIMING_CFG_V_ACT_LINES_SHIFT		(16)
++
++#define		DSI_PHY_TMR_CFG_BTA_TIME_MASK			(0xfff)
++#define		DSI_PHY_TMR_CFG_BTA_TIME_SHIFT			(0)
++#define		DSI_PHY_TMR_CFG_LP2HS_TIME_MASK			(0xff)
++#define		DSI_PHY_TMR_CFG_LP2HS_TIME_SHIFT		(12)
++#define		DSI_PHY_TMR_CFG_HS2LP_TIME_MASK			(0xff)
++#define		DSI_PHY_TMR_CFG_HS2LP_TIME_SHIFT		(20)
++
++#define		DSI_PHY_IF_CFG_N_LANES_MASK			(0x3)
++#define		DSI_PHY_IF_CFG_N_LANES_SHIFT			(0)
++#define		DSI_PHY_IF_CFG_WAIT_TIME_MASK			(0xff)
++#define		DSI_PHY_IF_CFG_WAIT_TIME_SHIFT			(2)
++
++#define		DSI_PHY_RSTZ_EN_CLK				(0x1 << 2)
++#define		DSI_PHY_RSTZ_DISABLE_RST			(0x1 << 1)
++#define		DSI_PHY_RSTZ_DISABLE_SHUTDOWN			(0x1 << 0)
++#define		DSI_PHY_RSTZ_RST				(0x0)
++
++#define		DSI_PHY_STATUS_LOCK				(0x1 << 0)
++#define		DSI_PHY_STATUS_STOPSTATE_CLK_LANE		(0x1 << 2)
++
++#define		DSI_GEN_HDR_TYPE_MASK				(0xff)
++#define		DSI_GEN_HDR_TYPE_SHIFT				(0)
++#define		DSI_GEN_HDR_DATA_MASK				(0xffff)
++#define		DSI_GEN_HDR_DATA_SHIFT				(8)
++
++#define		DSI_CMD_PKT_STATUS_GEN_CMD_EMPTY		(0x1 << 0)
++#define		DSI_CMD_PKT_STATUS_GEN_CMD_FULL			(0x1 << 1)
++#define		DSI_CMD_PKT_STATUS_GEN_PLD_W_EMPTY		(0x1 << 2)
++#define		DSI_CMD_PKT_STATUS_GEN_PLD_W_FULL		(0x1 << 3)
++#define		DSI_CMD_PKT_STATUS_GEN_PLD_R_EMPTY		(0x1 << 4)
++#define		DSI_CMD_PKT_STATUS_GEN_RD_CMD_BUSY		(0x1 << 6)
++
++#define		DSI_ERROR_MSK0_ALL_MASK				(0x1fffff)
++#define		DSI_ERROR_MSK1_ALL_MASK				(0x3ffff)
++
++#define		DSI_PHY_IF_CTRL_RESET				(0x0)
++#define		DSI_PHY_IF_CTRL_TX_REQ_CLK_HS			(0x1 << 0)
++#define		DSI_PHY_IF_CTRL_TX_REQ_CLK_ULPS			(0x1 << 1)
++#define		DSI_PHY_IF_CTRL_TX_EXIT_CLK_ULPS		(0x1 << 2)
++#define		DSI_PHY_IF_CTRL_TX_REQ_DATA_ULPS		(0x1 << 3)
++#define		DSI_PHY_IF_CTRL_TX_EXIT_DATA_ULPS		(0x1 << 4)
++#define		DSI_PHY_IF_CTRL_TX_TRIG_MASK			(0xF)
++#define		DSI_PHY_IF_CTRL_TX_TRIG_SHIFT			(5)
++
++#define		DSI_PHY_CLK_INIT_COMMAND			(0x44)
++#define		DSI_GEN_PLD_DATA_BUF_SIZE			(0x4)
++/**
++ * struct mipi_dsi_platform_data - MIPI DSI driver platform data.
++ *
++ * This structure communicates platform-specific information to the MIPI DSI
++ * driver that can't be expressed as resources.
++ *
++ * @ipu_id:	 the id of IPUs on which this MIPI DSI works
++ *
++ * @disp_id:	 the id of IPU display interfaces
++ *
++ * @lcd_panel:	 the supported mipi LCD panel string
++ *
++ * @init:	 A pointer to a function the driver will call to
++ *              initialize the platform (e.g., set up the pin mux).
++ * @exit:         A pointer to a function the driver will call to
++ *                           exit the platform (e.g., free pins).
++ * @io_regulator:	 io regulator name for MIPI DSI display module
++ *
++ * @core_regulator:	 core regulator name for MIPI DSI display module
++ *
++ * @analog_regulator:	 analog regulator name for MIPI DSI display module
++ *
++ * @io_volt:	 io regulator voltage for MIPI DSI display module
++ *
++ * @core_volt:	 core regulator voltage for MIPI DSI display module
++ *
++ * @analog_volt:	 analog regulator voltage for MIPI DSI display module
++ *
++ * @reset:		 A pointer to a function the driver will call to
++ *                           reset the MIPI DSI display module
++ * @lcd_power:		 A pointer to a function the drvier will call to
++ *                           configure the power of MIPI LCD panel
++ * @backlight_power:         A pointer to a function the drvier will call to
++ *                           configure the power of MIPI LCD backlight
++ */
++struct mipi_dsi_platform_data {
++	/* SoC hardware information. */
++	int	ipu_id;
++	int	disp_id;
++	char	*lcd_panel;
++	int	(*init)(struct platform_device *);
++	void	(*exit)(struct platform_device *);
++
++	/* board related information. */
++	char	 *io_regulator;
++	char	 *core_regulator;
++	char	 *analog_regulator;
++	int	io_volt;
++	int	core_volt;
++	int	analog_volt;
++	void	 (*reset) (void);
++	void	 (*lcd_power)(int);
++	void	 (*backlight_power)(int);
++};
++#endif
+diff --git a/arch/arm/plat-mxc/include/mach/mx6.h b/arch/arm/plat-mxc/include/mach/mx6.h
+index 17419d9..7ad9058 100644
+--- a/arch/arm/plat-mxc/include/mach/mx6.h
++++ b/arch/arm/plat-mxc/include/mach/mx6.h
+@@ -246,6 +246,7 @@
+ #define MX6Q_UART3_BASE_ADDR UART3_BASE_ADDR
+ #define MX6Q_UART4_BASE_ADDR UART4_BASE_ADDR
+ #define MX6Q_FEC_BASE_ADDR	 ENET_BASE_ADDR
++#define MX6Q_MIPI_DSI_BASE_ADDR	 MIPI_DSI_BASE_ADDR
+ 
+ /* define virtual address */
+ #define PERIPBASE_VIRT 0xF2000000
+@@ -413,6 +414,7 @@
+ #define MX6Q_INT_UART3	MXC_INT_UART3_ANDED
+ #define MX6Q_INT_UART4	MXC_INT_UART4_ANDED
+ #define MX6Q_INT_FEC	MXC_INT_ENET1
++#define MX6Q_INT_DSI	MXC_INT_DSI
+ 
+ #define IRQ_LOCALTIMER				29
+ 
+-- 
+1.7.7.4
+

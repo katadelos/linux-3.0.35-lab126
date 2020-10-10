@@ -1,0 +1,93 @@
+From f14478afad95cb2ab9a3b17332b9cfb37f7de77d Mon Sep 17 00:00:00 2001
+From: Terry Lv <r65388@freescale.com>
+Date: Fri, 12 Oct 2012 14:39:34 +0800
+Subject: [PATCH 2132/2463] ENGR00229327: otp: driver causes warning when
+ enable CONFIG_LOCKDEP
+
+When CONFIG_LOCKDEP is enabled, it will cause warings:
+
+------------[ cut here ]------------
+WARNING: at kernel/lockdep.c:2885 sysfs_add_file_mode+0x54/0xc0()
+     Modules linked in:
+     [<80046364>] (unwind_backtrace+0x0/0xfc) from [<800758c0>]
+     (warn_slowpath_common+0x4c/0x64)
+     [<800758c0>] (warn_slowpath_common+0x4c/0x64) from [<800758f4>]
+     (warn_slowpath_null+0x1c/0x24)
+     [<800758f4>] (warn_slowpath_null+0x1c/0x24) from [<801536c4>]
+     (sysfs_add_file_mode+0x54/0xc0)
+     [<801536c4>] (sysfs_add_file_mode+0x54/0xc0) from [<8015616c>]
+     (internal_create_group+0xdc/0x1d8)
+     [<8015616c>] (internal_create_group+0xdc/0x1d8) from [<80524110>]
+     (fsl_otp_probe+0x168/0x1d4)
+     [<80524110>] (fsl_otp_probe+0x168/0x1d4) from [<802b42e8>]
+     (platform_drv_probe+0x18/0x1c)
+     [<802b42e8>] (platform_drv_probe+0x18/0x1c) from [<802b2fe4>]
+     (driver_probe_device+0x98/0x1a4)
+     [<802b2fe4>] (driver_probe_device+0x98/0x1a4) from [<802b3184>]
+     (__driver_attach+0x94/0x98)
+     [<802b3184>] (__driver_attach+0x94/0x98) from [<802b280c>]
+     (bus_for_each_dev+0x60/0x8c)
+     [<802b280c>] (bus_for_each_dev+0x60/0x8c) from [<802b2180>]
+     (bus_add_driver+0x190/0x268)
+     [<802b2180>] (bus_add_driver+0x190/0x268) from [<802b3788>]
+     (driver_register+0x78/0x13c)
+     [<802b3788>] (driver_register+0x78/0x13c) from [<800394ac>]
+     (do_one_initcall+0x30/0x170)
+     [<800394ac>] (do_one_initcall+0x30/0x170) from [<800083cc>]
+     (kernel_init+0x98/0x144)
+     [<800083cc>] (kernel_init+0x98/0x144) from [<8004003c>]
+     (kernel_thread_exit+0x0/0x8)
+     ---[ end trace 877415a10b5d9cb1 ]---
+
+also, on imx6sl, it will cause below issue:
+BUG: key bffea2e4 not in .data!
+BUG: key bffea300 not in .data!
+BUG: key bffea31c not in .data!
+BUG: key bffea338 not in .data!
+BUG: key bffea354 not in .data!
+BUG: key bffea370 not in .data!
+BUG: key bffea38c not in .data!
+BUG: key bffea3a8 not in .data!
+BUG: key bffea3c4 not in .data!
+BUG: key bffea3e0 not in .data!
+BUG: key bffea3fc not in .data!
+BUG: key bffea418 not in .data!
+BUG: key bffea434 not in .data!
+BUG: key bffea450 not in .data!
+BUG: key bffea46c not in .data!
+BUG: key bffea488 not in .data!
+BUG: key bffea4a4 not in .data!
+BUG: key bffea4c0 not in .data!
+BUG: key bffea4dc not in .data!
+
+We need to call sysfs_attr_init to initlize sysfs attr.
+
+Signed-off-by: Terry Lv <r65388@freescale.com>
+---
+ drivers/char/fsl_otp.c |    3 ++-
+ 1 files changed, 2 insertions(+), 1 deletions(-)
+
+diff --git a/drivers/char/fsl_otp.c b/drivers/char/fsl_otp.c
+index 05ad55e..7021c42 100755
+--- a/drivers/char/fsl_otp.c
++++ b/drivers/char/fsl_otp.c
+@@ -1,7 +1,7 @@
+ /*
+  * Freescale On-Chip OTP driver
+  *
+- * Copyright (C) 2010-2011 Freescale Semiconductor, Inc. All Rights Reserved.
++ * Copyright (C) 2010-2012 Freescale Semiconductor, Inc. All Rights Reserved.
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License as published by
+@@ -153,6 +153,7 @@ static int __init alloc_otp_attr(struct mxc_otp_platform_data *pdata)
+ 		goto error_out;
+ 
+ 	for (i = 0; i < otp_data->fuse_num; i++) {
++		sysfs_attr_init(&kattr[i].attr);
+ 		kattr[i].attr.name = pdata->fuse_name[i];
+ 		kattr[i].attr.mode = 0600;
+ 		kattr[i].show  = otp_show;
+-- 
+1.7.7.4
+

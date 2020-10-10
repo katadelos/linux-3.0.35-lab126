@@ -1,0 +1,40 @@
+From ead9ee46f1e52f8913c4d9df9a5eb633f7ab2122 Mon Sep 17 00:00:00 2001
+From: Tony LIU <junjie.liu@freescale.com>
+Date: Fri, 1 Jun 2012 17:55:17 +0800
+Subject: [PATCH 1564/2463] ENGR00211329-1 Fix system dump of unhandled usb
+ irq
+
+Revert "ENGR00211686 mx6 usb: system crash after suspend/resume"
+
+This reverts commit eb0fdddfc19ec5597f5973499765a5a8f5e75749.
+
+Signed-off-by: Tony LIU <junjie.liu@freescale.com>
+---
+ drivers/usb/gadget/arcotg_udc.c |    4 ++--
+ 1 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/usb/gadget/arcotg_udc.c b/drivers/usb/gadget/arcotg_udc.c
+index 842c54e..ea81802 100755
+--- a/drivers/usb/gadget/arcotg_udc.c
++++ b/drivers/usb/gadget/arcotg_udc.c
+@@ -3432,6 +3432,7 @@ static int fsl_udc_resume(struct platform_device *pdev)
+ 		/* if in host mode, we need to do nothing */
+ 		if ((fsl_readl(&dr_regs->otgsc) & OTGSC_STS_USB_ID) == 0) {
+ 			dr_phy_low_power_mode(udc_controller, true);
++			dr_wake_up_enable(udc_controller, true);
+ 			goto end;
+ 		}
+ 		dr_controller_setup(udc_controller);
+@@ -3451,8 +3452,7 @@ end:
+ 		 * subsystem will not leave from low power mode.
+ 		 */
+ 		if (!udc_can_wakeup_system() &&
+-			(pdata->pmflags == 0) &&
+-			(fsl_readl(&dr_regs->otgsc) & OTGSC_STS_USB_ID)) {
++			(pdata->pmflags == 0)) {
+ 			dr_wake_up_enable(udc_controller, true);
+ 		}
+ 
+-- 
+1.7.7.4
+

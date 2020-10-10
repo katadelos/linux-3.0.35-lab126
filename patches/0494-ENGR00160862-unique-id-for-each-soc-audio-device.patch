@@ -1,0 +1,49 @@
+From 377251912f8bd7762ec5eaa5fd180849df9029aa Mon Sep 17 00:00:00 2001
+From: Alan Tull <alan.tull@freescale.com>
+Date: Wed, 26 Oct 2011 13:13:47 -0500
+Subject: [PATCH 0494/2463] ENGR00160862 unique id for each soc-audio device
+
+On boards which have more than one soc-audio device, the initialization
+of the first device will create a sysfs directory named
+/sys/devices/platform/soc-audio and subsequent soc-audio devices will
+fail to init because they try to create another sysfs directory of the
+same name.
+
+The solution is to have a unique number for each device such that
+different boards having combinations will be OK.
+
+Signed-off-by: Alan Tull <alan.tull@freescale.com>
+---
+ sound/soc/imx/imx-sgtl5000.c |    2 +-
+ sound/soc/imx/imx-spdif.c    |    2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/sound/soc/imx/imx-sgtl5000.c b/sound/soc/imx/imx-sgtl5000.c
+index b59abf2..0ebc600 100644
+--- a/sound/soc/imx/imx-sgtl5000.c
++++ b/sound/soc/imx/imx-sgtl5000.c
+@@ -368,7 +368,7 @@ static int __init imx_sgtl5000_init(void)
+ 	else
+ 		imx_sgtl5000_dai[0].codec_name = "sgtl5000.1-000a";
+ 
+-	imx_sgtl5000_snd_device = platform_device_alloc("soc-audio", -1);
++	imx_sgtl5000_snd_device = platform_device_alloc("soc-audio", 1);
+ 	if (!imx_sgtl5000_snd_device)
+ 		return -ENOMEM;
+ 
+diff --git a/sound/soc/imx/imx-spdif.c b/sound/soc/imx/imx-spdif.c
+index 885d8d58..efee769 100644
+--- a/sound/soc/imx/imx-spdif.c
++++ b/sound/soc/imx/imx-spdif.c
+@@ -113,7 +113,7 @@ static int __init imx_spdif_init(void)
+ 		return -ENOMEM;
+ 	}
+ 
+-	imx_spdif_snd_device = platform_device_alloc("soc-audio", -1);
++	imx_spdif_snd_device = platform_device_alloc("soc-audio", 3);
+ 	if (!imx_spdif_snd_device) {
+ 		pr_err("%s - failed platform_device_alloc\n", __func__);
+ 		return -ENOMEM;
+-- 
+1.7.7.4
+
