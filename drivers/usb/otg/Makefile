@@ -23,3 +23,4 @@ fsl_usb2_otg-objs		:= fsl_otg.o otg_fsm.o
 obj-$(CONFIG_FSL_USB2_OTG)	+= fsl_usb2_otg.o
 fsl_otg_arc-objs		:= fsl_otg.o otg_fsm.o
 obj-$(CONFIG_MXC_OTG)		+= fsl_otg_arc.o
+obj-$(CONFIG_USB_KINDLE_OTG_CONTROL) += otg_control.o
