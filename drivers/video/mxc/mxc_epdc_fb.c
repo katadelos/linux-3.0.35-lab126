@@ -424,9 +424,10 @@ struct epd_vc_data_volts {
 
 #if defined(CONFIG_LAB126)
 
+static int mxc_epdc_debugging = 0;
+module_param_named(debug, mxc_epdc_debugging, int, 0644);
 #include "mxc_epdc_fb_lab126.c"
 #define WFM_TEMP_BUF_LEN   (1024*1024*10)
-static int mxc_epdc_debugging = 0;
 static int mxc_epdc_paused = 0;
 static int use_cmap = 0;
 
@@ -498,6 +499,7 @@ static void dump_epdc_reg(void)
 	printk(KERN_INFO "EPDC_CTRL 0x%x\n", __raw_readl(EPDC_CTRL));
 	printk(KERN_INFO "EPDC_WVADDR 0x%x\n", __raw_readl(EPDC_WVADDR));
 	printk(KERN_INFO "EPDC_WB_ADDR 0x%x\n", __raw_readl(EPDC_WB_ADDR));
+	printk(KERN_INFO "EPDC_WB_ADDR_TCE 0x%x\n", __raw_readl(EPDC_WB_ADDR_TCE));
 	printk(KERN_INFO "EPDC_RES 0x%x\n", __raw_readl(EPDC_RES));
 	printk(KERN_INFO "EPDC_FORMAT 0x%x\n", __raw_readl(EPDC_FORMAT));
 	printk(KERN_INFO "EPDC_FIFOCTRL 0x%x\n", __raw_readl(EPDC_FIFOCTRL));
@@ -550,6 +552,132 @@ static void dump_epdc_reg(void)
 	printk(KERN_INFO "EPDC_GPIO 0x%x\n", __raw_readl(EPDC_GPIO));
 	printk(KERN_INFO "EPDC_VERSION 0x%x\n", __raw_readl(EPDC_VERSION));
 	printk(KERN_INFO "\n\n");
+}
+
+/* Compact state trace used for comparison with the 6.x Lab126 port. */
+static void lab126_debug_epdc_state(const char *where)
+{
+	if (!mxc_epdc_debugging)
+		return;
+
+	printk(KERN_INFO
+		"mxc_epdc_fb: [%s] EPDC ctrl=0x%x irq=0x%x mask=0x%x "
+		"irq1=0x%x irq2=0x%x status=0x%x upd_addr=0x%x "
+		"upd_stride=0x%x upd_cord=0x%x upd_size=0x%x upd_ctrl=0x%x "
+		"wb_addr=0x%x wb_tce=0x%x temp=0x%x\n",
+		where,
+		__raw_readl(EPDC_CTRL), __raw_readl(EPDC_IRQ),
+		__raw_readl(EPDC_IRQ_MASK), __raw_readl(EPDC_IRQ1),
+		__raw_readl(EPDC_IRQ2), __raw_readl(EPDC_STATUS),
+		__raw_readl(EPDC_UPD_ADDR), __raw_readl(EPDC_UPD_STRIDE),
+		__raw_readl(EPDC_UPD_CORD), __raw_readl(EPDC_UPD_SIZE),
+		__raw_readl(EPDC_UPD_CTRL), __raw_readl(EPDC_WB_ADDR),
+		__raw_readl(EPDC_WB_ADDR_TCE), __raw_readl(EPDC_TEMP));
+}
+
+static void lab126_debug_working_buffer(struct mxc_epdc_fb_data *fb_data,
+					const char *stage)
+{
+	u8 *buffer;
+	u32 i;
+	u8 min = 0xff;
+	u8 max = 0;
+	u32 hash = 2166136261U;
+
+	if (!mxc_epdc_debugging || !fb_data ||
+		!fb_data->working_buffer_A_virt || !fb_data->working_buffer_size)
+		return;
+
+	buffer = (u8 *)fb_data->working_buffer_A_virt;
+	for (i = 0; i < fb_data->working_buffer_size; i++) {
+		if (buffer[i] < min)
+			min = buffer[i];
+		if (buffer[i] > max)
+			max = buffer[i];
+		hash ^= buffer[i];
+		hash *= 16777619U;
+	}
+
+	printk(KERN_INFO
+		"Lab126 WB %s phys=0x%x wb=0x%x wb_tce=0x%x size=%u "
+		"min=0x%02x max=0x%02x first=0x%02x last=0x%02x hash=0x%08x\n",
+		stage, fb_data->working_buffer_A_phys,
+		__raw_readl(EPDC_WB_ADDR), __raw_readl(EPDC_WB_ADDR_TCE),
+		fb_data->working_buffer_size, min, max, buffer[0],
+		buffer[fb_data->working_buffer_size - 1], hash);
+}
+
+static void lab126_debug_pxp_buffer(struct update_data_list *update,
+					struct mxc_epdc_fb_data *fb_data)
+{
+	u8 *buffer;
+	u32 bytes;
+	u32 i;
+	u8 min = 0xff;
+	u8 max = 0;
+	u32 hash = 2166136261U;
+
+	if (!mxc_epdc_debugging || !update || !fb_data || !update->virt_addr ||
+		!update->update_desc)
+		return;
+
+	bytes = fb_data->pxp_conf.out_param.stride *
+		fb_data->pxp_conf.out_param.height;
+	if (!bytes || update->update_desc->epdc_offs >= fb_data->max_pix_size ||
+		bytes > fb_data->max_pix_size - update->update_desc->epdc_offs)
+		return;
+
+	buffer = (u8 *)update->virt_addr + update->update_desc->epdc_offs;
+	for (i = 0; i < bytes; i++) {
+		if (buffer[i] < min)
+			min = buffer[i];
+		if (buffer[i] > max)
+			max = buffer[i];
+		hash ^= buffer[i];
+		hash *= 16777619U;
+	}
+
+	printk(KERN_INFO
+		"mxc_epdc_fb: PXP output bytes=%u addr=0x%x offs=0x%x "
+		"stride=%u min=0x%02x max=0x%02x first=0x%02x last=0x%02x "
+		"hash=0x%08x\n",
+		bytes, update->phys_addr, update->update_desc->epdc_offs,
+		fb_data->pxp_conf.out_param.stride, min, max, buffer[0],
+		buffer[bytes - 1], hash);
+}
+
+static void lab126_debug_pxp_config(struct update_data_list *update,
+					struct mxc_epdc_fb_data *fb_data,
+					u32 src_width, u32 src_height,
+					u32 input_offs, u32 output_offs)
+{
+	if (!mxc_epdc_debugging || !update || !update->update_desc)
+		return;
+
+	printk(KERN_INFO
+		"mxc_epdc_fb: PXP config marker=%u src=%ux%u "
+		"region=%d,%d %ux%u pxp=%d,%d %ux%u "
+		"input_offs=%u output_offs=%u epdc_offs=%u stride=%u "
+		"rotate=%d lut=0x%x s0_fmt=0x%x out_fmt=0x%x "
+		"sg0=0x%x sg1=0x%x\n",
+		update->update_desc->upd_data.update_marker,
+		src_width, src_height,
+		update->update_desc->upd_data.update_region.left,
+		update->update_desc->upd_data.update_region.top,
+		update->update_desc->upd_data.update_region.width,
+		update->update_desc->upd_data.update_region.height,
+		fb_data->pxp_conf.proc_data.srect.left,
+		fb_data->pxp_conf.proc_data.srect.top,
+		fb_data->pxp_conf.proc_data.srect.width,
+		fb_data->pxp_conf.proc_data.srect.height,
+		input_offs, output_offs, update->update_desc->epdc_offs,
+		update->update_desc->epdc_stride,
+		fb_data->pxp_conf.proc_data.rotate,
+		fb_data->pxp_conf.proc_data.lut_transform,
+		fb_data->pxp_conf.s0_param.pixel_fmt,
+		fb_data->pxp_conf.out_param.pixel_fmt,
+		sg_dma_address(&fb_data->sg[0]),
+		sg_dma_address(&fb_data->sg[1]));
 }
 
 #ifdef DEBUG
@@ -887,6 +1015,7 @@ static void epdc_submit_update(u32 lut_num, u32 waveform_mode, u32 update_mode,
 	    update_mode;
 
 	__raw_writel(reg_val, EPDC_UPD_CTRL);
+	lab126_debug_epdc_state("submit");
 }
 
 static void epdc_submit_paused_update(int waveform)
@@ -901,6 +1030,7 @@ static void epdc_submit_paused_update(int waveform)
 	}
 	reg_val &= ~EPDC_UPD_CTRL_AUTOWV_PAUSE;
 	__raw_writel(reg_val, EPDC_UPD_CTRL);
+	lab126_debug_epdc_state("submit-paused");
 }
 
 static inline bool epdc_is_lut_complete(int rev, u32 lut_num)
@@ -1186,6 +1316,7 @@ static void epdc_init_settings(struct mxc_epdc_fb_data *fb_data)
 
 	/* Enable clock gating (clear to enable) */
 	__raw_writel(EPDC_CTRL_CLKGATE, EPDC_CTRL_CLEAR);
+	lab126_debug_epdc_state("powerup");
 	while (__raw_readl(EPDC_CTRL) & (EPDC_CTRL_SFTRST | EPDC_CTRL_CLKGATE))
 		;
 
@@ -1459,6 +1590,7 @@ static int epdc_powerup_wait_for_enabled(struct mxc_epdc_fb_data *fb_data)
 
 	LLOG_DEVICE_METRIC(DEVICE_METRIC_HIGH_PRIORITY, DEVICE_METRIC_TYPE_COUNTER,
 	                   "kernel", DRIVER_NAME, "powerup_timeout", 1, "");
+	lab126_debug_epdc_state("powerup-timeout");
 
 	mutex_lock(&fb_data->power_mutex);
 	epdc_force_powerdown(fb_data);
@@ -1561,6 +1693,7 @@ static void epdc_powerdown(struct mxc_epdc_fb_data *fb_data)
 		|| (fb_data->updates_active)) {
 		return;
 	}
+	lab126_debug_epdc_state("powerdown-before");
 
 	/* Reset counter to reduce chance of overflow */
 	fb_data->order_cnt = 0;
@@ -1585,6 +1718,7 @@ static void epdc_powerdown(struct mxc_epdc_fb_data *fb_data)
 	fb_data->powering_down = false;
 	init_completion(&fb_data->powerup_compl);
 	dev_dbg(fb_data->dev, "%s: Power state: %d\n", __FUNCTION__, fb_data->power_state);
+	lab126_debug_epdc_state("powerdown-after");
 
 	if (fb_data->wait_for_powerdown) {
 		fb_data->wait_for_powerdown = false;
@@ -1654,6 +1788,8 @@ static int epdc_init_sequence(struct mxc_epdc_fb_data *fb_data)
 		mutex_lock(&fb_data->power_mutex);
 		epdc_powerup_vcom(fb_data, WAVEFORM_MODE_INIT, fb_data->temp_index);
 		ret = draw_mode0(fb_data);
+		if (!ret)
+			lab126_debug_working_buffer(fb_data, "after-mode0");
 		if (ret) {
 			LLOG_DEVICE_METRIC(DEVICE_METRIC_HIGH_PRIORITY, DEVICE_METRIC_TYPE_COUNTER,
 			                   "kernel", DRIVER_NAME, "mode0_failure", 1, "");
@@ -2440,6 +2576,8 @@ static int epdc_process_update(struct update_data_list *upd_data_list,
 		mutex_unlock(&fb_data->pxp_mutex);
 		return ret;
 	}
+	lab126_debug_pxp_config(upd_data_list, fb_data, src_width, src_height,
+				pxp_input_offs, pxp_output_offs);
 
 	/* This is a blocking call, so upon return PxP tx should be done */
 	ret = pxp_complete_update(fb_data, &hist_stat);
@@ -2448,6 +2586,11 @@ static int epdc_process_update(struct update_data_list *upd_data_list,
 		mutex_unlock(&fb_data->pxp_mutex);
 		return ret;
 	}
+	if (mxc_epdc_debugging)
+		printk(KERN_INFO
+			"mxc_epdc_fb: PXP complete marker=%u hist=0x%x\n",
+			upd_data->update_marker, hist_stat);
+	lab126_debug_pxp_buffer(upd_data_list, fb_data);
 
 	mutex_unlock(&fb_data->pxp_mutex);
 
@@ -3199,8 +3342,9 @@ static void epdc_submit_work_func(struct work_struct *work)
 				fb_data->cur_update->update_desc->upd_data.update_marker, fb_data->cur_update->lut_num, temp);
 	}
 
-	dev_dbg(fb_data->dev, "Sending update on LUT: %d\n", upd_data_list->lut_num);
-	epdc_submit_update(upd_data_list->lut_num,
+		dev_dbg(fb_data->dev, "Sending update on LUT: %d\n", upd_data_list->lut_num);
+		lab126_debug_working_buffer(fb_data, "before-submit");
+		epdc_submit_update(upd_data_list->lut_num,
 			   upd_data_list->update_desc->upd_data.waveform_mode,
 			   upd_data_list->update_desc->upd_data.update_mode,
 			   (upd_data_list->update_desc->upd_data.flags
@@ -3837,8 +3981,9 @@ static int mxc_epdc_fb_send_single_update(struct mxcfb_update_data *upd_data,
 		fb_data->wv_modes_update = false;
 	}
 
-	epdc_submit_update(upd_data_list->lut_num,
-			   upd_desc->upd_data.waveform_mode,
+		lab126_debug_working_buffer(fb_data, "before-submit");
+		epdc_submit_update(upd_data_list->lut_num,
+				   upd_desc->upd_data.waveform_mode,
 			   upd_desc->upd_data.update_mode,
 			   (upd_desc->upd_data.flags
 				& EPDC_FLAG_TEST_COLLISION) ? true : false,
@@ -4709,6 +4854,17 @@ static irqreturn_t mxc_epdc_irq_handler(int irq, void *data)
 	else
 		wb_pause = false;
 
+	if (mxc_epdc_debugging) {
+		lab126_debug_epdc_state("irq");
+		printk(KERN_INFO
+			"mxc_epdc_fb: IRQ stat=0x%llx luts_active=0x%x "
+			"wb_busy=%u upd_done=%u lut_cancelled=%u "
+			"collision=%u luts_available=0x%x waiting_wb=%u wb_pause=%u\n",
+			epdc_irq_stat, epdc_luts_active, epdc_wb_busy, epdc_upd_done,
+			epdc_lut_cancelled, epdc_collision, epdc_luts_avail,
+			epdc_waiting_on_wb, wb_pause);
+	}
+
 	if (!wb_pause)
 		epdc_upd_done = 0;
 
@@ -4836,6 +4992,8 @@ static irqreturn_t mxc_epdc_irq_handler(int irq, void *data)
 	 * If so, update queues and check for collisions
 	 */
 	if (epdc_waiting_on_wb) {
+		lab126_debug_working_buffer(fb_data, "after-wb");
+
 		/* Signal completion if submit workqueue was waiting on WB */
 		if (fb_data->waiting_for_wb && !wb_pause) {
 			dev_dbg(fb_data->dev, "Working buffer complete\n");
@@ -5352,7 +5510,8 @@ static irqreturn_t mxc_epdc_irq_handler(int irq, void *data)
 		fb_data->wv_modes_update = false;
 	}
 
-	epdc_submit_update(fb_data->cur_update->lut_num,
+		lab126_debug_working_buffer(fb_data, "before-submit");
+		epdc_submit_update(fb_data->cur_update->lut_num,
 			   fb_data->cur_update->update_desc->upd_data.waveform_mode,
 			   fb_data->cur_update->update_desc->upd_data.update_mode,
 			   false, fb_data->cur_update->update_desc->wb_pause,
@@ -5666,14 +5825,14 @@ static int mxc_epdc_fb_init_hw(struct fb_info *info)
 	if (ret == -EHWFAULT)
 		return ret;
 
-	wfm_using_builtin = true;
-	dev_err(fb_data->dev, "Failed to load fw! (err %d) Trying fallback fw\n", ret);
-	ret = request_firmware(&fw, "imx/default.fw.gz", fb_data->dev);
-	if (ret) {
-		dev_err(fb_data->dev, "Failed to load default fw!\n");
-		return ret;
-	}
-	return mxc_epdc_fb_process_fw(fb_data, fw);
+	/* This comparison image must exercise the live panel waveform.  A
+	 * fallback waveform hides a firmware-selection failure and produces a
+	 * misleading comparison with the stock kernel. */
+	wfm_using_builtin = false;
+	dev_err(fb_data->dev,
+		"Failed to load panel waveform %s (err %d); fallback disabled\n",
+		fb_data->fw_str, ret);
+	return ret;
 }
 
 static ssize_t store_update(struct device *device,

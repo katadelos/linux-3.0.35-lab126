@@ -753,6 +753,15 @@ int fetch_epdc_pmic_voltages( struct epd_vc_data_volts *vcdv, struct mxc_epdc_fb
 				vcd.version, vcd.vpos, vcd.vneg, vcd.vddh, vcd.vee, vcd.vcom_offset, vcd.unused_0, vcd.unused_1 );
 
 	mxc_epdc_fb_vc_convert_to_volts(&vcd, vcdv);
+	if (mxc_epdc_debugging)
+		printk(KERN_INFO
+			"mxc_epdc_fb: VC mode=%u temp=%u raw="
+			"vpos=0x%04x vneg=0x%04x vddh=0x%04x vee=0x%04x "
+			"vcom=0x%04x decoded VPOS=%duV VNEG=%duV "
+			"VDDH=%duV VEE=%duV VCOM_offset=%duV\n",
+			w_mode, w_temp_range, vcd.vpos, vcd.vneg, vcd.vddh,
+			vcd.vee, vcd.vcom_offset, vcdv->vpos_v, vcdv->vneg_v,
+			vcdv->vddh_v, vcdv->vee_v, vcdv->vcom_v);
 	return 0;
 }
 
@@ -2555,6 +2564,13 @@ static struct imx_epdc_fb_mode * panel_choose_fbmode(struct mxc_epdc_fb_data *fb
 	if (panel_get_info(&panel_info, true))
 		return NULL;
 
+	if (mxc_epdc_debugging)
+		printk(KERN_INFO
+			"mxc_epdc_fb: choose panel id=%s barcode=%s resolution=%s "
+			"vdd=%s vcom=%duV\n",
+			panel_info->id, panel_info->bcd, panel_info->resolution,
+			panel_info->vdd, panel_info->vcom_uV);
+
 /*
  * TODO: Once Eink finalizes the flash spec to include the panel resolution, this code can be re-enabled
 
@@ -2594,6 +2610,15 @@ static struct imx_epdc_fb_mode * panel_choose_fbmode(struct mxc_epdc_fb_data *fb
 
 			if(fbmode_overrides[i].vddh != 22000)
 				max77696_epd_set_vddh(fbmode_overrides[i].vddh);
+
+			if (mxc_epdc_debugging)
+				printk(KERN_INFO
+					"mxc_epdc_fb: panel override prefix=%s mode=%d "
+					"lve=%d vddh=%dmV\n",
+					fbmode_overrides[i].barcode_prefix,
+					fbmode_overrides[i].vmode_index,
+					fbmode_overrides[i].lve,
+					fbmode_overrides[i].vddh);
 			
 			return &epdc_modes[fbmode_overrides[i].vmode_index];
 		}
@@ -2848,6 +2873,24 @@ static int panel_get_info(struct panel_info **panel, bool header_only)
 	}
 
 	*panel = panel_info_cache;
+	if (mxc_epdc_debugging && panel_info_cache->waveform_info)
+		printk(KERN_INFO
+			"mxc_epdc_fb: panel record id=%s bcd=%s info=%s "
+			"resolution=%s dimensions=%s vdd=%s vcom=%duV "
+			"waveform type=0x%x version=%u.%u mode=%u "
+			"advanced=0x%x frame_rate=%u bits=%u length=%lu\n",
+			panel_info_cache->id, panel_info_cache->bcd,
+			panel_info_cache->panel_info_version,
+			panel_info_cache->resolution, panel_info_cache->dimensions,
+			panel_info_cache->vdd, panel_info_cache->vcom_uV,
+			panel_info_cache->waveform_info->waveform.type,
+			panel_info_cache->waveform_info->waveform.version,
+			panel_info_cache->waveform_info->waveform.subversion,
+			panel_info_cache->waveform_info->waveform.mode_version,
+			panel_info_cache->waveform_info->waveform.awv,
+			panel_info_cache->waveform_info->waveform.fpl_rate,
+			panel_info_cache->waveform_info->waveform.bit_depth,
+			panel_info_cache->waveform_info->filesize);
 
 	return 0;
 }
@@ -3209,6 +3252,8 @@ static int has_vcom_shift(struct eink_waveform_info_t *info)
 static int mxc_set_vcom(struct mxc_epdc_fb_data *fb_data, int vcom_uV)
 {
 	int ret = 0;
+	int requested_vcom_uV = vcom_uV;
+	int actual_vcom_uV = 0;
 	struct eink_waveform_info_t info;
 
 	mutex_lock(&fb_data->power_mutex);
@@ -3222,10 +3267,17 @@ static int mxc_set_vcom(struct mxc_epdc_fb_data *fb_data, int vcom_uV)
 	}
 	// TODO: -vcom_uV is a workaround. Mitch, remove this when you commit your PMIC changes.
 	ret = regulator_set_voltage(fb_data->vcom_regulator, -vcom_uV, -vcom_uV);
+	if (!ret)
+		actual_vcom_uV = regulator_get_voltage(fb_data->vcom_regulator);
 	if (ret)
 		dev_err(fb_data->dev, "unable to set VCOM = %dmV (err = %d)\n", uV_to_mV(vcom_uV), ret);
 	else
-		dev_dbg(fb_data->dev, "VCOM = %dmV\n", uV_to_mV(regulator_get_voltage(fb_data->vcom_regulator)));
+		dev_dbg(fb_data->dev, "VCOM = %dmV\n", uV_to_mV(actual_vcom_uV));
+	if (mxc_epdc_debugging)
+		printk(KERN_INFO
+			"mxc_epdc_fb: VCOM requested=%duV applied=%duV "
+			"regulator_request=%duV actual=%duV ret=%d\n",
+			requested_vcom_uV, vcom_uV, -vcom_uV, actual_vcom_uV, ret);
 
 	fb_data->vcom_uV = vcom_uV;
 	mutex_unlock(&fb_data->power_mutex);
@@ -3411,4 +3463,3 @@ void mxc_epdc_waveform_done(struct mxc_epdc_fb_data *fb_data)
 		remove_wf_proc_entry(WF_PROC_PARENT, proc_wf_parent, NULL);
 	}
 }
-

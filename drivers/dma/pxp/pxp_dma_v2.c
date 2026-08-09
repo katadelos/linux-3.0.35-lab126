@@ -842,6 +842,23 @@ static int pxp_config(struct pxps *pxp, struct pxp_channel *pxp_chan)
 	pxp_set_csc(pxp);
 	pxp_set_bg(pxp);
 	pxp_set_lut(pxp);
+	if (pxp_conf_data->proc_data.lut_transform != PXP_LUT_NONE)
+		dev_info(pxp->dev,
+			"Lab126 PXP config lut=0x%x ctrl=0x%x addr=0x%x "
+			"data=0x%x s0_fmt=0x%x out_fmt=0x%x s0=%ux%u "
+			"out=%ux%u stride=%u rotate=%d\n",
+			pxp_conf_data->proc_data.lut_transform,
+			__raw_readl(pxp->base + HW_PXP_LUT_CTRL),
+			__raw_readl(pxp->base + HW_PXP_LUT_ADDR),
+			__raw_readl(pxp->base + HW_PXP_LUT_DATA),
+			pxp_conf_data->s0_param.pixel_fmt,
+			pxp_conf_data->out_param.pixel_fmt,
+			pxp_conf_data->s0_param.width,
+			pxp_conf_data->s0_param.height,
+			pxp_conf_data->out_param.width,
+			pxp_conf_data->out_param.height,
+			pxp_conf_data->out_param.stride,
+			pxp_conf_data->proc_data.rotate);
 
 	pxp_set_s0buf(pxp);
 	pxp_set_outbuf(pxp);

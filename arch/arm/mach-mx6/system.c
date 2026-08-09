@@ -402,7 +402,7 @@ void arch_idle_single_core(void)
 	}
 }
 
-void arch_idle_with_workaround(cpu)
+void arch_idle_with_workaround(int cpu)
 {
 	u32 podf = wait_mode_arm_podf;
 

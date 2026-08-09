@@ -44,6 +44,16 @@
 #define DRIVER_NAME    MAX77696_EPD_NAME
 #define DRIVER_VERSION MAX77696_DRIVER_VERSION".0"
 
+/*
+ * Register readback is deliberately opt-in.  The EPD regulator is on the
+ * same PMIC transaction path as the voltage writes; polling it after every
+ * operation changes the stock probe/update sequence and can turn a working
+ * power transition into an interrupted I2C transaction.
+ */
+static int max77696_epd_debugging;
+module_param_named(debug, max77696_epd_debugging, int, 0644);
+MODULE_PARM_DESC(debug, "enable Lab126 EPD PMIC register/rail readback");
+
 #ifdef VERBOSE
 #define dev_noise(args...) dev_dbg(args)
 #else /* VERBOSE */
@@ -121,6 +131,8 @@ struct max77696_epd_data {
 
 static int max77696_epd_regulator_device_init(struct max77696_epd_data *me, int reg,
 					struct regulator_init_data *initdata);
+static void max77696_epd_debug_state(struct max77696_epd_data *me,
+					const char *where);
 
 
 /* Event handling functions */
@@ -177,6 +189,7 @@ int max77696_epd_set_vddh(int vddh_mV)
 	__lock(me);
 	rc = max77696_vreg_reg_write(me, EPDVDDH, (vddh_mV - 15000) / 470 );
 	__unlock(me);
+	max77696_epd_debug_state(me, "set-vddh");
  	if (unlikely(rc)) {
 		dev_err(me->dev, "EPDVDDH write error [%d]\n", rc);
    	}
@@ -243,6 +256,7 @@ static int _display_enable(struct max77696_epd_data *me)
 	__lock(me);
 	rc = max77696_vreg_reg_set_bit(me, EPDCNFG, EPDEN, 1);
 	__unlock(me);
+	max77696_epd_debug_state(me, "display-enable");
 	if (unlikely(rc)) {
 		dev_err(me->dev, "EPDCNFG write error [%d]\n", rc);
 	}
@@ -258,6 +272,7 @@ static int _display_disable(struct max77696_epd_data *me)
 	__lock(me);
 	rc = max77696_vreg_reg_set_bit(me, EPDCNFG, EPDEN, 0);
 	__unlock(me);
+	max77696_epd_debug_state(me, "display-disable");
 	if (unlikely(rc)) {
 		dev_err(me->dev, "EPDCNFG write error [%d]\n", rc);
 	}
@@ -395,6 +410,49 @@ struct max77696_regulator_data reg_data[MAX77696_EPD_NR_REGS] = {
 	},
 };
 
+static void max77696_epd_debug_state(struct max77696_epd_data *me,
+					const char *where)
+{
+	u8 rails[4] = { 0, 0, 0, 0 };
+	u8 cnfg = 0;
+	u8 fault = 0;
+	u8 vcom_r = 0;
+	u8 vcom = 0;
+	int rc_rails;
+	int rc_cnfg;
+	int rc_fault;
+	int rc_vcom_r;
+	int rc_vcom;
+	int vcom_uV;
+
+	if (!max77696_epd_debugging)
+		return;
+
+	__lock(me);
+	rc_rails = max77696_vreg_reg_bulk_read(me, EPDVEE, rails, 4);
+	rc_cnfg = max77696_vreg_reg_read(me, EPDCNFG, &cnfg);
+	rc_fault = max77696_vreg_reg_read(me, EPDINT, &fault);
+	rc_vcom_r = max77696_vreg_reg_get_bit(me, EPDVCOMR, VCOMR,
+						&vcom_r);
+	rc_vcom = max77696_vreg_reg_read(me, EPDVCOM, &vcom);
+	__unlock(me);
+
+	vcom_uV = (((int)vcom_r << 8) | vcom) *
+		reg_data[MAX77696_EPD_ID_EPDVCOM].step_uV;
+	dev_info(me->dev,
+		"Lab126 PMIC [%s] raw VEE=0x%02x VNEG=0x%02x "
+		"VPOS=0x%02x VDDH=0x%02x decoded VEE=-%duV "
+		"VNEG=-%duV VPOS=%duV VDDH=%duV VCOM=-%duV "
+		"EPDCNFG=0x%02x EPDINT=0x%02x PWRGOOD=%d rc=%d/%d/%d/%d/%d\n",
+		where, rails[0], rails[1], rails[2], rails[3],
+		15000000 + rails[0] * 420000,
+		8000000 + rails[1] * 500000,
+		8000000 + rails[2] * 500000,
+		15000000 + rails[3] * 470000,
+		vcom_uV, cnfg, fault, gpio_get_value(me->pwrgood_gpio),
+		rc_rails, rc_cnfg, rc_fault, rc_vcom_r, rc_vcom);
+}
+
 /*********** VCOM ops **************/
 
 static int max77696_epd_vcom_enable(struct regulator_dev *rdev);
@@ -480,6 +538,7 @@ static int _vcom_set_voltage(struct max77696_epd_data *me, int min_uV, int max_u
 	}
 out:	
 	__unlock(me);
+	max77696_epd_debug_state(me, "vcom-set");
 	return rc;
 }
 
